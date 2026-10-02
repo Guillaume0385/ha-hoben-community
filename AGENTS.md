@@ -59,8 +59,7 @@ ha-hoben-community/
 │   ├── test_profiles.py
 │   ├── test_coordinator.py
 │   └── test_entities.py
-├── docs/
-│   └── protocol.md
+├── protocol.md
 ├── .github/
 │   └── workflows/
 ├── AGENTS.md
@@ -335,7 +334,17 @@ Favor dataclasses/enums/constants for protocol structures and immutable register
 
 ---
 
-## Protocol source of truth
+## Documentation roles and source-of-truth rules
+
+Use the three root Markdown files consistently:
+
+- `project.md`: source of truth for project scope, architecture, roadmap and version sequencing;
+- `protocol.md`: source of truth for reverse-engineered protocol facts, packet formats, registers and confidence levels;
+- `AGENTS.md`: development, testing, safety, documentation and contribution rules.
+
+If there is ambiguity about **when** a feature belongs, which architecture to follow, or which release should contain it, follow `project.md`. Do not alter protocol facts simply to fit a roadmap decision.
+
+### Protocol source of truth
 
 `protocol.md` is the human-readable source of truth for the reverse-engineered protocol.
 
@@ -365,6 +374,8 @@ For V6/V6v16, candidate user-facing writes currently include:
 - 1798: manual-mode temperature;
 - 1799: manual-mode max power;
 - 1801: selected user bits using mask-write.
+
+Knowing a writable register does **not** determine when it may be exposed. Follow the release sequencing in `project.md`: v0.1 remains strictly read-only; validated temperature/ventilation/user-mode controls belong to v0.2; normal controller ON/OFF belongs to v0.3.
 
 Do **not** expose registers 1287-1293 (technical/motor/test) or the installer/factory area beginning around 2304.
 
