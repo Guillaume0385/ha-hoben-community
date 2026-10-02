@@ -48,5 +48,4 @@ partir de Home Assistant 2026.3.
 
 ## Licence
 
-La licence reste à choisir par le mainteneur. Aucun fichier `LICENSE` n'est créé
-avant cette décision.
+Le code de ce dépôt est distribué sous [licence MIT](LICENSE).

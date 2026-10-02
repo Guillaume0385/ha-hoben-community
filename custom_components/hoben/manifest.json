@@ -3,6 +3,7 @@
   "name": "Hoben",
   "codeowners": ["@Guillaume0385"],
   "documentation": "https://github.com/Guillaume0385/ha-hoben-community",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Guillaume0385/ha-hoben-community/issues",
   "requirements": [],
   "version": "0.0.1"

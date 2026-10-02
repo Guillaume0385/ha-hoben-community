@@ -19,6 +19,7 @@ def test_structure() -> None:
     assert isinstance(manifest, dict)
     assert manifest["domain"] == "hoben"
     assert manifest["name"] == "Hoben"
+    assert manifest["iot_class"] == "cloud_polling"
     # Accept SemVer releases and prereleases, without pinning the bootstrap version.
     number = r"(?:0|[1-9][0-9]*)"
     identifier = rf"(?:{number}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
