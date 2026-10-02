@@ -6,6 +6,8 @@
 **Statut :** rétro-ingénierie statique de l'application officielle ; aucune commande n'a été envoyée au poêle pendant l'analyse.
 
 > Cette documentation est non officielle. Les informations marquées **CONFIRMÉ** proviennent directement du code IL de MyHOBEN/HobenCore. Les éléments **À VALIDER** sont ceux qui nécessitent une capture réelle sur un poêle afin de confirmer la sémantique ou l'unité. Pour une première intégration Home Assistant, le mode lecture seule est recommandé par défaut.
+>
+> **Rôle de ce fichier :** `protocol.md` décrit ce qui est techniquement connu du protocole. La roadmap, l'architecture du projet et le calendrier d'exposition des fonctionnalités sont définis dans `project.md`, qui prévaut en cas d'ambiguïté sur ces sujets. La présence d'une commande ou d'un registre dans ce document ne signifie donc pas qu'il doit être exposé immédiatement dans Home Assistant.
 
 ---
 
@@ -735,7 +737,9 @@ La zone d'écriture commence à 2304 (`erciw...`) et comprend puissance mini, co
 
 ## 13. Décodage recommandé côté Home Assistant
 
-Architecture Python proposée :
+Cette section décrit une **organisation possible pour le prototype initial**. Elle ne remplace pas l'architecture de référence définie dans `project.md`. Le code protocolaire doit conserver des frontières suffisamment propres pour être extrait vers la bibliothèque indépendante `pyhoben` lorsque la couche de lecture sera stable.
+
+Architecture Python possible pendant le prototypage :
 
 ```text
 custom_components/hoben/
@@ -826,14 +830,16 @@ Pour `DataUpdated`, il faut retirer les 5 premiers octets avant de lire le MBAP.
 
 ## 14. Entités Home Assistant proposées
 
-### Phase 1 — lecture seule
+Cette section suit la roadmap de `project.md`.
+
+### v0.1.x — lecture seule
 
 À créer en premier :
 
 - température ambiante ;
 - température fumées ;
 - température air comburant si pertinente ;
-- température consigne/dérogation ;
+- température consigne/dérogation lue ;
 - puissance/niveau de puissance ;
 - état de fonctionnement ;
 - mode de fonctionnement ;
@@ -844,25 +850,37 @@ Pour `DataUpdated`, il faut retirer les 5 premiers octets avant de lire le MBAP.
 - PVI si exploitable ;
 - diagnostics Wi-Fi en catégorie diagnostic.
 
-### Phase 2 — commandes sûres
+Aucune entité de cette version ne doit envoyer de commande au poêle.
+
+### v0.2.x — température et contrôles utilisateur validés
 
 Après validation réelle :
 
-- `switch` ou commande marche/arrêt via registre 1280 ;
+- commande de température/dérogation ;
+- durée de dérogation si son unité et sa sémantique sont validées ;
 - `select` ventilation 0/1/2 ;
 - `select` mode parmi les modes utilisateur pertinents ;
-- consigne temporaire ;
-- durée de dérogation.
+- confirmation par lecture après écriture ;
+- limitation de fréquence et gestion des commandes rejetées.
 
-### Phase 3 — `climate`
-
-Créer une entité `climate` uniquement quand les points suivants sont validés :
+Une entité `climate` peut être introduite pendant cette phase seulement lorsque les points suivants sont validés :
 
 - échelle exacte des températures ;
 - mode qui correspond à la consigne utilisée ;
 - plage min/max autorisée ;
 - comportement de la dérogation ;
 - retour d'état après écriture.
+
+### v0.3.x — marche/arrêt normal du contrôleur
+
+Après validation dédiée du registre 1280 :
+
+- commande ON via le contrôleur HOBEN ;
+- commande OFF via le contrôleur HOBEN en conservant son cycle normal d'arrêt ;
+- confirmation d'état après commande ;
+- gestion des timeouts/rejets sans boucle de retry agressive.
+
+Le registre 1280 est documenté plus haut pour l'interopérabilité, mais son exposition Home Assistant appartient à cette phase, conformément à `project.md`.
 
 ---
 
@@ -879,14 +897,15 @@ Une intégration Home Assistant ne doit jamais :
 
 Règles recommandées :
 
-1. lecture seule par défaut ;
-2. option explicite « Autoriser le pilotage » ;
-3. whitelist stricte des registres utilisateur ;
-4. limitation de fréquence des commandes ;
-5. lecture de confirmation après chaque écriture ;
+1. la v0.1.x est strictement en lecture seule ;
+2. à partir de la v0.2.x, n'exposer que les commandes explicitement prévues par la roadmap et déjà validées ;
+3. conserver une whitelist stricte des registres utilisateur ;
+4. limiter la fréquence des commandes ;
+5. effectuer une lecture de confirmation après chaque écriture ;
 6. en cas de réponse Modbus d'erreur, ne pas réessayer en boucle ;
 7. conserver le cycle d'arrêt normal du poêle ;
-8. ne jamais exposer les modes test/installateur.
+8. ne jamais exposer les modes test/installateur ;
+9. si une option utilisateur « Autoriser le pilotage » est retenue par le projet, elle doit être explicite et désactivable, mais son existence reste une décision d'architecture définie dans `project.md`.
 
 ---
 
