@@ -36,6 +36,18 @@ The first real validation target is a **Hoben Osmose**.
 
 ---
 
+## Documentation roles and precedence
+
+The three root Markdown files have distinct responsibilities:
+
+- `project.md` is the source of truth for **project scope, roadmap, release sequencing and architecture decisions**;
+- `protocol.md` is the source of truth for **reverse-engineered MyHOBEN/Hoben protocol facts, packet formats, registers and confidence levels**;
+- `AGENTS.md` defines **development, testing, safety, documentation and contribution rules** for coding agents and contributors.
+
+If these documents appear inconsistent about architecture, scope, feature timing or version planning, **`project.md` takes precedence**. Protocol facts should not be changed merely to match the roadmap; instead, implementation timing must follow `project.md`, while `protocol.md` continues to document what is technically known.
+
+---
+
 # Version roadmap
 
 The version roadmap is intentionally incremental. Protocol and safety validation takes priority over feature count.
