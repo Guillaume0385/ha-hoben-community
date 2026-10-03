@@ -400,11 +400,13 @@ The simulator is preferred over a live stove for CI because it is deterministic,
 
 The Hoben Osmose should be used as an opt-in validation environment, not a CI dependency.
 
-The dedicated `Live Validation` GitHub Actions workflow is manual-only
-(`workflow_dispatch`), separate from the deterministic/offline `Validate` CI and
-never required for normal PR checks. It currently offers only credential-free
-`tls-only` validation; future read-only modes will be added incrementally in
-separate reviewed PRs.
+The dedicated `Live Validation` GitHub Actions workflow is explicitly opt-in:
+`workflow_dispatch` for normal use, or adding the exact `live-validation` label
+to a PR for pre-merge validation (`pull_request: labeled` only). An existing label
+does not authorize runs on new commits; removing and re-adding it requests a new
+validation. This lane stays separate from the deterministic/offline `Validate`
+CI. It currently offers only credential-free `tls-only` validation; future
+read-only modes will be added incrementally in separate reviewed PRs.
 
 Real-device validation is important for unknown protocol semantics, especially:
 
