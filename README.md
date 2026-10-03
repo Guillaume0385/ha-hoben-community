@@ -47,6 +47,28 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
+### Live Validation sur GitHub Actions
+
+Le workflow [Live Validation](.github/workflows/live-validation.yml) est
+**opt-in**, déclenché uniquement à la main via **Actions → Live Validation →
+Run workflow** (`workflow_dispatch`). Choisir le mode `tls-only`, seule option
+disponible et valeur par défaut. La CI normale `Validate` reste déterministe et
+hors ligne vis-à-vis de Hoben ; Live Validation n'est jamais requis pour les PR.
+
+Sur `ubuntu-latest` avec Python 3.12, il exécute uniquement
+`python scripts/probe_hoben_connection.py --tls-only` : une connexion TLS vérifiée
+à `myhoben.fr:465`, puis fermeture, sans identifiant, secret ni dépendance externe.
+Aucun OpenClient, Modbus, appairage, contrôle ou retry automatique n'est effectué.
+Le JSON expurgé reste dans les logs, le résumé du job et l'artefact
+`live-validation-output`, y compris lorsque la sonde échoue ; son échec fait
+échouer le job. Aucun prédiagnostic DNS/TCP supplémentaire n'est ajouté.
+
+Le choix de mode et son aiguillage explicite permettront d'ajouter progressivement
+des validations en lecture seule, dans des PR dédiées et revues, en conservant
+la préparation et les rapports communs. Aucun mode de session n'est disponible
+dans ce workflow. Si GitHub ne propose pas son lancement depuis la branche de PR,
+le premier lancement manuel pourra avoir lieu après fusion sur `main`.
+
 ## Sonde manuelle TLS / OpenClient
 
 Cette validation de développement est **strictement volontaire**, indépendante
