@@ -6,10 +6,13 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from custom_components.hoben.modbus import (
+    ModbusExceptionResponse,
+    ModbusReadResponse,
     ModbusTcpFrame,
     build_read_holding_registers,
     build_read_input_registers,
     decode_mbap,
+    decode_read_response,
     encode_mbap,
 )
 
@@ -213,3 +216,205 @@ def test_bytes_required(value: object) -> None:
         encode_mbap(0, 1, value)
     with pytest.raises(TypeError, match="frame must be bytes"):
         decode_mbap(value)
+
+
+@pytest.mark.parametrize(
+    ("frame", "expected"),
+    [
+        (
+            "12 34 00 00 00 09 01 04 06 12 34 AB CD 00 01",
+            ModbusReadResponse(0x1234, 1, 0x04, (0x1234, 0xABCD, 0x0001)),
+        ),
+        (
+            "AB CD 00 00 00 09 FE 03 06 56 78 9A BC 01 23",
+            ModbusReadResponse(0xABCD, 0xFE, 0x03, (0x5678, 0x9ABC, 0x0123)),
+        ),
+    ],
+    ids=["input-registers", "holding-registers"],
+)
+def test_decode_read_response(frame: str, expected: ModbusReadResponse) -> None:
+    """Literal synthetic responses preserve IDs, order, count and byte order."""
+    response = decode_read_response(bytes.fromhex(frame))
+    assert response == expected
+    assert isinstance(response.registers, tuple)
+    with pytest.raises(FrozenInstanceError):
+        response.registers = ()
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        "12 34 00 00 00 0B 01 03 08 00 00 7F FF 80 00 FF FF",
+        "12 34 00 00 00 0B 01 04 08 00 00 7F FF 80 00 FF FF",
+    ],
+)
+def test_read_response_uint16_boundaries(frame: str) -> None:
+    """High-bit register values remain unsigned, with no physical conversion."""
+    response = decode_read_response(bytes.fromhex(frame))
+    assert isinstance(response, ModbusReadResponse)
+    assert response.registers == (0x0000, 0x7FFF, 0x8000, 0xFFFF)
+    assert all(0 <= value <= 0xFFFF for value in response.registers)
+
+
+@pytest.mark.parametrize(
+    ("frame", "expected"),
+    [
+        ("00 00 00 00 00 05 00 03 02 12 34", ModbusReadResponse(0, 0, 3, (0x1234,))),
+        (
+            "FF FF 00 00 00 05 FF 04 02 12 34",
+            ModbusReadResponse(0xFFFF, 0xFF, 4, (0x1234,)),
+        ),
+        ("00 00 00 00 00 03 00 83 02", ModbusExceptionResponse(0, 0, 3, 2)),
+        ("FF FF 00 00 00 03 FF 84 02", ModbusExceptionResponse(0xFFFF, 0xFF, 4, 2)),
+    ],
+)
+def test_read_response_id_boundaries(
+    frame: str, expected: ModbusReadResponse | ModbusExceptionResponse
+) -> None:
+    """Both response kinds preserve the full Transaction ID and Unit ID ranges."""
+    assert decode_read_response(bytes.fromhex(frame)) == expected
+
+
+@pytest.mark.parametrize("function_code", [0x03, 0x04])
+def test_read_response_maximum_registers(function_code: int) -> None:
+    """125 registers occupy 250 data bytes and MBAP Length 253 (0xFD)."""
+    frame = (
+        bytes.fromhex("12 34 00 00 00 FD 01")
+        + bytes([function_code, 0xFA])
+        + b"\x12\x34" * 125
+    )
+    assert decode_read_response(frame) == ModbusReadResponse(
+        0x1234, 1, function_code, (0x1234,) * 125
+    )
+
+
+@pytest.mark.parametrize("function_code", [0x03, 0x04])
+@pytest.mark.parametrize(
+    ("header", "data", "message"),
+    [
+        ("12 34 00 00 00 02 01", "", "missing byte_count"),
+        ("12 34 00 00 00 03 01", "00", "nonzero and even"),
+        ("12 34 00 00 00 06 01", "03 12 34 56", "nonzero and even"),
+        ("12 34 00 00 00 03 01", "02", "byte_count does not match"),
+        ("12 34 00 00 00 04 01", "02 12", "byte_count does not match"),
+        ("12 34 00 00 00 07 01", "06 12 34 AB CD", "byte_count does not match"),
+        ("12 34 00 00 00 07 01", "02 12 34 AB CD", "byte_count does not match"),
+        ("12 34 00 00 00 06 01", "02 12 34 FF", "byte_count does not match"),
+    ],
+    ids=[
+        "missing-byte-count",
+        "zero-byte-count",
+        "odd-byte-count",
+        "missing-register-data",
+        "truncated-register",
+        "byte-count-too-large",
+        "extra-register",
+        "extra-byte",
+    ],
+)
+def test_invalid_read_response_pdu(
+    function_code: int, header: str, data: str, message: str
+) -> None:
+    """Keep MBAP Length valid so malformed read PDUs reach the response parser."""
+    frame = bytes.fromhex(header) + bytes([function_code]) + bytes.fromhex(data)
+    with pytest.raises(ValueError, match=message):
+        decode_read_response(frame)
+
+
+@pytest.mark.parametrize("function_code", [0x03, 0x04])
+def test_read_response_excessive_register_count(function_code: int) -> None:
+    """A legal MBAP size does not allow a byte_count claiming 126 registers."""
+    frame = (
+        bytes.fromhex("12 34 00 00 00 FD 01")
+        + bytes([function_code, 0xFC])
+        + b"\x12\x34" * 125
+    )
+    with pytest.raises(ValueError, match="at most 125 registers"):
+        decode_read_response(frame)
+
+
+@pytest.mark.parametrize(
+    ("frame", "expected"),
+    [
+        ("12 34 00 00 00 03 01 83 02", ModbusExceptionResponse(0x1234, 1, 3, 2)),
+        ("AB CD 00 00 00 03 FE 84 02", ModbusExceptionResponse(0xABCD, 0xFE, 4, 2)),
+    ],
+)
+def test_decode_read_exception(frame: str, expected: ModbusExceptionResponse) -> None:
+    """Exceptions are immutable data with the original, unflagged function code."""
+    response = decode_read_response(bytes.fromhex(frame))
+    assert response == expected
+    with pytest.raises(FrozenInstanceError):
+        response.exception_code = 0
+
+
+@pytest.mark.parametrize("function_code", [0x03, 0x04])
+@pytest.mark.parametrize("exception_code", [0x00, 0xFF])
+def test_read_exception_raw_code(function_code: int, exception_code: int) -> None:
+    """Preserve raw UInt8 exception codes without an exception-code allowlist."""
+    frame = bytes.fromhex("12 34 00 00 00 03 01") + bytes(
+        [function_code | 0x80, exception_code]
+    )
+    assert decode_read_response(frame) == ModbusExceptionResponse(
+        0x1234, 1, function_code, exception_code
+    )
+
+
+@pytest.mark.parametrize("function_code", [0x83, 0x84])
+@pytest.mark.parametrize(
+    ("header", "data"),
+    [
+        ("12 34 00 00 00 02 01", ""),
+        ("12 34 00 00 00 04 01", "02 FF"),
+        ("12 34 00 00 00 05 01", "02 FF FF"),
+    ],
+    ids=["missing-code", "extra-byte", "extra-bytes"],
+)
+def test_invalid_read_exception_pdu(function_code: int, header: str, data: str) -> None:
+    """Exception PDUs must contain exactly the function and one exception byte."""
+    frame = bytes.fromhex(header) + bytes([function_code]) + bytes.fromhex(data)
+    with pytest.raises(ValueError, match="exception PDU must contain exactly 2 bytes"):
+        decode_read_response(frame)
+
+
+@pytest.mark.parametrize(
+    "function_code",
+    [
+        0x00,
+        0x01,
+        0x02,
+        0x05,
+        0x06,
+        0x10,
+        0x16,
+        0x7F,
+        0x80,
+        0x81,
+        0x82,
+        0x86,
+        0x90,
+        0x96,
+        0xFF,
+    ],
+)
+def test_unsupported_read_response_function(function_code: int) -> None:
+    """Reject other functions, including writes and their exception variants."""
+    frame = bytes.fromhex("12 34 00 00 00 03 01") + bytes([function_code, 0x02])
+    with pytest.raises(ValueError, match=f"Unsupported.*0x{function_code:02X}"):
+        decode_read_response(frame)
+
+
+@pytest.mark.parametrize(
+    ("frame", "message"),
+    [
+        ("", "Truncated MBAP header"),
+        ("12 34 00 00 00 01 01", "MBAP length"),
+        ("12 34 00 01 00 05 01 04 02 12 34", "protocol ID"),
+        ("12 34 00 00 00 06 01 04 02 12 34", "complete frame size"),
+    ],
+    ids=["empty-frame", "empty-pdu", "nonzero-protocol", "inconsistent-length"],
+)
+def test_read_response_invalid_mbap(frame: str, message: str) -> None:
+    """Reuse MBAP validation before accessing or interpreting any PDU byte."""
+    with pytest.raises(ValueError, match=message):
+        decode_read_response(bytes.fromhex(frame))
