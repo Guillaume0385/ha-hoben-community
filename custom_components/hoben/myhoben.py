@@ -1,12 +1,12 @@
 """Pure MyHOBEN session codecs and Modbus framing (protocol.md §§2 and 4).
 
-Each helper handles exactly one complete, already-delimited message or frame.
+Each helper handles one already-delimited message/frame or confirmed session prefix.
 MyHOBEN adds only a message-type byte, with no independent length field. Stream
-buffering and splitting belong to a future transport layer, not these helpers.
+buffering belongs to the session layer, not these helpers.
 For Modbus messages, the PDU remains opaque; MBAP validation uses its own codec.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .modbus import decode_mbap
 
@@ -18,13 +18,13 @@ DATA_RESPONSE_CLIENT = 0x0E
 
 @dataclass(frozen=True)
 class OpenedClient:
-    """Confirmed session fields, preserved without interpreting the stove profile."""
+    """Confirmed fields, with the sensitive DeviceGuid excluded from repr output."""
 
     product_revision: int
     product_type: int
     software_minor: int
     software_major: int
-    device_guid: str
+    device_guid: str = field(repr=False)
     application_version: int
 
 
@@ -62,7 +62,7 @@ def encode_open_client(
 
 
 def decode_opened_client(message: bytes) -> OpenedClient:
-    """Parse the confirmed offsets of a complete 0x04 OpenedClient message.
+    """Parse confirmed offsets from a 0x04 OpenedClient prefix of at least 48 bytes.
 
     Offsets are relative to the type byte: 7/8 are product revision/type, 9/10
     are software minor/major, 14:46 is the 32-byte ASCII DeviceGuid and 46:48

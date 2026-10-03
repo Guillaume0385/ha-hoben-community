@@ -215,6 +215,21 @@ Home Assistant user
 
 ## Recommended code layers
 
+### Current increment — one-shot connection validation
+
+`transport.py` implements layer 1 as verified, timeout-bounded async TLS byte
+streams, without MyHOBEN interpretation or Home Assistant imports. `session.py`
+seeds layer 5 with `open_session_once()`: one OpenClient, leading Ping/Pong,
+buffering through the confirmed 48-byte OpenedClient prefix, existing codec and
+profile selection, then close on every outcome. Its safe report omits identifiers.
+
+The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only and session-open
+validation. The full OpenedClient boundary and authorization/pairing remain
+unresolved; a suffix is not reframed and an unexpected message reports only its
+numeric type. No polling, automatic reconnect, long-lived client, generated
+DeviceGuid, Home Assistant setup/entities or stove controls belong to this
+increment. The broader responsibilities below remain roadmap goals.
+
 ### Layer 1 — transport
 
 Responsibilities:
