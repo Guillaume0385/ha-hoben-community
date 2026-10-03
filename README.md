@@ -81,11 +81,11 @@ Exemple Bash avec saisie masquée, sans placer les identifiants dans l'historiqu
 ou les arguments du processus (ne pas activer `set -x`) :
 
 ```bash
-read -r -s -p 'UserGuid : ' HOBEN_USER_GUID
+IFS= read -r -s -p 'UserGuid : ' HOBEN_USER_GUID
 printf '\n'
-read -r -s -p 'DeviceGuid : ' HOBEN_DEVICE_GUID
+IFS= read -r -s -p 'DeviceGuid : ' HOBEN_DEVICE_GUID
 printf '\n'
-read -r -s -p 'DeviceInfo : ' HOBEN_DEVICE_INFO
+IFS= read -r -s -p 'DeviceInfo : ' HOBEN_DEVICE_INFO
 printf '\n'
 read -r -p 'Build (34 = build Android analysé) : ' HOBEN_BUILD
 export HOBEN_USER_GUID HOBEN_DEVICE_GUID HOBEN_DEVICE_INFO HOBEN_BUILD
