@@ -225,6 +225,25 @@ Note : le code appelle `InstantiateStove(type=octet8, product/rev=octet7, vsoftM
 - `type == 3`, révision 1, vsoftMaj 0/1, version <= 5 → `StoveV6`
 - `type == 3`, révision 1, vsoftMaj 0/1, version > 5 → `StoveV6v16`
 
+Dans `OpenedClient`, `type` correspond à `product_type`, la révision à
+`product_revision` et `vsoftMaj` à `software_major`. Ces correspondances permettent
+de sélectionner les quatre cas non ambigus ci-dessus.
+
+**À VALIDER — discriminant « version » :** le champ comparé au seuil 5 dans les
+deux règles `type == 3`, révision 1, vsoftMaj 0/1 n'est pas identifié explicitement.
+La documentation et l'historique du dépôt ne prouvent pas qu'il s'agit de
+`software_minor`, de `application_version` ou d'un autre champ. La liste des
+arguments d'`InstantiateStove` ci-dessus ne suffit pas à établir ce lien avec la
+comparaison dans `StoveFactory.Create()`.
+
+Tant que ce lien n'est pas prouvé, `select_stove_profile()` retourne `UNKNOWN`
+pour cette branche, quelles que soient les valeurs de `software_minor` et
+`application_version`. Les deux règles V6/V6v16 restent documentées en attente de
+validation du champ. Toute autre combinaison non documentée retourne également
+`UNKNOWN`. Le sélecteur renvoie uniquement un identifiant `StoveProfile`, sans
+cartographie ni comportement de poêle ; le DeviceGuid n'intervient jamais dans
+la sélection et n'est pas journalisé.
+
 Le plugin Home Assistant doit donc **attendre `OpenedClient` et sélectionner dynamiquement la cartographie**, plutôt que supposer que l'Osmose est V6/V6v16.
 
 ---
