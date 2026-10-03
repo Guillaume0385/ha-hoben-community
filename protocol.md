@@ -291,7 +291,7 @@ Le `Unit ID` utilisé par MyHOBEN est **1**.
 
 ### Limites Modbus standard — NORMATIF
 
-Source : [MODBUS Application Protocol Specification V1.1b3](https://www.modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf),
+Source : [MODBUS Application Protocol Specification V1.1b3](https://www.modbus.org/file/secure/modbusprotocolspecification.pdf),
 sections **4.1** (taille du PDU et de l'ADU TCP), **4.4** (adressage),
 **6.3** (fonction 03) et **6.4** (fonction 04).
 Ces contraintes viennent du standard Modbus ; elles ne sont pas des hypothèses
