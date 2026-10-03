@@ -326,6 +326,31 @@ Fonctions utilisées :
 - `03` Read Holding Registers
 - `04` Read Input Registers
 
+### Réponses de lecture 03/04 — NORMATIF
+
+Source : MODBUS Application Protocol Specification V1.1b3 (lien ci-dessus),
+sections **6.3**, **6.4** et **7** (réponses d'exception).
+Le PDU d'une réponse normale contient :
+
+```text
+function (03 ou 04)
+byte_count
+register_1_hi register_1_lo ... register_N_hi register_N_lo
+```
+
+`byte_count` vaut exactement `2 × N`, avec **1 à 125 registres** : il est donc
+non nul, pair et au plus égal à **250**. Le PDU contient exactement
+`2 + byte_count` octets, sans données supplémentaires. Chaque registre est un
+**UInt16 big-endian**, conservé brut par le codec, sans conversion signée ou physique.
+
+Une réponse d'exception contient exactement **deux octets** :
+`function | 0x80` (`83` ou `84` en hexadécimal), puis `exception_code`.
+Le codec représente cette réponse séparément d'une réponse normale et conserve
+le code fonction original (`03` ou `04`) ainsi que le code d'exception UInt8 brut.
+Les deux types de réponse conservent les Transaction ID et Unit ID du MBAP ;
+la corrélation avec une requête relève du futur client stateful.
+Ces règles sont celles de Modbus et n'ajoutent aucun fait spécifique à Hoben.
+
 ### Écriture simple — fonction 06
 
 PDU généré par `requestWriteSingle` :

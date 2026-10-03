@@ -1,7 +1,7 @@
-"""Pure Modbus/TCP framing and read requests, as documented in protocol.md.
+"""Pure Modbus/TCP framing and read messages, as documented in protocol.md.
 
 The caller supplies exactly one complete frame. This module has no transport,
-MyHOBEN envelope, register decoding, or Home Assistant dependencies.
+MyHOBEN envelope, register interpretation, or Home Assistant dependencies.
 """
 
 from dataclasses import dataclass
@@ -34,6 +34,26 @@ class ModbusTcpFrame:
     transaction_id: int
     unit_id: int
     pdu: bytes
+
+
+@dataclass(frozen=True)
+class ModbusReadResponse:
+    """A function 03/04 response with ordered, unsigned 16-bit register values."""
+
+    transaction_id: int
+    unit_id: int
+    function_code: int
+    registers: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ModbusExceptionResponse:
+    """A read exception with the original function code and raw UInt8 error code."""
+
+    transaction_id: int
+    unit_id: int
+    function_code: int
+    exception_code: int
 
 
 def _validate_integer(name: str, value: int, minimum: int, maximum: int) -> None:
@@ -83,6 +103,58 @@ def decode_mbap(frame: bytes) -> ModbusTcpFrame:
     if len(frame) != _MBAP_PREFIX_SIZE + length:
         raise ValueError("MBAP length does not match the complete frame size")
     return ModbusTcpFrame(transaction_id, unit_id, frame[_MBAP_HEADER.size :])
+
+
+def decode_read_response(
+    frame: bytes,
+) -> ModbusReadResponse | ModbusExceptionResponse:
+    """Decode one complete function 03/04 response, including Modbus exceptions.
+
+    A normal PDU is function, byte_count, then 1..125 big-endian UInt16 values.
+    byte_count must be nonzero, even and match all remaining PDU bytes exactly.
+    No signed or physical conversion is applied to the register values.
+
+    An exception PDU is exactly two bytes: function | 0x80, exception_code.
+    Return it as data, preserving the original function (03/04) and raw code.
+    Transaction and Unit IDs are preserved without correlating a prior request.
+
+    MBAP validation is delegated to decode_mbap. Raise ValueError for malformed
+    frames or unsupported functions, and TypeError if frame is not bytes.
+    """
+    decoded = decode_mbap(frame)
+    pdu = decoded.pdu
+    # decode_mbap guarantees a nonempty PDU, including its function byte.
+    function_code = pdu[0]
+    if function_code in (READ_HOLDING_REGISTERS | 0x80, READ_INPUT_REGISTERS | 0x80):
+        if len(pdu) != 2:
+            raise ValueError("Modbus exception PDU must contain exactly 2 bytes")
+        return ModbusExceptionResponse(
+            decoded.transaction_id, decoded.unit_id, function_code & 0x7F, pdu[1]
+        )
+
+    if function_code not in (READ_HOLDING_REGISTERS, READ_INPUT_REGISTERS):
+        raise ValueError(
+            f"Unsupported read response function code: 0x{function_code:02X}"
+        )
+    if len(pdu) < 2:
+        raise ValueError("Read response PDU is missing byte_count")
+    byte_count = pdu[1]
+    if byte_count == 0 or byte_count % 2:
+        raise ValueError("Read response byte_count must be nonzero and even")
+    if byte_count // 2 > _MAX_READ_REGISTERS:
+        raise ValueError(
+            f"Read response must contain at most {_MAX_READ_REGISTERS} registers"
+        )
+    if len(pdu) != 2 + byte_count:
+        raise ValueError("Read response byte_count does not match the PDU data size")
+
+    registers = tuple(
+        int.from_bytes(pdu[offset : offset + 2], "big")
+        for offset in range(2, len(pdu), 2)
+    )
+    return ModbusReadResponse(
+        decoded.transaction_id, decoded.unit_id, function_code, registers
+    )
 
 
 def _build_read_request(
