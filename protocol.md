@@ -214,6 +214,17 @@ offset 47   : version application MSB
 
 Note : le code appelle `InstantiateStove(type=octet8, product/rev=octet7, vsoftMaj=octet10, vsoftMin=octet9)`.
 
+**À VALIDER — longueur totale :** les champs confirmés nécessitent un préfixe de
+48 octets, mais cela ne prouve pas que le message complet mesure 48 octets.
+Le chemin de validation ponctuelle `open_session_once()` accumule ce préfixe,
+appelle `decode_opened_client()` puis ferme la connexion. Les octets suivants
+déjà reçus restent non classifiés : seul leur nombre peut être rapporté, jamais
+leur contenu. Ils ne sont pas interprétés comme un nouveau message.
+Les Ping précédant le préfixe sont consommés un par un avec un Pong immédiat,
+y compris lorsqu'ils arrivent avec le début d'OpenedClient dans une même lecture.
+Tout autre type avant OpenedClient arrête la sonde en rapportant uniquement son
+numéro, sans supposer la longueur de sa charge utile ni automatiser l'association.
+
 ### Choix de l'implémentation poêle — CONFIRMÉ
 
 `StoveFactory.Create()` utilise les valeurs retournées lors de l'ouverture :
@@ -989,6 +1000,11 @@ Ces validations peuvent être réalisées sans modifier le poêle : une premièr
 ---
 
 ## 17. Séquence minimale pour un prototype lecture seule
+
+La sonde manuelle actuelle s'arrête après l'étape 4 puis ferme la connexion.
+Elle répond aux Ping pendant cette ouverture, mais n'effectue aucune des lectures
+Modbus ou opérations Home Assistant des étapes suivantes. Sa préparation ne
+constitue pas une validation réelle du serveur ou des champs encore inconnus.
 
 ```text
 1. TLS connect myhoben.fr:465

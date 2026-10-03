@@ -8,9 +8,10 @@ Home Assistant ou HACS.
 
 ## État du projet
 
-La version `0.0.1` est uniquement un **socle de développement, pas encore
-fonctionnel**. Elle ne permet pas de connecter, lire ou piloter un poêle.
-Aucun client réseau, flux de configuration ou entité n'est implémenté.
+La version `0.0.1` reste un **socle de développement**, sans fonctionnalité
+utilisable dans Home Assistant : aucun flux de configuration ni entité.
+Une sonde manuelle permet maintenant de préparer le premier test TLS puis
+OpenClient. Elle ferme la connexion après l'ouverture et ne lit aucun registre.
 La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
 
 ## Installation future via HACS
@@ -45,6 +46,81 @@ La CI exécute ces contrôles ainsi que les validateurs officiels HACS et Hassfe
 L'icône communautaire originale représente trois points reliés ; elle ne reprend
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
+
+## Sonde manuelle TLS / OpenClient
+
+Cette validation de développement est **strictement volontaire**, indépendante
+des tests et de Home Assistant. Python 3.12+ suffit, sans dépendance externe.
+La suite automatisée utilise des flux simulés et interdit les connexions réseau.
+
+Depuis la racine du dépôt, vérifier uniquement TLS, sans identifiant ni message
+MyHOBEN :
+
+```sh
+python scripts/probe_hoben_connection.py --tls-only
+```
+
+La sonde utilise `myhoben.fr:465`, les autorités de confiance du système et la
+vérification du nom `myhoben.fr`. Un certificat invalide ou un nom incorrect fait
+échouer la connexion. Aucun mode non vérifié, port 433 ou repli en clair n'existe.
+
+Pour tester ensuite **un seul OpenClient**, fournir les quatre variables :
+
+| Variable | Valeur fournie par le testeur |
+| --- | --- |
+| `HOBEN_USER_GUID` | UserGuid existant, transmis tel quel |
+| `HOBEN_DEVICE_GUID` | DeviceGuid existant, transmis tel quel ; aucune génération |
+| `HOBEN_DEVICE_INFO` | Description du terminal, transmise telle quelle |
+| `HOBEN_BUILD` | Entier de 0 à 65535, obligatoire |
+
+Le build **34** est celui de MyHOBEN Android 2.2 analysé dans `protocol.md` ; il
+n'est pas une valeur par défaut. Le format initial du DeviceGuid reste à valider.
+Ne pas inventer un identifiant pour contourner cette incertitude.
+
+Exemple Bash avec saisie masquée, sans placer les identifiants dans l'historique
+ou les arguments du processus (ne pas activer `set -x`) :
+
+```bash
+IFS= read -r -s -p 'UserGuid : ' HOBEN_USER_GUID
+printf '\n'
+IFS= read -r -s -p 'DeviceGuid : ' HOBEN_DEVICE_GUID
+printf '\n'
+IFS= read -r -s -p 'DeviceInfo : ' HOBEN_DEVICE_INFO
+printf '\n'
+read -r -p 'Build (34 = build Android analysé) : ' HOBEN_BUILD
+export HOBEN_USER_GUID HOBEN_DEVICE_GUID HOBEN_DEVICE_INFO HOBEN_BUILD
+python scripts/probe_hoben_connection.py --session
+unset HOBEN_USER_GUID HOBEN_DEVICE_GUID HOBEN_DEVICE_INFO HOBEN_BUILD
+```
+
+Le rapport JSON contient uniquement l'hôte/port, l'état et, si l'ouverture
+réussit, le type de message, les champs produit/logiciel/application, le profil
+et le nombre d'octets supplémentaires déjà reçus (`unclassified_bytes`).
+Les UserGuid, DeviceGuid, codes d'autorisation et trames brutes sont exclus.
+`profile: "unknown"` reste un succès, notamment pour la branche V6/V6v16 ambiguë.
+Le code de sortie vaut 0 pour un succès, 1 pour un échec, 2 pour un usage invalide.
+
+En cas d'échec, `error` distingue TLS, transport, EOF, délai, entrées invalides et
+protocole. Un type inattendu est rapporté uniquement par son numéro
+(`unexpected_message_type`, `message_type`) ; sa charge utile n'est pas décodée.
+L'association/autorisation est volontairement absente : aucun code n'est demandé
+ni envoyé. La sonde envoie uniquement OpenClient et les Pong nécessaires, puis
+ferme, sans requête Modbus, commande de poêle ni reconnexion automatique.
+
+Les délais par défaut sont 10 s pour la connexion, chaque lecture et chaque
+écriture/drain, 5 s pour la fermeture et 30 s pour l'échange complet après TLS.
+Les Ping ou fragments successifs ne réinitialisent pas ce dernier délai.
+Seuls les **48 premiers octets confirmés** d'OpenedClient sont décodés ; sa
+longueur totale reste inconnue. Le suffixe déjà reçu n'est jamais traité comme
+un autre message, même s'il commence par un Ping.
+
+Pour les développeurs, `AsyncTlsTransport.connect/write/read/close` fournit les
+octets bruts avec des erreurs distinctes `TransportTimeout` et `TransportEOF`.
+`open_session_once(transport, user_guid=..., build=..., device_guid=...,
+device_info=...)` possède le cycle connexion/fermeture et retourne
+`OpenSessionResult`. Utiliser sa méthode `safe_report()` pour les diagnostics ;
+ne pas exporter l'objet complet avec `dataclasses.asdict()`, car le résultat du
+codec conserve le DeviceGuid. Ces modules n'importent pas Home Assistant.
 
 ## Licence
 
