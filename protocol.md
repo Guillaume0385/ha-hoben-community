@@ -289,6 +289,28 @@ Byte 7.. : PDU Modbus
 
 Le `Unit ID` utilisé par MyHOBEN est **1**.
 
+### Limites Modbus standard — NORMATIF
+
+Source : [MODBUS Application Protocol Specification V1.1b3](https://www.modbus.org/file/secure/modbusprotocolspecification.pdf),
+sections **4.1** (taille du PDU et de l'ADU TCP), **4.4** (adressage),
+**6.3** (fonction 03) et **6.4** (fonction 04).
+Ces contraintes viennent du standard Modbus ; elles ne sont pas des hypothèses
+sur les registres ou les capacités d'un poêle Hoben.
+
+- Un PDU contient au moins le code fonction et au maximum **253 octets**.
+- Le champ MBAP `Length` compte le Unit ID et le PDU : **2 à 254 octets**.
+  L'ADU Modbus/TCP complet fait donc au maximum **260 octets** (6 + 254),
+  sans compter une éventuelle enveloppe MyHOBEN.
+- Les lectures 03 et 04 portent sur **1 à 125 registres**.
+- Les adresses du PDU vont de **0 à 65535**. La dernière adresse demandée,
+  `address + quantity - 1`, doit rester dans cet espace ; le codec rejette donc
+  `address + quantity > 65536`, même si chaque champ est représentable séparément.
+
+Le codec valide ces limites à l'encodage et au décodage MBAP, ainsi que la
+quantité et la fin de plage lors de la construction des requêtes de lecture.
+Les lectures applicatives V4 (20 registres) et V6/V6v16 (110 registres) documentées
+ci-dessous respectent ces contraintes.
+
 ### Requête lecture
 
 Le PDU interne de lecture est :
