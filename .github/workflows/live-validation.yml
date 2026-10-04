@@ -10,6 +10,7 @@ on:
         default: tls-only
         options:
           - tls-only
+          - session-open
   pull_request:
     types: [labeled]
 
@@ -20,7 +21,7 @@ jobs:
   live-validation:
     # Only the newly added label opts in; an existing label never authorizes a push.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'tls-only') ||
       (github.event_name == 'pull_request' &&
        github.event.action == 'labeled' &&
        github.event.label.name == 'live-validation')
@@ -31,7 +32,7 @@ jobs:
         shell: bash
     env:
       # Label-triggered validation stays TLS-only, independently of future inputs.
-      LIVE_MODE: ${{ github.event_name == 'pull_request' && 'tls-only' || inputs.mode }}
+      LIVE_MODE: tls-only
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,8 +50,6 @@ jobs:
       - name: Run selected live probe
         id: probe
         run: |
-          # Extend the choice list and explicit cases in future read-only PRs.
-          # Setup, output preservation and reporting stay shared between modes.
           case "$LIVE_MODE" in
             tls-only)
               printf '%s\n' 'Mode: tls-only'
@@ -75,6 +74,138 @@ jobs:
           {
             printf '%s\n' '## Live Hoben validation'
             printf '\nMode: %s\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$LIVE_MODE" "$result"
+            if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
+              printf '\nProbe output (sanitized JSON):\n\n```json\n'
+              cat "$RUNNER_TEMP/live-validation.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable (probe did not complete).\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-validation-output
+          path: ${{ runner.temp }}/live-validation.json
+          if-no-files-found: ignore
+
+  live-session-negative:
+    # A newly added, distinct label is the only opt-in. No secret or environment.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'live-session-negative'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Diagnostic header
+        run: |
+          printf 'Runner OS: %s\n' "$RUNNER_OS"
+          python --version
+          printf '%s\n' 'Mode: session-negative' 'Endpoint: myhoben.fr:465'
+          printf '%s\n' 'Synthetic negative test; no real authentication is validated.'
+
+      - name: Observe one synthetic OpenClient
+        id: probe
+        run: |
+          # Fixed test inputs live in the probe; no HOBEN_* environment inputs.
+          # Exit 0 records an informative reply/EOF, not an authenticated session.
+          python scripts/probe_hoben_connection.py --session-negative | tee "$RUNNER_TEMP/live-session-negative.json"
+
+      - name: Summarize negative observation
+        if: ${{ always() }}
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=inconclusive
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=informative
+          fi
+          {
+            printf '%s\n' '## Negative Hoben session observation'
+            printf '\nMode: session-negative\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
+            printf '\nSynthetic/unassigned UserGuid and normal initial DeviceGuid; no authentication validated.\n'
+            if [ -s "$RUNNER_TEMP/live-session-negative.json" ]; then
+              printf '\nProbe output (sanitized JSON):\n\n```json\n'
+              cat "$RUNNER_TEMP/live-session-negative.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable (probe did not complete).\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve negative probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-session-negative-output
+          path: ${{ runner.temp }}/live-session-negative.json
+          if-no-files-found: ignore
+
+  session-open:
+    # Defense in depth: hoben-live MUST independently allow only the protected
+    # main branch before adding its secret. An unreviewed branch can edit this if.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'session-open' &&
+      github.ref == 'refs/heads/main'
+    name: First-client session observation
+    environment: hoben-live
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Diagnostic header
+        run: |
+          printf 'Runner OS: %s\n' "$RUNNER_OS"
+          python --version
+          printf '%s\n' 'Mode: session-open' 'Endpoint: myhoben.fr:465'
+
+      - name: Validate UserGuid and observe one OpenClient
+        id: probe
+        env:
+          # Add only after verifying hoben-live's main-only deployment policy.
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        run: |
+          # Exit 0 means a classified response, not necessarily authentication.
+          # pipefail retains errors while tee preserves only sanitized JSON.
+          python scripts/probe_hoben_connection.py --session | tee "$RUNNER_TEMP/live-validation.json"
+
+      - name: Summarize first response or failure
+        if: ${{ always() }}
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=failure
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=observed
+          fi
+          {
+            printf '%s\n' '## Live Hoben validation'
+            printf '\nMode: session-open\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
+            printf '\nFirst response only; no authentication code requested or sent.\n'
             if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
               printf '\nProbe output (sanitized JSON):\n\n```json\n'
               cat "$RUNNER_TEMP/live-validation.json"

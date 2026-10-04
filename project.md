@@ -220,11 +220,13 @@ Home Assistant user
 `transport.py` implements layer 1 as verified, timeout-bounded async TLS byte
 streams, without MyHOBEN interpretation or Home Assistant imports. `session.py`
 seeds layer 5 with `open_session_once()`: one OpenClient, leading Ping/Pong,
-buffering through the confirmed 48-byte OpenedClient prefix, existing codec and
-profile selection, then close on every outcome. Its safe report omits identifiers.
+then the first response. It uses the confirmed 48-byte OpenedClient prefix and
+profile selection, or returns typed authorization/closure observations, then
+closes on every outcome. Its safe report omits identifiers and opaque payloads.
 
-The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only and session-open
-validation. The full OpenedClient boundary still remains unresolved. Static APK
+The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only, first-client
+session-open and secret-free negative validation. The full OpenedClient boundary
+still remains unresolved. Static APK
 analysis now establishes the identity lifecycle used by MyHOBEN: the user enters
 or scans the HOBEN identifier, it is sent as a 32-character UserGuid without
 dashes, a new client starts with a DeviceGuid of 32 zero characters, and a
@@ -232,6 +234,15 @@ successful OpenedClient can replace/persist that client DeviceGuid. The
 `DeviceAuthReq (0x2F)` → user code → `DeviceAuthRes (0x30)` path and several
 `CloseClient` rejection codes are also documented, but still require live
 validation against the current server before Home Assistant automates pairing.
+
+The real probe now validates/normalizes `HOBEN_USER_GUID` before constructing the
+transport, constructs the normal initial zero DeviceGuid internally, and defaults
+to build 34 and the stable community DeviceInfo documented in README. It never
+reads `HOBEN_DEVICE_GUID`. `DeviceAuthReq` becomes `authorization_required`;
+known CloseClient subcodes become allowlisted reasons. No authentication code is
+requested/sent, and no returned DeviceGuid is persisted in this increment.
+Negative mode uses a syntactically valid but synthetic/unassigned zero UserGuid
+with the same normal initial DeviceGuid, ignoring every `HOBEN_*` input.
 
 A suffix after the confirmed OpenedClient prefix is not reframed and an
 unexpected message reports only its numeric type. No polling, automatic
@@ -413,12 +424,21 @@ The simulator is preferred over a live stove for CI because it is deterministic,
 The Hoben Osmose should be used as an opt-in validation environment, not a CI dependency.
 
 The dedicated `Live Validation` GitHub Actions workflow is explicitly opt-in:
-`workflow_dispatch` for normal use, or adding the exact `live-validation` label
-to a PR for pre-merge validation (`pull_request: labeled` only). An existing label
-does not authorize runs on new commits; removing and re-adding it requests a new
-validation. This lane stays separate from the deterministic/offline `Validate`
-CI. It currently offers only credential-free `tls-only` validation; future
-read-only modes will be added incrementally in separate reviewed PRs.
+`workflow_dispatch` offers `tls-only` or real `session-open`, the latter only on
+`refs/heads/main` with the `hoben-live` environment. Before adding its sole Hoben
+secret `HOBEN_USER_GUID`, mandatory PR review must protect main and the environment
+must independently allow exactly Branch `main`, without other branches or tags.
+README documents the separate verification of effective GitHub settings; a YAML
+condition alone cannot protect a secret from code on an unreviewed branch.
+
+Adding the exact `live-validation` label to a PR opts into TLS-only; adding
+`live-session-negative` opts into a separate synthetic/unassigned UserGuid probe
+with no secret or environment. Only `pull_request: labeled` is eligible. Existing
+labels never authorize runs on new commits, push or synchronize; removing and
+re-adding the chosen label requests another observation. The negative probe
+classifies the actual response without requiring any particular server outcome.
+These lanes stay separate from deterministic/offline `Validate` CI. Further
+pairing, persistence and read-only modes require separate reviewed increments.
 
 Real-device validation is important for unknown protocol semantics, especially:
 

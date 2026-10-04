@@ -311,8 +311,11 @@ déjà reçus restent non classifiés : seul leur nombre peut être rapporté, j
 leur contenu. Ils ne sont pas interprétés comme un nouveau message.
 Les Ping précédant le préfixe sont consommés un par un avec un Pong immédiat,
 y compris lorsqu'ils arrivent avec le début d'OpenedClient dans une même lecture.
-Tout autre type avant OpenedClient arrête la sonde en rapportant uniquement son
-numéro, sans supposer la longueur de sa charge utile ni automatiser l'association.
+La sonde classe aussi `DeviceAuthReq (0x2F)` comme `authorization_required` et les
+sous-codes documentés de `CloseClient (0x05)` (§5), puis ferme sans envoyer de
+code d'authentification. Un sous-code absent à EOF ou inconnu reste non interprété.
+Les types réellement inattendus sont rapportés uniquement par leur numéro,
+sans payload ni hypothèse sur sa longueur. Aucun suffixe inconnu n'est reframé.
 
 ### Choix de l'implémentation poêle — CONFIRMÉ
 

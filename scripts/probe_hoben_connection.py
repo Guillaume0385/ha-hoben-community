@@ -1,8 +1,9 @@
 """Opt-in TLS/OpenClient validation. Importing this module never opens a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only or --session. Session fields come only from HOBEN_* environment values,
-so identifiers need not appear in command-line arguments or shell history.
+--tls-only, --session or --session-negative. A first-client session uses the
+Identifiant HOBEN and a normal initial zero DeviceGuid. Negative mode substitutes
+only a synthetic/unassigned UserGuid and never reads HOBEN_* inputs.
 """
 
 import argparse
@@ -16,6 +17,10 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from custom_components.hoben.myhoben import (  # noqa: E402
+    INITIAL_DEVICE_GUID,
+    normalize_user_guid,
+)
 from custom_components.hoben.session import (  # noqa: E402
     SessionProtocolError,
     SessionTimeout,
@@ -32,6 +37,14 @@ from custom_components.hoben.transport import (  # noqa: E402
     TransportTlsError,
 )
 
+# protocol.md §4 confirms the analyzed Android build.
+DEFAULT_BUILD = 34
+# Stable implementation/test-client descriptor, NOT official MyHOBEN metadata.
+# Only the slash-separated shape is documented; infer no hidden field semantics.
+DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
+# Syntactically valid, synthetic/unassigned identity; never a real-mode default.
+NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
+
 
 class _SafeArgumentParser(argparse.ArgumentParser):
     """Do not echo accidental identifier arguments in argparse error messages."""
@@ -44,24 +57,26 @@ class _SafeArgumentParser(argparse.ArgumentParser):
 
 async def _probe(session: bool) -> dict[str, int | str]:
     """Validate inputs before connecting and return only allowlisted fields."""
-    transport = AsyncTlsTransport()
     if session:
         try:
-            user_guid = os.environ["HOBEN_USER_GUID"]
-            device_guid = os.environ["HOBEN_DEVICE_GUID"]
-            device_info = os.environ["HOBEN_DEVICE_INFO"]
-            build = int(os.environ["HOBEN_BUILD"])
+            user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
+            device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
+            build = int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
+            if not device_info.strip() or not 0 <= build <= 65535:
+                raise ValueError
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
+
         result = await open_session_once(
-            transport,
+            AsyncTlsTransport(),
             user_guid=user_guid,
             build=build,
-            device_guid=device_guid,
+            device_guid=INITIAL_DEVICE_GUID,
             device_info=device_info,
         )
-        return {"state": "opened", **result.safe_report()}
+        return result.safe_report()
 
+    transport = AsyncTlsTransport()
     failed = True
     try:
         await transport.connect()
@@ -75,6 +90,24 @@ async def _probe(session: bool) -> dict[str, int | str]:
     return {"state": "tls_connected"}
 
 
+async def _probe_negative() -> dict[str, int | str]:
+    """Observe one synthetic OpenClient; no secret, env override or real pairing.
+
+    Use the existing verified transport and one-shot session lifecycle unchanged.
+    UnexpectedMessageType and TransportEOF can only originate from its receive
+    path, after TLS connect and the OpenClient write/drain have completed.
+    No response type or authentication outcome is assumed for these test values.
+    """
+    result = await open_session_once(
+        AsyncTlsTransport(),
+        user_guid=NEGATIVE_TEST_USER_GUID,
+        build=DEFAULT_BUILD,
+        device_guid=INITIAL_DEVICE_GUID,
+        device_info=DEFAULT_DEVICE_INFO,
+    )
+    return result.safe_report()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run only after explicit mode selection; print sanitized JSON, no traceback."""
     parser = _SafeArgumentParser(description=__doc__)
@@ -84,8 +117,20 @@ def main(argv: list[str] | None = None) -> int:
         "--session",
         action="store_true",
         help=(
-            "Send one OpenClient using HOBEN_USER_GUID, HOBEN_DEVICE_GUID, "
-            "HOBEN_DEVICE_INFO and HOBEN_BUILD (all required; no build default)"
+            "Observe one first-client OpenClient using HOBEN_USER_GUID (Identifiant "
+            "HOBEN, with or without dashes) and an initial zero DeviceGuid; "
+            "HOBEN_BUILD defaults to 34 and HOBEN_DEVICE_INFO to the documented "
+            "test descriptor. "
+            "No authentication code is requested or sent."
+        ),
+    )
+    mode.add_argument(
+        "--session-negative",
+        action="store_true",
+        help=(
+            "Send one OpenClient with a synthetic/unassigned UserGuid and normal "
+            "initial zero DeviceGuid, observe and close. "
+            "No secrets or HOBEN_* inputs; does not validate real authentication."
         ),
     )
     args = parser.parse_args(argv)
@@ -95,7 +140,11 @@ def main(argv: list[str] | None = None) -> int:
         "state": "error",
     }
     try:
-        report.update(asyncio.run(_probe(args.session)))
+        report.update(
+            asyncio.run(
+                _probe_negative() if args.session_negative else _probe(args.session)
+            )
+        )
     except UnexpectedMessageType as error:
         report.update(error="unexpected_message_type", message_type=error.message_type)
     except TransportTimeout as error:
@@ -117,7 +166,22 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         # A manual diagnostic must never print arbitrary exception payloads.
         report.update(error="probe_failed")
+    if args.session_negative:
+        report["mode"] = "session-negative"
+        # An observed reply/EOF is informative, not successful authentication.
+        # Timeouts, TLS/transport errors and malformed prefixes stay inconclusive.
+        informative = report["state"] in (
+            "opened",
+            "authorization_required",
+            "closed",
+        ) or report.get("error") in (
+            "unexpected_message_type",
+            "eof",
+        )
+        report["observation"] = "informative" if informative else "inconclusive"
     print(json.dumps(report, sort_keys=True))
+    if args.session_negative:
+        return 0 if report["observation"] == "informative" else 1
     return 1 if report["state"] == "error" else 0
 
 
