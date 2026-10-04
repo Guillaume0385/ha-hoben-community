@@ -271,7 +271,14 @@ def test_tls_only_connect_error_still_closes(streams, monkeypatch, capsys) -> No
 
 
 @pytest.mark.parametrize(
-    "args", [[], ["--tls-only", "--session"], ["SYNTHETIC-PRIVATE"]]
+    "args",
+    [
+        [],
+        ["--tls-only", "--session"],
+        ["--tls-only", "--session-negative"],
+        ["--session", "--session-negative"],
+        ["SYNTHETIC-PRIVATE"],
+    ],
 )
 def test_explicit_mode_required_and_arguments_not_echoed(streams, capsys, args) -> None:
     """Import, accidental invocation and bad arguments cannot open a connection."""
@@ -302,4 +309,5 @@ def test_direct_script_help_from_outside_checkout(tmp_path) -> None:
         check=True,
     )
     assert "--tls-only" in result.stdout
+    assert "--session-negative" in result.stdout
     assert "HOBEN_BUILD" in result.stdout

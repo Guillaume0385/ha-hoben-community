@@ -19,6 +19,21 @@ def workflow():
     return yaml.load(LIVE_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
 
+def _and_condition_matches(condition: str, context: dict[str, str]) -> bool:
+    """Evaluate the equality/AND subset used by the two session job gates.
+
+    Reject other grammar rather than ignoring new alternatives. GitHub string
+    equality is case-insensitive. This does not validate remote environment policy.
+    """
+    clauses = []
+    for term in condition.split("&&"):
+        match = re.fullmatch(r"([a-z_.]+)\s*==\s*'([^']+)'", term.strip())
+        assert match is not None, f"Unsupported condition term: {term}"
+        key, expected = match.groups()
+        clauses.append(context[key].casefold() == expected.casefold())
+    return all(clauses)
+
+
 def test_live_events_and_dispatch_choices(workflow) -> None:
     """No push, schedule, PR update or privileged pull_request_target runs live."""
     assert set(workflow["on"]) == {"workflow_dispatch", "pull_request"}
@@ -32,7 +47,7 @@ def test_live_events_and_dispatch_choices(workflow) -> None:
 def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None:
     """Pin the event boundary: even a same-repo label cannot reach session-open."""
     jobs = workflow["jobs"]
-    assert set(jobs) == {"live-validation", "session-open"}
+    assert set(jobs) == {"live-validation", "live-session-negative", "session-open"}
     tls = jobs["live-validation"]
     assert " ".join(tls["if"].split()) == (
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'tls-only') || "
@@ -72,25 +87,66 @@ def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None
 def test_session_open_requires_manual_main(
     workflow, event_name, mode, ref, allowed
 ) -> None:
-    """Evaluate the YAML gate across refs/events, without claiming remote policy.
-
-    The gate deliberately uses only equality checks joined with AND. Reject any
-    other expression grammar instead of silently ignoring an added alternative.
-    GitHub string equality is case-insensitive; environment branch restrictions
-    remain a separate, mandatory server-side boundary.
-    """
+    """Evaluate the real-session YAML gate across refs/events, including labels."""
     context = {
         "github.event_name": event_name,
         "inputs.mode": mode,
         "github.ref": ref,
     }
-    clauses = []
-    for term in workflow["jobs"]["session-open"]["if"].split("&&"):
-        match = re.fullmatch(r"([a-z_.]+)\s*==\s*'([^']+)'", term.strip())
-        assert match is not None, f"Unsupported condition term: {term}"
-        key, expected = match.groups()
-        clauses.append(context[key].casefold() == expected.casefold())
-    assert all(clauses) is allowed
+    assert (
+        _and_condition_matches(workflow["jobs"]["session-open"]["if"], context)
+        is allowed
+    )
+
+
+@pytest.mark.parametrize(
+    ("event_name", "action", "label", "allowed"),
+    [
+        ("pull_request", "labeled", "live-session-negative", True),
+        ("pull_request", "labeled", "live-validation", False),
+        ("pull_request", "labeled", "other", False),
+        ("pull_request", "labeled", "live-session-negative-extra", False),
+        ("pull_request", "synchronize", "live-session-negative", False),
+        ("pull_request", "opened", "live-session-negative", False),
+        ("pull_request", "unlabeled", "live-session-negative", False),
+        ("workflow_dispatch", "labeled", "live-session-negative", False),
+        ("push", "labeled", "live-session-negative", False),
+    ],
+)
+def test_negative_requires_its_newly_added_label(
+    workflow, event_name, action, label, allowed
+) -> None:
+    """Existing labels, commits, other labels and manual runs never opt in."""
+    context = {
+        "github.event_name": event_name,
+        "github.event.action": action,
+        "github.event.label.name": label,
+    }
+    condition = workflow["jobs"]["live-session-negative"]["if"]
+    assert _and_condition_matches(condition, context) is allowed
+
+
+def test_negative_job_has_no_secret_or_environment(workflow) -> None:
+    """Execute PR-head code with no Hoben secret or protected environment binding."""
+    job = workflow["jobs"]["live-session-negative"]
+    assert "environment" not in job
+    assert "env" not in workflow
+    assert "env" not in job
+    source = json.dumps(job)
+    assert "secrets" not in source
+    assert "hoben-live" not in source
+    assert "HOBEN_DEVICE_GUID" not in source
+    steps = job["steps"]
+    checkout = next(
+        s for s in steps if s.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    probe = next(s for s in steps if s.get("id") == "probe")
+    assert "env" not in probe
+    assert (
+        "python scripts/probe_hoben_connection.py --session-negative | tee"
+        in probe["run"]
+    )
 
 
 def test_environment_and_only_device_secret(workflow) -> None:
@@ -110,9 +166,9 @@ def test_environment_and_only_device_secret(workflow) -> None:
 
 
 def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
-    """Both jobs use verified probe defaults and retain only its JSON report."""
+    """All jobs use verified probe defaults and retain only their JSON report."""
     assert workflow["permissions"] == {"contents": "read"}
-    for job in workflow["jobs"].values():
+    for name, job in workflow["jobs"].items():
         assert "permissions" not in job
         assert job["runs-on"] == "ubuntu-latest"
         assert job["timeout-minutes"] == "5"
@@ -131,7 +187,12 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
         ]
         assert len(uploads) == 1
         assert uploads[0]["if"] == "${{ always() }}"
-        assert uploads[0]["with"]["path"] == "${{ runner.temp }}/live-validation.json"
+        filename = (
+            "live-session-negative.json"
+            if name == "live-session-negative"
+            else "live-validation.json"
+        )
+        assert uploads[0]["with"]["path"] == "${{ runner.temp }}/" + filename
 
 
 @pytest.mark.parametrize(
@@ -157,6 +218,36 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
             "failure",
         ),
         ("session-open", None, "skipped", "failure"),
+        (
+            "live-session-negative",
+            {"state": "opened", "observation": "informative"},
+            "success",
+            "informative",
+        ),
+        (
+            "live-session-negative",
+            {
+                "state": "error",
+                "error": "unexpected_message_type",
+                "message_type": 47,
+                "observation": "informative",
+            },
+            "success",
+            "informative",
+        ),
+        (
+            "live-session-negative",
+            {"state": "error", "error": "eof", "observation": "informative"},
+            "success",
+            "informative",
+        ),
+        (
+            "live-session-negative",
+            {"state": "error", "error": "timeout", "observation": "inconclusive"},
+            "failure",
+            "inconclusive",
+        ),
+        ("live-session-negative", None, "skipped", "inconclusive"),
     ],
 )
 def test_actual_summary_preserves_only_sanitized_probe_json(
@@ -166,7 +257,10 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
     steps = workflow["jobs"][job_name]["steps"]
     summary = next(s for s in steps if s.get("name", "").startswith("Summarize"))
     assert summary["if"] == "${{ always() }}"
-    probe_path = tmp_path / "live-validation.json"
+    negative = job_name == "live-session-negative"
+    probe_path = tmp_path / (
+        "live-session-negative.json" if negative else "live-validation.json"
+    )
     summary_path = tmp_path / "summary.md"
     if report is not None:
         probe_path.write_text(json.dumps(report), encoding="utf-8")
@@ -174,7 +268,11 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
         "RUNNER_TEMP": str(tmp_path),
         "GITHUB_STEP_SUMMARY": str(summary_path),
         "PROBE_OUTCOME": outcome,
-        "LIVE_MODE": "tls-only" if job_name == "live-validation" else "session-open",
+        "LIVE_MODE": {
+            "live-validation": "tls-only",
+            "session-open": "session-open",
+            "live-session-negative": "session-negative",
+        }[job_name],
         "HOBEN_DEVICE_GUID": "SYNTHETIC-PRIVATE-DEVICE",
         "HOBEN_USER_GUID": "SYNTHETIC-PRIVATE-USER",
     }

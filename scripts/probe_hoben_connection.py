@@ -1,8 +1,9 @@
 """Opt-in TLS/OpenClient validation. Importing this module never opens a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only or --session. DeviceGuid comes only from HOBEN_DEVICE_GUID, never from
-arguments. Session opening stays blocked until a UserGuid source is confirmed.
+--tls-only, --session or --session-negative. Real session opening stays blocked
+until a UserGuid source is confirmed. The separate negative mode sends fixed,
+deliberately invalid synthetic identifiers and never reads HOBEN_* inputs.
 """
 
 import argparse
@@ -38,6 +39,10 @@ DEFAULT_BUILD = 34
 # Only the slash-separated shape is documented; infer no hidden field semantics.
 DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
 BLOCKED_EXIT_CODE = 3
+# Negative-test data only: neither valid GUIDs nor evidence of real GUID lengths.
+# These constants must never become defaults for the real --session path.
+NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
+NEGATIVE_TEST_DEVICE_GUID = "00000000000000000000000000000000"
 
 
 def _resolve_user_guid() -> str | None:
@@ -104,6 +109,24 @@ async def _probe(session: bool) -> dict[str, int | str]:
     return {"state": "tls_connected"}
 
 
+async def _probe_negative() -> dict[str, int | str]:
+    """Observe one synthetic OpenClient; no secret, env override or real pairing.
+
+    Use the existing verified transport and one-shot session lifecycle unchanged.
+    UnexpectedMessageType and TransportEOF can only originate from its receive
+    path, after TLS connect and the OpenClient write/drain have completed.
+    No response type or authentication outcome is assumed for these test values.
+    """
+    result = await open_session_once(
+        AsyncTlsTransport(),
+        user_guid=NEGATIVE_TEST_USER_GUID,
+        build=DEFAULT_BUILD,
+        device_guid=NEGATIVE_TEST_DEVICE_GUID,
+        device_info=DEFAULT_DEVICE_INFO,
+    )
+    return {"state": "opened", **result.safe_report()}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run only after explicit mode selection; print sanitized JSON, no traceback."""
     parser = _SafeArgumentParser(description=__doc__)
@@ -118,6 +141,14 @@ def main(argv: list[str] | None = None) -> int:
             "BLOCKED before connect until a UserGuid source is confirmed."
         ),
     )
+    mode.add_argument(
+        "--session-negative",
+        action="store_true",
+        help=(
+            "Send one deliberately invalid synthetic OpenClient, observe and close. "
+            "No secrets or HOBEN_* inputs; does not validate real authentication."
+        ),
+    )
     args = parser.parse_args(argv)
     report: dict[str, int | str] = {
         "host": DEFAULT_HOST,
@@ -125,7 +156,11 @@ def main(argv: list[str] | None = None) -> int:
         "state": "error",
     }
     try:
-        report.update(asyncio.run(_probe(args.session)))
+        report.update(
+            asyncio.run(
+                _probe_negative() if args.session_negative else _probe(args.session)
+            )
+        )
     except UnexpectedMessageType as error:
         report.update(error="unexpected_message_type", message_type=error.message_type)
     except TransportTimeout as error:
@@ -147,7 +182,18 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         # A manual diagnostic must never print arbitrary exception payloads.
         report.update(error="probe_failed")
+    if args.session_negative:
+        report["mode"] = "session-negative"
+        # An observed reply/EOF is informative, not successful authentication.
+        # Timeouts, TLS/transport errors and malformed prefixes stay inconclusive.
+        informative = report["state"] == "opened" or report.get("error") in (
+            "unexpected_message_type",
+            "eof",
+        )
+        report["observation"] = "informative" if informative else "inconclusive"
     print(json.dumps(report, sort_keys=True))
+    if args.session_negative:
+        return 0 if report["observation"] == "informative" else 1
     if report["state"] == "blocked":
         return BLOCKED_EXIT_CODE
     return 1 if report["state"] == "error" else 0
