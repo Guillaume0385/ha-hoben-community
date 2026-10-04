@@ -84,7 +84,9 @@ async def test_success_persists_assignment_and_closes(
     fingerprint = result["result"].unique_id
     assert fingerprint == user_guid_fingerprint(USER_GUID)
     assert len(fingerprint) == 64
-    client_factory.assert_called_once_with(user_guid=NORMALIZED_USER_GUID)
+    client_factory.assert_called_once_with(
+        user_guid=NORMALIZED_USER_GUID, device_guid=None
+    )
     client.async_refresh.assert_awaited_once_with()
     client.async_close.assert_awaited_once_with()
     # Only the required private storage payload may contain the identifiers.

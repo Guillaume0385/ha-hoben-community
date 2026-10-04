@@ -32,6 +32,22 @@ _USER_SCHEMA = vol.Schema(
 )
 
 
+def _connection_error(error: Exception) -> str:
+    """Map validation failures to fixed text without exposing client payloads."""
+    if isinstance(error, (HobenInvalidInputError, HobenInvalidCredentialsError)):
+        return "invalid_identifier"
+    if isinstance(error, HobenAuthorizationRequiredError):
+        return "authorization_required"
+    if isinstance(error, HobenTransportError):
+        return "cannot_connect"
+    if isinstance(error, HobenUnsupportedProfileError):
+        return "unsupported_stove"
+    if isinstance(error, HobenError):
+        return "protocol_error"
+    log_unexpected_error(_LOGGER, error)
+    return "unknown"
+
+
 class HobenConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configure one stove with a private HOBEN identifier and a neutral title."""
 
@@ -52,19 +68,8 @@ class HobenConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 try:
                     device_guid = await self._async_validate_connection(user_guid)
-                except (HobenInvalidInputError, HobenInvalidCredentialsError):
-                    errors["base"] = "invalid_identifier"
-                except HobenAuthorizationRequiredError:
-                    errors["base"] = "authorization_required"
-                except HobenTransportError:
-                    errors["base"] = "cannot_connect"
-                except HobenUnsupportedProfileError:
-                    errors["base"] = "unsupported_stove"
-                except HobenError:
-                    errors["base"] = "protocol_error"
                 except Exception as error:
-                    log_unexpected_error(_LOGGER, error)
-                    errors["base"] = "unknown"
+                    errors["base"] = _connection_error(error)
                 else:
                     return self.async_create_entry(
                         title="Hoben",
@@ -75,9 +80,47 @@ class HobenConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=_USER_SCHEMA, errors=errors
         )
 
-    async def _async_validate_connection(self, user_guid: str) -> str:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Offer recovery for the entry referenced by HA, without identity input."""
+        # Read the authoritative entry on confirmation, not the flow's data copy.
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Retry the stored identity; only a successful V4 read resumes polling."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            entry = self._get_reauth_entry()
+            try:
+                user_guid = normalize_user_guid(entry.data[CONF_USER_GUID])
+                device_guid = entry.data[CONF_DEVICE_GUID]
+            except (KeyError, TypeError, ValueError):
+                errors["base"] = "invalid_identifier"
+            else:
+                await self.async_set_unique_id(user_guid_fingerprint(user_guid))
+                self._abort_if_unique_id_mismatch()
+                try:
+                    assigned_device_guid = await self._async_validate_connection(
+                        user_guid, device_guid
+                    )
+                except Exception as error:
+                    errors["base"] = _connection_error(error)
+                else:
+                    # Reload even without a rotation: the coordinator stopped on
+                    # ConfigEntryAuthFailed and needs a fresh successful setup.
+                    return self.async_update_reload_and_abort(
+                        entry, data_updates={CONF_DEVICE_GUID: assigned_device_guid}
+                    )
+        return self.async_show_form(
+            step_id="reauth_confirm", data_schema=vol.Schema({}), errors=errors
+        )
+
+    async def _async_validate_connection(
+        self, user_guid: str, device_guid: str | None = None
+    ) -> str:
         """Only persist a nonzero server assignment after a complete V4 refresh."""
-        client = HobenClient(user_guid=user_guid)
+        client = HobenClient(user_guid=user_guid, device_guid=device_guid)
         try:
             snapshot = await client.async_refresh()
             if snapshot.profile is not StoveProfile.V4:

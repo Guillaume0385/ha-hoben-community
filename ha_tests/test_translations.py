@@ -18,6 +18,8 @@ async def test_runtime_translations_load_without_core_strings(hass, language):
     prefix = "component.hoben.config."
     assert translations[prefix + "step.user.title"]
     assert translations[prefix + "step.user.description"]
+    assert translations[prefix + "step.reauth_confirm.title"]
+    assert translations[prefix + "step.reauth_confirm.description"]
     assert translations[prefix + f"step.user.data.{CONF_USER_GUID}"]
     description = translations[prefix + f"step.user.data_description.{CONF_USER_GUID}"]
     assert "MyHOBEN" in description
@@ -30,7 +32,8 @@ async def test_runtime_translations_load_without_core_strings(hass, language):
         "unknown",
     ):
         assert translations[prefix + "error." + error]
-    assert translations[prefix + "abort.already_configured"]
+    for reason in ("already_configured", "reauth_successful", "unique_id_mismatch"):
+        assert translations[prefix + "abort." + reason]
     assert not (INTEGRATION / "strings.json").exists()
 
 

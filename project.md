@@ -245,10 +245,20 @@ sanitized `ConfigEntryError`. Only HobenClient owns network retries. Unload stop
 the timers and closes the client; HA discards runtime data, and reload reconstructs
 the client with the persisted identity.
 
+Authentication failures start an entry-bound `SOURCE_REAUTH` confirmation. It
+accepts no identifiers and retries one client refresh using the entry's current
+persisted UserGuid/DeviceGuid. The fingerprint must still match the existing
+entry. Success updates only a newly assigned DeviceGuid and uses HA's
+update/reload/abort helper to resume polling, even when the identity is unchanged.
+Failure keeps the confirmation open with a sanitized translated error, without
+changing storage or creating another entry. No DeviceAuthRes is sent. A different
+HOBEN identity requires an explicitly new configuration, not a silent reauth
+identity change.
+
 One device is registered with a neutral name, manufacturer Hoben, safe protocol
 profile and OpenedClient software version. No commercial Osmose model is inferred.
 No semantic entity, permanent connection, DataUpdated, diagnostics, pairing,
-reconfiguration/reauth flow or write/control path belongs to this increment.
+reconfiguration or write/control path belongs to this increment.
 **Validating the semantic mapping of the 20 raw V4 registers is the next protocol
 milestone**, before any sensor values or physical units are exposed.
 
@@ -257,6 +267,9 @@ HA orchestration is tested offline using the separately pinned
 environment and new `ha-tests` CI job. The existing Python 3.12 protocol suite
 stays HA-independent. The trusted MANAGER authenticated exact-HEAD gate is retained
 unchanged; the existing live suite validates the underlying client path.
+HA tests also cover reauth initiation, confirmation, failure/retry, identity
+rotation, reload and resumed polling. Scripted transport tests use the real client
+to prove that reauth authorization requests never cause a pairing response.
 
 ### DONE — stateful read-only HobenClient and DeviceGuid lifecycle
 

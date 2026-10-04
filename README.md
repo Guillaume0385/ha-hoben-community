@@ -58,12 +58,16 @@ commercial tel qu’Osmose.
 
 Un problème réseau rend le rafraîchissement indisponible et permet à Home
 Assistant de retenter le setup. Un identifiant rejeté ou une autorisation requise
-arrête le sondage et signale une erreur d’authentification ; le support de
-l’association et de la réauthentification n’est pas encore implémenté. Le flux
-initial permet de réessayer plus tard. Pour une entrée existante, recharger
-l’intégration après résolution ; si l’identifiant doit être corrigé, supprimer
-puis ajouter à nouveau l’entrée. Une réponse protocolaire, Modbus ou un profil
-non pris en charge fait échouer le setup avec un message fixe expurgé.
+arrête le sondage et ouvre une confirmation de réauthentification dans Home
+Assistant. Confirmer reteste l’entrée avec ses GUID persistés, sans les afficher
+ni permettre de changer l’identité. Une lecture V4 réussie persiste une éventuelle
+rotation du DeviceGuid et recharge l’intégration, même sans rotation, pour
+reprendre le sondage. Une autorisation toujours requise ou un identifiant encore
+refusé maintient le formulaire avec un message fixe ; l’association reste non
+prise en charge. Le flux initial permet aussi de réessayer plus tard. Pour
+utiliser un autre identifiant HOBEN, configurer explicitement une nouvelle entrée.
+Une réponse protocolaire, Modbus ou un profil non pris en charge fait échouer le
+setup avec un message fixe expurgé.
 
 L’intervalle de 60 secondes n’est pas configurable pour cet incrément. Aucun
 socket permanent, DataUpdated, diagnostic de registres, association, entité
@@ -197,9 +201,14 @@ python -m pytest -c ha_tests/pytest.ini ha_tests
 ```
 
 Les tests chargent les vrais config entries, flux, timers du coordinateur,
-traductions et registre d’appareils HA ; `HobenClient` est simulé. Le harnais
-bloque les sockets externes et un garde interdit toute construction de transport
-Hoben, même si une simulation est oubliée. Aucun test HA ne contacte `myhoben.fr`.
+traductions et registre d’appareils HA. Ils vérifient notamment le démarrage du
+flux de réauthentification sur une erreur d’authentification, la reprise après
+rechargement et la conservation de l’identité. `HobenClient` est simulé pour
+l’orchestration ; des tests de réauthentification utilisent aussi le vrai client
+sur un transport scripté, pour vérifier l’absence de réponse d’association.
+Le harnais bloque les sockets externes et un garde interdit toute construction
+de transport Hoben réel, même si une simulation est oubliée. Aucun test HA ne
+contacte `myhoben.fr`.
 
 La CI exécute les jobs séparés `tests` et `ha-tests`, ainsi que les validateurs
 officiels HACS et Hassfest.
@@ -301,6 +310,7 @@ Après la première validation réussie, configurer manuellement :
 ```text
 Settings → Branches → main
 → Require status checks to pass before merging
+→ add: ha-tests
 → add: live-hoben-authenticated
 ```
 
@@ -309,6 +319,9 @@ Les checks requis deviennent **`tests`**, **`ha-tests`**, **`hacs`**, **`hassfes
 le contexte du workflow `pull_request_target` est celui de la base. Le succès
 d'un ancien SHA ne satisfait donc pas la protection d'un nouveau commit.
 Sans ce réglage effectif, le statut seul ne bloque pas techniquement la fusion.
+Avant toute publication communautaire, vérifier en particulier que `ha-tests`
+est effectivement requis par la protection de `main`, en plus des checks déjà
+présents. La réussite de ce job dans une PR ne configure pas cette protection.
 
 **Installation initiale :** GitHub ne peut pas lancer une nouvelle définition de
 confiance qui existe seulement dans cette première PR. Le MANAGER doit décider

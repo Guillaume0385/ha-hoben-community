@@ -14,7 +14,7 @@ from conftest import (
     ROTATED_DEVICE_GUID,
     assert_private_values_absent,
 )
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -249,6 +249,16 @@ async def test_first_refresh_failure_cleans_up_and_uses_correct_setup_state(
     client.async_close.assert_awaited_once_with()
     assert not dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert_private_values_absent(caplog.text)
+    if isinstance(
+        error, (HobenAuthorizationRequiredError, HobenInvalidCredentialsError)
+    ):
+        [flow] = hass.config_entries.flow.async_progress()
+        assert flow["context"]["source"] == SOURCE_REAUTH
+        assert flow["context"]["entry_id"] == entry.entry_id
+        form = await hass.config_entries.flow.async_configure(flow["flow_id"])
+        assert form["step_id"] == "reauth_confirm"
+        assert form["data_schema"].schema == {}
+        assert_private_values_absent(repr(form))
     entry.async_cancel_retry_setup()
 
 
