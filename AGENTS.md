@@ -269,6 +269,73 @@ Pull requests should eventually be required to pass:
 
 Do not weaken or delete a failing test merely to make CI green. Fix the implementation or explicitly update the test because the documented behavior has changed.
 
+### MANAGER-gated authenticated pre-merge validation
+
+Maintain four distinct validation layers:
+
+1. deterministic offline CI (`tests`/Ruff, `hacs`, `hassfest`), with no Hoben
+   connection or secret;
+2. optional secret-free protocol smoke (TLS or synthetic identity);
+3. authenticated pre-merge live validation, explicitly authorized by MANAGER
+   after code review of the exact candidate HEAD;
+4. manual exploratory live validation on protected main, including the existing
+   `session-open` / `read-v4-state` dispatch modes.
+
+Every merge requires layer 3 in addition to passing offline CI. Real-device
+validation is never part of ordinary pytest or automatic PR CI. A TLS smoke,
+synthetic response or classified rejection cannot satisfy authenticated approval.
+
+Use the trusted `main` definition of `manager-live-hoben.yml`, triggered only by
+`pull_request_target: labeled`. Only exact actor `Guillaume0385`, exact label
+`manager-live-hoben`, base `main`, a non-draft PR and exact same-repository head
+`Guillaume0385/ha-hoben-community` are eligible. No forks, automatic commit
+triggers, arbitrary labels or replay of a previous workflow run are permitted.
+Check identifiers strictly because GitHub expression equality ignores case;
+reject a queued approval if the current PR HEAD no longer matches the event SHA.
+
+> Adding `manager-live-hoben` means the MANAGER has reviewed the exact candidate HEAD and explicitly trusts that code to run with the Hoben live credential.
+
+Before adding it, MANAGER must inspect the complete diff, verify compliance with
+these rules/project/protocol, verify no secret exfiltration or identifier logging,
+verify no unauthorized write/control path, verify offline CI and record the full
+reviewed HEAD SHA. Implementing an issue or opening a PR does not itself grant
+this live approval. Codex must leave the PR open for MANAGER review.
+
+The privileged candidate run must checkout `github.event.pull_request.head.sha`
+exactly with `persist-credentials: false`, reuse `hoben-live` restricted to the
+exact protected main branch, and use only its existing `HOBEN_USER_GUID` secret.
+Inject it into the sole live probe step, never job-wide. Install no new
+candidate-controlled dependencies in that job. Keep the token with
+`statuses: write` on separate trusted runners, without candidate checkout;
+the candidate job has only `contents: read` and no GitHub status token input.
+Never export environment dumps, raw packets, identifiers, authorization codes,
+arbitrary server payloads or arbitrary exception text.
+
+The fixed v0.1 `--live-premerge` suite must open one verified TLS session, require
+authenticated OpenedClient and dynamically V4, make exactly one function 04 read
+(FFFF, unit 1, start 1024, quantity 20), validate correlation and 20 UInt16 values,
+then close. No exact register contents are expected. Do not send pairing,
+function 06/16/22, transaction FFF0 or any stove-control command.
+
+Publish `live-hoben-authenticated` as pending/success/failure on that exact
+candidate SHA, with success only when the whole live job and probe succeed.
+Afterwards MANAGER checks the tested SHA and sanitized result, confirms success,
+removes the label and merges only if HEAD still matches. Each new commit requires
+fresh review and removal/re-addition of the label. After the first successful
+validation, MANAGER manually adds `live-hoben-authenticated` to main's required
+status checks alongside `tests`, `hacs`, `hassfest`; without effective branch
+protection the status alone cannot enforce the gate.
+
+A new workflow present only in a PR cannot bootstrap its own trusted main
+definition. MANAGER must arrange a separate reviewed initial installation on
+protected main; leave the implementation PR open pending that prerequisite and
+its live review. Never run candidate workflow YAML to bypass the boundary.
+
+When a future v0.1 PR adds a safe read-only mechanism testable on the real stove,
+extend the fixed allowlisted suite with a bounded test for that mechanism.
+Future real write/control tests require a separate safety decision following
+the release roadmap and write-command policy; adding write code is insufficient.
+
 ---
 
 ## Code readability and documentation

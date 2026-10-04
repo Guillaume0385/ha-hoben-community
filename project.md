@@ -227,7 +227,8 @@ profile selection, or returns typed authorization/closure observations, then
 closes on every outcome. Its safe report omits identifiers and opaque payloads.
 
 The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only, first-client
-session-open, secret-free negative validation and opt-in `read-v4-state`.
+session-open, secret-free negative validation, opt-in `read-v4-state` and the
+fixed MANAGER-approved `live-premerge` suite.
 The full OpenedClient boundary still remains unresolved. Static APK
 analysis now establishes the identity lifecycle used by MyHOBEN: the user enters
 or scans the HOBEN identifier, it is sent as a 32-character UserGuid without
@@ -269,9 +270,12 @@ Modbus exception, rejects buffered trailing bytes, then closes on every outcome.
 The full OpenedClient boundary remains unresolved, including suffixes arriving
 later. No V4 register meaning, pairing, persistence, write or control is added.
 
-The PR is validated offline only. After merge to protected main, the
-manager/user manually runs `read-v4-state`; the resulting 20 raw registers must
-be reviewed separately before any V4 semantics or Home Assistant entities.
+Every candidate is first tested offline, then the MANAGER reviews its exact HEAD
+before authorizing authenticated pre-merge validation. The fixed `live-premerge`
+suite reuses the same one-shot V4 operation, retaining sanitized opening metadata
+and reporting only the register count. The exploratory `read-v4-state` mode on
+protected main can still export raw registers, which must be reviewed separately
+before assigning any V4 semantics or creating Home Assistant entities.
 
 ### Layer 1 — transport
 
@@ -444,7 +448,74 @@ The simulator is preferred over a live stove for CI because it is deterministic,
 
 ## Real stove
 
-The Hoben Osmose should be used as an opt-in validation environment, not a CI dependency.
+Validation has four separate layers:
+
+1. **Offline deterministic CI:** pytest/Ruff, HACS and Hassfest; no Hoben network
+   access or credential. Offline simulations remain reproducible and mandatory.
+2. **Secret-free protocol smoke:** optional TLS-only and synthetic-identity
+   diagnostics; these observations never establish authenticated success.
+3. **MANAGER-gated authenticated pre-merge validation:** required before each
+   merge, after review of the exact candidate HEAD, using a trusted main workflow
+   and the fixed read-only live suite on that SHA.
+4. **Manual exploratory live validation on main:** the existing dispatch modes
+   for reviewed protocol research and diagnostics, separate from merge approval.
+
+The Hoben Osmose remains an opt-in environment for the live lanes; normal pytest
+and `Validate` never require it. Opt-in here means explicit MANAGER authorization
+after review, not permission to skip the authenticated merge requirement.
+
+### MANAGER-gated authenticated candidate validation
+
+`.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
+Only `pull_request_target: labeled`, the exact label `manager-live-hoben`, exact
+actor `Guillaume0385`, a non-draft PR targeting `main` and the exact same head
+repository `Guillaume0385/ha-hoben-community` can authorize execution. Forks,
+automatic events, already-present labels and workflow reruns do not authorize it.
+The trusted script rechecks case-sensitive identities and the current PR HEAD
+before accepting a queued approval.
+
+> Adding `manager-live-hoben` means the MANAGER has reviewed the exact candidate HEAD and explicitly trusts that code to run with the Hoben live credential.
+
+Before labeling, MANAGER inspects the entire diff, checks AGENTS/project/protocol
+compliance, rejects secret exfiltration/logging and unauthorized control paths,
+verifies offline CI and records the full reviewed HEAD SHA. The trusted workflow
+then checks out exactly `github.event.pull_request.head.sha` with
+`persist-credentials: false`. `hoben-live` must retain its independent exact
+protected-main branch policy; its sole `HOBEN_USER_GUID` secret is injected only
+into the fixed candidate probe step. No candidate dependency is installed and
+the status-writing token is kept on separate trusted runners.
+
+`python scripts/probe_hoben_connection.py --live-premerge` requires verified TLS,
+authenticated opening and dynamic V4 selection, then exactly one documented
+function 04 read (transaction FFFF, unit 1, address 1024, quantity 20), a
+correlated response containing exactly 20 UInt16 values, and closure. Success
+does not depend on exact register contents, product revision or software
+version. Pairing, writes, controls, polling and retries are excluded.
+
+Trusted jobs publish `pending`, then `success` only for full live success or
+`failure` otherwise, using the stable commit status `live-hoben-authenticated`
+on the event's exact candidate SHA. MANAGER verifies that SHA and the sanitized
+report, confirms success, removes the label and merges only while HEAD still
+matches. New commits require new review and label removal/re-addition.
+
+After the first successful live validation, MANAGER must manually update
+**Settings → Branches → main → Require status checks to pass before merging**
+and add **`live-hoben-authenticated`**, alongside `tests`, `hacs`, `hassfest`.
+Only effective branch protection makes this status enforceable for every new
+SHA; a base-context Actions result or an older candidate success is insufficient.
+
+The first installation needs a separate MANAGER decision: a trusted workflow
+cannot run while it exists only in a candidate PR. Install its reviewed
+definition on protected main before labeling the implementation PR. Leave that
+PR open pending installation, review and authenticated validation; never obtain
+the credential by running its candidate YAML as a bootstrap workaround.
+
+Future v0.1 PRs adding safe real-testable read-only mechanisms must extend the
+fixed bounded suite (for example persistent sessions, Ping/Pong, reconnect,
+documented reads or DataUpdated). Future real writes require a separate safety
+decision under AGENTS/project/protocol; write code alone never authorizes a test.
+
+### Existing exploratory and secret-free workflow
 
 The dedicated `Live Validation` GitHub Actions workflow is explicitly opt-in:
 `workflow_dispatch` offers `tls-only`, real `session-open` or `read-v4-state`,
@@ -549,7 +620,10 @@ Recommended workflow:
 7. open a pull request;
 8. inspect CI results;
 9. fix failures rather than bypassing checks;
-10. merge only once tests and documentation are complete.
+10. MANAGER reviews the full diff and records the exact HEAD SHA after offline CI;
+11. MANAGER adds `manager-live-hoben` and verifies authenticated success on that SHA;
+12. MANAGER removes the label and merges only if HEAD is unchanged and all
+    required checks pass. Codex leaves implementation PRs open for this process.
 
 Use `AGENTS.md` as persistent project instructions for Codex.
 

@@ -66,9 +66,14 @@ class V4ReadBlockedResult:
 
 @dataclass(frozen=True)
 class V4ReadResult:
-    """One correlated read or exception, containing no client/device identifiers."""
+    """One correlated read or exception, with its opening evidence.
+
+    The session retains the server's DeviceGuid with repr redaction. Export only
+    safe_report() and session.safe_report(), never dataclasses.asdict().
+    """
 
     response: ModbusReadResponse | ModbusExceptionResponse
+    session: OpenSessionResult
 
     def safe_report(self) -> dict[str, int | str | list[int]]:
         """Return raw UInt16 values or the raw numeric Modbus exception code."""
@@ -95,7 +100,9 @@ V4Result = (
 )
 
 
-async def _receive_v4_response(transport: AsyncTlsTransport) -> V4ReadResult:
+async def _receive_v4_response(
+    transport: AsyncTlsTransport,
+) -> ModbusReadResponse | ModbusExceptionResponse:
     """Buffer one 0x0E envelope, using MBAP only once its six-byte prefix exists.
 
     Leading standalone Ping is the only additional message allowed. Reject any
@@ -139,7 +146,7 @@ async def _receive_v4_response(transport: AsyncTlsTransport) -> V4ReadResult:
                         raise V4ReadProtocolError(
                             "V4 read requires exactly 20 registers"
                         )
-                    return V4ReadResult(response)
+                    return response
         # Yield even with a buffered stream, so endless Ping cannot defeat the
         # overall exchange deadline or cancellation. No polling/retry is added.
         await asyncio.sleep(0)
@@ -203,7 +210,9 @@ async def open_and_read_v4_once(
             try:
                 async with asyncio.timeout(read_timeout):
                     await transport.write(request)
-                    result = await _receive_v4_response(transport)
+                    result = V4ReadResult(
+                        await _receive_v4_response(transport), session
+                    )
             except TransportError:
                 raise
             except TimeoutError:

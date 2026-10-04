@@ -1,8 +1,9 @@
 """Opt-in TLS/OpenClient/V4 read validation; imports never open a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only, --session, --session-negative or --read-v4-state. A session uses the
-Identifiant HOBEN and a normal initial zero DeviceGuid. Negative mode substitutes
+--tls-only, --session, --session-negative, --read-v4-state or --live-premerge.
+A session uses the Identifiant HOBEN and a normal initial zero DeviceGuid.
+Negative mode substitutes
 only a synthetic/unassigned UserGuid and never reads HOBEN_* inputs.
 """
 
@@ -38,6 +39,7 @@ from custom_components.hoben.transport import (  # noqa: E402
 )
 from custom_components.hoben.v4_read import (  # noqa: E402
     V4ReadProtocolError,
+    V4ReadResult,
     V4ReadTimeout,
     open_and_read_v4_once,
 )
@@ -61,20 +63,34 @@ class _SafeArgumentParser(argparse.ArgumentParser):
 
 
 async def _probe(
-    session: bool, *, read_v4_state: bool = False
+    session: bool, *, read_v4_state: bool = False, live_premerge: bool = False
 ) -> dict[str, int | str | list[int]]:
     """Validate inputs before connecting and return only allowlisted fields."""
-    if session or read_v4_state:
+    if session or read_v4_state or live_premerge:
         try:
             user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
-            device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
-            build = int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
+            # The MANAGER suite accepts only the credential: even non-secret
+            # exploratory overrides must not change the reviewed fixed suite.
+            device_info = (
+                DEFAULT_DEVICE_INFO
+                if live_premerge
+                else os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
+            )
+            build = (
+                DEFAULT_BUILD
+                if live_premerge
+                else int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
+            )
             if not device_info.strip() or not 0 <= build <= 65535:
                 raise ValueError
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
 
-        operation = open_and_read_v4_once if read_v4_state else open_session_once
+        operation = (
+            open_and_read_v4_once
+            if read_v4_state or live_premerge
+            else open_session_once
+        )
         result = await operation(
             AsyncTlsTransport(),
             user_guid=user_guid,
@@ -82,6 +98,16 @@ async def _probe(
             device_guid=INITIAL_DEVICE_GUID,
             device_info=device_info,
         )
+        if live_premerge and isinstance(result, V4ReadResult):
+            # Retain the opening evidence without exporting the returned
+            # DeviceGuid. Register contents can change and are not required.
+            report = result.session.safe_report() | result.safe_report()
+            registers = report.pop("registers", None)
+            if registers is not None:
+                report["register_count"] = len(registers)
+            report["transaction_id"] = result.response.transaction_id
+            report["unit_id"] = result.response.unit_id
+            return report
         return result.safe_report()
 
     transport = AsyncTlsTransport()
@@ -118,7 +144,7 @@ async def _probe_negative() -> dict[str, int | str]:
 
 def main(argv: list[str] | None = None) -> int:
     """Run only after explicit mode selection; print sanitized JSON, no traceback."""
-    parser = _SafeArgumentParser(description=__doc__)
+    parser = _SafeArgumentParser(description=__doc__, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--tls-only", action="store_true", help="Verify TLS, then close")
     mode.add_argument(
@@ -142,6 +168,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     mode.add_argument(
+        "--live-premerge",
+        action="store_true",
+        help=(
+            "Fixed MANAGER-approved suite: verified TLS, authenticated opening, "
+            "dynamic V4 selection, exactly one function 04 read (FFFF, unit 1, "
+            "address 1024, quantity 20), then close. Uses only HOBEN_USER_GUID; "
+            "no exploratory overrides, pairing or control."
+        ),
+    )
+    mode.add_argument(
         "--read-v4-state",
         action="store_true",
         help=(
@@ -162,7 +198,11 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(
                 _probe_negative()
                 if args.session_negative
-                else _probe(args.session, read_v4_state=args.read_v4_state)
+                else _probe(
+                    args.session,
+                    read_v4_state=args.read_v4_state,
+                    live_premerge=args.live_premerge,
+                )
             )
         )
     except UnexpectedMessageType as error:
@@ -192,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
         report.update(error="probe_failed")
     if args.read_v4_state:
         report["mode"] = "read-v4-state"
+    if args.live_premerge:
+        report["mode"] = "live-premerge"
     if args.session_negative:
         report["mode"] = "session-negative"
         # An observed reply/EOF is informative, not successful authentication.
@@ -206,6 +248,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         report["observation"] = "informative" if informative else "inconclusive"
     print(json.dumps(report, sort_keys=True))
+    if args.live_premerge:
+        # A classified rejection is useful for research but never passes this
+        # authenticated gate. The protocol parser already checks correlation
+        # and UInt16 values; explicitly require the entire fixed result here.
+        required = {
+            "state": "read",
+            "message_type": 4,
+            "profile": "v4",
+            "unclassified_bytes": 0,
+            "function": 4,
+            "transaction_id": 0xFFFF,
+            "unit_id": 1,
+            "start_address": 1024,
+            "quantity": 20,
+            "register_count": 20,
+        }
+        return 0 if all(report.get(k) == v for k, v in required.items()) else 1
     if args.read_v4_state:
         return 0 if report["state"] == "read" else 1
     if args.session_negative:

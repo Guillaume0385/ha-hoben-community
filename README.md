@@ -34,7 +34,8 @@ avant de contribuer. Les tests du socle sont locaux, déterministes et ne
 nécessitent ni Home Assistant, ni serveur Hoben.
 
 Avec Python 3.12 ou supérieur et pip prenant en charge les groupes de dépendances
-(pip 25.1 ou supérieur) :
+(pip 25.1 ou supérieur), ainsi que Node.js pour simuler hors ligne les scripts
+GitHub Actions de confiance (déjà présent sur les runners GitHub) :
 
 ```sh
 python -m venv .venv
@@ -51,10 +52,117 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
-### Live Validation sur GitHub Actions
+### Quatre couches de validation
+
+| Couche | Déclenchement et portée |
+| --- | --- |
+| CI déterministe hors ligne | `Validate` : pytest/Ruff, HACS et Hassfest ; aucun accès Hoben ni secret. Les validateurs officiels peuvent accéder à leurs propres services. |
+| Smoke protocolaire sans secret | Labels optionnels `live-validation` (TLS seulement) et `live-session-negative` (identité synthétique), sans authentification réelle. |
+| Validation authentifiée avant fusion | Après revue MANAGER, label exact `manager-live-hoben` ; workflow de confiance sur `main`, code candidat au SHA exact et suite fixe en lecture seule. |
+| Exploration manuelle sur main | `Live Validation` / `workflow_dispatch`, dont les modes réels `session-open` et `read-v4-state` réservés à `main` protégé. |
+
+La CI normale reste déterministe. Chaque fusion exige en plus la validation
+authentifiée du **commit candidat exact**, déclenchée volontairement après revue.
+Un smoke TLS ou une observation négative ne satisfait pas cette exigence.
+
+### Validation authentifiée avant fusion, après revue MANAGER
+
+Le workflow [MANAGER authenticated Hoben validation](.github/workflows/manager-live-hoben.yml)
+utilise uniquement **`pull_request_target: labeled`**. Sa définition provient de
+`main` protégé, même s'il checkout ensuite le code candidat. Seul l'ajout du label
+exact **`manager-live-hoben`** par **`Guillaume0385`** peut autoriser une PR ouverte,
+non draft, vers `main`, dont la branche appartient exactement à
+`Guillaume0385/ha-hoben-community`. Les forks sont exclus. Les identités et le
+label sont aussi comparés strictement dans le script de confiance, car l'égalité
+des expressions GitHub ignore la casse.
+
+> Adding `manager-live-hoben` means the MANAGER has reviewed the exact candidate HEAD and explicitly trusts that code to run with the Hoben live credential.
+
+**Avant d'ajouter le label**, le MANAGER doit :
+
+1. inspecter le diff complet, y compris la sonde et les modules importés ;
+2. vérifier le respect de `AGENTS.md`, `project.md` et `protocol.md` ;
+3. vérifier l'absence d'exfiltration, de journalisation d'identifiants et
+   d'opérations d'écriture/contrôle non autorisées ;
+4. vérifier la CI hors ligne (`tests`, `hacs`, `hassfest`) ;
+5. consigner dans la revue le **SHA HEAD complet** approuvé ;
+6. ajouter `manager-live-hoben` seulement après cette revue.
+
+Le job de confiance vérifie aussi que la PR courante possède encore ce SHA et
+ce label avant de publier `live-hoben-authenticated = pending` sur le candidat.
+Un événement mis en attente devenu obsolète est refusé. La commande candidate
+utilise un autre runner, les seules permissions `contents: read`, le checkout
+exact **`github.event.pull_request.head.sha`**, `persist-credentials: false` et
+l'environnement **`hoben-live`**, qui doit garder sa restriction à la seule
+branche `main` protégée décrite plus bas. Le seul secret Hoben reste
+**`HOBEN_USER_GUID`**, injecté uniquement dans l'étape suivante :
+
+```sh
+python scripts/probe_hoben_connection.py --live-premerge
+```
+
+Cette suite fixe ignore les surcharges exploratoires, ne prend aucun argument
+libre d'hôte/fonction/registre et n'installe aucune dépendance candidate. Elle
+exécute TLS vérifié vers `myhoben.fr:465` → un OpenClient/OpenedClient → profil
+dynamiquement V4 sans suffixe déjà reçu → **une seule** lecture fonction **04**,
+transaction **`0xFFFF`**, unité **1**, adresse **1024**, quantité **20** → réponse
+DataResponseClient corrélée avec exactement **20 UInt16** → fermeture.
+Une autorisation demandée, un rejet, un autre profil, un timeout, une exception
+Modbus ou une réponse non corrélée fait échouer la validation. Les valeurs des
+registres peuvent changer : aucune valeur exacte n'est exigée. Le JSON exporte
+les métadonnées expurgées et le nombre de registres, sans leurs contenus.
+Aucun code d'association, fonction 06/16/22, transaction `0xFFF0` ni commande
+de température, ventilation, mode ou ON/OFF n'est envoyé.
+
+Un dernier job de confiance, sans checkout candidat ni secret Hoben, publie
+**`success` seulement si le job et la sonde ont réussi**, sinon **`failure`**.
+Le token avec `statuses: write` reste dans les jobs de confiance ; il n'est
+jamais remis à la commande candidate. Les logs, le résumé et le nom de l'artefact
+`live-hoben-authenticated-<SHA>` identifient le commit testé. Aucun GUID, code
+d'autorisation, paquet brut ou texte d'exception arbitraire n'est exporté.
+
+**Après le test**, le MANAGER doit vérifier le SHA testé, lire le rapport
+expurgé, confirmer `live-hoben-authenticated = success`, retirer le label, puis
+fusionner uniquement si HEAD est toujours exactement ce SHA et tous les checks
+requis sont verts. Tout nouveau commit exige une nouvelle revue et le retrait /
+réajout du label. Ni `opened`, `synchronize`, `reopened`, push, schedule, label
+déjà présent ni bouton « Re-run jobs » n'autorisent une nouvelle sonde réelle.
+La fusion reste une décision MANAGER ; Codex laisse la PR ouverte.
+
+Après la première validation réussie, configurer manuellement :
+
+```text
+Settings → Branches → main
+→ Require status checks to pass before merging
+→ add: live-hoben-authenticated
+```
+
+Les checks requis deviennent **`tests`**, **`hacs`**, **`hassfest`** et
+**`live-hoben-authenticated`**. Le statut est publié sur le SHA candidat, car
+le contexte du workflow `pull_request_target` est celui de la base. Le succès
+d'un ancien SHA ne satisfait donc pas la protection d'un nouveau commit.
+Sans ce réglage effectif, le statut seul ne bloque pas techniquement la fusion.
+
+**Installation initiale :** GitHub ne peut pas lancer une nouvelle définition de
+confiance qui existe seulement dans cette première PR. Le MANAGER doit décider
+et organiser une installation initiale distincte, revue, sur `main` protégé,
+avant de labelliser la PR d'implémentation et tester son SHA. Cette contrainte
+d'amorçage ne permet pas d'utiliser le YAML candidat pour obtenir le secret.
+Créer aussi la définition du label exact `manager-live-hoben` dans le dépôt,
+sans l'appliquer à une PR avant sa revue. Vérifier la restriction effective de
+`hoben-live` à la seule branche `main` avant toute exécution authentifiée.
+La PR reste ouverte en attente de cette installation et de la revue live.
+
+Chaque future PR v0.1 ajoutant un mécanisme de lecture seule testable en sécurité
+(session persistante, Ping/Pong, reconnexion, lecture documentée, DataUpdated)
+doit étendre cette suite allowlistée avec un test réel borné approprié.
+L'ajout de code d'écriture n'autorise jamais automatiquement un test réel de
+contrôle : une décision de sécurité distincte reste nécessaire.
+
+### Smoke sans secret et exploration manuelle sur GitHub Actions
 
 Le workflow [Live Validation](.github/workflows/live-validation.yml) est
-**opt-in**, avec les déclenchements explicites suivants :
+**opt-in**, avec les déclenchements explicites suivants, séparés du workflow MANAGER :
 
 - **TLS avant fusion :** ajouter le label exact `live-validation` à la PR.
   Seul l'événement `pull_request: labeled` pour ce label lance `tls-only`.
@@ -181,7 +289,7 @@ Pour le test négatif distinct, sans secret et sans validation d'authentificatio
 python scripts/probe_hoben_connection.py --session-negative
 ```
 
-Les quatre modes CLI sont mutuellement exclusifs. Pour **une première connexion
+Les cinq modes CLI sont mutuellement exclusifs. Pour **une première connexion
 avec `--session`**, les paramètres sont :
 
 | Paramètre | Source / défaut |
@@ -273,7 +381,7 @@ Utiliser `safe_report()` pour les diagnostics ; ne pas exporter l'objet complet
 avec `dataclasses.asdict()`, car le codec OpenedClient conserve le DeviceGuid.
 Ces modules n'importent pas Home Assistant.
 
-### Une lecture V4 brute, après revue et fusion sur main
+### Une lecture V4 brute manuelle sur main
 
 L'observation réelle du **4 octobre 2026** a confirmé dynamiquement le profil
 **V4** du Hoben Osmose de référence : type produit 5, révision 0, logiciel 8.2,
@@ -283,8 +391,10 @@ Osmose comme V4 et ne prouve pas la longueur totale universelle d'OpenedClient.
 Après fusion sur `main` protégé, le responsable/utilisateur peut lancer
 **Actions → Live Validation → read-v4-state**, avec l'environnement `hoben-live`
 et le seul secret `HOBEN_USER_GUID` déjà protégé comme pour `session-open`.
-**Ne pas exécuter cette lecture réelle depuis une branche de développement.**
-Les tests de la PR sont entièrement simulés et hors ligne. La commande du job,
+Le mode exploratoire `read-v4-state` reste réservé à `main` ; seule la suite
+`--live-premerge` du workflow de confiance peut tester un SHA de PR après revue
+et label MANAGER. Les tests pytest sont entièrement simulés et hors ligne.
+La commande du job exploratoire,
 réservée à cette validation volontaire depuis le code revu, est :
 
 ```sh
