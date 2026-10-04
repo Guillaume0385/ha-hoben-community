@@ -220,7 +220,34 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — Home Assistant config flow and raw coordinator
+### Current increment — typed V4 semantic decoder
+
+The next protocol increment is a **Home Assistant-independent V4 semantic
+decoder** layered above the existing raw `RawStoveSnapshot`. It must decode the
+20 application registers 1024..1043 only where `protocol.md` currently provides
+a sufficiently established meaning, without moving transport/session concerns
+into the profile layer.
+
+This increment must at minimum:
+
+- decode V4 temperatures as signed Int16 values with the documented **/10 °C**
+  conversion and handle the `0x0FFF` unavailable sentinel;
+- decode register 1024 as packed mode + OnOff;
+- decode register 1030 as packed power + V4 operation state;
+- decode register 1028 ventilation as Normal / Silence / Boost;
+- expose the established derogation values/units while keeping write/control
+  behavior out of scope;
+- leave warnings, combustion-fault labels, date/time packing, PVI and other
+  partially established fields raw/partial until their mappings are complete;
+- add deterministic unit tests for every implemented conversion and boundary;
+- remain independent from Home Assistant entities so the decoder can later move
+  cleanly into `pyhoben`.
+
+No Home Assistant sensor/entity may consume these physical values until a
+sanitized simultaneous raw-register/MyHOBEN UI comparison has validated the
+decoder on the reference Osmose. This increment remains **read-only**.
+
+### DONE — Home Assistant config flow and raw coordinator
 
 Issue #23 adds the first functional HA runtime layer over the completed client.
 The UI accepts one sensitive **Identifiant HOBEN**, validates it with the existing

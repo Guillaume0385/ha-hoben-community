@@ -11,10 +11,13 @@ Home Assistant ou HACS.
 La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
 être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
 enregistre un appareil et conserve un état V4 brut dans un coordinateur, rafraîchi
-toutes les **60 secondes**. **Aucune entité capteur n’est encore exposée** : les
-20 registres UInt16 restent sans interprétation jusqu’à validation de leur
-cartographie. Chaque rafraîchissement utilise le client protocolaire réutilisable
-`HobenClient` et une connexion TLS bornée.
+toutes les **60 secondes**. **Aucune entité capteur n’est encore exposée** : le
+code conserve actuellement les 20 registres comme UInt16 bruts. Leur cartographie
+et leurs principaux formats V4 sont désormais documentés statiquement dans
+`protocol.md`, mais une validation dynamique simultanée **raw/UI MyHOBEN** reste
+requise avant d'exposer des valeurs physiques dans Home Assistant. Chaque
+rafraîchissement utilise le client protocolaire réutilisable `HobenClient` et
+une connexion TLS bornée.
 Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
