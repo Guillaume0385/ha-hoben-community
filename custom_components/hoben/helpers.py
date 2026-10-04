@@ -23,9 +23,11 @@ def log_unexpected_error(logger: logging.Logger, error: Exception) -> None:
 
     logger.exception/format_exception can disclose arbitrary exception payloads
     and chained errors. Unexpected failures still need actionable stack context.
+    Walk raw frames: extract_tb() also reads source files through linecache,
+    blocking HA's event loop even when the source lines are never logged.
     """
-    frames = traceback.extract_tb(error.__traceback__)
     context = "\n".join(
-        f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in frames
+        f"  {frame.f_code.co_filename}:{lineno} in {frame.f_code.co_name}"
+        for frame, lineno in traceback.walk_tb(error.__traceback__)
     )
     logger.error("Unexpected Hoben client failure; stack locations:\n%s", context)
