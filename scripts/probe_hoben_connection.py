@@ -51,6 +51,7 @@ from custom_components.hoben.v4_read import (  # noqa: E402
     V4ReadTimeout,
     open_and_read_v4_once,
 )
+from custom_components.hoben.v4_state import decode_v4_snapshot  # noqa: E402
 
 # Syntactically valid, synthetic/unassigned identity; never a real-mode default.
 NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
@@ -83,16 +84,21 @@ async def _probe(
             # Only the credential is read; no exploratory override is consulted.
             client = HobenClient(user_guid=user_guid, max_attempts=1)
             try:
-                await client.async_refresh()
+                first_snapshot = await client.async_refresh()
+                decode_v4_snapshot(first_snapshot)
                 if not client.has_assigned_device_guid:
                     raise HobenProtocolError()
                 snapshot = await client.async_refresh()
+                decode_v4_snapshot(snapshot)
                 if not client.has_assigned_device_guid:
                     raise HobenProtocolError()
                 return snapshot.safe_report() | {
                     "state": "client_refresh_validated",
                     "device_guid_reuse": "validated",
                     "refresh_count": 2,
+                    # Only completion metadata. Never print decoded household
+                    # values, enum codes, raw registers or either identity.
+                    "v4_decode_count": 2,
                 }
             finally:
                 await client.async_close()
@@ -266,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             "device_guid_reuse": "validated",
             "refresh_count": 2,
             "register_count": 20,
+            "v4_decode_count": 2,
         }
         return 0 if all(report.get(k) == v for k, v in required.items()) else 1
     if args.read_v4_state:

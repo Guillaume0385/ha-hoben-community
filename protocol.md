@@ -812,6 +812,30 @@ Le registre 1042 `erarPVIConv` dispose d'un convertisseur d'affichage en
 dans la propriété publique utilisée par l'écran analysé. Il ne doit donc pas
 encore être exposé comme mesure V4 fiable.
 
+#### Implémentation du candidat #26 — lecture seule, validation dynamique en attente
+
+`v4_state.py` applique cette cartographie statique à un `RawStoveSnapshot` V4 de
+20 UInt16, dans un `V4StoveState` immuable indépendant de Home Assistant. Le
+helper de température réinterprète Int16 et divise directement par 10 ; seul
+`0x0FFF` est une sentinelle, et la consigne 1032 masque aussi les valeurs signées
+inférieures à 50. Aucune plage d’édition UI n’est utilisée pour borner les mesures.
+
+Choix explicite de l’intégration : les modes/états/ventilations non documentés,
+OnOff hors 0/1 et puissance supérieure à 100 donnent `None`, avec conservation
+du code brut. Elle ne reproduit pas les replis de l’interface MyHOBEN vers
+Automatic, Arrêt ou zéro. Le mapping d’état reste celui de V4, sans réutiliser
+`EOperationState`. Les valeurs de dérogation sont conservées dans le modèle,
+mais les entités numériques les masquent si les bits 5 et 6 sont tous deux nuls.
+Les défauts, champ combiné 1033, warnings, bitmap d’information complet,
+date/heure et PVI restent bruts sans interprétation supplémentaire ni entité.
+
+Le candidat ajoute des tests déterministes, pas une confirmation dynamique des
+valeurs. La sonde pré-merge décode les deux snapshots déjà lus et ne rapporte
+qu’un compteur de réussite ; aucune valeur du foyer n’est publiée. Une
+comparaison privée simultanée avec MyHOBEN sur l’Osmose de référence reste
+**À VALIDER avant fusion**. Elle ne doit être marquée confirmée qu’après preuve
+réelle, dans un suivi documentaire distinct.
+
 ### V6/V6v16 — zone applicative (lecture, base 1024)
 
 | Adresse | Nom HOBEN | Utilité HA |

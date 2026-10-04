@@ -220,13 +220,16 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — typed V4 semantic decoder
+### Current increment — typed V4 decoder and first read entities (validation pending)
 
-The next protocol increment is a **Home Assistant-independent V4 semantic
-decoder** layered above the existing raw `RawStoveSnapshot`. It must decode the
-20 application registers 1024..1043 only where `protocol.md` currently provides
-a sufficiently established meaning, without moving transport/session concerns
-into the profile layer.
+The issue #26 candidate implements a **Home Assistant-independent V4 semantic
+decoder** above the unchanged raw `RawStoveSnapshot` API. `v4_state.py` exposes
+`decode_v4_snapshot(snapshot) -> V4StoveState` and `decode_v4_temperature(raw)`.
+The state is frozen/hashable and the decoder requires V4 and exactly 20 UInt16.
+It performs no I/O and does not mutate the snapshot or move transport/session
+concerns into the profile layer. Implementation and offline tests do **not**
+mark this milestone DONE: exact-HEAD MANAGER validation and private simultaneous
+raw/UI comparison on the reference Osmose are still pending before merge.
 
 This increment must at minimum:
 
@@ -243,9 +246,40 @@ This increment must at minimum:
 - remain independent from Home Assistant entities so the decoder can later move
   cleanly into `pyhoben`.
 
-No Home Assistant sensor/entity may consume these physical values until a
-sanitized simultaneous raw-register/MyHOBEN UI comparison has validated the
-decoder on the reference Osmose. This increment remains **read-only**.
+`HobenCoordinatorData(raw, state)` combines raw metadata and semantic values from
+one client refresh every 60 seconds. Decoding runs before successful DeviceGuid
+rotation persistence; a decoding failure keeps the previous data and is sanitized
+through the existing protocol error mapping. Entities use `CoordinatorEntity`
+availability and read memory only. Setup forwards `sensor` and `binary_sensor`;
+real entity listeners replace the artificial no-op subscriber. Partial setup
+failure unloads platforms, shuts down polling, closes the client and discards
+runtime_data. Normal unload removes listeners before shutdown; reload preserves
+entity/device identities and uses the persisted DeviceGuid.
+
+The candidate includes six core sensors (ambient/target temperature, power %, V4
+state/mode, ventilation), diagnostic smoke/combustion-air temperatures, diagnostic
+wired/RF ambient temperatures disabled by default, three derogation value sensors
+and active/scheduled binary flags. A third binary sensor explicitly names the
+controller OnOff request/read-back, without implying current combustion or using
+RUNNING. Inactive derogation numeric values are unknown. Setpoints have no
+measurement state class; enum sensors declare known snake_case options. Stable
+unique IDs append an entity key to the config entry's non-secret fingerprint.
+All attach to the existing stove and use EN/FR entity/state translations.
+
+The fixed MANAGER probe now decodes both existing client refreshes and reports
+only `v4_decode_count: 2` alongside prior sanitized metadata/counts. It adds no
+session/read/retry and publishes no raw/decoded household values; the trusted
+workflow is unchanged. This execution check cannot replace the private UI
+comparison. Before any physical-value entities enter main, MANAGER must review
+the exact HEAD after green offline CI, pass the authenticated gate, and compare
+ambient/target temperatures, operation mode, ventilation, OnOff and observable
+state/power simultaneously with MyHOBEN. Record only compared fields, pass/fail
+and timestamp in the PR. Stop and fix protocol evidence/tests on contradiction.
+This increment remains strictly **read-only**, open for that review/validation.
+
+Next protocol gaps remain separate: warning-bit and fault-label tables,
+date/time packing, PVI's reliable V4 meaning, unknown information bits and
+DataUpdated metadata/framing. They have no ordinary HA entities in this candidate.
 
 ### DONE — Home Assistant config flow and raw coordinator
 
@@ -644,10 +678,10 @@ re-adding the chosen label requests another observation. The negative probe
 classifies the actual response without requiring any particular server outcome.
 Neither PR label can reach `read-v4-state`. All live modes remain opt-in, with
 no automatic trigger or retry for the V4 read. These lanes stay separate from
-deterministic/offline `Validate` CI. HA persistence and raw polling are the current
-increment. The next small protocol increment is a typed V4 decoder based on the
-documented 1024..1043 map, with deterministic tests before any entities consume
-physical values.
+deterministic/offline `Validate` CI. HA persistence and raw polling are established;
+the current semantic candidate requires the exact-HEAD authenticated gate and
+private raw/UI comparison above. Further pairing and protocol gaps require
+separate reviews.
 
 Real-device validation is important for the remaining unknown or statically
 derived protocol semantics, especially:

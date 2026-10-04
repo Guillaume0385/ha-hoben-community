@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from homeassistant.helpers.translation import async_get_translations
 
+from custom_components.hoben.binary_sensor import BINARY_SENSORS
 from custom_components.hoben.const import CONF_USER_GUID, DOMAIN
+from custom_components.hoben.sensor import SENSORS
 
 ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "custom_components" / DOMAIN
@@ -57,3 +59,24 @@ def test_manifest_and_translation_schema():
         return {prefix}
 
     assert paths(en) == paths(fr)
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+async def test_entity_names_and_enum_states_load(hass, language):
+    translations = await async_get_translations(hass, language, "entity", {DOMAIN})
+    for platform, descriptions in (
+        ("sensor", SENSORS),
+        ("binary_sensor", BINARY_SENSORS),
+    ):
+        for description in descriptions:
+            prefix = f"component.hoben.entity.{platform}.{description.translation_key}."
+            assert translations[prefix + "name"]
+            for option in getattr(description, "options", None) or ():
+                assert translations[prefix + "state." + option]
+    prefix = "component.hoben.entity.sensor.operation_mode."
+    assert translations[prefix + "name"] == (
+        "Operation mode" if language == "en" else "Mode de fonctionnement"
+    )
+    assert translations[prefix + "state.manual"] == (
+        "Manual" if language == "en" else "Manuel"
+    )
