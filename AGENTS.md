@@ -311,11 +311,17 @@ the candidate job has only `contents: read` and no GitHub status token input.
 Never export environment dumps, raw packets, identifiers, authorization codes,
 arbitrary server payloads or arbitrary exception text.
 
-The fixed v0.1 `--live-premerge` suite must open one verified TLS session, require
-authenticated OpenedClient and dynamically V4, make exactly one function 04 read
-(FFFF, unit 1, start 1024, quantity 20), validate correlation and 20 UInt16 values,
-then close. No exact register contents are expected. Do not send pairing,
-function 06/16/22, transaction FFF0 or any stove-control command.
+The fixed v0.1 `--live-premerge` suite must exercise two sequential refreshes on
+the same HobenClient. Each refresh opens a fresh verified TLS session, requires
+authenticated OpenedClient and dynamically V4 without an unclassified suffix,
+makes exactly one function 04 read (FFFF, unit 1, start 1024, quantity 20),
+validates correlation and 20 UInt16 values, then closes. Refresh 1 starts from
+the initial zero DeviceGuid and must adopt a nonzero assigned identity; refresh
+2 must automatically reuse it. Disable retries in this fixed live suite, keeping
+exactly two sessions/reads on success. Client retry/backoff is tested offline.
+No exact register contents are expected. Report only sanitized metadata/counts
+and validated reuse, never either identifier. Do not send pairing, function
+06/16/22, transaction FFF0 or any stove-control command.
 
 Publish `live-hoben-authenticated` as pending/success/failure on that exact
 candidate SHA, with success only when the whole live job and probe succeed.

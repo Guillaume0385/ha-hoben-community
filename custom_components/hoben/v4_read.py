@@ -158,6 +158,29 @@ async def _receive_v4_response(
             raise
 
 
+async def _read_v4(
+    transport: AsyncTlsTransport, *, read_timeout: float = 30.0
+) -> ModbusReadResponse | ModbusExceptionResponse:
+    """Read once on an already gated V4 session; the caller owns its closure.
+
+    Keep the request and response validation shared by the one-shot probe and
+    HobenClient. There is deliberately no generic register/function argument.
+    """
+    request = encode_data_request_client(
+        build_read_input_registers(
+            _TRANSACTION_ID, _START_ADDRESS, _QUANTITY, unit_id=HOBEN_UNIT_ID
+        )
+    )
+    try:
+        async with asyncio.timeout(read_timeout):
+            await transport.write(request)
+            return await _receive_v4_response(transport)
+    except TransportError:
+        raise
+    except TimeoutError:
+        raise V4ReadTimeout("V4 read exchange timed out") from None
+
+
 async def open_and_read_v4_once(
     transport: AsyncTlsTransport,
     *,
@@ -202,21 +225,9 @@ async def open_and_read_v4_once(
         elif session.profile is not StoveProfile.V4 or session.unclassified_bytes:
             result = V4ReadBlockedResult(session)
         else:
-            request = encode_data_request_client(
-                build_read_input_registers(
-                    _TRANSACTION_ID, _START_ADDRESS, _QUANTITY, unit_id=HOBEN_UNIT_ID
-                )
+            result = V4ReadResult(
+                await _read_v4(transport, read_timeout=read_timeout), session
             )
-            try:
-                async with asyncio.timeout(read_timeout):
-                    await transport.write(request)
-                    result = V4ReadResult(
-                        await _receive_v4_response(transport), session
-                    )
-            except TransportError:
-                raise
-            except TimeoutError:
-                raise V4ReadTimeout("V4 read exchange timed out") from None
         failed = False
         return result
     finally:
