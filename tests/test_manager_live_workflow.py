@@ -373,7 +373,13 @@ def test_actual_summary_records_candidate_sha_and_sanitized_json(
         for s in workflow["jobs"]["live-probe"]["steps"]
         if s.get("name", "").startswith("Summarize")
     )
-    report = {"state": "read", "profile": "v4", "register_count": 20}
+    report = {
+        "state": "client_refresh_validated",
+        "profile": "v4",
+        "register_count": 20,
+        "refresh_count": 2,
+        "device_guid_reuse": "validated",
+    }
     (tmp_path / "live-hoben-authenticated.json").write_text(json.dumps(report))
     summary_path = tmp_path / "summary.md"
     result = subprocess.run(
@@ -394,5 +400,6 @@ def test_actual_summary_records_candidate_sha_and_sanitized_json(
     )
     rendered = summary_path.read_text()
     assert SHA in rendered and json.dumps(report) in rendered
+    assert "Two HobenClient refreshes with assigned DeviceGuid reuse" in rendered
     assert f"Result: {'success' if outcome == 'success' else 'failure'}" in rendered
     assert "PRIVATE" not in rendered + result.stdout + result.stderr

@@ -18,6 +18,15 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from custom_components.hoben.client import (  # noqa: E402
+    DEFAULT_BUILD,
+    DEFAULT_DEVICE_INFO,
+    HobenClient,
+)
+from custom_components.hoben.exceptions import (  # noqa: E402
+    HobenError,
+    HobenProtocolError,
+)
 from custom_components.hoben.myhoben import (  # noqa: E402
     INITIAL_DEVICE_GUID,
     normalize_user_guid,
@@ -39,16 +48,10 @@ from custom_components.hoben.transport import (  # noqa: E402
 )
 from custom_components.hoben.v4_read import (  # noqa: E402
     V4ReadProtocolError,
-    V4ReadResult,
     V4ReadTimeout,
     open_and_read_v4_once,
 )
 
-# protocol.md §4 confirms the analyzed Android build.
-DEFAULT_BUILD = 34
-# Stable implementation/test-client descriptor, NOT official MyHOBEN metadata.
-# Only the slash-separated shape is documented; infer no hidden field semantics.
-DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
 # Syntactically valid, synthetic/unassigned identity; never a real-mode default.
 NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
 
@@ -69,28 +72,40 @@ async def _probe(
     if session or read_v4_state or live_premerge:
         try:
             user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
-            # The MANAGER suite accepts only the credential: even non-secret
-            # exploratory overrides must not change the reviewed fixed suite.
-            device_info = (
-                DEFAULT_DEVICE_INFO
-                if live_premerge
-                else os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
-            )
-            build = (
-                DEFAULT_BUILD
-                if live_premerge
-                else int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
-            )
-            if not device_info.strip() or not 0 <= build <= 65535:
-                raise ValueError
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
 
-        operation = (
-            open_and_read_v4_once
-            if read_v4_state or live_premerge
-            else open_session_once
-        )
+        if live_premerge:
+            # Exercise the public client, not a parallel handshake/read path.
+            # Exactly two refreshes/transports: retries are tested offline and
+            # disabled here so a transient failure cannot pass the fixed suite.
+            # Exercise the same build/DeviceInfo defaults as the future HA caller.
+            # Only the credential is read; no exploratory override is consulted.
+            client = HobenClient(user_guid=user_guid, max_attempts=1)
+            try:
+                await client.async_refresh()
+                if not client.has_assigned_device_guid:
+                    raise HobenProtocolError()
+                snapshot = await client.async_refresh()
+                if not client.has_assigned_device_guid:
+                    raise HobenProtocolError()
+                return snapshot.safe_report() | {
+                    "state": "client_refresh_validated",
+                    "device_guid_reuse": "validated",
+                    "refresh_count": 2,
+                }
+            finally:
+                await client.async_close()
+
+        try:
+            device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
+            build = int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
+            if not device_info.strip() or not 0 <= build <= 65535:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Missing or invalid session inputs") from None
+
+        operation = open_and_read_v4_once if read_v4_state else open_session_once
         result = await operation(
             AsyncTlsTransport(),
             user_guid=user_guid,
@@ -98,16 +113,6 @@ async def _probe(
             device_guid=INITIAL_DEVICE_GUID,
             device_info=device_info,
         )
-        if live_premerge and isinstance(result, V4ReadResult):
-            # Retain the opening evidence without exporting the returned
-            # DeviceGuid. Register contents can change and are not required.
-            report = result.session.safe_report() | result.safe_report()
-            registers = report.pop("registers", None)
-            if registers is not None:
-                report["register_count"] = len(registers)
-            report["transaction_id"] = result.response.transaction_id
-            report["unit_id"] = result.response.unit_id
-            return report
         return result.safe_report()
 
     transport = AsyncTlsTransport()
@@ -171,9 +176,10 @@ def main(argv: list[str] | None = None) -> int:
         "--live-premerge",
         action="store_true",
         help=(
-            "Fixed MANAGER-approved suite: verified TLS, authenticated opening, "
-            "dynamic V4 selection, exactly one function 04 read (FFFF, unit 1, "
-            "address 1024, quantity 20), then close. Uses only HOBEN_USER_GUID; "
+            "Fixed MANAGER-approved suite: two refreshes on one HobenClient, "
+            "each with fresh verified TLS, authenticated V4 opening, one function "
+            "04 read (FFFF, unit 1, address 1024, quantity 20), then close. "
+            "Require assigned DeviceGuid reuse. Uses only HOBEN_USER_GUID; "
             "no exploratory overrides, pairing or control."
         ),
     )
@@ -205,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         )
+    except HobenError as error:
+        report.update(error.safe_report())
     except UnexpectedMessageType as error:
         report.update(error="unexpected_message_type", message_type=error.message_type)
     except TransportTimeout as error:
@@ -253,15 +261,10 @@ def main(argv: list[str] | None = None) -> int:
         # authenticated gate. The protocol parser already checks correlation
         # and UInt16 values; explicitly require the entire fixed result here.
         required = {
-            "state": "read",
-            "message_type": 4,
+            "state": "client_refresh_validated",
             "profile": "v4",
-            "unclassified_bytes": 0,
-            "function": 4,
-            "transaction_id": 0xFFFF,
-            "unit_id": 1,
-            "start_address": 1024,
-            "quantity": 20,
+            "device_guid_reuse": "validated",
+            "refresh_count": 2,
             "register_count": 20,
         }
         return 0 if all(report.get(k) == v for k, v in required.items()) else 1

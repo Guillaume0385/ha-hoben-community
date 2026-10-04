@@ -217,65 +217,76 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — one-shot session and raw V4 read validation
+### Current increment — stateful read-only HobenClient with bounded sessions
 
-`transport.py` implements layer 1 as verified, timeout-bounded async TLS byte
-streams, without MyHOBEN interpretation or Home Assistant imports. `session.py`
-seeds layer 5 with `open_session_once()`: one OpenClient, leading Ping/Pong,
-then the first response. It uses the confirmed 48-byte OpenedClient prefix and
-profile selection, or returns typed authorization/closure observations, then
-closes on every outcome. Its safe report omits identifiers and opaque payloads.
+`client.py` implements the intended protocol API for the future Home Assistant
+coordinator: `HobenClient(user_guid, device_guid=None)`, `async_refresh()` and
+idempotent `async_close()`. It contains no HA objects/imports and stays inside
+`custom_components/hoben/` until a later extraction to `pyhoben`.
 
-The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only, first-client
-session-open, secret-free negative validation, opt-in `read-v4-state` and the
-fixed MANAGER-approved `live-premerge` suite.
-The full OpenedClient boundary still remains unresolved. Static APK
-analysis now establishes the identity lifecycle used by MyHOBEN: the user enters
-or scans the HOBEN identifier, it is sent as a 32-character UserGuid without
-dashes, a new client starts with a DeviceGuid of 32 zero characters, and a
-successful OpenedClient can replace/persist that client DeviceGuid. The
-`DeviceAuthReq (0x2F)` → user code → `DeviceAuthRes (0x30)` path and several
-`CloseClient` rejection codes are also documented, but still require live
-validation against the current server before Home Assistant automates pairing.
+`DEFAULT_BUILD` (34) and `DEFAULT_DEVICE_INFO` are defined once in `client.py`
+and shared with the exploratory probes. The default DeviceInfo retains the
+documented historical community `GitHubActions` descriptor. The fixed live suite
+does not pass build/DeviceInfo overrides, so it exercises the same defaults the
+future HA caller will use. Offline regressions pin the documented default packet
+and forbid the live suite from substituting exploratory probe settings.
 
-The real probe now validates/normalizes `HOBEN_USER_GUID` before constructing the
-transport, constructs the normal initial zero DeviceGuid internally, and defaults
-to build 34 and the stable community DeviceInfo documented in README. It never
-reads `HOBEN_DEVICE_GUID`. `DeviceAuthReq` becomes `authorization_required`;
-known CloseClient subcodes become allowlisted reasons. No authentication code is
-requested/sent, and no returned DeviceGuid is persisted in this increment.
-Negative mode uses a syntactically valid but synthetic/unassigned zero UserGuid
-with the same normal initial DeviceGuid, ignoring every `HOBEN_*` input.
+The client owns a private normalized UserGuid and a private, in-memory,
+persistable DeviceGuid. Without a persisted identity it starts with
+`INITIAL_DEVICE_GUID` (32 ASCII zeroes). A supplied identity is validated before
+any network I/O: only the proven 32-byte ASCII constraint is enforced, without
+inventing a hex/GUID format. After an unambiguous supported V4 OpenedClient, the
+returned DeviceGuid is validated and adopted immediately, before the read. It
+survives subsequent read failures and is automatically reused on every later
+refresh or transport retry. Unsupported/ambiguous openings do not update it.
+The deliberately sensitive `device_guid_for_persistence` accessor is the sole
+identity export; the client writes no storage. Future HA code may explicitly
+persist it in ConfigEntry storage. `has_assigned_device_guid` is non-sensitive.
 
-A suffix after the confirmed OpenedClient prefix is not reframed and an
-unexpected message reports only its numeric type. No polling, automatic
-reconnect, long-lived client, Home Assistant setup/entities or stove controls
-belong to this increment. The broader responsibilities below remain roadmap
-goals.
+Each refresh attempt uses a fresh verified `myhoben.fr:465` TLS transport:
+OpenClient with current identity → OpenedClient/profile/boundary checks → adopt
+identity → one raw application read → validate response → close. Only V4 is
+implemented: FFFF, unit 1, function 04, address 1024, quantity 20. UNKNOWN and
+other profiles fail with typed errors. `RawStoveSnapshot` is immutable and holds
+exactly 20 raw UInt16 registers plus public product/software/profile metadata,
+with no GUID, raw packet or session object. No V4 meaning/unit is assigned.
 
-The staged progression is now **session-open → one V4 read → semantic validation**.
-The real session observation on 2026-10-04 confirmed product type 5/revision 0,
-software 8.2, application version 512, selected profile V4 and zero already-read
-unclassified bytes. A sanitized metadata fixture records it without identifiers
-or a raw capture. The prior production negative observation `05 02` with a
-synthetic zero UserGuid is documented as `invalid_identifier`.
+The client shares `_open_session()` and the V4 exchange primitives instead of
+duplicating frames. Existing `open_session_once()` and
+`open_and_read_v4_once()` remain available for exploratory tools/tests. Leading
+Ping gets Pong; buffered unclassified OpenedClient suffixes and trailing response
+bytes are rejected without reframing. The complete OpenedClient length remains
+unresolved, including possible suffixes arriving in a later TLS read. A permanent
+socket, receive loop, background reconnect worker and DataUpdated handling are
+deferred until framing is sufficiently established.
 
-`v4_read.py` adds `open_and_read_v4_once()`, independent of Home Assistant. It
-shares the internal handshake primitive without changing `open_session_once()`
-into a persistent client. Only a successful V4 OpenedClient with no already-read
-unclassified suffix permits the fixed documented read (FFFF, unit 1, function 04,
-address 1024, quantity 20). It buffers one MBAP-delimited response, answers leading
-Ping, validates correlation and exactly 20 raw UInt16 registers or a numeric
-Modbus exception, rejects buffered trailing bytes, then closes on every outcome.
-The full OpenedClient boundary remains unresolved, including suffixes arriving
-later. No V4 register meaning, pairing, persistence, write or control is added.
+The default transport retry policy is two total attempts: immediate first
+attempt, close/discard on a transport failure, one nonblocking 1-second backoff,
+then a fresh transport using the current identity. Configuration permits 1..2
+total attempts and 0..30 seconds of backoff. Protocol/authentication errors,
+DeviceAuthReq, CloseClient, unsupported profiles and Modbus exceptions never
+retry. Cancellation propagates and closes the transport. An async lock serializes
+refreshes including backoff and identity updates. `async_close()` permanently
+closes the client, cancels its active refresh, waits for cleanup and prevents
+queued/new refreshes. The caller provides recurring scheduling.
 
-Every candidate is first tested offline, then the MANAGER reviews its exact HEAD
-before authorizing authenticated pre-merge validation. The fixed `live-premerge`
-suite reuses the same one-shot V4 operation, retaining sanitized opening metadata
-and reporting only the register count. The exploratory `read-v4-state` mode on
-protected main can still export raw registers, which must be reviewed separately
-before assigning any V4 semantics or creating Home Assistant entities.
+`exceptions.py` exposes distinct input, invalid-credential, authorization,
+documented server-closure, unsupported-profile, protocol, Modbus, transport,
+timeout, retry-exhaustion and closed-client failures. Repr, diagnostics and
+errors never contain identities, caller descriptions or server payloads. The
+last accepted profile and last successful snapshot are retained in memory.
+No pairing, file persistence, HA setup/entities, semantic decoding or control
+belongs to this increment.
+
+The opt-in probe keeps TLS-only, session-open, synthetic negative and exploratory
+`read-v4-state` modes. The fixed MANAGER-approved `--live-premerge` path now uses
+HobenClient itself: two sequential refreshes on one instance, initial zero
+DeviceGuid then automatic assigned-identity reuse, each with a fresh session and
+one V4 read. Live retries are disabled so success means exactly two sessions and
+two reads. Only public metadata/counts and validated reuse are exported; the
+credential remains the sole input. Offline CI precedes exact-HEAD MANAGER review.
+Project-side live reuse remains **to validate** until that authenticated run
+succeeds; only then may `protocol.md` record confirmation on the reference Osmose.
 
 ### Layer 1 — transport
 
@@ -283,7 +294,7 @@ Responsibilities:
 
 - async TLS socket connection;
 - certificate verification;
-- reconnect/backoff;
+- one bounded connection per transport (client orchestrates retry/backoff);
 - receive buffering;
 - write serialization;
 - timeouts;
@@ -340,15 +351,17 @@ The profile must be selected dynamically from `OpenedClient` data.
 
 ### Layer 5 — stateful protocol client
 
-Responsibilities:
+Current responsibilities:
 
-- maintain current stove state;
-- schedule/request refreshes;
-- merge spontaneous `DataUpdated` messages;
-- expose typed state to callers;
-- serialize commands;
-- confirm commands by read-back;
+- own normalized private UserGuid and in-memory/persistable DeviceGuid;
+- request one raw profile-specific refresh through a bounded TLS session;
+- serialize refreshes and apply finite transport retry/backoff;
+- expose an immutable raw snapshot and public profile metadata;
 - surface clear exceptions.
+
+Scheduling belongs to the HA coordinator/caller. Long-lived reception and
+`DataUpdated` merging await proven framing; command serialization/read-back
+belong to later control releases.
 
 ### Layer 6 — Home Assistant integration
 
@@ -485,12 +498,15 @@ protected-main branch policy; its sole `HOBEN_USER_GUID` secret is injected only
 into the fixed candidate probe step. No candidate dependency is installed and
 the status-writing token is kept on separate trusted runners.
 
-`python scripts/probe_hoben_connection.py --live-premerge` requires verified TLS,
-authenticated opening and dynamic V4 selection, then exactly one documented
-function 04 read (transaction FFFF, unit 1, address 1024, quantity 20), a
-correlated response containing exactly 20 UInt16 values, and closure. Success
-does not depend on exact register contents, product revision or software
-version. Pairing, writes, controls, polling and retries are excluded.
+`python scripts/probe_hoben_connection.py --live-premerge` requires two sequential
+refreshes on the same HobenClient. The first starts with zero DeviceGuid and
+adopts an assigned identity; the second automatically reuses it. Each opens a
+fresh verified TLS connection, requires authenticated dynamic V4 without a
+buffered unclassified suffix, makes exactly one function 04 read (transaction
+FFFF, unit 1, address 1024, quantity 20), validates 20 correlated UInt16 values,
+then closes. Success does not depend on exact register contents, product revision
+or software version. Pairing, writes, controls, polling and live retries are
+excluded. Client transport retries are tested deterministically offline.
 
 Trusted jobs publish `pending`, then `success` only for full live success or
 `failure` otherwise, using the stable commit status `live-hoben-authenticated`

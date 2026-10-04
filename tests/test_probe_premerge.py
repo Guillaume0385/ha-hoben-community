@@ -2,7 +2,8 @@
 
 import json
 import ssl
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -44,10 +45,10 @@ def synthetic_environment(monkeypatch):
 
 @pytest.mark.parametrize("registers", [[0] * 20, [65535] * 20, list(range(20))])
 @pytest.mark.parametrize("major", [8, 9])
-def test_current_suite_opens_once_reads_once_and_does_not_freeze_values(
+def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
     streams, monkeypatch, capsys, caplog, registers, major
 ):
-    """One correlated read passes for changing UInt16 values and software metadata."""
+    """Two fresh TLS sessions reuse assignment, with changing UInt16 metadata/data."""
 
     class OnlyCredentialEnvironment(dict):
         def __getitem__(self, key):
@@ -63,6 +64,31 @@ def test_current_suite_opens_once_reads_once_and_does_not_freeze_values(
     )
     opened = OPENED[:10] + bytes([major]) + OPENED[11:]
     streams.reader.read.side_effect = [b"\x0a" + opened, b"\x0a" + response(registers)]
+    second = SimpleNamespace(
+        reader=SimpleNamespace(
+            read=AsyncMock(side_effect=[opened, response(list(reversed(registers)))])
+        ),
+        writer=SimpleNamespace(
+            write=Mock(),
+            drain=AsyncMock(),
+            close=Mock(),
+            wait_closed=AsyncMock(),
+            transport=SimpleNamespace(abort=Mock()),
+        ),
+    )
+
+    async def connect(*args, **kwargs):
+        if streams.connect.await_count == 1:
+            return streams.reader, streams.writer
+        streams.writer.wait_closed.assert_awaited_once_with()
+        return second.reader, second.writer
+
+    streams.connect.side_effect = connect
+    client_factory = Mock(wraps=probe.HobenClient)
+    monkeypatch.setattr(probe, "HobenClient", client_factory)
+    legacy = Mock(side_effect=AssertionError("The public client must own the suite"))
+    monkeypatch.setattr(probe, "open_and_read_v4_once", legacy)
+    monkeypatch.setattr(probe, "open_session_once", legacy)
     with caplog.at_level("DEBUG"):
         assert probe.main(["--live-premerge"]) == 0
     output = capsys.readouterr()
@@ -71,20 +97,15 @@ def test_current_suite_opens_once_reads_once_and_does_not_freeze_values(
         "host": "myhoben.fr",
         "port": 465,
         "mode": "live-premerge",
-        "state": "read",
-        "message_type": 4,
+        "state": "client_refresh_validated",
         "product_type": 5,
         "product_revision": 0,
         "software_major": major,
         "software_minor": 2,
         "application_version": 512,
         "profile": "v4",
-        "unclassified_bytes": 0,
-        "function": 4,
-        "transaction_id": 65535,
-        "unit_id": 1,
-        "start_address": 1024,
-        "quantity": 20,
+        "device_guid_reuse": "validated",
+        "refresh_count": 2,
         "register_count": 20,
     }
     assert [c.args[0] for c in streams.writer.write.call_args_list] == [
@@ -93,13 +114,22 @@ def test_current_suite_opens_once_reads_once_and_does_not_freeze_values(
         READ_REQUEST,
         b"\x0b",
     ]
-    streams.connect.assert_awaited_once()
-    kwargs = streams.connect.call_args.kwargs
-    assert streams.connect.call_args.args == ("myhoben.fr", 465)
-    assert kwargs["server_hostname"] == "myhoben.fr"
-    assert kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED
-    assert kwargs["ssl"].check_hostname is True
+    assert [c.args[0] for c in second.writer.write.call_args_list] == [
+        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
+        READ_REQUEST,
+    ]
+    client_factory.assert_called_once_with(
+        user_guid=USER_GUID.replace("-", "").lower(), max_attempts=1
+    )
+    legacy.assert_not_called()
+    assert streams.connect.await_count == 2
+    for call in streams.connect.call_args_list:
+        assert call.args == ("myhoben.fr", 465)
+        assert call.kwargs["server_hostname"] == "myhoben.fr"
+        assert call.kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED
+        assert call.kwargs["ssl"].check_hostname is True
     streams.writer.wait_closed.assert_awaited_once_with()
+    second.writer.wait_closed.assert_awaited_once_with()
     for sensitive in (
         USER_GUID,
         USER_GUID.replace("-", "").lower(),
@@ -107,6 +137,35 @@ def test_current_suite_opens_once_reads_once_and_does_not_freeze_values(
         "PRIVATE",
     ):
         assert sensitive not in output.out + output.err + caplog.text
+
+
+def test_live_premerge_uses_client_defaults_without_probe_overrides(
+    streams, monkeypatch, capsys
+):
+    """Local probe settings cannot silently substitute the live client's defaults."""
+    monkeypatch.setattr(probe, "DEFAULT_DEVICE_INFO", "Synthetic/ProbeOverride")
+    monkeypatch.setattr(probe, "DEFAULT_BUILD", 1)
+    client_factory = Mock(wraps=probe.HobenClient)
+    monkeypatch.setattr(probe, "HobenClient", client_factory)
+    streams.reader.read.side_effect = [
+        OPENED,
+        response([0] * 20),
+        OPENED,
+        response([65535] * 20),
+    ]
+    assert probe.main(["--live-premerge"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["state"] == "client_refresh_validated"
+    client_factory.assert_called_once_with(
+        user_guid=USER_GUID.replace("-", "").lower(), max_attempts=1
+    )
+    assert [c.args[0] for c in streams.writer.write.call_args_list] == [
+        OPEN_REQUEST,
+        READ_REQUEST,
+        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
+        READ_REQUEST,
+    ]
+    assert streams.connect.await_count == streams.writer.wait_closed.await_count == 2
 
 
 @pytest.mark.parametrize(
@@ -159,6 +218,68 @@ def test_mismatch_or_exception_fails_with_only_the_allowed_request(
     ]
     # Byte-exact emission also excludes pairing, function 06/16/22 and FFF0.
     streams.writer.wait_closed.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    "second_response",
+    [
+        b"\x2fPRIVATE",
+        b"\x05\x02PRIVATE",
+        OPENED + b"PRIVATE",
+        OPENED[:8] + b"\x02" + OPENED[9:],
+        OSError("PRIVATE"),
+        TimeoutError("PRIVATE"),
+    ],
+)
+def test_second_refresh_failure_never_reports_validated_reuse(
+    streams, capsys, second_response
+):
+    streams.reader.read.side_effect = [OPENED, response([0] * 20), second_response]
+    assert probe.main(["--live-premerge"]) == 1
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert report["state"] == "error"
+    assert "device_guid_reuse" not in report
+    assert "PRIVATE" not in output.out + output.err
+    assert [c.args[0] for c in streams.writer.write.call_args_list] == [
+        OPEN_REQUEST,
+        READ_REQUEST,
+        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
+    ]
+    assert streams.connect.await_count == 2
+    assert streams.writer.wait_closed.await_count == 2
+
+
+def test_zero_returned_identity_cannot_validate_assigned_reuse(streams, capsys):
+    opened = OPENED[:14] + b"0" * 32 + OPENED[46:]
+    streams.reader.read.side_effect = [opened, response([0] * 20)]
+    assert probe.main(["--live-premerge"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "malformed_response"
+    streams.connect.assert_awaited_once()
+    streams.writer.wait_closed.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"refresh_count": 1},
+        {"device_guid_reuse": "unvalidated"},
+        {"profile": "v6"},
+        {"register_count": 19},
+        {"state": "read"},
+    ],
+)
+def test_live_gate_requires_complete_two_refresh_result(monkeypatch, capsys, override):
+    report = {
+        "state": "client_refresh_validated",
+        "device_guid_reuse": "validated",
+        "refresh_count": 2,
+        "profile": "v4",
+        "register_count": 20,
+    } | override
+    monkeypatch.setattr(probe, "_probe", AsyncMock(return_value=report))
+    assert probe.main(["--live-premerge"]) == 1
+    assert json.loads(capsys.readouterr().out)["mode"] == "live-premerge"
 
 
 @pytest.mark.parametrize("user_guid", [None, "", "PRIVATE-INVALID"])

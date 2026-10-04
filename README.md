@@ -10,13 +10,99 @@ Home Assistant ou HACS.
 
 La version `0.0.1` reste un **socle de développement**, sans fonctionnalité
 utilisable dans Home Assistant : aucun flux de configuration ni entité.
-Une sonde manuelle permet de valider TLS puis OpenClient. Un mode opt-in dédié
-prépare maintenant une seule lecture de 20 registres V4 bruts, sans interprétation
-ni entité Home Assistant. Le mode `session-open` reste une observation sans lecture.
-Elle suit l'identification confirmée dans MyHOBEN 2.2 build 34 : Identifiant HOBEN
-normalisé en UserGuid, DeviceGuid initial nul et observation possible d'une demande
-d'autorisation ou d'un rejet documenté. Aucun code d'authentification n'est envoyé.
+Le client protocolaire réutilisable `HobenClient` gère maintenant l'identité du
+client et lit 20 registres V4 bruts par rafraîchissement, sans interprétation ni
+entité Home Assistant. Chaque rafraîchissement utilise une connexion TLS bornée.
+Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
+lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
+Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
+en mémoire, demande d'autorisation ou rejet documenté. Aucun code d'association
+n'est envoyé. La réutilisation réelle du DeviceGuid par ce projet reste à valider
+sur l'Osmose de référence après revue MANAGER.
 La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
+
+## API protocolaire HobenClient
+
+Depuis une coroutine, sans dépendance Home Assistant :
+
+```python
+from custom_components.hoben.client import HobenClient
+
+client = HobenClient(
+    user_guid=configured_hoben_id,
+    device_guid=persisted_device_guid_or_none,
+)
+try:
+    snapshot = await client.async_refresh()
+    # Sensible : uniquement pour un stockage explicite et sécurisé, jamais un log.
+    new_device_guid = client.device_guid_for_persistence
+finally:
+    await client.async_close()
+```
+
+Le build **34** et le descripteur communautaire historique **`GitHubActions`**
+sont les défauts du client. `DEFAULT_BUILD` et `DEFAULT_DEVICE_INFO` sont définis
+une seule fois dans `client.py` et partagés avec les sondes. La suite
+`--live-premerge` utilise directement ces défauts, comme le futur appelant HA.
+
+Le constructeur normalise l'Identifiant HOBEN en 32 caractères hexadécimaux
+minuscules sans tirets. Sans DeviceGuid persisté, il utilise les **32 zéros ASCII**
+initiaux. Une valeur fournie est validée avant le réseau : exactement 32 octets
+ASCII, sans imposer de format hexadécimal non prouvé. Une ouverture V4 valide et
+sans suffixe ambigu met immédiatement à jour le DeviceGuid en mémoire, avant la
+lecture. Les prochains rafraîchissements et retries réutilisent cette identité,
+même si la lecture précédente échoue. Une nouvelle attribution peut la remplacer.
+
+`device_guid_for_persistence` est un accès **explicitement sensible**. Le futur
+config flow pourra stocker cette valeur dans `ConfigEntry` puis la fournir à une
+nouvelle instance. Le client n'écrit aucun fichier ni stockage HA.
+`has_assigned_device_guid` indique sans divulgation si la valeur diffère des zéros.
+Les GUID ne figurent ni dans `repr`, ni dans `safe_report()`, ni dans les erreurs.
+Le client n'est pas une dataclass exportable par `asdict()`.
+
+Le résultat immuable `RawStoveSnapshot` contient `profile`, `registers` (tuple de
+**20 UInt16 bruts**), `product_type`, `product_revision`, `software_major`,
+`software_minor` et `application_version`. Il ne contient aucune identité,
+session ou trame brute, même via `asdict()`. Son rapport sûr conserve seulement
+les métadonnées et le nombre de registres. `client.profile` conserve le dernier
+profil accepté ; `client.last_snapshot` conserve le dernier rafraîchissement
+réussi. Aucune température, puissance, échelle ou autre sémantique V4 n'est
+encore attribuée. V4 est sélectionné dynamiquement ; les autres profils échouent
+explicitement, sans supposer que tous les Osmose sont V4.
+
+Chaque tentative ouvre un TLS vérifié vers `myhoben.fr:465`, effectue OpenClient,
+valide OpenedClient puis une seule lecture **04 / FFFF / unité 1 / adresse 1024 /
+quantité 20**, et ferme la connexion. Les primitives existantes construisent et
+valident les trames. La longueur complète d'OpenedClient restant inconnue, une
+connexion permanente et DataUpdated sont différés. Les suffixes déjà reçus sont
+refusés sans réinterprétation ; un suffixe arrivant plus tard reste une incertitude.
+
+Par défaut, un échec de transport permet **2 tentatives au total**, séparées par
+**1 seconde** de backoff asynchrone, après fermeture de la première connexion.
+`max_attempts` accepte 1 ou 2, `retry_delay` 0 à 30 secondes ; les délais globaux
+d'ouverture/lecture sont chacun de 30 secondes et configurables. Les erreurs
+protocole, autorisation, CloseClient, profil ou Modbus ne sont jamais retentées.
+Un verrou asynchrone sérialise les appels concurrents et les mises à jour
+d'identité. L'annulation se propage avec nettoyage. `async_close()` est idempotent,
+annule une opération active, attend sa fermeture et interdit tout nouvel appel
+sur cette instance. Le futur coordinateur HA assurera la planification.
+
+Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
+
+| Situation | Erreur typée |
+| --- | --- |
+| Entrée locale invalide | `HobenInvalidInputError` |
+| Identifiant rejeté par le serveur | `HobenInvalidCredentialsError` |
+| DeviceAuthReq | `HobenAuthorizationRequiredError` |
+| CloseClient | `HobenClosedError`, avec motif documenté |
+| Profil non pris en charge | `HobenUnsupportedProfileError` |
+| Réponse malformée / suffixe ambigu | `HobenProtocolError` / `HobenAmbiguousSessionError` |
+| Exception Modbus corrélée | `HobenModbusError`, code numérique brut |
+| Transport / timeout après les tentatives permises | `HobenRefreshExhaustedError`, sous-type de `HobenTransportError`, avec cause expurgée (`HobenTimeoutError` pour un timeout) |
+| Instance fermée | `HobenClientClosedError` |
+
+Aucune commande d'écriture/contrôle, association, boucle permanente ni tâche de
+fond n'est exposée par cette API.
 
 ## Installation future via HACS
 
@@ -103,14 +189,26 @@ python scripts/probe_hoben_connection.py --live-premerge
 
 Cette suite fixe ignore les surcharges exploratoires, ne prend aucun argument
 libre d'hôte/fonction/registre et n'installe aucune dépendance candidate. Elle
-exécute TLS vérifié vers `myhoben.fr:465` → un OpenClient/OpenedClient → profil
-dynamiquement V4 sans suffixe déjà reçu → **une seule** lecture fonction **04**,
-transaction **`0xFFFF`**, unité **1**, adresse **1024**, quantité **20** → réponse
-DataResponseClient corrélée avec exactement **20 UInt16** → fermeture.
+construit le client sans surcharge de `build` ni `device_info` pour valider
+réellement ses valeurs par défaut destinées au futur usage HA. Elle
+utilise **le même HobenClient pour deux rafraîchissements séquentiels**. Le premier
+part du DeviceGuid nul et adopte une identité attribuée ; le second la réutilise
+automatiquement. Chacun ouvre un **nouveau** TLS vérifié vers `myhoben.fr:465` →
+OpenClient/OpenedClient → profil dynamiquement V4 sans suffixe déjà reçu →
+**une seule** lecture fonction **04**, transaction **`0xFFFF`**, unité **1**, adresse
+**1024**, quantité **20** → réponse corrélée de **20 UInt16** → fermeture.
+Les retries sont désactivés dans cette suite fixe : exactement deux sessions et
+deux lectures en cas de réussite. Le retry/backoff du client est testé hors ligne.
 Une autorisation demandée, un rejet, un autre profil, un timeout, une exception
 Modbus ou une réponse non corrélée fait échouer la validation. Les valeurs des
 registres peuvent changer : aucune valeur exacte n'est exigée. Le JSON exporte
-les métadonnées expurgées et le nombre de registres, sans leurs contenus.
+les métadonnées expurgées et le nombre de registres, sans leurs contenus. La
+réussite exige `state: "client_refresh_validated"`, `profile: "v4"`,
+`device_guid_reuse: "validated"`, `refresh_count: 2` et `register_count: 20`.
+Un premier rafraîchissement réussi seul ne suffit pas. Aucun identifiant ne
+figure dans le rapport. `protocol.md` ne confirmera la réutilisation réelle qu'après
+la réussite de cette validation MANAGER sur le SHA exact, sans généraliser aux
+autres modèles.
 Aucun code d'association, fonction 06/16/22, transaction `0xFFF0` ni commande
 de température, ventilation, mode ou ON/OFF n'est envoyé.
 
@@ -321,8 +419,11 @@ Le DeviceInfo par défaut reste exactement :
 ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0
 ```
 
-C'est le descripteur de notre client de test, pas une valeur extraite de MyHOBEN
-ni un format obligatoire du serveur au-delà de la structure documentée.
+C'est le descripteur communautaire partagé par `HobenClient` et les sondes,
+centralisé dans `custom_components/hoben/client.py`. Son nom historique
+`GitHubActions` est conservé, y compris pour le futur usage HA. Il ne s'agit pas
+d'une valeur extraite de MyHOBEN ni d'un format obligatoire du serveur au-delà
+de la structure documentée.
 
 Exemple Bash avec saisie masquée, sans identifiant dans l'historique ou les
 arguments du processus (ne pas activer `set -x`) :
