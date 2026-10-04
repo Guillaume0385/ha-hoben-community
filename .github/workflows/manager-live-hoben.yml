@@ -1,0 +1,196 @@
+name: MANAGER authenticated Hoben validation
+
+# This definition must be installed on protected main. Candidate workflow YAML
+# is never used to authorize execution with the live credential.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manager-live-hoben-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  manager-approval:
+    # GitHub expression equality ignores case. The trusted script below also
+    # checks every identity/label with strict equality before granting access.
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'labeled' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == 'Guillaume0385/ha-hoben-community' &&
+      github.event.label.name == 'manager-live-hoben' &&
+      github.actor == 'Guillaume0385'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - name: Verify MANAGER approval and publish pending on candidate SHA
+        id: gate
+        # v8; all status-capable actions run without checking out candidate code.
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const repository = 'Guillaume0385/ha-hoben-community';
+            const manager = 'Guillaume0385';
+            const label = 'manager-live-hoben';
+            const pr = context.payload.pull_request;
+            const sha = pr?.head?.sha;
+            if (context.eventName !== 'pull_request_target' ||
+                context.payload.action !== 'labeled' ||
+                context.ref !== 'refs/heads/main' ||
+                `${context.repo.owner}/${context.repo.repo}` !== repository ||
+                pr?.base?.ref !== 'main' || pr?.base?.repo?.full_name !== repository ||
+                pr?.draft !== false || pr?.state !== 'open' ||
+                pr?.head?.repo?.full_name !== repository ||
+                context.payload.label?.name !== label ||
+                context.actor !== manager || context.payload.sender?.login !== manager ||
+                process.env.GITHUB_TRIGGERING_ACTOR !== manager ||
+                process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+                typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) {
+              core.setFailed('Exact MANAGER label approval required; no live credential released.');
+              return;
+            }
+            try {
+              // A queued label event cannot approve a newer commit or a PR
+              // that has since become draft/closed or lost its approval label.
+              const {data: current} = await github.rest.pulls.get({
+                ...context.repo, pull_number: pr.number
+              });
+              if (current.head.sha !== sha || current.state !== 'open' ||
+                  current.draft !== false || current.base.ref !== 'main' ||
+                  current.base.repo.full_name !== repository ||
+                  current.head.repo?.full_name !== repository ||
+                  !current.labels.some(item => item.name === label)) {
+                core.setFailed('Approval is stale; MANAGER must review and re-add the label.');
+                return;
+              }
+              await github.rest.repos.createCommitStatus({
+                ...context.repo, sha, state: 'pending',
+                context: 'live-hoben-authenticated',
+                description: 'MANAGER-approved authenticated read-only validation started',
+                target_url: `${context.serverUrl}/${repository}/actions/runs/${context.runId}`
+              });
+              core.info(`Reviewed candidate SHA: ${sha}`);
+              core.setOutput('approved', 'true');
+            } catch {
+              core.setFailed('Unable to verify approval or publish candidate pending status.');
+            }
+
+  live-probe:
+    needs: manager-approval
+    if: needs.manager-approval.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: hoben-live
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      probe-outcome: ${{ steps.probe.outcome }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: Guillaume0385/ha-hoben-community
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact reviewed checkout before releasing the Hoben secret
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          printf 'Tested candidate SHA: %s\n' "$CANDIDATE_SHA"
+          printf '%s\n' 'Endpoint: myhoben.fr:465' 'Mode: live-premerge'
+          python --version
+
+      - name: Fixed authenticated opening and exactly one V4 read
+        id: probe
+        env:
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        run: |
+          # No candidate dependency installation, workflow input or GitHub token.
+          # Exit zero requires authenticated V4 opening and 20 correlated values.
+          python scripts/probe_hoben_connection.py --live-premerge | tee "$RUNNER_TEMP/live-hoben-authenticated.json"
+
+      - name: Summarize sanitized result for the exact candidate SHA
+        if: ${{ always() }}
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=failure
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=success
+          fi
+          {
+            printf '%s\n' '## MANAGER authenticated Hoben validation'
+            printf '\nTested candidate SHA: %s\n\nResult: %s\n' "$CANDIDATE_SHA" "$result"
+            printf '\nEndpoint: myhoben.fr:465\n\nMode: live-premerge\n'
+            printf '\nOne authenticated opening and one read; no control or register semantics.\n'
+            if [ -s "$RUNNER_TEMP/live-hoben-authenticated.json" ]; then
+              printf '\nSanitized probe output:\n\n```json\n'
+              cat "$RUNNER_TEMP/live-hoben-authenticated.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve sanitized probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-hoben-authenticated-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/live-hoben-authenticated.json
+          if-no-files-found: ignore
+
+  candidate-status:
+    needs: [manager-approval, live-probe]
+    if: ${{ always() && needs.manager-approval.outputs.approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Publish success or failure on the reviewed candidate SHA
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          LIVE_RESULT: ${{ needs.live-probe.result }}
+          PROBE_OUTCOME: ${{ needs.live-probe.outputs.probe-outcome }}
+        with:
+          script: |
+            // This fresh job has no candidate checkout or Hoben credential.
+            // Job failure, timeout, cancellation and a skipped probe all fail.
+            const sha = context.payload.pull_request.head.sha;
+            const state = process.env.LIVE_RESULT === 'success' &&
+                          process.env.PROBE_OUTCOME === 'success' ? 'success' : 'failure';
+            try {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo, sha, state,
+                context: 'live-hoben-authenticated',
+                description: state === 'success'
+                  ? 'Authenticated V4 opening and one correlated 20-register read passed'
+                  : 'Authenticated read-only validation failed or did not complete',
+                target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              });
+              core.info(`Tested candidate SHA: ${sha}; live-hoben-authenticated: ${state}`);
+            } catch {
+              core.setFailed('Unable to publish candidate live validation result.');
+            }
