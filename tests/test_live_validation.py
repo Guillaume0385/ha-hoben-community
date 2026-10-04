@@ -383,13 +383,29 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
 
 
 def test_normal_validate_remains_offline() -> None:
-    """Normal PR CI keeps tests/HACS/Hassfest, without live jobs or secret access."""
+    """Protocol/HA/HACS/Hassfest CI stays separate from live/secret validation."""
     source = (ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
     validate = yaml.load(source, Loader=yaml.BaseLoader)
-    assert set(validate["jobs"]) == {"tests", "hacs", "hassfest"}
+    assert set(validate["jobs"]) == {"tests", "ha-tests", "hacs", "hassfest"}
     for job in validate["jobs"].values():
         assert "environment" not in job
     assert "secrets." not in source
     assert "probe_hoben_connection" not in source
     assert "myhoben.fr" not in source
     assert "python -m pytest" in source
+    protocol_steps = validate["jobs"]["tests"]["steps"]
+    ha_steps = validate["jobs"]["ha-tests"]["steps"]
+    assert any(
+        step.get("run") == "python -m pip install --group dev"
+        for step in protocol_steps
+    )
+    assert any(
+        step.get("run") == "python -m pip install --group ha-test" for step in ha_steps
+    )
+    assert any(
+        step.get("run") == "python -m pytest -c ha_tests/pytest.ini ha_tests"
+        for step in ha_steps
+    )
+    assert any(
+        step.get("with", {}).get("python-version") == "3.14" for step in ha_steps
+    )

@@ -1,0 +1,34 @@
+{
+  "title": "Hoben",
+  "config": {
+    "step": {
+      "reauth_confirm": {
+        "title": "Réessayer la connexion Hoben",
+        "description": "La connexion Hoben nécessite une nouvelle validation. Confirmez pour réessayer avec l’identité déjà enregistrée. L’association n’est pas prise en charge. Pour utiliser un autre identifiant HOBEN, configurez une nouvelle entrée."
+      },
+      "user": {
+        "title": "Connecter votre poêle Hoben",
+        "description": "Cette intégration non officielle se connecte en lecture seule. Elle lit les données V4 brutes toutes les 60 secondes et ne crée pas encore d’entités capteurs.",
+        "data": {
+          "user_guid": "Identifiant HOBEN"
+        },
+        "data_description": {
+          "user_guid": "Saisissez l’identifiant HOBEN affiché ou configuré dans MyHOBEN, avec ou sans tirets. Cette valeur est sensible."
+        }
+      }
+    },
+    "error": {
+      "invalid_identifier": "L’identifiant HOBEN est invalide ou a été refusé par le serveur.",
+      "authorization_required": "Le serveur demande une autorisation du client. L’association n’est pas encore prise en charge par cette intégration. Vous pouvez réessayer plus tard.",
+      "cannot_connect": "Impossible de se connecter au service Hoben. Réessayez plus tard.",
+      "unsupported_stove": "Le profil protocolaire de ce poêle n’est pas pris en charge. Seule la lecture V4 brute est disponible.",
+      "protocol_error": "La réponse Hoben n’a pas pu être acceptée en toute sécurité. Réessayez plus tard.",
+      "unknown": "Une erreur inattendue s’est produite. Consultez le contexte expurgé dans les journaux."
+    },
+    "abort": {
+      "already_configured": "Ce poêle Hoben est déjà configuré.",
+      "reauth_successful": "La connexion Hoben a été validée et l’intégration rechargée.",
+      "unique_id_mismatch": "L’identité enregistrée ne correspond pas à cette entrée Hoben. Configurez une nouvelle entrée pour utiliser un autre identifiant."
+    }
+  }
+}
