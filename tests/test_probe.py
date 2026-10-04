@@ -5,7 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -41,6 +41,17 @@ def synthetic_environment(monkeypatch):
         monkeypatch.setenv(name, value)
 
 
+@pytest.fixture
+def resolved_user_guid(streams, monkeypatch):
+    """Exercise the future session path only with fake streams and synthetic data.
+
+    No environment flag or CLI option can unlock the production resolver.
+    """
+    monkeypatch.setattr(
+        probe, "_resolve_user_guid", lambda: ENVIRONMENT["HOBEN_USER_GUID"]
+    )
+
+
 def test_tls_only_needs_no_inputs_or_writes(streams, monkeypatch, capsys) -> None:
     """TLS-only mode verifies the connection and closes without an OpenClient."""
     for name in ENVIRONMENT:
@@ -57,9 +68,13 @@ def test_tls_only_needs_no_inputs_or_writes(streams, monkeypatch, capsys) -> Non
     streams.writer.wait_closed.assert_awaited_once_with()
 
 
-def test_session_output_and_allowed_writes(streams, capsys, caplog) -> None:
+def test_session_output_and_allowed_writes(
+    streams, resolved_user_guid, monkeypatch, capsys, caplog
+) -> None:
     """Only one OpenClient/Pong are sent; UNKNOWN and suffix count are safe output."""
     streams.reader.read.return_value = b"\x0a" + OPENED + b"\x0aSYNTHETIC-AUTH-CODE"
+    open_once = AsyncMock(wraps=probe.open_session_once)
+    monkeypatch.setattr(probe, "open_session_once", open_once)
     with caplog.at_level("DEBUG"):
         assert probe.main(["--session"]) == 0
     output = capsys.readouterr()
@@ -81,18 +96,104 @@ def test_session_output_and_allowed_writes(streams, capsys, caplog) -> None:
         b"\x03SYNTHETIC-USER\x00\x01\x22\x00SYNTHETIC-DEVICESynthetic/Maker/Model",
         b"\x0b",
     ]
+    open_once.assert_awaited_once()
     for identifier in ("SYNTHETIC", OPENED[14:46].decode()):
         assert identifier not in output.out + output.err + caplog.text
     streams.writer.wait_closed.assert_awaited_once_with()
 
 
-@pytest.mark.parametrize("missing", ENVIRONMENT)
-def test_missing_inputs_do_not_connect(streams, monkeypatch, capsys, missing) -> None:
-    """No identifier or build is invented when a required value is absent."""
-    monkeypatch.delenv(missing)
+@pytest.mark.parametrize("device_guid", [None, "", " \t\n"])
+def test_missing_device_guid_does_not_connect(
+    streams, monkeypatch, capsys, caplog, device_guid
+) -> None:
+    """An absent/empty environment secret fails input validation before the gate."""
+    if device_guid is None:
+        monkeypatch.delenv("HOBEN_DEVICE_GUID")
+    else:
+        monkeypatch.setenv("HOBEN_DEVICE_GUID", device_guid)
     assert probe.main(["--session"]) == 1
-    assert json.loads(capsys.readouterr().out)["error"] == "invalid_session_inputs"
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {
+        "host": "myhoben.fr",
+        "port": 465,
+        "state": "error",
+        "error": "invalid_session_inputs",
+    }
+    assert "SYNTHETIC" not in output.out + output.err + caplog.text
     streams.connect.assert_not_awaited()
+    streams.writer.write.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "unconfirmed_user_guid",
+    [
+        None,
+        "",
+        "00000000-0000-0000-0000-000000000000",
+        "SYNTHETIC-USER",
+        "SYNTHETIC-DEVICE",
+    ],
+)
+def test_unresolved_user_guid_blocks_before_transport(
+    streams, monkeypatch, capsys, caplog, unconfirmed_user_guid
+) -> None:
+    """Neither arbitrary env inputs, zero GUIDs nor DeviceGuid can bypass the gate."""
+    if unconfirmed_user_guid is None:
+        monkeypatch.delenv("HOBEN_USER_GUID")
+    else:
+        monkeypatch.setenv("HOBEN_USER_GUID", unconfirmed_user_guid)
+    # Only DeviceGuid is required: all other parameters have safe defaults.
+    monkeypatch.delenv("HOBEN_BUILD")
+    monkeypatch.delenv("HOBEN_DEVICE_INFO")
+    transport = Mock(side_effect=AssertionError("Preflight must run first"))
+    open_once = AsyncMock(side_effect=AssertionError("No session without evidence"))
+    monkeypatch.setattr(probe, "AsyncTlsTransport", transport)
+    monkeypatch.setattr(probe, "open_session_once", open_once)
+    with caplog.at_level("DEBUG"):
+        assert probe.main(["--session"]) == 3
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {
+        "host": "myhoben.fr",
+        "port": 465,
+        "state": "blocked",
+        "error": "user_guid_unresolved",
+    }
+    assert output.err == ""
+    assert "SYNTHETIC" not in output.out + output.err + caplog.text
+    transport.assert_not_called()
+    open_once.assert_not_awaited()
+    streams.connect.assert_not_awaited()
+    streams.writer.write.assert_not_called()
+
+
+def test_session_defaults_use_existing_one_shot_path(
+    streams, resolved_user_guid, monkeypatch, capsys
+) -> None:
+    """The synthetic request proves build 34 and the stable descriptor on the wire."""
+    monkeypatch.delenv("HOBEN_BUILD")
+    monkeypatch.delenv("HOBEN_DEVICE_INFO")
+    streams.reader.read.return_value = OPENED
+    assert probe.main(["--session"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "opened"
+    streams.writer.write.assert_called_once_with(
+        b"\x03SYNTHETIC-USER\x00\x01\x22\x00SYNTHETIC-DEVICE"
+        b"ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
+    )
+    streams.writer.wait_closed.assert_awaited_once_with()
+
+
+def test_session_overrides_preserve_caller_values(
+    streams, resolved_user_guid, monkeypatch, capsys
+) -> None:
+    """Explicit non-secret build/descriptor overrides keep the existing interface."""
+    monkeypatch.setenv("HOBEN_BUILD", "4660")
+    monkeypatch.setenv("HOBEN_DEVICE_GUID", " SYNTHETIC-DEVICE ")
+    streams.reader.read.return_value = OPENED
+    assert probe.main(["--session"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "opened"
+    streams.writer.write.assert_called_once_with(
+        b"\x03SYNTHETIC-USER\x00\x01\x34\x12 SYNTHETIC-DEVICE Synthetic/Maker/Model"
+    )
 
 
 @pytest.mark.parametrize("build", ["SYNTHETIC-PRIVATE", "-1", "65536"])
@@ -104,6 +205,28 @@ def test_invalid_build_is_redacted(streams, monkeypatch, capsys, build) -> None:
     assert json.loads(output.out)["error"] == "invalid_session_inputs"
     assert "SYNTHETIC-PRIVATE" not in output.out + output.err
     streams.connect.assert_not_awaited()
+    streams.writer.write.assert_not_called()
+
+
+@pytest.mark.parametrize("message_type", [0, 47, 255])
+def test_unexpected_message_payload_never_reaches_output(
+    streams, resolved_user_guid, capsys, caplog, message_type
+) -> None:
+    """Real session decoding stops at the numeric type, even for pairing data."""
+    streams.reader.read.return_value = bytes([message_type]) + b"SYNTHETIC-AUTH-CODE"
+    with caplog.at_level("DEBUG"):
+        assert probe.main(["--session"]) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {
+        "host": "myhoben.fr",
+        "port": 465,
+        "state": "error",
+        "error": "unexpected_message_type",
+        "message_type": message_type,
+    }
+    assert "SYNTHETIC" not in output.out + output.err + caplog.text
+    streams.writer.write.assert_called_once()
+    streams.writer.wait_closed.assert_awaited_once_with()
 
 
 @pytest.mark.parametrize(

@@ -10,6 +10,7 @@ on:
         default: tls-only
         options:
           - tls-only
+          - session-open
   pull_request:
     types: [labeled]
 
@@ -20,7 +21,7 @@ jobs:
   live-validation:
     # Only the newly added label opts in; an existing label never authorizes a push.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'tls-only') ||
       (github.event_name == 'pull_request' &&
        github.event.action == 'labeled' &&
        github.event.label.name == 'live-validation')
@@ -31,7 +32,7 @@ jobs:
         shell: bash
     env:
       # Label-triggered validation stays TLS-only, independently of future inputs.
-      LIVE_MODE: ${{ github.event_name == 'pull_request' && 'tls-only' || inputs.mode }}
+      LIVE_MODE: tls-only
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,8 +50,6 @@ jobs:
       - name: Run selected live probe
         id: probe
         run: |
-          # Extend the choice list and explicit cases in future read-only PRs.
-          # Setup, output preservation and reporting stay shared between modes.
           case "$LIVE_MODE" in
             tls-only)
               printf '%s\n' 'Mode: tls-only'
@@ -75,6 +74,73 @@ jobs:
           {
             printf '%s\n' '## Live Hoben validation'
             printf '\nMode: %s\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$LIVE_MODE" "$result"
+            if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
+              printf '\nProbe output (sanitized JSON):\n\n```json\n'
+              cat "$RUNNER_TEMP/live-validation.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable (probe did not complete).\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-validation-output
+          path: ${{ runner.temp }}/live-validation.json
+          if-no-files-found: ignore
+
+  session-open:
+    # Secrets are never available to the PR-label job, including same-repo PRs.
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'session-open'
+    name: Session open (UserGuid preflight)
+    environment: hoben-live
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Diagnostic header
+        run: |
+          printf 'Runner OS: %s\n' "$RUNNER_OS"
+          python --version
+          printf '%s\n' 'Mode: session-open' 'Endpoint: myhoben.fr:465'
+
+      - name: Run session preflight and one-shot probe
+        id: probe
+        env:
+          # Configure this manually as an environment secret in hoben-live.
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: |
+          # Exit 3 means BLOCKED, not a server/protocol failure. pipefail retains
+          # that non-success result while tee preserves only sanitized JSON.
+          python scripts/probe_hoben_connection.py --session | tee "$RUNNER_TEMP/live-validation.json"
+
+      - name: Summarize session success, BLOCKED or failure
+        if: ${{ always() }}
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=failure
+          if [ -s "$RUNNER_TEMP/live-validation.json" ] && \
+             python -c 'import json, sys; r = json.load(open(sys.argv[1])); sys.exit(0 if r.get("state") == "blocked" and r.get("error") == "user_guid_unresolved" else 1)' "$RUNNER_TEMP/live-validation.json"; then
+            result=BLOCKED
+            printf '%s\n' '::warning::BLOCKED: user_guid_unresolved; no connection or OpenClient sent.'
+          elif [ "$PROBE_OUTCOME" = success ]; then
+            result=success
+          fi
+          {
+            printf '%s\n' '## Live Hoben validation'
+            printf '\nMode: session-open\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
             if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
               printf '\nProbe output (sanitized JSON):\n\n```json\n'
               cat "$RUNNER_TEMP/live-validation.json"
