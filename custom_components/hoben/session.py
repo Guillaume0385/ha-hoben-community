@@ -5,13 +5,17 @@ import math
 from dataclasses import dataclass
 
 from .myhoben import (
+    CLOSE_CLIENT,
+    DEVICE_AUTH_REQ,
     OPENED_CLIENT,
+    CloseClientReason,
     OpenedClient,
+    decode_close_client,
     decode_opened_client,
     encode_open_client,
 )
 from .profiles import StoveProfile, select_stove_profile
-from .transport import AsyncTlsTransport, TransportError
+from .transport import AsyncTlsTransport, TransportEOF, TransportError
 
 _PING = 0x0A
 _PONG = b"\x0b"
@@ -33,7 +37,7 @@ class UnexpectedMessageType(SessionProtocolError):
 
 
 class SessionTimeout(TimeoutError):
-    """The overall OpenClient/OpenedClient exchange exceeded its deadline."""
+    """The overall OpenClient/first-response exchange exceeded its deadline."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,7 @@ class OpenSessionResult:
         """Explicitly allowlist diagnostic fields, excluding all identifiers."""
         opened = self.opened_client
         return {
+            "state": "opened",
             "message_type": OPENED_CLIENT,
             "product_type": opened.product_type,
             "product_revision": opened.product_revision,
@@ -64,7 +69,34 @@ class OpenSessionResult:
         }
 
 
-async def _receive_opened_client(transport: AsyncTlsTransport) -> OpenSessionResult:
+@dataclass(frozen=True)
+class AuthorizationRequiredResult:
+    """OpenClient reached an authorization request; no code is requested/sent."""
+
+    def safe_report(self) -> dict[str, int | str]:
+        """Report only the known type and its documented meaning."""
+        return {"state": "authorization_required", "message_type": DEVICE_AUTH_REQ}
+
+
+@dataclass(frozen=True)
+class ClosedSessionResult:
+    """Server closure with an allowlisted reason, without any raw payload."""
+
+    reason: CloseClientReason
+
+    def safe_report(self) -> dict[str, int | str]:
+        """Unknown/missing subcodes stay unknown; no numeric payload is exported."""
+        return {
+            "state": "closed",
+            "message_type": CLOSE_CLIENT,
+            "reason": self.reason.value,
+        }
+
+
+SessionResult = OpenSessionResult | AuthorizationRequiredResult | ClosedSessionResult
+
+
+async def _receive_response(transport: AsyncTlsTransport) -> SessionResult:
     """Accumulate a small prefix buffer and answer only standalone leading Ping."""
     buffer = bytearray()
     while True:
@@ -74,9 +106,16 @@ async def _receive_opened_client(transport: AsyncTlsTransport) -> OpenSessionRes
                 del buffer[0]
                 await transport.write(_PONG)
                 continue
-            if message_type != OPENED_CLIENT:
+            if message_type == DEVICE_AUTH_REQ:
+                return AuthorizationRequiredResult()
+            if message_type == CLOSE_CLIENT and len(buffer) >= 2:
+                return ClosedSessionResult(decode_close_client(bytes(buffer[:2])))
+            if message_type not in (OPENED_CLIENT, CLOSE_CLIENT):
                 raise UnexpectedMessageType(message_type)
-            if len(buffer) >= _OPENED_CLIENT_PREFIX_SIZE:
+            if (
+                message_type == OPENED_CLIENT
+                and len(buffer) >= _OPENED_CLIENT_PREFIX_SIZE
+            ):
                 try:
                     opened = decode_opened_client(
                         bytes(buffer[:_OPENED_CLIENT_PREFIX_SIZE])
@@ -92,7 +131,12 @@ async def _receive_opened_client(transport: AsyncTlsTransport) -> OpenSessionRes
         # Yield even if streams already have buffered data, allowing the overall
         # deadline/cancellation to fire during an uninterrupted stream of Ping.
         await asyncio.sleep(0)
-        buffer.extend(await transport.read(_READ_SIZE))
+        try:
+            buffer.extend(await transport.read(_READ_SIZE))
+        except TransportEOF:
+            if buffer == bytes([CLOSE_CLIENT]):
+                return ClosedSessionResult(decode_close_client(bytes(buffer)))
+            raise
 
 
 async def open_session_once(
@@ -103,10 +147,12 @@ async def open_session_once(
     device_guid: str,
     device_info: str,
     handshake_timeout: float = 30.0,
-) -> OpenSessionResult:
-    """Own connect → one OpenClient → confirmed OpenedClient prefix → close.
+) -> SessionResult:
+    """Own connect → one OpenClient → first non-Ping response → close.
 
-    Supply all codec inputs unchanged; no identifier is generated or normalized.
+    The shared codec validates/normalizes UserGuid. Other inputs are caller-owned.
+    Authorization requests and server closures are observations, not successful
+    authentication. Never send DeviceAuthRes or process trailing opaque payloads.
     UNKNOWN is a successful profile selection. Per-operation transport timeouts
     apply alongside a finite total exchange deadline (after TLS connection).
     This connection cannot be reused as a session: the response's full length
@@ -129,7 +175,7 @@ async def open_session_once(
         try:
             async with asyncio.timeout(handshake_timeout):
                 await transport.write(request)
-                result = await _receive_opened_client(transport)
+                result = await _receive_response(transport)
         except TransportError:
             # Preserve the operation-specific timeout/EOF instead of relabeling it.
             raise

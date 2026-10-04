@@ -137,7 +137,7 @@ jobs:
           {
             printf '%s\n' '## Negative Hoben session observation'
             printf '\nMode: session-negative\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
-            printf '\nSynthetic test only; no authentication or GUID format validated.\n'
+            printf '\nSynthetic/unassigned UserGuid and normal initial DeviceGuid; no authentication validated.\n'
             if [ -s "$RUNNER_TEMP/live-session-negative.json" ]; then
               printf '\nProbe output (sanitized JSON):\n\n```json\n'
               cat "$RUNNER_TEMP/live-session-negative.json"
@@ -162,7 +162,7 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       inputs.mode == 'session-open' &&
       github.ref == 'refs/heads/main'
-    name: Session open (UserGuid preflight)
+    name: First-client session observation
     environment: hoben-live
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -183,32 +183,29 @@ jobs:
           python --version
           printf '%s\n' 'Mode: session-open' 'Endpoint: myhoben.fr:465'
 
-      - name: Run session preflight and one-shot probe
+      - name: Validate UserGuid and observe one OpenClient
         id: probe
         env:
           # Add only after verifying hoben-live's main-only deployment policy.
-          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
         run: |
-          # Exit 3 means BLOCKED, not a server/protocol failure. pipefail retains
-          # that non-success result while tee preserves only sanitized JSON.
+          # Exit 0 means a classified response, not necessarily authentication.
+          # pipefail retains errors while tee preserves only sanitized JSON.
           python scripts/probe_hoben_connection.py --session | tee "$RUNNER_TEMP/live-validation.json"
 
-      - name: Summarize session success, BLOCKED or failure
+      - name: Summarize first response or failure
         if: ${{ always() }}
         env:
           PROBE_OUTCOME: ${{ steps.probe.outcome }}
         run: |
           result=failure
-          if [ -s "$RUNNER_TEMP/live-validation.json" ] && \
-             python -c 'import json, sys; r = json.load(open(sys.argv[1])); sys.exit(0 if r.get("state") == "blocked" and r.get("error") == "user_guid_unresolved" else 1)' "$RUNNER_TEMP/live-validation.json"; then
-            result=BLOCKED
-            printf '%s\n' '::warning::BLOCKED: user_guid_unresolved; no connection or OpenClient sent.'
-          elif [ "$PROBE_OUTCOME" = success ]; then
-            result=success
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=observed
           fi
           {
             printf '%s\n' '## Live Hoben validation'
             printf '\nMode: session-open\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
+            printf '\nFirst response only; no authentication code requested or sent.\n'
             if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
               printf '\nProbe output (sanitized JSON):\n\n```json\n'
               cat "$RUNNER_TEMP/live-validation.json"

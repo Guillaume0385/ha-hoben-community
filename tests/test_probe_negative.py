@@ -2,14 +2,14 @@
 
 import json
 import ssl
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from custom_components.hoben.session import SessionTimeout
 from scripts import probe_hoben_connection as probe
 
-# Independently written request: two 32-byte ASCII-zero test identifiers.
+# Independent request: synthetic/unassigned UserGuid + NORMAL initial DeviceGuid.
 REQUEST = (
     b"\x0300000000000000000000000000000000\x00\x01\x22\x00"
     b"00000000000000000000000000000000"
@@ -25,7 +25,7 @@ OPENED = (
 def test_negative_uses_only_fixed_inputs(
     streams, monkeypatch, capsys, caplog, with_environment
 ) -> None:
-    """No user inputs/default resolver, one OpenClient and only necessary Pong."""
+    """No env inputs, one OpenClient with normal initial DeviceGuid, necessary Pong."""
     for name in (
         "HOBEN_USER_GUID",
         "HOBEN_DEVICE_GUID",
@@ -36,8 +36,19 @@ def test_negative_uses_only_fixed_inputs(
             monkeypatch.setenv(name, "PRIVATE-SHOULD-NOT-BE-READ")
         else:
             monkeypatch.delenv(name, raising=False)
-    resolver = Mock(side_effect=AssertionError("Negative mode has no real GUID source"))
-    monkeypatch.setattr(probe, "_resolve_user_guid", resolver)
+
+    class EnvironmentWithoutHobenReads(dict):
+        def __getitem__(self, key):
+            assert not key.startswith("HOBEN_")
+            return super().__getitem__(key)
+
+        def get(self, key, default=None):
+            assert not key.startswith("HOBEN_")
+            return super().get(key, default)
+
+    monkeypatch.setattr(
+        probe.os, "environ", EnvironmentWithoutHobenReads(probe.os.environ)
+    )
     open_once = AsyncMock(wraps=probe.open_session_once)
     monkeypatch.setattr(probe, "open_session_once", open_once)
     streams.reader.read.return_value = b"\x0a" + OPENED + b"PRIVATE-AUTH"
@@ -70,7 +81,6 @@ def test_negative_uses_only_fixed_inputs(
         REQUEST,
         b"\x0b",
     ]
-    resolver.assert_not_called()
     streams.connect.assert_awaited_once()
     streams.writer.wait_closed.assert_awaited_once_with()
     public = output.out + output.err + caplog.text
@@ -78,7 +88,7 @@ def test_negative_uses_only_fixed_inputs(
         assert sensitive not in public
 
 
-@pytest.mark.parametrize("message_type", [0, 47, 255, None])
+@pytest.mark.parametrize("message_type", [0, 255, None])
 def test_negative_classifies_reply_or_eof_without_interpretation(
     streams, capsys, caplog, message_type
 ) -> None:
@@ -188,22 +198,28 @@ def test_negative_other_failures_are_redacted(
     assert output.err == ""
 
 
-def test_negative_does_not_unlock_real_session(streams, monkeypatch, capsys) -> None:
-    """Synthetic identifiers remain exclusive to the explicit negative mode."""
+@pytest.mark.parametrize("user_guid", [None, "PRIVATE-INVALID"])
+def test_negative_does_not_supply_real_session_inputs(
+    streams, monkeypatch, capsys, user_guid
+) -> None:
+    """A negative probe never creates/falls back to a UserGuid in the real mode."""
     for name in ("HOBEN_BUILD", "HOBEN_DEVICE_INFO"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOBEN_DEVICE_GUID", "PRIVATE-DEVICE")
-    monkeypatch.setenv("HOBEN_USER_GUID", "0" * 32)
+    if user_guid is None:
+        monkeypatch.delenv("HOBEN_USER_GUID", raising=False)
+    else:
+        monkeypatch.setenv("HOBEN_USER_GUID", user_guid)
     assert probe.main(["--session-negative"]) == 0  # Synthetic EOF observation.
     capsys.readouterr()
     streams.connect.reset_mock()
     streams.writer.write.reset_mock()
-    assert probe.main(["--session"]) == 3
+    assert probe.main(["--session"]) == 1
     assert json.loads(capsys.readouterr().out) == {
         "host": "myhoben.fr",
         "port": 465,
-        "state": "blocked",
-        "error": "user_guid_unresolved",
+        "state": "error",
+        "error": "invalid_session_inputs",
     }
     streams.connect.assert_not_awaited()
     streams.writer.write.assert_not_called()

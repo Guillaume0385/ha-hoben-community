@@ -7,9 +7,16 @@ from unittest.mock import AsyncMock, Mock, call
 import pytest
 
 from custom_components.hoben import session
-from custom_components.hoben.myhoben import decode_opened_client, encode_open_client
+from custom_components.hoben.myhoben import (
+    CloseClientReason,
+    decode_close_client,
+    decode_opened_client,
+    encode_open_client,
+)
 from custom_components.hoben.profiles import StoveProfile, select_stove_profile
 from custom_components.hoben.session import (
+    AuthorizationRequiredResult,
+    ClosedSessionResult,
     SessionProtocolError,
     SessionTimeout,
     UnexpectedMessageType,
@@ -28,15 +35,15 @@ OPENED = (
     b"ABCDabcdABCDabcdABCDabcdABCDabcd\x34\x12"
 )
 FIELDS = {
-    "user_guid": " Synthetic-Usér\t",
-    "device_guid": "Synthetic-device ",
+    "user_guid": "01234567-89AB-CDEF-0123-456789ABCDEF",
+    "device_guid": "00000000000000000000000000000000",
     "device_info": "Synthetic/模型/Android",
     "build": 0x1234,
 }
 
 
 def open_once(**overrides):
-    """Supply synthetic caller values unchanged to the public session API."""
+    """Supply synthetic first-client inputs to the public session API."""
     return open_session_once(AsyncTlsTransport(), **(FIELDS | overrides))
 
 
@@ -122,9 +129,9 @@ def test_profile_outcomes(streams, product_type, revision, major, profile) -> No
     streams.writer.close.assert_called_once_with()
 
 
-@pytest.mark.parametrize("message_type", [0, 3, 11, 14, 27, 47, 255])
+@pytest.mark.parametrize("message_type", [0, 3, 11, 14, 27, 255])
 def test_unexpected_type_is_numeric_only(streams, message_type, caplog) -> None:
-    """Unknown/pairing types stop before reading or interpreting their payload."""
+    """Unexpected types stop before reading or interpreting their payload."""
     streams.reader.read.side_effect = [
         bytes([message_type]) + b"SYNTHETIC-AUTH-CODE-AND-GUID",
         OPENED,
@@ -137,6 +144,84 @@ def test_unexpected_type_is_numeric_only(streams, message_type, caplog) -> None:
     assert "SYNTHETIC-AUTH" not in "".join(traceback.format_exception(caught.value))
     assert "SYNTHETIC-AUTH" not in caplog.text
     streams.reader.read.assert_awaited_once()
+    streams.writer.write.assert_called_once_with(encode_open_client(**FIELDS))
+    streams.writer.wait_closed.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [b"\x2f"],
+        [b"\x0a", b"\x2f\x0aPRIVATE-AUTH-GUID"],
+        [b"\x0a\x2f\x04PRIVATE-AUTH-GUID"],
+    ],
+)
+def test_authorization_required_stops_without_code(streams, chunks, caplog) -> None:
+    """0x2F ends observation, even with opaque bytes resembling another message."""
+    streams.reader.read.side_effect = chunks + [OPENED]
+    with caplog.at_level("DEBUG"):
+        result = asyncio.run(open_once())
+    assert isinstance(result, AuthorizationRequiredResult)
+    assert result.safe_report() == {
+        "state": "authorization_required",
+        "message_type": 47,
+    }
+    expected = [encode_open_client(**FIELDS)]
+    if chunks[0].startswith(b"\x0a"):
+        expected.append(b"\x0b")
+    assert [call.args[0] for call in streams.writer.write.call_args_list] == expected
+    assert streams.reader.read.await_count == len(chunks)
+    streams.writer.wait_closed.assert_awaited_once_with()
+    assert "PRIVATE" not in repr(result) + str(result.safe_report()) + caplog.text
+
+
+@pytest.mark.parametrize(
+    ("subcode", "reason"),
+    [
+        (2, CloseClientReason.INVALID_IDENTIFIER),
+        (3, CloseClientReason.STOVE_CONNECTION_REQUIRED),
+        (4, CloseClientReason.AUTHORIZATION_REJECTED),
+        (5, CloseClientReason.AUTHORIZATION_TIMEOUT),
+        (6, CloseClientReason.SERVER_MAINTENANCE),
+        (0, CloseClientReason.UNKNOWN),
+        (7, CloseClientReason.UNKNOWN),
+        (255, CloseClientReason.UNKNOWN),
+    ],
+)
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_close_client_is_structured_and_opaque(
+    streams, monkeypatch, caplog, subcode, reason, fragmented
+) -> None:
+    """A split subcode uses the shared decoder; unknown suffixes cannot cause Pong."""
+    response = bytes([5, subcode]) + b"\x0a\x2fPRIVATE-AUTH-GUID"
+    chunks = [response[:1], response[1:]] if fragmented else [response]
+    streams.reader.read.side_effect = [b"\x0a"] + chunks + [OPENED]
+    decoder = Mock(wraps=decode_close_client)
+    monkeypatch.setattr(session, "decode_close_client", decoder)
+    with caplog.at_level("DEBUG"):
+        result = asyncio.run(open_once())
+    assert isinstance(result, ClosedSessionResult)
+    assert result.reason is reason
+    assert result.safe_report() == {
+        "state": "closed",
+        "message_type": 5,
+        "reason": reason.value,
+    }
+    decoder.assert_called_once_with(bytes([5, subcode]))
+    assert [call.args[0] for call in streams.writer.write.call_args_list] == [
+        encode_open_client(**FIELDS),
+        b"\x0b",
+    ]
+    assert streams.reader.read.await_count == 1 + len(chunks)
+    streams.writer.wait_closed.assert_awaited_once_with()
+    assert "PRIVATE" not in repr(result) + str(result.safe_report()) + caplog.text
+
+
+def test_close_client_eof_without_subcode(streams) -> None:
+    """Observe an explicit CloseClient on EOF without inventing a reason/length."""
+    streams.reader.read.side_effect = [b"\x05", b""]
+    result = asyncio.run(open_once())
+    assert result == ClosedSessionResult(CloseClientReason.UNKNOWN)
     streams.writer.write.assert_called_once_with(encode_open_client(**FIELDS))
     streams.writer.wait_closed.assert_awaited_once_with()
 
@@ -176,7 +261,7 @@ def test_transport_timeout_closes(streams, deadlines, operation) -> None:
         streams.writer.wait_closed.assert_awaited_once_with()
 
 
-@pytest.mark.parametrize("pending_data", [b"\x0a", OPENED[:1]])
+@pytest.mark.parametrize("pending_data", [b"\x0a", OPENED[:1], b"\x05"])
 def test_overall_handshake_deadline(streams, deadlines, pending_data) -> None:
     """Neither endless Ping nor a stalled partial response can extend the deadline."""
 
@@ -230,6 +315,7 @@ def test_suffix_unclassified_and_report_redacted(streams, monkeypatch, caplog) -
     decoder.assert_called_once_with(OPENED)
     streams.writer.write.assert_called_once_with(encode_open_client(**FIELDS))
     assert result.safe_report() == {
+        "state": "opened",
         "message_type": 4,
         "product_type": 2,
         "product_revision": 0,
@@ -254,12 +340,19 @@ def test_invalid_prefix_closes_safely(streams) -> None:
     streams.writer.wait_closed.assert_awaited_once_with()
 
 
-@pytest.mark.parametrize("response", [OPENED, b"\x2fSYNTHETIC-PRIVATE"])
-def test_close_error_does_not_hide_protocol_outcome(streams, response) -> None:
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        (OPENED, TransportError),
+        (b"\x2fSYNTHETIC-PRIVATE", TransportError),
+        (b"\x05\x02SYNTHETIC-PRIVATE", TransportError),
+        (b"\xffSYNTHETIC-PRIVATE", UnexpectedMessageType),
+    ],
+)
+def test_close_error_does_not_hide_protocol_outcome(streams, response, error) -> None:
     """Report shutdown failure on success; preserve an earlier protocol failure."""
     streams.reader.read.return_value = response
     streams.writer.wait_closed.side_effect = OSError("SYNTHETIC-PRIVATE")
-    error = TransportError if response == OPENED else UnexpectedMessageType
     with pytest.raises(error):
         asyncio.run(open_once())
     streams.writer.transport.abort.assert_called_once_with()
@@ -270,6 +363,7 @@ def test_close_error_does_not_hide_protocol_outcome(streams, response) -> None:
     [
         {"build": -1},
         {"user_guid": b"SYNTHETIC-PRIVATE"},
+        {"user_guid": "SYNTHETIC-PRIVATE"},
         {"device_guid": "SYNTHETIC-PRIVATE\ud800"},
         {"handshake_timeout": 0},
         {"handshake_timeout": float("inf")},

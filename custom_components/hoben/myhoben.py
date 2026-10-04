@@ -1,4 +1,4 @@
-"""Pure MyHOBEN session codecs and Modbus framing (protocol.md §§2 and 4).
+"""Pure MyHOBEN session codecs and Modbus framing (protocol.md §§2, 4 and 5).
 
 Each helper handles one already-delimited message/frame or confirmed session prefix.
 MyHOBEN adds only a message-type byte, with no independent length field. Stream
@@ -6,14 +6,74 @@ buffering belongs to the session layer, not these helpers.
 For Modbus messages, the PDU remains opaque; MBAP validation uses its own codec.
 """
 
+import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from .modbus import decode_mbap
 
 OPEN_CLIENT = 0x03
 OPENED_CLIENT = 0x04
+CLOSE_CLIENT = 0x05
 DATA_REQUEST_CLIENT = 0x0D
 DATA_RESPONSE_CLIENT = 0x0E
+DEVICE_AUTH_REQ = 0x2F
+# Guid.Empty without dashes is the normal first-association client identity.
+INITIAL_DEVICE_GUID = "00000000000000000000000000000000"
+
+
+class CloseClientReason(StrEnum):
+    """Allowlisted meanings from protocol.md §5, never server-supplied text."""
+
+    INVALID_IDENTIFIER = "invalid_identifier"
+    STOVE_CONNECTION_REQUIRED = "stove_connection_required"
+    AUTHORIZATION_REJECTED = "authorization_rejected"
+    AUTHORIZATION_TIMEOUT = "authorization_timeout"
+    SERVER_MAINTENANCE = "server_maintenance"
+    UNKNOWN = "unknown"
+
+
+_CLOSE_CLIENT_REASONS = {
+    0x02: CloseClientReason.INVALID_IDENTIFIER,
+    0x03: CloseClientReason.STOVE_CONNECTION_REQUIRED,
+    0x04: CloseClientReason.AUTHORIZATION_REJECTED,
+    0x05: CloseClientReason.AUTHORIZATION_TIMEOUT,
+    0x06: CloseClientReason.SERVER_MAINTENANCE,
+}
+
+
+def normalize_user_guid(value: str) -> str:
+    """Validate an Identifiant HOBEN and return 32 lowercase ASCII hex digits.
+
+    Accept compact or canonical 8-4-4-4-12 GUID notation, without echoing inputs.
+    No assigned-identity or authentication claim follows from valid syntax.
+    """
+    if not isinstance(value, str):
+        raise TypeError("user_guid must be str")
+    if (
+        re.fullmatch(
+            r"[0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+            value,
+        )
+        is None
+    ):
+        raise ValueError("Invalid UserGuid format")
+    return value.replace("-", "").lower()
+
+
+def decode_close_client(message: bytes) -> CloseClientReason:
+    """Read only a documented 0x05 subcode; discard all other payload bytes.
+
+    Missing/unknown subcodes have no inferred meaning. The session layer may
+    supply a type-only prefix after EOF; this does not establish a frame length.
+    """
+    if not isinstance(message, bytes):
+        raise TypeError("message must be bytes")
+    if not message or message[0] != CLOSE_CLIENT:
+        raise ValueError("Expected CloseClient message type 0x05")
+    return _CLOSE_CLIENT_REASONS.get(
+        message[1] if len(message) >= 2 else None, CloseClientReason.UNKNOWN
+    )
 
 
 @dataclass(frozen=True)
@@ -33,8 +93,9 @@ def encode_open_client(
 ) -> bytes:
     """Encode 0x03 + UserGuid + 00 01 + UInt16-LE build + DeviceGuid + DeviceInfo.
 
-    All three strings are UTF-8 encoded exactly as supplied: their lengths and
-    formats are not established, so no normalization or separators are added.
+    UserGuid is validated/normalized to 32 ASCII hex digits (protocol.md §4).
+    DeviceGuid and DeviceInfo are UTF-8 encoded as supplied. First-client callers
+    use INITIAL_DEVICE_GUID; persistence of the returned DeviceGuid is separate.
     Raise TypeError for non-str fields and ValueError for a build outside UInt16
     or not an integer (including booleans). No identifier values enter errors.
     """
@@ -53,7 +114,7 @@ def encode_open_client(
         raise ValueError("build must be an integer between 0 and 65535")
     return (
         bytes([OPEN_CLIENT])
-        + user_guid.encode("utf-8")
+        + normalize_user_guid(user_guid).encode("ascii")
         + b"\x00\x01"
         + build.to_bytes(2, "little")
         + device_guid.encode("utf-8")

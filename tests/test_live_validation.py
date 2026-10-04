@@ -136,6 +136,7 @@ def test_negative_job_has_no_secret_or_environment(workflow) -> None:
     assert "secrets" not in source
     assert "hoben-live" not in source
     assert "HOBEN_DEVICE_GUID" not in source
+    assert "HOBEN_USER_GUID" not in source
     steps = job["steps"]
     checkout = next(
         s for s in steps if s.get("uses", "").startswith("actions/checkout@")
@@ -149,7 +150,7 @@ def test_negative_job_has_no_secret_or_environment(workflow) -> None:
     )
 
 
-def test_environment_and_only_device_secret(workflow) -> None:
+def test_environment_and_only_user_secret(workflow) -> None:
     """One environment secret is exposed only to the session probe step."""
     job = workflow["jobs"]["session-open"]
     assert job["environment"] == "hoben-live"
@@ -158,11 +159,16 @@ def test_environment_and_only_device_secret(workflow) -> None:
     assert len(secret_steps) == 1
     assert secret_steps[0]["id"] == "probe"
     assert secret_steps[0]["env"] == {
-        "HOBEN_DEVICE_GUID": "${{ secrets.HOBEN_DEVICE_GUID }}"
+        "HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"
     }
     assert "--session" in secret_steps[0]["run"]
     secret_references = re.findall(r"secrets\.([A-Z_]+)", LIVE_PATH.read_text())
-    assert secret_references == ["HOBEN_DEVICE_GUID"]
+    assert secret_references == ["HOBEN_USER_GUID"]
+    assert "HOBEN_DEVICE_GUID" not in LIVE_PATH.read_text()
+    # The workflow only injects the secret as an environment input to Python.
+    # No shell command/summary creates or interpolates the identifier.
+    for step in job["steps"]:
+        assert "HOBEN_USER_GUID" not in step.get("run", "")
 
 
 def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
@@ -203,13 +209,19 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
             "session-open",
             {"state": "opened", "profile": "unknown"},
             "success",
-            "success",
+            "observed",
         ),
         (
             "session-open",
-            {"state": "blocked", "error": "user_guid_unresolved"},
-            "failure",
-            "BLOCKED",
+            {"state": "authorization_required", "message_type": 47},
+            "success",
+            "observed",
+        ),
+        (
+            "session-open",
+            {"state": "closed", "message_type": 5, "reason": "invalid_identifier"},
+            "success",
+            "observed",
         ),
         (
             "session-open",
@@ -229,7 +241,28 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
             {
                 "state": "error",
                 "error": "unexpected_message_type",
+                "message_type": 255,
+                "observation": "informative",
+            },
+            "success",
+            "informative",
+        ),
+        (
+            "live-session-negative",
+            {
+                "state": "authorization_required",
                 "message_type": 47,
+                "observation": "informative",
+            },
+            "success",
+            "informative",
+        ),
+        (
+            "live-session-negative",
+            {
+                "state": "closed",
+                "message_type": 5,
+                "reason": "invalid_identifier",
                 "observation": "informative",
             },
             "success",
@@ -253,7 +286,7 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
 def test_actual_summary_preserves_only_sanitized_probe_json(
     workflow, tmp_path, job_name, report, outcome, expected
 ) -> None:
-    """Run the real summary shell, including the distinct BLOCKED warning."""
+    """Run the actual summary shell for observations, errors and missing output."""
     steps = workflow["jobs"][job_name]["steps"]
     summary = next(s for s in steps if s.get("name", "").startswith("Summarize"))
     assert summary["if"] == "${{ always() }}"
@@ -290,8 +323,8 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
     assert "Endpoint: myhoben.fr:465" in rendered
     if report is not None:
         assert json.dumps(report) in rendered
-    if expected == "BLOCKED":
-        assert "::warning::BLOCKED: user_guid_unresolved" in result.stdout
+    if job_name == "session-open":
+        assert "no authentication code requested or sent" in rendered
     assert "SYNTHETIC-PRIVATE" not in rendered + result.stdout + result.stderr
 
 

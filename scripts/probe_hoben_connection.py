@@ -1,9 +1,9 @@
 """Opt-in TLS/OpenClient validation. Importing this module never opens a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only, --session or --session-negative. Real session opening stays blocked
-until a UserGuid source is confirmed. The separate negative mode sends fixed,
-deliberately invalid synthetic identifiers and never reads HOBEN_* inputs.
+--tls-only, --session or --session-negative. A first-client session uses the
+Identifiant HOBEN and a normal initial zero DeviceGuid. Negative mode substitutes
+only a synthetic/unassigned UserGuid and never reads HOBEN_* inputs.
 """
 
 import argparse
@@ -17,6 +17,10 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from custom_components.hoben.myhoben import (  # noqa: E402
+    INITIAL_DEVICE_GUID,
+    normalize_user_guid,
+)
 from custom_components.hoben.session import (  # noqa: E402
     SessionProtocolError,
     SessionTimeout,
@@ -33,28 +37,13 @@ from custom_components.hoben.transport import (  # noqa: E402
     TransportTlsError,
 )
 
-# protocol.md §4 confirms the analyzed Android build, not a generic UserGuid.
+# protocol.md §4 confirms the analyzed Android build.
 DEFAULT_BUILD = 34
 # Stable implementation/test-client descriptor, NOT official MyHOBEN metadata.
 # Only the slash-separated shape is documented; infer no hidden field semantics.
 DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
-BLOCKED_EXIT_CODE = 3
-# Negative-test data only: neither valid GUIDs nor evidence of real GUID lengths.
-# These constants must never become defaults for the real --session path.
+# Syntactically valid, synthetic/unassigned identity; never a real-mode default.
 NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
-NEGATIVE_TEST_DEVICE_GUID = "00000000000000000000000000000000"
-
-
-def _resolve_user_guid() -> str | None:
-    """Fail closed until repository evidence establishes a valid UserGuid source.
-
-    protocol.md §4 and its history identify Stove.UserGuid as account/stove data;
-    neither a generic default nor derivation from DeviceGuid is documented.
-    An arbitrary HOBEN_USER_GUID environment value is not such evidence. There is
-    deliberately no CLI/env bypass. Enabling this needs evidence, docs and tests
-    in a future change; offline tests replace this resolver over fake streams.
-    """
-    return None
 
 
 class _SafeArgumentParser(argparse.ArgumentParser):
@@ -70,30 +59,22 @@ async def _probe(session: bool) -> dict[str, int | str]:
     """Validate inputs before connecting and return only allowlisted fields."""
     if session:
         try:
-            device_guid = os.environ["HOBEN_DEVICE_GUID"]
+            user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
             device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
             build = int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
-            if (
-                not device_guid.strip()
-                or not device_info.strip()
-                or not 0 <= build <= 65535
-            ):
+            if not device_info.strip() or not 0 <= build <= 65535:
                 raise ValueError
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
 
-        user_guid = _resolve_user_guid()
-        if not user_guid:
-            # No transport construction, DNS lookup, TLS connect or network write.
-            return {"state": "blocked", "error": "user_guid_unresolved"}
         result = await open_session_once(
             AsyncTlsTransport(),
             user_guid=user_guid,
             build=build,
-            device_guid=device_guid,
+            device_guid=INITIAL_DEVICE_GUID,
             device_info=device_info,
         )
-        return {"state": "opened", **result.safe_report()}
+        return result.safe_report()
 
     transport = AsyncTlsTransport()
     failed = True
@@ -121,10 +102,10 @@ async def _probe_negative() -> dict[str, int | str]:
         AsyncTlsTransport(),
         user_guid=NEGATIVE_TEST_USER_GUID,
         build=DEFAULT_BUILD,
-        device_guid=NEGATIVE_TEST_DEVICE_GUID,
+        device_guid=INITIAL_DEVICE_GUID,
         device_info=DEFAULT_DEVICE_INFO,
     )
-    return {"state": "opened", **result.safe_report()}
+    return result.safe_report()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,16 +117,19 @@ def main(argv: list[str] | None = None) -> int:
         "--session",
         action="store_true",
         help=(
-            "Prepare one OpenClient using HOBEN_DEVICE_GUID; HOBEN_BUILD defaults "
-            "to 34 and HOBEN_DEVICE_INFO to the documented test descriptor. "
-            "BLOCKED before connect until a UserGuid source is confirmed."
+            "Observe one first-client OpenClient using HOBEN_USER_GUID (Identifiant "
+            "HOBEN, with or without dashes) and an initial zero DeviceGuid; "
+            "HOBEN_BUILD defaults to 34 and HOBEN_DEVICE_INFO to the documented "
+            "test descriptor. "
+            "No authentication code is requested or sent."
         ),
     )
     mode.add_argument(
         "--session-negative",
         action="store_true",
         help=(
-            "Send one deliberately invalid synthetic OpenClient, observe and close. "
+            "Send one OpenClient with a synthetic/unassigned UserGuid and normal "
+            "initial zero DeviceGuid, observe and close. "
             "No secrets or HOBEN_* inputs; does not validate real authentication."
         ),
     )
@@ -186,7 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         report["mode"] = "session-negative"
         # An observed reply/EOF is informative, not successful authentication.
         # Timeouts, TLS/transport errors and malformed prefixes stay inconclusive.
-        informative = report["state"] == "opened" or report.get("error") in (
+        informative = report["state"] in (
+            "opened",
+            "authorization_required",
+            "closed",
+        ) or report.get("error") in (
             "unexpected_message_type",
             "eof",
         )
@@ -194,8 +182,6 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(report, sort_keys=True))
     if args.session_negative:
         return 0 if report["observation"] == "informative" else 1
-    if report["state"] == "blocked":
-        return BLOCKED_EXIT_CODE
     return 1 if report["state"] == "error" else 0
 
 

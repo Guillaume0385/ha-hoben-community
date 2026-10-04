@@ -11,12 +11,18 @@ from custom_components.hoben.modbus import (
     decode_read_response,
 )
 from custom_components.hoben.myhoben import (
+    CloseClientReason,
     OpenedClient,
+    decode_close_client,
     decode_data_response_client,
     decode_opened_client,
     encode_data_request_client,
     encode_open_client,
+    normalize_user_guid,
 )
+
+SYNTHETIC_USER_GUID = "0123456789abcdef0123456789abcdef"
+INITIAL_DEVICE_GUID = "00000000000000000000000000000000"
 
 # Literal complete 48-byte response, independent of any encoder or real capture.
 # Undocumented bytes are synthetic too; the four product/software bytes differ.
@@ -30,11 +36,15 @@ OPENED_CLIENT_MESSAGE = (
 def test_encode_open_client() -> None:
     """Check the complete wire bytes, including 34 12 and no length field."""
     message = encode_open_client(
-        "USER", 0x1234, "DEVICE", "Maker/Model/fr/Android/16/1080/2400/2.5/Portrait/0,0"
+        "01234567-89AB-CDEF-0123-456789ABCDEF",
+        0x1234,
+        INITIAL_DEVICE_GUID,
+        "Maker/Model/fr/Android/16/1080/2400/2.5/Portrait/0,0",
     )
     assert isinstance(message, bytes)
     assert message == (
-        b"\x03USER\x00\x01\x34\x12DEVICE"
+        b"\x030123456789abcdef0123456789abcdef\x00\x01\x34\x12"
+        b"00000000000000000000000000000000"
         b"Maker/Model/fr/Android/16/1080/2400/2.5/Portrait/0,0"
     )
 
@@ -42,31 +52,116 @@ def test_encode_open_client() -> None:
 @pytest.mark.parametrize(
     ("build", "expected"),
     [
-        (0, b"\x03USER\x00\x01\x00\x00DEVICEINFO"),
-        (0xFFFF, b"\x03USER\x00\x01\xff\xffDEVICEINFO"),
+        (0, b"\x00\x00"),
+        (0xFFFF, b"\xff\xff"),
     ],
 )
 def test_open_client_build_boundaries(build: int, expected: bytes) -> None:
     """Both ends of the UInt16 range occupy exactly two bytes."""
-    assert encode_open_client("USER", build, "DEVICE", "INFO") == expected
+    assert encode_open_client(
+        SYNTHETIC_USER_GUID, build, INITIAL_DEVICE_GUID, "INFO"
+    ) == (
+        b"\x030123456789abcdef0123456789abcdef\x00\x01"
+        + expected
+        + b"00000000000000000000000000000000INFO"
+    )
 
 
 def test_open_client_preserves_utf8() -> None:
-    """Keep case, whitespace and Unicode (including decomposed text) in all fields."""
-    assert encode_open_client(" Usér\t", 34, "dévice ", "Ma\u0301ker/模型") == (
-        b"\x03 Us\xc3\xa9r\t\x00\x01\x22\x00d\xc3\xa9vice "
-        b"Ma\xcc\x81ker/\xe6\xa8\xa1\xe5\x9e\x8b"
+    """Keep case, whitespace and Unicode (including decomposed text) in DeviceInfo."""
+    assert encode_open_client(
+        SYNTHETIC_USER_GUID, 34, INITIAL_DEVICE_GUID, " Ma\u0301ker/模型\t"
+    ) == (
+        b"\x030123456789abcdef0123456789abcdef\x00\x01\x22\x00"
+        b"00000000000000000000000000000000 "
+        b"Ma\xcc\x81ker/\xe6\xa8\xa1\xe5\x9e\x8b\t"
     )
 
 
-@pytest.mark.parametrize(("user_length", "device_length"), [(0, 0), (1, 2), (65, 40)])
-def test_open_client_has_no_identifier_length_policy(
-    user_length: int, device_length: int
-) -> None:
-    """Synthetic strings need no UUID format, fixed length or nonempty DeviceInfo."""
-    assert encode_open_client("U" * user_length, 34, "D" * device_length, "") == (
-        b"\x03" + b"U" * user_length + b"\x00\x01\x22\x00" + b"D" * device_length
-    )
+@pytest.mark.parametrize(
+    "value",
+    [
+        SYNTHETIC_USER_GUID,
+        SYNTHETIC_USER_GUID.upper(),
+        "01234567-89AB-CDEF-0123-456789ABCDEF",
+    ],
+)
+def test_normalize_user_guid(value) -> None:
+    """Both documented notations produce exactly 32 ASCII hex digits."""
+    normalized = normalize_user_guid(value)
+    assert normalized == SYNTHETIC_USER_GUID
+    assert len(normalized.encode("ascii")) == 32
+
+
+def test_zero_user_guid_has_valid_syntax() -> None:
+    """The negative identity is synthetic/unassigned, not syntactically malformed."""
+    assert normalize_user_guid("00000000-0000-0000-0000-000000000000") == "0" * 32
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "a" * 31,
+        "a" * 33,
+        "g" * 32,
+        "０" * 32,
+        "a" * 32 + "\n",
+        " " + SYNTHETIC_USER_GUID,
+        "{" + SYNTHETIC_USER_GUID + "}",
+        "012345678-9ab-cdef-0123-456789abcdef",
+        "SYNTHETIC-PRIVATE",
+    ],
+)
+def test_invalid_user_guid_is_not_encoded(value) -> None:
+    """No malformed GUID passes the shared codec or appears in its error."""
+    for operation in (
+        lambda: normalize_user_guid(value),
+        lambda: encode_open_client(value, 34, INITIAL_DEVICE_GUID, "INFO"),
+    ):
+        with pytest.raises(ValueError, match="^Invalid UserGuid format$"):
+            operation()
+
+
+@pytest.mark.parametrize("value", [None, 123, b"SYNTHETIC-PRIVATE"])
+def test_normalize_user_guid_requires_text(value) -> None:
+    """No coercion of binary/non-text identifiers."""
+    with pytest.raises(TypeError, match="^user_guid must be str$"):
+        normalize_user_guid(value)
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        (b"\x05\x02", CloseClientReason.INVALID_IDENTIFIER),
+        (b"\x05\x03", CloseClientReason.STOVE_CONNECTION_REQUIRED),
+        (b"\x05\x04", CloseClientReason.AUTHORIZATION_REJECTED),
+        (b"\x05\x05", CloseClientReason.AUTHORIZATION_TIMEOUT),
+        (b"\x05\x06", CloseClientReason.SERVER_MAINTENANCE),
+        (b"\x05\xff", CloseClientReason.UNKNOWN),
+        (b"\x05\x00", CloseClientReason.UNKNOWN),
+        (b"\x05", CloseClientReason.UNKNOWN),
+    ],
+)
+def test_close_client_reason(message, reason) -> None:
+    """Only the documented subcode is interpreted; absence remains unknown."""
+    assert decode_close_client(message) is reason
+    if len(message) >= 2:
+        assert decode_close_client(message + b"\x0aPRIVATE-AUTH-GUID") is reason
+
+
+@pytest.mark.parametrize("message", [b"", b"\x04\x02", b"\xffPRIVATE"])
+def test_close_client_requires_type(message) -> None:
+    """No arbitrary payload or other message becomes a closure reason."""
+    with pytest.raises(ValueError, match="^Expected CloseClient message type 0x05$"):
+        decode_close_client(message)
+
+
+@pytest.mark.parametrize("value", [None, "PRIVATE", bytearray(b"\x05\x02")])
+def test_close_client_requires_bytes(value) -> None:
+    """The pure decoder accepts only immutable bytes."""
+    with pytest.raises(TypeError, match="^message must be bytes$"):
+        decode_close_client(value)
 
 
 @pytest.mark.parametrize("build", [-1, 0x10000, True, False, 34.0, "34", None])
@@ -75,14 +170,18 @@ def test_open_client_invalid_build(build: object) -> None:
     with pytest.raises(
         ValueError, match="build must be an integer between 0 and 65535"
     ):
-        encode_open_client("USER", build, "DEVICE", "INFO")
+        encode_open_client(SYNTHETIC_USER_GUID, build, INITIAL_DEVICE_GUID, "INFO")
 
 
 @pytest.mark.parametrize("field", ["user_guid", "device_guid", "device_info"])
 @pytest.mark.parametrize("value", [b"SYNTHETIC", bytearray(b"SYNTHETIC"), None, 123])
 def test_open_client_requires_strings(field: str, value: object) -> None:
     """Each string argument rejects binary data and other non-str values."""
-    fields = {"user_guid": "USER", "device_guid": "DEVICE", "device_info": "INFO"}
+    fields = {
+        "user_guid": SYNTHETIC_USER_GUID,
+        "device_guid": INITIAL_DEVICE_GUID,
+        "device_info": "INFO",
+    }
     fields[field] = value
     with pytest.raises(TypeError, match=f"{field} must be str"):
         encode_open_client(build=34, **fields)
