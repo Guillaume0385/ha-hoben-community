@@ -40,6 +40,11 @@ finally:
     await client.async_close()
 ```
 
+Le build **34** et le descripteur communautaire historique **`GitHubActions`**
+sont les défauts du client. `DEFAULT_BUILD` et `DEFAULT_DEVICE_INFO` sont définis
+une seule fois dans `client.py` et partagés avec les sondes. La suite
+`--live-premerge` utilise directement ces défauts, comme le futur appelant HA.
+
 Le constructeur normalise l'Identifiant HOBEN en 32 caractères hexadécimaux
 minuscules sans tirets. Sans DeviceGuid persisté, il utilise les **32 zéros ASCII**
 initiaux. Une valeur fournie est validée avant le réseau : exactement 32 octets
@@ -184,6 +189,8 @@ python scripts/probe_hoben_connection.py --live-premerge
 
 Cette suite fixe ignore les surcharges exploratoires, ne prend aucun argument
 libre d'hôte/fonction/registre et n'installe aucune dépendance candidate. Elle
+construit le client sans surcharge de `build` ni `device_info` pour valider
+réellement ses valeurs par défaut destinées au futur usage HA. Elle
 utilise **le même HobenClient pour deux rafraîchissements séquentiels**. Le premier
 part du DeviceGuid nul et adopte une identité attribuée ; le second la réutilise
 automatiquement. Chacun ouvre un **nouveau** TLS vérifié vers `myhoben.fr:465` →
@@ -412,8 +419,11 @@ Le DeviceInfo par défaut reste exactement :
 ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0
 ```
 
-C'est le descripteur de notre client de test, pas une valeur extraite de MyHOBEN
-ni un format obligatoire du serveur au-delà de la structure documentée.
+C'est le descripteur communautaire partagé par `HobenClient` et les sondes,
+centralisé dans `custom_components/hoben/client.py`. Son nom historique
+`GitHubActions` est conservé, y compris pour le futur usage HA. Il ne s'agit pas
+d'une valeur extraite de MyHOBEN ni d'un format obligatoire du serveur au-delà
+de la structure documentée.
 
 Exemple Bash avec saisie masquée, sans identifiant dans l'historique ou les
 arguments du processus (ne pas activer `set -x`) :

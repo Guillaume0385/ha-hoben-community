@@ -224,6 +224,13 @@ coordinator: `HobenClient(user_guid, device_guid=None)`, `async_refresh()` and
 idempotent `async_close()`. It contains no HA objects/imports and stays inside
 `custom_components/hoben/` until a later extraction to `pyhoben`.
 
+`DEFAULT_BUILD` (34) and `DEFAULT_DEVICE_INFO` are defined once in `client.py`
+and shared with the exploratory probes. The default DeviceInfo retains the
+documented historical community `GitHubActions` descriptor. The fixed live suite
+does not pass build/DeviceInfo overrides, so it exercises the same defaults the
+future HA caller will use. Offline regressions pin the documented default packet
+and forbid the live suite from substituting exploratory probe settings.
+
 The client owns a private normalized UserGuid and a private, in-memory,
 persistable DeviceGuid. Without a persisted identity it starts with
 `INITIAL_DEVICE_GUID` (32 ASCII zeroes). A supplied identity is validated before

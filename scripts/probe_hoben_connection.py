@@ -18,7 +18,11 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from custom_components.hoben.client import HobenClient  # noqa: E402
+from custom_components.hoben.client import (  # noqa: E402
+    DEFAULT_BUILD,
+    DEFAULT_DEVICE_INFO,
+    HobenClient,
+)
 from custom_components.hoben.exceptions import (  # noqa: E402
     HobenError,
     HobenProtocolError,
@@ -48,11 +52,6 @@ from custom_components.hoben.v4_read import (  # noqa: E402
     open_and_read_v4_once,
 )
 
-# protocol.md §4 confirms the analyzed Android build.
-DEFAULT_BUILD = 34
-# Stable implementation/test-client descriptor, NOT official MyHOBEN metadata.
-# Only the slash-separated shape is documented; infer no hidden field semantics.
-DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
 # Syntactically valid, synthetic/unassigned identity; never a real-mode default.
 NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
 
@@ -73,20 +72,6 @@ async def _probe(
     if session or read_v4_state or live_premerge:
         try:
             user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
-            # The MANAGER suite accepts only the credential: even non-secret
-            # exploratory overrides must not change the reviewed fixed suite.
-            device_info = (
-                DEFAULT_DEVICE_INFO
-                if live_premerge
-                else os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
-            )
-            build = (
-                DEFAULT_BUILD
-                if live_premerge
-                else int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
-            )
-            if not device_info.strip() or not 0 <= build <= 65535:
-                raise ValueError
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
 
@@ -94,12 +79,9 @@ async def _probe(
             # Exercise the public client, not a parallel handshake/read path.
             # Exactly two refreshes/transports: retries are tested offline and
             # disabled here so a transient failure cannot pass the fixed suite.
-            client = HobenClient(
-                user_guid=user_guid,
-                build=build,
-                device_info=device_info,
-                max_attempts=1,
-            )
+            # Exercise the same build/DeviceInfo defaults as the future HA caller.
+            # Only the credential is read; no exploratory override is consulted.
+            client = HobenClient(user_guid=user_guid, max_attempts=1)
             try:
                 await client.async_refresh()
                 if not client.has_assigned_device_guid:
@@ -114,6 +96,14 @@ async def _probe(
                 }
             finally:
                 await client.async_close()
+
+        try:
+            device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
+            build = int(os.environ.get("HOBEN_BUILD", str(DEFAULT_BUILD)))
+            if not device_info.strip() or not 0 <= build <= 65535:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Missing or invalid session inputs") from None
 
         operation = open_and_read_v4_once if read_v4_state else open_session_once
         result = await operation(

@@ -118,9 +118,9 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
         READ_REQUEST,
     ]
-    client_factory.assert_called_once()
-    assert "device_guid" not in client_factory.call_args.kwargs
-    assert client_factory.call_args.kwargs["max_attempts"] == 1
+    client_factory.assert_called_once_with(
+        user_guid=USER_GUID.replace("-", "").lower(), max_attempts=1
+    )
     legacy.assert_not_called()
     assert streams.connect.await_count == 2
     for call in streams.connect.call_args_list:
@@ -137,6 +137,35 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         "PRIVATE",
     ):
         assert sensitive not in output.out + output.err + caplog.text
+
+
+def test_live_premerge_uses_client_defaults_without_probe_overrides(
+    streams, monkeypatch, capsys
+):
+    """Local probe settings cannot silently substitute the live client's defaults."""
+    monkeypatch.setattr(probe, "DEFAULT_DEVICE_INFO", "Synthetic/ProbeOverride")
+    monkeypatch.setattr(probe, "DEFAULT_BUILD", 1)
+    client_factory = Mock(wraps=probe.HobenClient)
+    monkeypatch.setattr(probe, "HobenClient", client_factory)
+    streams.reader.read.side_effect = [
+        OPENED,
+        response([0] * 20),
+        OPENED,
+        response([65535] * 20),
+    ]
+    assert probe.main(["--live-premerge"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["state"] == "client_refresh_validated"
+    client_factory.assert_called_once_with(
+        user_guid=USER_GUID.replace("-", "").lower(), max_attempts=1
+    )
+    assert [c.args[0] for c in streams.writer.write.call_args_list] == [
+        OPEN_REQUEST,
+        READ_REQUEST,
+        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
+        READ_REQUEST,
+    ]
+    assert streams.connect.await_count == streams.writer.wait_closed.await_count == 2
 
 
 @pytest.mark.parametrize(

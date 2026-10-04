@@ -40,8 +40,11 @@ from .session import (
 from .transport import AsyncTlsTransport, TransportError, TransportTimeout
 from .v4_read import V4ReadProtocolError, V4ReadTimeout, _read_v4
 
-_DEFAULT_BUILD = 34
-_DEFAULT_DEVICE_INFO = "ha-hoben-community/HobenClient/en/Python/Linux/0/0/1/0/0,0"
+# protocol.md §4 confirms the analyzed Android build.
+DEFAULT_BUILD = 34
+# Keep the documented community descriptor shared with the exploratory probes.
+# It is not official MyHOBEN metadata; only its slash-separated shape is known.
+DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
 _MAX_RETRY_DELAY = 30.0
 
 
@@ -118,8 +121,8 @@ class HobenClient:
         retry_delay: float = 1.0,
         handshake_timeout: float = 30.0,
         read_timeout: float = 30.0,
-        build: int = _DEFAULT_BUILD,
-        device_info: str = _DEFAULT_DEVICE_INFO,
+        build: int = DEFAULT_BUILD,
+        device_info: str = DEFAULT_DEVICE_INFO,
     ) -> None:
         # Validate every field before constructing a transport. Codec validation
         # remains shared with the legacy helpers; its temporary packet is unused.

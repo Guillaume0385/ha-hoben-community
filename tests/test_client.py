@@ -160,6 +160,16 @@ def test_first_refresh_normalizes_identity_and_returns_immutable_raw_snapshot(tl
     assert kwargs["ssl"].check_hostname is True
 
 
+def test_default_client_uses_documented_stable_device_info(tls):
+    """The coordinator-facing default must send the documented community identity."""
+    client = HobenClient(user_guid=USER_GUID)
+    asyncio.run(client.async_refresh())
+    descriptor = b"ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
+    assert emitted(tls.pairs[0])[0] == OPEN_REQUEST[:69] + descriptor
+    assert client_module.DEFAULT_DEVICE_INFO == descriptor.decode()
+    assert_cleanup(tls)
+
+
 @pytest.mark.parametrize(
     "device_guid", [DEVICE_GUID, "\x00 \taZz!\x7f" * 4, " " * 32, "Z" * 32]
 )
