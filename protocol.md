@@ -670,9 +670,149 @@ Le décodeur vérifie le MBAP, extrait le Transaction ID, puis convertit les reg
 
 ---
 
-## 8. Registres V6/V6v16 utiles pour Home Assistant
+## 8. Registres applicatifs et formatage des valeurs
 
-### Zone applicative (lecture, base 1024)
+### V4 — 20 registres 1024..1043 — CONFIRMÉ statiquement
+
+L'analyse complémentaire de `HobenCore.dll` et `HobenApp.dll` de MyHOBEN
+2.2 build 34 permet maintenant de relier les 20 registres lus par le profil V4
+aux propriétés affichées par l'application. Cette cartographie est distincte de
+celle V6/V6v16.
+
+| Adresse | Nom HOBEN V4 | Format / interprétation MyHOBEN |
+|---:|---|---|
+| 1024 | `erarMode_ConsigneMarchArret` | octet haut = mode V4 ; octet bas = marche/arrêt |
+| 1025 | `erarTemperatureDerogation` | Int16 signé, affichage en °C après division par 10 |
+| 1026 | `erarTempoStartDerogation` | temporisation de début en minutes |
+| 1027 | `erarDureeDerogation` | durée en minutes |
+| 1028 | `erarModeVentilation` | 0 Normal, 1 Silence, 2 Boost |
+| 1029 | `erarDefautsCombustion` | code de défaut V4 |
+| 1030 | `erarPuissance_Etat` | octet haut = puissance en %, octet bas = état V4 |
+| 1031 | `erarTemperatureAmbianteOffseted` | température ambiante principale, Int16 / 10 °C |
+| 1032 | `erarConsigneTemperatureEC` | température de consigne affichée, Int16 / 10 °C |
+| 1033 | `erarModeVentilEC_ConsignePMaxEC` | champ combiné déclaré ; non recopié par `UpdateApplicatif` V4 dans ce build |
+| 1034 | `erarWarnings` | bitmap de warnings |
+| 1035 | `erarInformations` | bitmap d'informations/états |
+| 1036 | `erarAnnee_Mois` | date poêle empaquetée |
+| 1037 | `erarJourSemaineJourMois_Heures` | jour/date/heure empaquetés |
+| 1038 | `erarMinutes_Secondes` | minutes/secondes empaquetées |
+| 1039 | `erarTemperatureAmbianteConv` | température ambiante filaire/convertie, Int16 / 10 °C |
+| 1040 | `erarTemperatureComburantConv` | température air comburant, Int16 / 10 °C |
+| 1041 | `erarTemperatureFumeeConv` | température fumées, Int16 / 10 °C |
+| 1042 | `erarPVIConv` | valeur PVI ; l'interface possède un affichage en mV, mais ce champ n'est pas recopié par `UpdateApplicatif` V4 analysé |
+| 1043 | `erarTemperatureRFConv` | température ambiante RF, Int16 / 10 °C |
+
+Les registres arrivent comme des UInt16 Modbus big-endian. Pour les températures,
+MyHOBEN réinterprète la valeur 16 bits comme **Int16 signé**, puis son convertisseur
+d'affichage applique **valeur / 10**. Le facteur `0,1 °C` est donc maintenant
+**confirmé statiquement pour V4**. Le convertisseur traite `0x0FFF` / 4095 comme
+une température indisponible et affiche `-.-°C`. Pour la consigne principale,
+l'interface masque également les valeurs brutes inférieures à 50.
+
+Les captures MyHOBEN fournies le 2026-10-04 montrent **23,5 °C** en température
+ambiante et **19,0 °C** en consigne. Elles sont cohérentes avec des valeurs brutes
+235 et 190 selon ce convertisseur, mais aucune capture brute simultanée n'a encore
+été enregistrée : ces nombres ne doivent donc pas être présentés comme des valeurs
+de registre observées en production.
+
+#### V4 — marche/arrêt et mode dans le registre 1024
+
+`erarMode_ConsigneMarchArret` est un champ combiné :
+
+```text
+bits 15..8 : mode V4
+bits  7..0 : OnOff
+```
+
+Décodage du mode observé dans MyHOBEN V4 :
+
+| Octet mode | Mode affiché |
+|---:|---|
+| 0 | Automatic |
+| 1 | Magasin |
+| 2 | Manuel |
+| autre | Automatic par défaut |
+
+L'octet bas porte la valeur logique marche/arrêt 0/1.
+
+#### V4 — puissance et état dans le registre 1030
+
+`erarPuissance_Etat` est également combiné :
+
+```text
+bits 15..8 : puissance 0..100 %
+bits  7..0 : état V4
+```
+
+La puissance est utilisée directement comme pourcentage ; l'interface ramène à
+0 une valeur supérieure à 100.
+
+Le profil V4 utilise son propre décodage d'état :
+
+| Octet état V4 | État MyHOBEN |
+|---:|---|
+| 0 | Arrêt |
+| 1 | Fin de combustion |
+| 2 | Démarrage standard |
+| 3 | Démarrage blackout |
+| 4 | Stabilisation |
+| 5 | Gestion combustion |
+| autre | Arrêt par défaut |
+
+Ce mapping V4 ne doit pas être remplacé par les valeurs numériques de
+`EOperationState` documentées plus bas.
+
+#### V4 — dérogation et unités
+
+Pour V4, les registres 1025-1027 ont maintenant une unité établie par le code de
+l'application :
+
+- 1025 : température de dérogation en dixièmes de degré ; l'UI évolue par pas de
+  5 unités brutes = **0,5 °C**, avec une plage utilisateur **5,0 à 30,0 °C** ;
+- 1026 : temporisation de début en **minutes** ; l'application l'utilise pour
+  calculer l'heure de début relativement à l'heure courante ;
+- 1027 : durée en **minutes** ; l'UI évolue par pas de **15 minutes**, avec un
+  maximum de **1440 minutes / 24 h**.
+
+Attention à l'écran « Mode dérogation » : lorsque la dérogation n'est ni active
+ni programmée, les valeurs visibles sont des **valeurs locales de préparation de
+l'interface**, pas une preuve du contenu de 1025-1027. Dans la capture fournie,
+l'application reprend la consigne courante (19,0 °C), l'heure courante (16:16) et
+une durée locale par défaut de 180 minutes (03:00).
+
+L'interrupteur d'activation est dérivé du registre 1035 `erarInformations` :
+
+- bit 5 / masque `0x0020` : dérogation active ;
+- bit 6 / masque `0x0040` : dérogation programmée.
+
+L'interface considère la dérogation activée si l'un de ces deux indicateurs est
+présent.
+
+Le même bitmap contient aussi des états liés notamment aux vacances, hors-gel,
+anti-vent, anti-condensation, arrêt externe, cycle de nettoyage, anticipation,
+démarrage à chaud et fenêtre ouverte. Les positions exactes de tous ces indicateurs
+ne sont pas encore consignées ici et ne doivent pas être devinées.
+
+#### V4 — warnings, défauts et PVI
+
+Le registre 1034 est un bitmap de warnings. Les libellés retrouvés dans
+l'application couvrent notamment les sondes RF/TA/TC/PVI, une température fumées
+élevée, un conduit bouché et une entrée d'air bouchée. La correspondance exacte
+bit par bit doit être extraite/testée avant création d'entités diagnostiques.
+
+Le registre 1029 porte un **code de défaut**, pas un bitmap. La table V4 de
+l'application contient notamment les valeurs `360`, `362`, `364`, `365`,
+`366`, `370` et `372`, avec des libellés liés aux fumées, pressostat,
+thermostat, timeout d'allumage, conduit bouché et entrée d'air bouchée. La
+correspondance code → libellé doit rester documentée comme incomplète tant que
+l'association exacte de chaque code n'a pas été revue.
+
+Le registre 1042 `erarPVIConv` dispose d'un convertisseur d'affichage en
+**millivolts** dans l'application, mais `UpdateApplicatif` V4 ne le copie pas
+dans la propriété publique utilisée par l'écran analysé. Il ne doit donc pas
+encore être exposé comme mesure V4 fiable.
+
+### V6/V6v16 — zone applicative (lecture, base 1024)
 
 | Adresse | Nom HOBEN | Utilité HA |
 |---:|---|---|
@@ -771,7 +911,11 @@ Le modèle objet HOBEN expose au minimum :
 - défaut sondes 1/2
 - défaut moteur
 
-### États de fonctionnement — CONFIRMÉ
+### États de fonctionnement génériques — CONFIRMÉ
+
+`EOperationState` expose les états du modèle objet commun. **Le profil V4 ne
+place pas directement ces numéros dans son octet d'état** : utiliser la table V4
+du registre 1030 en §8 pour les 20 registres applicatifs V4.
 
 `EOperationState` :
 
@@ -811,11 +955,21 @@ Le modèle objet HOBEN expose au minimum :
 | 1 | Silence |
 | 2 | Boost |
 
-### Températures — IMPORTANT
+### Températures — formatage par profil
 
-Dans `HobenCore`, les températures applicatives sont lues comme **Int16 signé** (`ReadTempKey`). Il n'y a pas de division par 10 dans cette routine de décodage.
+Dans `HobenCore`, les températures applicatives sont lues comme **Int16 signé**
+(`ReadTempKey`). Cette routine conserve la valeur brute ; la conversion physique
+peut donc être appliquée plus haut dans l'application.
 
-**À VALIDER sur une trame Osmose réelle :** unité finale utilisée par les registres (°C direct, dixième de degré, ou format HOBEN spécifique). L'intégration ne doit pas supposer une échelle avant comparaison entre une valeur brute et la température affichée par MyHOBEN.
+Pour **V4**, l'analyse de `HobenApp.dll` confirme que le convertisseur d'affichage
+utilisé par MyHOBEN applique **Int16 / 10**, soit une résolution de **0,1 °C**.
+La valeur `4095 / 0x0FFF` est traitée comme indisponible par l'affichage. Cette
+règle s'applique aux températures V4 identifiées en §8, notamment ambiance,
+consigne, dérogation, air comburant, fumées et RF.
+
+Pour **V6/V6v16**, ne pas généraliser automatiquement ce facteur tant que le
+chemin d'affichage correspondant n'a pas été établi ou confirmé sur une capture
+réelle.
 
 ---
 
@@ -861,9 +1015,15 @@ V6/V6v16 :
 
 V4 :
 
-- Register : **1281 / `0x0501`**.
+- Register : **1281 / `0x0501`** ;
+- l'UI MyHOBEN travaille en dixièmes de degré : **190 = 19,0 °C** ;
+- pas utilisateur observé : **5 unités = 0,5 °C** ;
+- plage UI observée : **50..300 = 5,0..30,0 °C**.
 
-**À VALIDER : échelle de température** sur une capture réelle. Ne pas activer une écriture `climate.set_temperature` tant que le facteur brut ↔ °C n'a pas été vérifié.
+Le facteur V4 est confirmé statiquement par le chemin d'affichage/édition de
+MyHOBEN. Une écriture réelle reste toutefois interdite tant que la phase de
+contrôle prévue par `project.md` n'a pas été atteinte et validée par lecture de
+retour. Pour V6/V6v16, l'échelle d'écriture reste à valider séparément.
 
 ### 10.3 Temporisation de dérogation
 
@@ -876,17 +1036,25 @@ V6/V6v16 :
 - Nom : `erawTempoStartDerogation`
 - Valeur : UInt16.
 
-V4 : registre **1282**.
+V4 : registre **1282**. MyHOBEN l'interprète en **minutes** pour calculer le
+début de dérogation relativement à l'heure courante.
 
-L'unité exacte (minutes/secondes ou format horaire interne) est **À VALIDER** avant exposition comme service HA.
+Pour V6/V6v16, l'unité reste **À VALIDER** avant exposition comme service HA.
 
 ### 10.4 Durée de dérogation
 
-Registre V6/V6v16 :
+V4 :
+
+- **1283 / `0x0503`** ;
+- unité MyHOBEN : **minutes** ;
+- pas UI : **15 minutes** ;
+- maximum UI : **1440 minutes / 24 h**.
+
+V6/V6v16 :
 
 - **1285 / `0x0505`** = `erawDureeDerogation`.
 
-Présent dans la cartographie d'écriture. L'unité est à valider dynamiquement.
+Pour V6/V6v16, l'unité reste à valider dynamiquement.
 
 ### 10.5 Mode ventilation
 
@@ -1215,12 +1383,15 @@ session :
    reste à établir ;
 2. **association réelle** : déterminer comment le code demandé par MyHOBEN est
    présenté/généré et confirmer la séquence `2F → 30 + code → 04` ;
-3. **signification des 20 registres V4 bruts** : deux lectures ont réussi le
-   2026-10-04 sur l'Osmose de référence, avec réutilisation du DeviceGuid attribué
-   sur la seconde connexion (§4), mais aucune cartographie sémantique V4 n'en
-   découle ;
-4. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
-5. **unité des temporisations/durées de dérogation** ;
+3. **validation dynamique de la cartographie V4 désormais connue statiquement** :
+   capturer de façon expurgée une lecture 1024..1043 pendant un affichage MyHOBEN
+   comparable, afin de confirmer sur le serveur/poêle réel le facteur 0,1 °C,
+   puissance/état, mode et ventilation sans publier d'identifiant ;
+4. **bitmaps V4 incomplets** : terminer la correspondance bit par bit de
+   `erarWarnings` et `erarInformations`, ainsi que la table exacte code →
+   libellé de `erarDefautsCombustion` ;
+5. **champs V4 encore partiels** : préciser le packing date/heure 1036-1038 et
+   la sémantique réellement exploitable de 1033 et 1042 ;
 6. contenu des **4 octets de métadonnées de `DataUpdated`**.
 
 Les deux premières validations concernent l'ouverture/association du client
@@ -1359,6 +1530,21 @@ FF FF    transaction ID
 - Unit ID 1 ;
 - fonctions Modbus 03/04/06/16/22 ;
 - lecture V6 : fonction 04, 1024, 110 registres ;
+- cartographie V4 des 20 registres 1024..1043 dans `UpdateApplicatif` ;
+- champs V4 combinés 1024 (mode + marche/arrêt) et 1030 (puissance + état) ;
+- températures V4 interprétées en Int16 et affichées avec un facteur /10 ;
+- ventilation V4 0/1/2 = Normal/Silence/Boost ;
+- dérogation V4 : température en dixièmes de degré, temporisation/durée en minutes ;
+- bits 5/6 de `erarInformations` pour dérogation active/programmée ;
+- valeur température indisponible `0x0FFF` dans le convertisseur d'affichage V4.
+
+### Observé dans l'interface MyHOBEN fournie
+
+- affichage 23,5 °C en température ambiante et 19,0 °C en consigne le 2026-10-04,
+  cohérent avec le format V4 /10 mais sans capture brute simultanée ;
+- écran de dérogation inactif affichant 19,0 °C, l'heure courante et 03:00 :
+  ces valeurs sont des valeurs locales de préparation lorsque les bits
+  active/programmée sont absents, pas une lecture prouvée de 1025-1027.
 
 ### Confirmé dynamiquement en production
 
@@ -1373,6 +1559,8 @@ FF FF    transaction ID
 - test négatif précédemment observé avec UserGuid synthétique nul : `CloseClient 05 02`,
   `invalid_identifier`.
 
-La signification des 20 registres V4 reste à valider séparément ; aucune
-sémantique V4 n'est ajoutée. La réutilisation observée du DeviceGuid ne permet pas
-de généraliser ce comportement à tous les modèles Hoben.
+La cartographie et le formatage des 20 registres V4 sont maintenant établis
+statiquement dans §8, mais une capture brute simultanée avec l'interface reste
+nécessaire pour transformer ces correspondances en validation dynamique du
+poêle réel. La réutilisation observée du DeviceGuid ne permet pas de généraliser
+ce comportement à tous les modèles Hoben.

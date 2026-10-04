@@ -91,9 +91,12 @@ Validation objectives on the real Osmose:
 
 - select the profile dynamically: the reference Osmose was confirmed as V4 on
   2026-10-04, without generalizing to all Osmose units;
-- validate one raw V4 application read before assigning any register semantics;
-- confirm raw-to-physical temperature conversion;
-- confirm main state/power decoding;
+- the raw V4 application read is already validated; implement the statically
+  recovered 1024..1043 semantic decoder in a dedicated, tested profile layer;
+- confirm on one sanitized live sample that the documented V4 temperature
+  conversion (Int16 / 10 °C) matches the simultaneous MyHOBEN display;
+- confirm the documented V4 packed state/power, mode and ventilation decoding
+  against one real raw sample;
 - observe and document `DataUpdated` metadata;
 - generate sanitized regression fixtures.
 
@@ -151,8 +154,8 @@ Goal: move from a personal working integration to a community-quality HACS proje
 Planned functionality:
 
 - additional Hoben models/profiles based on community diagnostics;
-- V4 support where sufficiently validated;
-- V6/V6v16 mapping refinements;
+- additional V4 models/variants and edge cases beyond the reference Osmose;
+- V6/V6v16 mapping refinements and support where sufficiently validated;
 - graceful unknown-profile diagnostics;
 - expanded fault/warning decoding;
 - historical counters/statistics where useful;
@@ -217,7 +220,34 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — Home Assistant config flow and raw coordinator
+### Current increment — typed V4 semantic decoder
+
+The next protocol increment is a **Home Assistant-independent V4 semantic
+decoder** layered above the existing raw `RawStoveSnapshot`. It must decode the
+20 application registers 1024..1043 only where `protocol.md` currently provides
+a sufficiently established meaning, without moving transport/session concerns
+into the profile layer.
+
+This increment must at minimum:
+
+- decode V4 temperatures as signed Int16 values with the documented **/10 °C**
+  conversion and handle the `0x0FFF` unavailable sentinel;
+- decode register 1024 as packed mode + OnOff;
+- decode register 1030 as packed power + V4 operation state;
+- decode register 1028 ventilation as Normal / Silence / Boost;
+- expose the established derogation values/units while keeping write/control
+  behavior out of scope;
+- leave warnings, combustion-fault labels, date/time packing, PVI and other
+  partially established fields raw/partial until their mappings are complete;
+- add deterministic unit tests for every implemented conversion and boundary;
+- remain independent from Home Assistant entities so the decoder can later move
+  cleanly into `pyhoben`.
+
+No Home Assistant sensor/entity may consume these physical values until a
+sanitized simultaneous raw-register/MyHOBEN UI comparison has validated the
+decoder on the reference Osmose. This increment remains **read-only**.
+
+### DONE — Home Assistant config flow and raw coordinator
 
 Issue #23 adds the first functional HA runtime layer over the completed client.
 The UI accepts one sensitive **Identifiant HOBEN**, validates it with the existing
@@ -303,7 +333,11 @@ identity → one raw application read → validate response → close. Only V4 i
 implemented: FFFF, unit 1, function 04, address 1024, quantity 20. UNKNOWN and
 other profiles fail with typed errors. `RawStoveSnapshot` is immutable and holds
 exactly 20 raw UInt16 registers plus public product/software/profile metadata,
-with no GUID, raw packet or session object. No V4 meaning/unit is assigned.
+with no GUID, raw packet or session object. The **client still exposes raw values
+by design**, while `protocol.md` now documents the V4 1024..1043 semantics and
+formatting recovered from MyHOBEN. A dedicated V4 semantic decoder is the next
+protocol layer; the raw transport/client model must not be overloaded with UI
+conversion logic.
 
 The client shares `_open_session()` and the V4 exchange primitives instead of
 duplicating frames. Existing `open_session_once()` and
@@ -329,8 +363,9 @@ documented server-closure, unsupported-profile, protocol, Modbus, transport,
 timeout, retry-exhaustion and closed-client failures. Repr, diagnostics and
 errors never contain identities, caller descriptions or server payloads. The
 last accepted profile and last successful snapshot are retained in memory.
-No pairing, file persistence, HA setup/entities, semantic decoding or control
-belongs to this increment.
+No pairing, file persistence, HA semantic entities or control belongs to this
+completed client increment. Static V4 semantics are now documented separately;
+their implementation belongs to the next dedicated decoder increment.
 
 The opt-in probe keeps TLS-only, session-open, synthetic negative and exploratory
 `read-v4-state` modes. The fixed MANAGER-approved `--live-premerge` path now uses
@@ -342,7 +377,10 @@ credential remains the sole input. Offline CI precedes exact-HEAD MANAGER review
 The MANAGER run for PR #22 confirmed identity reuse across two fresh TLS sessions
 and two successful 20-register raw V4 reads on the reference Osmose on 2026-10-04.
 The lifecycle is **DONE**; `protocol.md` records the reviewed SHA and sanitized
-successful run. This does not establish V4 register semantics or all-model support.
+successful run. This live run did not itself establish V4 register semantics; those semantics
+were subsequently recovered statically from MyHOBEN and are documented in
+`protocol.md`. A real raw/display comparison is still required before treating
+the decoder as dynamically validated. This does not establish all-model support.
 
 ### Layer 1 — transport
 
@@ -607,16 +645,20 @@ classifies the actual response without requiring any particular server outcome.
 Neither PR label can reach `read-v4-state`. All live modes remain opt-in, with
 no automatic trigger or retry for the V4 read. These lanes stay separate from
 deterministic/offline `Validate` CI. HA persistence and raw polling are the current
-increment; further pairing and semantic interpretation require separate reviews.
+increment. The next small protocol increment is a typed V4 decoder based on the
+documented 1024..1043 map, with deterministic tests before any entities consume
+physical values.
 
-Real-device validation is important for unknown protocol semantics, especially:
+Real-device validation is important for the remaining unknown or statically
+derived protocol semantics, especially:
 
 - first-association behavior with a real HOBEN identifier and an initial zero DeviceGuid;
 - origin/presentation of the authentication code and the live `0x2F → 0x30 → 0x04` sequence;
 - reuse of the server-assigned DeviceGuid on a subsequent connection;
-- temperature scaling;
-- timing units;
-- profile identity;
+- one simultaneous raw V4/UI comparison to validate the documented /10 °C,
+  packed state/power, mode and ventilation mappings;
+- exact V4 warning/information bits and combustion-fault code labels;
+- packing of V4 date/time fields and practical meaning of 1033/1042;
 - DataUpdated metadata;
 - exact visible effect of writes;
 - real reconnection behavior.
