@@ -181,8 +181,11 @@ Use deterministic fixtures and protocol simulations for:
 - function 22 mask-write when implemented;
 - `DataResponseClient` parsing;
 - `DataUpdated` parsing;
-- signed temperature/register conversions;
+- signed temperature/register conversions, including V4 Int16 / 10 °C and
+  unavailable sentinels documented in `protocol.md`;
+- V4 packed high/low-byte state/power and mode/on-off decoding;
 - state/mode/ventilation enum decoding;
+- V4 derogation minute units and active/programmed information bits;
 - reconnects, timeouts and server disconnects;
 - unknown message types and unknown product profiles;
 - Modbus exception responses;
@@ -197,8 +200,10 @@ A real Hoben Osmose is extremely useful, but **real-stove tests must be opt-in/m
 Use the real stove for:
 
 - validating the actual stove profile returned by `OpenedClient`;
-- confirming temperature scale and units;
-- confirming derogation timing units;
+- confirming the **statically recovered** V4 register map and /10 °C conversion
+  against simultaneous raw values and the MyHOBEN display;
+- confirming real behavior of the documented V4 derogation timing before any
+  write/control exposure;
 - validating `DataUpdated` metadata;
 - validating that write commands produce the expected user-visible result;
 - checking reconnection behavior against the real service;

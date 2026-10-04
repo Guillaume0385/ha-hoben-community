@@ -118,9 +118,15 @@ Le résultat immuable `RawStoveSnapshot` contient `profile`, `registers` (tuple 
 session ou trame brute, même via `asdict()`. Son rapport sûr conserve seulement
 les métadonnées et le nombre de registres. `client.profile` conserve le dernier
 profil accepté ; `client.last_snapshot` conserve le dernier rafraîchissement
-réussi. Aucune température, puissance, échelle ou autre sémantique V4 n'est
-encore attribuée. V4 est sélectionné dynamiquement ; les autres profils échouent
-explicitement, sans supposer que tous les Osmose sont V4.
+réussi. `RawStoveSnapshot` reste volontairement **brut** : il ne transforme
+pas encore ces UInt16 en propriétés physiques. En revanche, `protocol.md`
+documente maintenant la cartographie V4 1024..1043 extraite de MyHOBEN :
+températures en Int16 / 10 °C, puissance/état et mode/marche-arrêt empaquetés,
+ventilation 0/1/2 et temporisations de dérogation en minutes. Le prochain
+increment protocolaire doit implémenter ce décodage dans une couche V4 dédiée,
+avec tests, sans le mélanger au transport/client. V4 reste sélectionné
+dynamiquement ; les autres profils échouent explicitement, sans supposer que
+tous les Osmose sont V4.
 
 Chaque tentative ouvre un TLS vérifié vers `myhoben.fr:465`, effectue OpenClient,
 valide OpenedClient puis une seule lecture **04 / FFFF / unité 1 / adresse 1024 /
@@ -620,9 +626,13 @@ ce schéma de réussite (**valeurs illustratives synthétiques**) :
 }
 ```
 
-Les registres sont des **UInt16 bruts** dans l'ordre reçu. Aucune température,
-puissance, échelle, mode ou signification V4 n'est attribuée. Leur sémantique
-sera examinée séparément après la première observation réelle sur `main`.
+Les registres sont toujours exportés par cette sonde comme **UInt16 bruts** dans
+l'ordre reçu : la sonde ne fait volontairement aucun décodage sémantique. La
+sémantique V4 est toutefois maintenant documentée dans `protocol.md` après
+analyse de MyHOBEN 2.2 build 34. En particulier, 1031 est la température ambiante,
+1032 la consigne, 1030 contient puissance+état, et les températures V4 utilisent
+un format Int16 en dixièmes de degré. Cette séparation permet de conserver la
+sonde comme outil brut de validation du futur décodeur.
 Une exception Modbus correspondante donne `state: "modbus_exception"` et le
 `exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
 Les refus après OpenedClient donnent `read_not_attempted` et une raison
@@ -637,6 +647,25 @@ d'association ou dump d'environnement n'entre dans les logs, résumés ou artefa
 Le job conserve ce JSON dans **`live-v4-read-output`**, y compris en cas d'échec.
 Ce mode n'ajoute ni écriture (06/16/22, transaction `0xFFF0`), ni DeviceAuthRes,
 ni polling, reconnexion, client persistant ou contrôle du poêle.
+
+## Format des principales données V4
+
+La cartographie détaillée et les niveaux de confiance sont dans
+[protocol.md](protocol.md). Pour le profil V4 du poêle de référence, l'analyse de
+MyHOBEN établit notamment :
+
+- registre 1031 : température ambiante principale, Int16 / 10 °C ;
+- registre 1032 : consigne de température, Int16 / 10 °C ;
+- registre 1030 : octet haut = puissance %, octet bas = état V4 ;
+- registre 1024 : octet haut = mode V4, octet bas = marche/arrêt ;
+- registre 1028 : ventilation 0 Normal, 1 Silence, 2 Boost ;
+- registres 1025-1027 : dérogation, avec température en dixièmes de degré et
+  temporisation/durée en minutes.
+
+Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. Les
+captures d'écran 23,5 °C / 19,0 °C sont cohérentes avec le facteur /10, mais
+aucune valeur brute simultanée n'a encore été publiée : une validation réelle
+expurgée reste prévue avant exposition des entités physiques.
 
 ## Licence
 
