@@ -1,0 +1,93 @@
+name: Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Live validation mode
+        required: true
+        type: choice
+        default: tls-only
+        options:
+          - tls-only
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  live-validation:
+    # Only the newly added label opts in; an existing label never authorizes a push.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'live-validation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Label-triggered validation stays TLS-only, independently of future inputs.
+      LIVE_MODE: ${{ github.event_name == 'pull_request' && 'tls-only' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Diagnostic header
+        run: |
+          printf 'Runner OS: %s\n' "$RUNNER_OS"
+          python --version
+          printf '%s\n' 'Endpoint: myhoben.fr:465'
+
+      - name: Run selected live probe
+        id: probe
+        run: |
+          # Extend the choice list and explicit cases in future read-only PRs.
+          # Setup, output preservation and reporting stay shared between modes.
+          case "$LIVE_MODE" in
+            tls-only)
+              printf '%s\n' 'Mode: tls-only'
+              # Bash pipefail preserves failure while tee retains sanitized JSON.
+              python scripts/probe_hoben_connection.py --tls-only | tee "$RUNNER_TEMP/live-validation.json"
+              ;;
+            *)
+              printf '%s\n' 'Unsupported live validation mode.' >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Summarize live validation
+        if: ${{ always() }}
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=failure
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=success
+          fi
+          {
+            printf '%s\n' '## Live Hoben validation'
+            printf '\nMode: %s\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$LIVE_MODE" "$result"
+            if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
+              printf '\nProbe output (sanitized JSON):\n\n```json\n'
+              cat "$RUNNER_TEMP/live-validation.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable (probe did not complete).\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-validation-output
+          path: ${{ runner.temp }}/live-validation.json
+          if-no-files-found: ignore

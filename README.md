@@ -47,6 +47,39 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
+### Live Validation sur GitHub Actions
+
+Le workflow [Live Validation](.github/workflows/live-validation.yml) est
+**opt-in**, avec deux déclenchements explicites :
+
+- **Avant fusion :** ajouter le label exact `live-validation` à la PR. Seul
+  l'événement `pull_request` de type `labeled` pour ce label autorise le job,
+  toujours en mode `tls-only`. Retirer puis réajouter ce label permet une nouvelle
+  validation volontaire. L'ajout d'un autre label, l'ouverture de la PR et les
+  nouveaux commits (`synchronize` ou push) ne lancent pas la sonde, même si le
+  label `live-validation` reste présent.
+- **Usage normal :** une fois le workflow présent sur `main`, utiliser
+  **Actions → Live Validation → Run workflow** (`workflow_dispatch`). Choisir
+  `tls-only`, seule option disponible et valeur par défaut.
+
+La CI normale `Validate` reste déterministe et hors ligne vis-à-vis de Hoben.
+Live Validation est indépendante des contrôles ordinaires des PR. Pour la PR
+qui introduit ce workflow, le MANAGER déclenchera la validation par label et
+vérifiera le succès TLS réel avant de décider de sa fusion.
+
+Sur `ubuntu-latest` avec Python 3.12, il exécute uniquement
+`python scripts/probe_hoben_connection.py --tls-only` : une connexion TLS vérifiée
+à `myhoben.fr:465`, puis fermeture, sans identifiant, secret ni dépendance externe.
+Aucun OpenClient, Modbus, appairage, contrôle ou retry automatique n'est effectué.
+Le JSON expurgé reste dans les logs, le résumé du job et l'artefact
+`live-validation-output`, y compris lorsque la sonde échoue ; son échec fait
+échouer le job. Aucun prédiagnostic DNS/TCP supplémentaire n'est ajouté.
+
+Le choix de mode et son aiguillage explicite permettront d'ajouter progressivement
+des validations en lecture seule, dans des PR dédiées et revues, en conservant
+la préparation et les rapports communs. Aucun mode de session n'est disponible
+dans ce workflow.
+
 ## Sonde manuelle TLS / OpenClient
 
 Cette validation de développement est **strictement volontaire**, indépendante
