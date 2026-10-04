@@ -5,7 +5,7 @@
 **Date de l'analyse :** 30 septembre 2026, approfondie le 4 octobre 2026  
 **Statut :** rétro-ingénierie statique de l'application officielle ; aucune commande n'a été envoyée au poêle pendant l'analyse.
 
-> Cette documentation est non officielle. Les informations marquées **CONFIRMÉ** proviennent directement du code IL de MyHOBEN/HobenCore. Les éléments **À VALIDER** sont ceux qui nécessitent une capture réelle sur un poêle afin de confirmer la sémantique ou l'unité. Pour une première intégration Home Assistant, le mode lecture seule est recommandé par défaut.
+> Cette documentation est non officielle. Les informations marquées **CONFIRMÉ** proviennent directement du code IL de MyHOBEN/HobenCore, sauf mention explicite d'une confirmation dynamique en production. Les éléments **À VALIDER** sont ceux qui nécessitent une capture réelle sur un poêle afin de confirmer la sémantique ou l'unité. Pour une première intégration Home Assistant, le mode lecture seule est recommandé par défaut.
 >
 > **Rôle de ce fichier :** `protocol.md` décrit ce qui est techniquement connu du protocole. La roadmap, l'architecture du projet et le calendrier d'exposition des fonctionnalités sont définis dans `project.md`, qui prévaut en cas d'ambiguïté sur ces sujets. La présence d'une commande ou d'un registre dans ce document ne signifie donc pas qu'il doit être exposé immédiatement dans Home Assistant.
 
@@ -349,6 +349,37 @@ la sélection et n'est pas journalisé.
 
 Le plugin Home Assistant doit donc **attendre `OpenedClient` et sélectionner dynamiquement la cartographie**, plutôt que supposer que l'Osmose est V6/V6v16.
 
+### Session de l'Osmose de référence — CONFIRMÉ dynamiquement le 2026-10-04
+
+Une observation réelle contre **`myhoben.fr:465`**, avec TLS vérifié et
+l'Identifiant HOBEN configuré, a reçu `OpenedClient (0x04)` après un OpenClient
+de première connexion. Les seules métadonnées publiques retenues sont :
+
+| Champ | Valeur observée |
+|---|---:|
+| `product_type` | 5 |
+| `product_revision` | 0 |
+| `software_major` | 8 |
+| `software_minor` | 2 |
+| `application_version` | 512 |
+| profil sélectionné dynamiquement | `v4` |
+| `unclassified_bytes` déjà reçus | 0 |
+
+Le **Hoben Osmose de référence s'identifie actuellement comme V4**. Cette
+observation ne classe pas tous les Osmose comme V4 et ne prouve pas une longueur
+totale universelle d'OpenedClient. La fixture de régression
+`tests/fixtures/opened_client_v4_production_2026_10_04.json` contient uniquement
+ces métadonnées expurgées : aucun UserGuid, DeviceGuid, secret ou octet de capture
+réelle. Les tests utilisent un préfixe binaire indépendant et entièrement
+synthétique pour vérifier la sélection et les offsets.
+
+Le nouveau chemin ponctuel de lecture V4 doit refuser la lecture si cette
+première observation comporte un suffixe non classifié, même s'il ressemble à
+un autre message. Il exige exactement V4 et ne continue après aucune demande
+d'autorisation, fermeture ou ouverture malformée. La lecture applicative réelle
+reste à valider manuellement sur `main` après revue/fusion ; cette observation
+confirme seulement l'ouverture et le profil, sans sémantique de registre V4.
+
 ---
 
 ## 5. Association / autorisation d'un nouveau client
@@ -407,9 +438,12 @@ situations :
 | `05 05` | délai d'authentification dépassé |
 | `05 06` | serveur en maintenance |
 
-Ces correspondances viennent du code de l'application. Leur comportement exact
-sur le serveur de production actuel reste à confirmer par un test réel
-non destructif.
+Ces correspondances viennent du code de l'application. **`05 02` →
+`invalid_identifier` a aussi été confirmé dynamiquement en production** contre
+`myhoben.fr:465` lors du test négatif avec un UserGuid synthétique/non attribué
+de 32 zéros et le DeviceGuid initial normal de 32 zéros. Aucun identifiant réel
+n'est publié. Les autres sous-codes restent confirmés statiquement seulement ;
+leur comportement exact sur le serveur actuel reste à valider.
 
 ### Flux de première association déduit du code — CONFIRMÉ statiquement / À VALIDER dynamiquement
 
@@ -537,7 +571,8 @@ Une réponse d'exception contient exactement **deux octets** :
 Le codec représente cette réponse séparément d'une réponse normale et conserve
 le code fonction original (`03` ou `04`) ainsi que le code d'exception UInt8 brut.
 Les deux types de réponse conservent les Transaction ID et Unit ID du MBAP ;
-la corrélation avec une requête relève du futur client stateful.
+la corrélation avec une requête relève de l'opération cliente, notamment de
+`open_and_read_v4_once()` pour cette lecture ponctuelle.
 Ces règles sont celles de Modbus et n'ajoutent aucun fait spécifique à Hoben.
 
 ### Écriture simple — fonction 06
@@ -1152,22 +1187,24 @@ précisément la première connexion. Les validations dynamiques restantes doive
 être réalisées sans commande de chauffage et en commençant par l'ouverture de
 session :
 
-1. **réponse du serveur à un UserGuid réel + DeviceGuid initial nul** : confirmer
-   si le premier retour est `DeviceAuthReq (0x2F)`, `OpenedClient (0x04)` ou
-   un `CloseClient` documenté ;
+1. **frontière complète d'OpenedClient** : l'ouverture réelle avec UserGuid
+   configuré et DeviceGuid initial nul a reçu `0x04` le 2026-10-04, sans suffixe
+   déjà reçu ; la longueur totale universelle, dont un suffixe arrivant plus tard,
+   reste à établir ;
 2. **association réelle** : déterminer comment le code demandé par MyHOBEN est
    présenté/généré et confirmer la séquence `2F → 30 + code → 04` ;
 3. **DeviceGuid attribué** : confirmer qu'un `OpenedClient` réussi fournit une
    valeur réutilisable et qu'une connexion suivante avec cette valeur n'exige
    plus l'association ;
-4. **profil retourné par l'Osmose** (`StoveV6` ou `StoveV6v16`) via les
-   champs de `OpenedClient` ;
+4. **première lecture applicative V4 réelle**, puis signification de ses 20
+   registres bruts : le profil V4 de l'Osmose de référence est confirmé via
+   OpenedClient, mais aucune cartographie sémantique V4 n'en découle ;
 5. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
 6. **unité des temporisations/durées de dérogation** ;
 7. contenu des **4 octets de métadonnées de `DataUpdated`**.
 
-Les trois premières validations concernent uniquement l'authentification du
-client et peuvent être réalisées sans requête Modbus ni commande du poêle.
+Les trois premières validations concernent l'ouverture/association du client
+et peuvent être réalisées sans requête Modbus ni commande du poêle.
 Toute capture destinée au dépôt doit être anonymisée avant publication.
 
 
@@ -1175,9 +1212,11 @@ Toute capture destinée au dépôt doit être anonymisée avant publication.
 
 ## 17. Séquence minimale pour un prototype lecture seule
 
-La sonde manuelle présente sur `main` ne met pas encore en œuvre tout le flux
-d'association décrit ci-dessous. Elle doit rester ponctuelle, expurgée et sans
-lecture Modbus tant que l'ouverture de session réelle n'a pas été validée.
+La sonde ne met pas encore en œuvre tout le flux d'association décrit ci-dessous.
+`session-open` reste une observation ponctuelle sans Modbus. Après l'ouverture
+V4 confirmée, `read-v4-state` prépare une seule lecture brute documentée (§7),
+à lancer volontairement depuis `main` après revue/fusion, puis fermeture.
+Il ne met pas en œuvre la boucle de lecture ni les entités proposées ci-dessous.
 
 ### Première association d'un client
 
@@ -1300,3 +1339,15 @@ FF FF    transaction ID
 - Unit ID 1 ;
 - fonctions Modbus 03/04/06/16/22 ;
 - lecture V6 : fonction 04, 1024, 110 registres ;
+
+### Confirmé dynamiquement en production
+
+- réception d'OpenedClient sur l'Osmose de référence le 2026-10-04 : type 5, révision 0,
+  logiciel 8.2, version application 512, profil sélectionné V4 ;
+- zéro octet non classifié déjà reçu après le préfixe, sans preuve d'une longueur
+  totale universelle d'OpenedClient ;
+- test négatif précédemment observé avec UserGuid synthétique nul : `CloseClient 05 02`,
+  `invalid_identifier`.
+
+La réponse à la lecture applicative V4 réelle et la signification de ses
+20 registres restent à valider séparément ; aucune sémantique V4 n'est ajoutée.

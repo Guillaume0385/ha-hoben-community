@@ -89,7 +89,9 @@ Planned functionality:
 
 Validation objectives on the real Osmose:
 
-- identify V6 vs V6v16 profile;
+- select the profile dynamically: the reference Osmose was confirmed as V4 on
+  2026-10-04, without generalizing to all Osmose units;
+- validate one raw V4 application read before assigning any register semantics;
 - confirm raw-to-physical temperature conversion;
 - confirm main state/power decoding;
 - observe and document `DataUpdated` metadata;
@@ -215,7 +217,7 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — one-shot connection validation
+### Current increment — one-shot session and raw V4 read validation
 
 `transport.py` implements layer 1 as verified, timeout-bounded async TLS byte
 streams, without MyHOBEN interpretation or Home Assistant imports. `session.py`
@@ -225,8 +227,8 @@ profile selection, or returns typed authorization/closure observations, then
 closes on every outcome. Its safe report omits identifiers and opaque payloads.
 
 The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only, first-client
-session-open and secret-free negative validation. The full OpenedClient boundary
-still remains unresolved. Static APK
+session-open, secret-free negative validation and opt-in `read-v4-state`.
+The full OpenedClient boundary still remains unresolved. Static APK
 analysis now establishes the identity lifecycle used by MyHOBEN: the user enters
 or scans the HOBEN identifier, it is sent as a 32-character UserGuid without
 dashes, a new client starts with a DeviceGuid of 32 zero characters, and a
@@ -249,6 +251,27 @@ unexpected message reports only its numeric type. No polling, automatic
 reconnect, long-lived client, Home Assistant setup/entities or stove controls
 belong to this increment. The broader responsibilities below remain roadmap
 goals.
+
+The staged progression is now **session-open → one V4 read → semantic validation**.
+The real session observation on 2026-10-04 confirmed product type 5/revision 0,
+software 8.2, application version 512, selected profile V4 and zero already-read
+unclassified bytes. A sanitized metadata fixture records it without identifiers
+or a raw capture. The prior production negative observation `05 02` with a
+synthetic zero UserGuid is documented as `invalid_identifier`.
+
+`v4_read.py` adds `open_and_read_v4_once()`, independent of Home Assistant. It
+shares the internal handshake primitive without changing `open_session_once()`
+into a persistent client. Only a successful V4 OpenedClient with no already-read
+unclassified suffix permits the fixed documented read (FFFF, unit 1, function 04,
+address 1024, quantity 20). It buffers one MBAP-delimited response, answers leading
+Ping, validates correlation and exactly 20 raw UInt16 registers or a numeric
+Modbus exception, rejects buffered trailing bytes, then closes on every outcome.
+The full OpenedClient boundary remains unresolved, including suffixes arriving
+later. No V4 register meaning, pairing, persistence, write or control is added.
+
+The PR is validated offline only. After merge to protected main, the
+manager/user manually runs `read-v4-state`; the resulting 20 raw registers must
+be reviewed separately before any V4 semantics or Home Assistant entities.
 
 ### Layer 1 — transport
 
@@ -424,7 +447,8 @@ The simulator is preferred over a live stove for CI because it is deterministic,
 The Hoben Osmose should be used as an opt-in validation environment, not a CI dependency.
 
 The dedicated `Live Validation` GitHub Actions workflow is explicitly opt-in:
-`workflow_dispatch` offers `tls-only` or real `session-open`, the latter only on
+`workflow_dispatch` offers `tls-only`, real `session-open` or `read-v4-state`,
+the latter two only on
 `refs/heads/main` with the `hoben-live` environment. Before adding its sole Hoben
 secret `HOBEN_USER_GUID`, mandatory PR review must protect main and the environment
 must independently allow exactly Branch `main`, without other branches or tags.
@@ -437,8 +461,10 @@ with no secret or environment. Only `pull_request: labeled` is eligible. Existin
 labels never authorize runs on new commits, push or synchronize; removing and
 re-adding the chosen label requests another observation. The negative probe
 classifies the actual response without requiring any particular server outcome.
-These lanes stay separate from deterministic/offline `Validate` CI. Further
-pairing, persistence and read-only modes require separate reviewed increments.
+Neither PR label can reach `read-v4-state`. All live modes remain opt-in, with
+no automatic trigger or retry for the V4 read. These lanes stay separate from
+deterministic/offline `Validate` CI. Further pairing, persistence, semantic
+interpretation and polling require separate reviewed increments.
 
 Real-device validation is important for unknown protocol semantics, especially:
 

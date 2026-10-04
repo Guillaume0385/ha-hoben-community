@@ -10,8 +10,9 @@ Home Assistant ou HACS.
 
 La version `0.0.1` reste un **socle de développement**, sans fonctionnalité
 utilisable dans Home Assistant : aucun flux de configuration ni entité.
-Une sonde manuelle permet maintenant de préparer le premier test TLS puis
-OpenClient. Elle observe la première réponse puis ferme, sans lire de registre.
+Une sonde manuelle permet de valider TLS puis OpenClient. Un mode opt-in dédié
+prépare maintenant une seule lecture de 20 registres V4 bruts, sans interprétation
+ni entité Home Assistant. Le mode `session-open` reste une observation sans lecture.
 Elle suit l'identification confirmée dans MyHOBEN 2.2 build 34 : Identifiant HOBEN
 normalisé en UserGuid, DeviceGuid initial nul et observation possible d'une demande
 d'autorisation ou d'un rejet documenté. Aucun code d'authentification n'est envoyé.
@@ -60,10 +61,11 @@ Le workflow [Live Validation](.github/workflows/live-validation.yml) est
 - **Test négatif avant fusion :** ajouter le label exact
   **`live-session-negative`**. Le job séparé exécute le commit de tête de la PR,
   sans secret GitHub ni environnement `hoben-live`. Les deux labels sont
-  indépendants ; aucun ne peut lancer le vrai `session-open`.
+  indépendants ; aucun ne peut lancer `session-open` ou `read-v4-state`.
 - **Usage manuel :** une fois le workflow présent sur `main`, utiliser
   **Actions → Live Validation → Run workflow** (`workflow_dispatch`). Choisir
-  `tls-only` (défaut) ou `session-open`. Ce dernier exige la référence
+  `tls-only` (défaut), `session-open` ou `read-v4-state`. Les deux derniers
+  exigent la référence
   `github.ref == 'refs/heads/main'` : les autres branches et les tags sont exclus.
 
 L'ouverture d'une PR, un push ou `synchronize` ne lance aucun test live, même
@@ -74,10 +76,12 @@ ligne vis-à-vis de Hoben, indépendante de ces jobs.
 Les jobs utilisent Python 3.12 sur `ubuntu-latest`, les seules permissions
 `contents: read` et un checkout avec `persist-credentials: false`. Le job
 `tls-only` ouvre une connexion TLS vérifiée à `myhoben.fr:465` puis ferme,
-sans identifiant ni message MyHOBEN. Les deux modes de session exécutent :
+sans identifiant ni message MyHOBEN. `session-open` et `session-negative` exécutent :
 TLS → un OpenClient → Pong si nécessaire → observation → fermeture.
-Aucun polling, Modbus, code d'authentification, contrôle du poêle ou retry
-automatique n'est envoyé.
+Ces deux modes de session n'envoient aucune requête Modbus. Le mode séparé
+`read-v4-state` ajoute exactement une lecture applicative V4 après ouverture
+validée. Aucun polling, code d'authentification, contrôle ou retry automatique
+n'est ajouté.
 
 Le job **`live-session-negative`** utilise exactement :
 
@@ -101,7 +105,8 @@ transport, préfixe malformé ou autre échec donnent `observation: "inconclusiv
 et le code **1**. Le résumé et l'artefact **`live-session-negative-output`**
 conservent uniquement le rapport expurgé, y compris en cas d'échec.
 
-Le vrai job **`session-open`** utilise l'environnement **`hoben-live`** et
+Les vrais jobs **`session-open`** et **`read-v4-state`** utilisent l'environnement
+**`hoben-live`** et
 l'unique secret Hoben **`HOBEN_USER_GUID`**, l'Identifiant HOBEN réel.
 
 **Prérequis de sécurité obligatoires, avant tout ajout du secret :**
@@ -141,11 +146,11 @@ Résultat requis : `protected: true`, politique `protected_branches: false` /
 `{ "name": "main", "type": "branch" }`. Vérifier aussi les règles actives de
 `main` : revue de PR obligatoire, sans contournement pour les comptes concernés.
 Une politique absente, une branche non protégée ou une lecture impossible laisse
-le prérequis **non validé** : ne pas ajouter le secret ni lancer `session-open`.
+le prérequis **non validé** : ne pas ajouter le secret ni lancer ces deux modes.
 Les tests YAML hors ligne ne prouvent pas ces réglages distants.
 
 Le workflow ne crée ni n'affiche le UserGuid. Le secret n'est injecté que dans
-l'environnement de l'étape Python du vrai job, jamais dans un argument, le job
+l'environnement de l'étape Python de chaque job réel, jamais dans un argument, le job
 négatif ou la CI normale. Le DeviceGuid initial est construit par le programme.
 Le résumé `session-open` distingue `observed` (réponse classée) et `failure` ;
 le JSON précise le résultat, sans assimiler une autorisation demandée ou un rejet
@@ -176,7 +181,7 @@ Pour le test négatif distinct, sans secret et sans validation d'authentificatio
 python scripts/probe_hoben_connection.py --session-negative
 ```
 
-Les trois modes CLI sont mutuellement exclusifs. Pour **une première connexion
+Les quatre modes CLI sont mutuellement exclusifs. Pour **une première connexion
 avec `--session`**, les paramètres sont :
 
 | Paramètre | Source / défaut |
@@ -194,11 +199,12 @@ est refusée **avant création du transport**, sans connexion réseau. Le nom us
 du poêle n'entre pas dans OpenClient. Le UserGuid est un secret d'association,
 même s'il est accessible ou imprimé pour l'utilisateur.
 
-`--session` ne lit ni n'exige `HOBEN_DEVICE_GUID`. Le DeviceGuid initial correspond
+`--session` et `--read-v4-state` ne lisent ni n'exigent `HOBEN_DEVICE_GUID`.
+Le DeviceGuid initial correspond
 à `Guid.Empty` sans tirets. Après une association/ouverture réussie, le DeviceGuid
 renvoyé dans `OpenedClient[14:46]` est destiné à être persisté puis réutilisé,
-comme le fait MyHOBEN. Cette sonde de première connexion s'arrête à l'observation :
-elle ne persiste ni n'exporte cet identifiant.
+comme le fait MyHOBEN. `--session` s'arrête à cette observation. Aucun de ces deux
+modes ne persiste ni n'exporte le DeviceGuid reçu.
 
 Le build 34 correspond à MyHOBEN Android 2.2 analysé dans `protocol.md`.
 Le DeviceInfo par défaut reste exactement :
@@ -266,6 +272,78 @@ device_info=...)` possède le cycle connexion/fermeture et retourne un
 Utiliser `safe_report()` pour les diagnostics ; ne pas exporter l'objet complet
 avec `dataclasses.asdict()`, car le codec OpenedClient conserve le DeviceGuid.
 Ces modules n'importent pas Home Assistant.
+
+### Une lecture V4 brute, après revue et fusion sur main
+
+L'observation réelle du **4 octobre 2026** a confirmé dynamiquement le profil
+**V4** du Hoben Osmose de référence : type produit 5, révision 0, logiciel 8.2,
+version application 512 et `unclassified_bytes: 0`. Cela ne classe pas tous les
+Osmose comme V4 et ne prouve pas la longueur totale universelle d'OpenedClient.
+
+Après fusion sur `main` protégé, le responsable/utilisateur peut lancer
+**Actions → Live Validation → read-v4-state**, avec l'environnement `hoben-live`
+et le seul secret `HOBEN_USER_GUID` déjà protégé comme pour `session-open`.
+**Ne pas exécuter cette lecture réelle depuis une branche de développement.**
+Les tests de la PR sont entièrement simulés et hors ligne. La commande du job,
+réservée à cette validation volontaire depuis le code revu, est :
+
+```sh
+python scripts/probe_hoben_connection.py --read-v4-state
+```
+
+Le module protocolaire `v4_read.py` possède le cycle complet : TLS vérifié →
+un OpenClient → OpenedClient → profil dynamique exactement V4 et aucun suffixe
+déjà reçu → une lecture → une réponse correspondante → fermeture. Une demande
+d'autorisation, tout CloseClient, un préfixe invalide, un profil différent/inconnu
+ou des octets OpenedClient non classifiés empêchent la lecture. Aucun suffixe
+opaque n'est réinterprété. Un suffixe qui arriverait plus tard reste une question
+de frontière protocolaire non résolue.
+
+La requête unique est celle de `protocol.md` : transaction `0xFFFF`, unité 1,
+fonction **04**, adresse 1024, quantité **20**. Les codecs construisent exactement :
+
+```text
+0D FF FF 00 00 00 06 01 04 04 00 00 14
+```
+
+Seuls des Ping initiaux reçoivent un Pong pendant l'attente de `0x0E`
+DataResponseClient. Le buffer attend les six octets du préfixe MBAP avant de
+calculer sa longueur bornée, accepte les fragments TLS et valide transaction,
+unité, fonction et exactement 40 octets de données. Une réponse tronquée,
+malformée, démesurée ou accompagnée d'octets supplémentaires déjà reçus est
+rejetée ; aucun second message n'est traité.
+
+Le rapport JSON allowlisté ajoute `host`, `port` et `mode: "read-v4-state"` à
+ce schéma de réussite (**valeurs illustratives synthétiques**) :
+
+```json
+{
+  "state": "read",
+  "profile": "v4",
+  "function": 4,
+  "start_address": 1024,
+  "quantity": 20,
+  "registers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+}
+```
+
+Les registres sont des **UInt16 bruts** dans l'ordre reçu. Aucune température,
+puissance, échelle, mode ou signification V4 n'est attribuée. Leur sémantique
+sera examinée séparément après la première observation réelle sur `main`.
+Une exception Modbus correspondante donne `state: "modbus_exception"` et le
+`exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
+Les refus après OpenedClient donnent `read_not_attempted` et une raison
+allowlistée ; autorisation/fermeture et erreurs conservent leurs rapports expurgés.
+Le code de sortie vaut **0 uniquement pour `read`**, **1** pour les autres
+résultats et **2** pour un usage CLI invalide.
+
+Les mêmes délais de transport s'appliquent, avec 30 s au total pour l'ouverture
+puis 30 s au total pour l'unique échange de lecture ; les Ping ne les prolongent
+pas. Tout résultat ferme la connexion. Aucun identifiant, trame brute, code
+d'association ou dump d'environnement n'entre dans les logs, résumés ou artefacts.
+Le job conserve ce JSON dans **`live-v4-read-output`**, y compris en cas d'échec.
+Ce mode n'ajoute ni écriture (06/16/22, transaction `0xFFF0`), ni DeviceAuthRes,
+ni polling, reconnexion, client persistant ou contrôle du poêle.
 
 ## Licence
 
