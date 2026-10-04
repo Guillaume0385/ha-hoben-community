@@ -220,6 +220,27 @@ DeviceGuid attribué par le serveur
 persistance locale puis réutilisation aux connexions suivantes
 ```
 
+### Réutilisation du DeviceGuid sur l'Osmose de référence — CONFIRMÉ dynamiquement le 2026-10-04
+
+La validation authentifiée MANAGER de la [PR #22](https://github.com/Guillaume0385/ha-hoben-community/pull/22),
+sur le SHA `420e0d16a3640af03671c79f5ad78da1e2a271a2`
+([run réussi](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37205061347)),
+a effectué deux rafraîchissements avec la **même instance de HobenClient**
+sur l'Osmose de référence, via `myhoben.fr:465` avec TLS vérifié.
+
+La première connexion utilise le DeviceGuid initial nul. Le DeviceGuid renvoyé
+par le premier `OpenedClient` est adopté en mémoire, puis la première session
+est fermée après une lecture V4 réussie. Sur une **seconde connexion TLS fraîche**,
+le client réutilise automatiquement cette identité attribuée ; le serveur
+répond par un **OpenedClient valide**, puis la lecture V4 suivante réussit.
+Chacun des deux rafraîchissements reçoit exactement **20 registres UInt16 bruts**.
+Le rapport expurgé indique `device_guid_reuse: "validated"` et `refresh_count: 2`.
+
+**La valeur du DeviceGuid et les autres identifiants réels ne sont pas publiés.**
+Cette observation est limitée à l'Osmose de référence testé à cette date : elle
+ne prouve pas le comportement de tous les modèles Hoben, la longueur complète
+d'OpenedClient ni la signification physique des registres V4.
+
 ### Identifiants utilisés
 
 MyHOBEN utilise donc :
@@ -377,8 +398,9 @@ Le nouveau chemin ponctuel de lecture V4 doit refuser la lecture si cette
 première observation comporte un suffixe non classifié, même s'il ressemble à
 un autre message. Il exige exactement V4 et ne continue après aucune demande
 d'autorisation, fermeture ou ouverture malformée. La lecture applicative réelle
-reste à valider manuellement sur `main` après revue/fusion ; cette observation
-confirme seulement l'ouverture et le profil, sans sémantique de registre V4.
+des deux rafraîchissements est désormais confirmée par la validation MANAGER
+documentée ci-dessus. Cette première observation de session confirme seulement
+l'ouverture et le profil, sans sémantique de registre V4.
 
 ---
 
@@ -1193,17 +1215,15 @@ session :
    reste à établir ;
 2. **association réelle** : déterminer comment le code demandé par MyHOBEN est
    présenté/généré et confirmer la séquence `2F → 30 + code → 04` ;
-3. **DeviceGuid attribué** : confirmer qu'un `OpenedClient` réussi fournit une
-   valeur réutilisable et qu'une connexion suivante avec cette valeur n'exige
-   plus l'association ;
-4. **première lecture applicative V4 réelle**, puis signification de ses 20
-   registres bruts : le profil V4 de l'Osmose de référence est confirmé via
-   OpenedClient, mais aucune cartographie sémantique V4 n'en découle ;
-5. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
-6. **unité des temporisations/durées de dérogation** ;
-7. contenu des **4 octets de métadonnées de `DataUpdated`**.
+3. **signification des 20 registres V4 bruts** : deux lectures ont réussi le
+   2026-10-04 sur l'Osmose de référence, avec réutilisation du DeviceGuid attribué
+   sur la seconde connexion (§4), mais aucune cartographie sémantique V4 n'en
+   découle ;
+4. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
+5. **unité des temporisations/durées de dérogation** ;
+6. contenu des **4 octets de métadonnées de `DataUpdated`**.
 
-Les trois premières validations concernent l'ouverture/association du client
+Les deux premières validations concernent l'ouverture/association du client
 et peuvent être réalisées sans requête Modbus ni commande du poêle.
 Toute capture destinée au dépôt doit être anonymisée avant publication.
 
@@ -1346,8 +1366,13 @@ FF FF    transaction ID
   logiciel 8.2, version application 512, profil sélectionné V4 ;
 - zéro octet non classifié déjà reçu après le préfixe, sans preuve d'une longueur
   totale universelle d'OpenedClient ;
+- adoption en mémoire du DeviceGuid renvoyé par le premier OpenedClient, puis
+  réutilisation réussie sur une seconde connexion TLS avec le même HobenClient,
+  réception d'un second OpenedClient valide et deux lectures V4 de 20 registres
+  réussies sur l'Osmose de référence le 2026-10-04 (§4) ;
 - test négatif précédemment observé avec UserGuid synthétique nul : `CloseClient 05 02`,
   `invalid_identifier`.
 
-La réponse à la lecture applicative V4 réelle et la signification de ses
-20 registres restent à valider séparément ; aucune sémantique V4 n'est ajoutée.
+La signification des 20 registres V4 reste à valider séparément ; aucune
+sémantique V4 n'est ajoutée. La réutilisation observée du DeviceGuid ne permet pas
+de généraliser ce comportement à tous les modèles Hoben.
