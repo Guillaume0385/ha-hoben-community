@@ -217,9 +217,50 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — stateful read-only HobenClient with bounded sessions
+### Current increment — Home Assistant config flow and raw coordinator
 
-`client.py` implements the intended protocol API for the future Home Assistant
+Issue #23 adds the first functional HA runtime layer over the completed client.
+The UI accepts one sensitive **Identifiant HOBEN**, validates it with the existing
+normalizer and performs exactly one `HobenClient.async_refresh()` before entry
+creation. The temporary client closes on success, error and cancellation. Only
+a successful V4 raw refresh with a nonzero server-assigned DeviceGuid can create
+an entry. No pairing response is implemented; authorization requests show a
+translated error with an opportunity to retry later.
+
+`ConfigEntry.data` stores normalized `user_guid` and assigned `device_guid`, both
+sensitive. A full SHA-256 fingerprint with fixed `hoben:user_guid:` domain prefix
+provides the duplicate-resistant unique ID and device identifier. Titles, names,
+errors and logs never expose the GUIDs. English/French custom-component texts
+live directly in `translations/`, without a Core strings.json dependency.
+
+`async_setup_entry()` constructs the client from persisted identity, awaits the
+first refresh and stores typed client/coordinator objects in `entry.runtime_data`.
+The `HobenDataUpdateCoordinator` keeps `RawStoveSnapshot` data and polls every
+**60 seconds**. An entry-owned subscriber enables polling even before any entity
+exists. Successful identity rotations update only `device_guid` through HA's
+config-entry API; unchanged values do not update storage. Transport failures map
+to `UpdateFailed`/setup retry, authentication failures stop polling with
+`ConfigEntryAuthFailed`, and protocol/Modbus/unsupported profiles fail setup with
+sanitized `ConfigEntryError`. Only HobenClient owns network retries. Unload stops
+the timers and closes the client; HA discards runtime data, and reload reconstructs
+the client with the persisted identity.
+
+One device is registered with a neutral name, manufacturer Hoben, safe protocol
+profile and OpenedClient software version. No commercial Osmose model is inferred.
+No semantic entity, permanent connection, DataUpdated, diagnostics, pairing,
+reconfiguration/reauth flow or write/control path belongs to this increment.
+**Validating the semantic mapping of the 20 raw V4 registers is the next protocol
+milestone**, before any sensor values or physical units are exposed.
+
+HA orchestration is tested offline using the separately pinned
+`pytest-homeassistant-custom-component==0.13.367` / HA 2026.9.4 / Python 3.14.2+
+environment and new `ha-tests` CI job. The existing Python 3.12 protocol suite
+stays HA-independent. The trusted MANAGER authenticated exact-HEAD gate is retained
+unchanged; the existing live suite validates the underlying client path.
+
+### DONE — stateful read-only HobenClient and DeviceGuid lifecycle
+
+`client.py` implements the intended protocol API for the Home Assistant
 coordinator: `HobenClient(user_guid, device_guid=None)`, `async_refresh()` and
 idempotent `async_close()`. It contains no HA objects/imports and stays inside
 `custom_components/hoben/` until a later extraction to `pyhoben`.
@@ -228,7 +269,7 @@ idempotent `async_close()`. It contains no HA objects/imports and stays inside
 and shared with the exploratory probes. The default DeviceInfo retains the
 documented historical community `GitHubActions` descriptor. The fixed live suite
 does not pass build/DeviceInfo overrides, so it exercises the same defaults the
-future HA caller will use. Offline regressions pin the documented default packet
+HA caller uses. Offline regressions pin the documented default packet
 and forbid the live suite from substituting exploratory probe settings.
 
 The client owns a private normalized UserGuid and a private, in-memory,
@@ -240,8 +281,8 @@ returned DeviceGuid is validated and adopted immediately, before the read. It
 survives subsequent read failures and is automatically reused on every later
 refresh or transport retry. Unsupported/ambiguous openings do not update it.
 The deliberately sensitive `device_guid_for_persistence` accessor is the sole
-identity export; the client writes no storage. Future HA code may explicitly
-persist it in ConfigEntry storage. `has_assigned_device_guid` is non-sensitive.
+identity export; the client writes no storage. HA code explicitly
+persists it in ConfigEntry storage. `has_assigned_device_guid` is non-sensitive.
 
 Each refresh attempt uses a fresh verified `myhoben.fr:465` TLS transport:
 OpenClient with current identity → OpenedClient/profile/boundary checks → adopt
@@ -285,8 +326,10 @@ DeviceGuid then automatic assigned-identity reuse, each with a fresh session and
 one V4 read. Live retries are disabled so success means exactly two sessions and
 two reads. Only public metadata/counts and validated reuse are exported; the
 credential remains the sole input. Offline CI precedes exact-HEAD MANAGER review.
-Project-side live reuse remains **to validate** until that authenticated run
-succeeds; only then may `protocol.md` record confirmation on the reference Osmose.
+The MANAGER run for PR #22 confirmed identity reuse across two fresh TLS sessions
+and two successful 20-register raw V4 reads on the reference Osmose on 2026-10-04.
+The lifecycle is **DONE**; `protocol.md` records the reviewed SHA and sanitized
+successful run. This does not establish V4 register semantics or all-model support.
 
 ### Layer 1 — transport
 
@@ -516,7 +559,7 @@ matches. New commits require new review and label removal/re-addition.
 
 After the first successful live validation, MANAGER must manually update
 **Settings → Branches → main → Require status checks to pass before merging**
-and add **`live-hoben-authenticated`**, alongside `tests`, `hacs`, `hassfest`.
+and add **`live-hoben-authenticated`**, alongside `tests`, `ha-tests`, `hacs`, `hassfest`.
 Only effective branch protection makes this status enforceable for every new
 SHA; a base-context Actions result or an older candidate success is insufficient.
 
@@ -550,8 +593,8 @@ re-adding the chosen label requests another observation. The negative probe
 classifies the actual response without requiring any particular server outcome.
 Neither PR label can reach `read-v4-state`. All live modes remain opt-in, with
 no automatic trigger or retry for the V4 read. These lanes stay separate from
-deterministic/offline `Validate` CI. Further pairing, persistence, semantic
-interpretation and polling require separate reviewed increments.
+deterministic/offline `Validate` CI. HA persistence and raw polling are the current
+increment; further pairing and semantic interpretation require separate reviews.
 
 Real-device validation is important for unknown protocol semantics, especially:
 

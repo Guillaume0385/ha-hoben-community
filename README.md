@@ -8,18 +8,66 @@ Home Assistant ou HACS.
 
 ## État du projet
 
-La version `0.0.1` reste un **socle de développement**, sans fonctionnalité
-utilisable dans Home Assistant : aucun flux de configuration ni entité.
-Le client protocolaire réutilisable `HobenClient` gère maintenant l'identité du
-client et lit 20 registres V4 bruts par rafraîchissement, sans interprétation ni
-entité Home Assistant. Chaque rafraîchissement utilise une connexion TLS bornée.
+La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
+être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
+enregistre un appareil et conserve un état V4 brut dans un coordinateur, rafraîchi
+toutes les **60 secondes**. **Aucune entité capteur n’est encore exposée** : les
+20 registres UInt16 restent sans interprétation jusqu’à validation de leur
+cartographie. Chaque rafraîchissement utilise le client protocolaire réutilisable
+`HobenClient` et une connexion TLS bornée.
 Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
-en mémoire, demande d'autorisation ou rejet documenté. Aucun code d'association
-n'est envoyé. La réutilisation réelle du DeviceGuid par ce projet reste à valider
-sur l'Osmose de référence après revue MANAGER.
+en mémoire puis persistance dans Home Assistant, demande d'autorisation ou rejet
+documenté. Aucun code d'association n'est envoyé. La réutilisation du DeviceGuid
+sur une seconde connexion a été confirmée sur l’Osmose de référence le
+2026-10-04, lors de la validation MANAGER de la PR #22 (voir `protocol.md`).
 La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
+
+## Configuration dans Home Assistant
+
+Après installation des fichiers `custom_components/hoben/` et redémarrage de
+Home Assistant, ouvrir **Paramètres → Appareils et services → Ajouter une
+intégration → Hoben**. Saisir l’**Identifiant HOBEN** affiché ou configuré dans
+MyHOBEN, avec ou sans tirets. Le champ est masqué et les messages ne répètent
+jamais la valeur saisie.
+
+Le flux normalise l’identifiant avec le validateur du protocole, refuse les
+doublons, effectue un seul appel `HobenClient.async_refresh()` et ferme le client
+temporaire sur chaque résultat. Cet appel conserve les tentatives bornées du
+client. Une lecture V4 réussie et un DeviceGuid attribué non nul sont nécessaires
+avant de créer l’entrée. Les profils V6/V6v16/inconnus sont refusés.
+
+Les champs sensibles `user_guid` (normalisé) et `device_guid` (attribué) sont
+stockés uniquement dans `ConfigEntry.data`, jamais dans les options. Protéger les
+fichiers de configuration et sauvegardes Home Assistant qui les contiennent.
+L’ID unique de l’entrée et l’identifiant de l’appareil utilisent la même empreinte
+SHA-256 complète, calculée sur l’identifiant normalisé avec le préfixe fixe
+`hoben:user_guid:`. Ni le nom neutre `Hoben`, ni les erreurs, ni les journaux
+n’affichent les GUID.
+
+Lors du setup, une première lecture doit réussir avant l’activation du
+coordinateur. `entry.runtime_data` contient le client et le coordinateur typés.
+Un abonnement lié à l’entrée maintient le sondage même sans entité ; le
+déchargement arrête les timers et ferme le client, y compris une lecture active.
+Le rechargement réutilise le DeviceGuid persisté. Après une lecture réussie,
+une nouvelle attribution modifie uniquement `device_guid`, sans réécrire l’entrée
+si la valeur est inchangée. L’appareil expose le fabricant `Hoben`, le profil
+`Protocol V4` et la version logicielle d’OpenedClient ; il ne déduit pas un nom
+commercial tel qu’Osmose.
+
+Un problème réseau rend le rafraîchissement indisponible et permet à Home
+Assistant de retenter le setup. Un identifiant rejeté ou une autorisation requise
+arrête le sondage et signale une erreur d’authentification ; le support de
+l’association et de la réauthentification n’est pas encore implémenté. Le flux
+initial permet de réessayer plus tard. Pour une entrée existante, recharger
+l’intégration après résolution ; si l’identifiant doit être corrigé, supprimer
+puis ajouter à nouveau l’entrée. Une réponse protocolaire, Modbus ou un profil
+non pris en charge fait échouer le setup avec un message fixe expurgé.
+
+L’intervalle de 60 secondes n’est pas configurable pour cet incrément. Aucun
+socket permanent, DataUpdated, diagnostic de registres, association, entité
+sémantique ou contrôle du poêle n’est ajouté.
 
 ## API protocolaire HobenClient
 
@@ -43,7 +91,7 @@ finally:
 Le build **34** et le descripteur communautaire historique **`GitHubActions`**
 sont les défauts du client. `DEFAULT_BUILD` et `DEFAULT_DEVICE_INFO` sont définis
 une seule fois dans `client.py` et partagés avec les sondes. La suite
-`--live-premerge` utilise directement ces défauts, comme le futur appelant HA.
+`--live-premerge` utilise directement ces défauts, comme l’appelant HA.
 
 Le constructeur normalise l'Identifiant HOBEN en 32 caractères hexadécimaux
 minuscules sans tirets. Sans DeviceGuid persisté, il utilise les **32 zéros ASCII**
@@ -53,8 +101,8 @@ sans suffixe ambigu met immédiatement à jour le DeviceGuid en mémoire, avant 
 lecture. Les prochains rafraîchissements et retries réutilisent cette identité,
 même si la lecture précédente échoue. Une nouvelle attribution peut la remplacer.
 
-`device_guid_for_persistence` est un accès **explicitement sensible**. Le futur
-config flow pourra stocker cette valeur dans `ConfigEntry` puis la fournir à une
+`device_guid_for_persistence` est un accès **explicitement sensible**. Le
+config flow stocke cette valeur dans `ConfigEntry` puis la fournit à une
 nouvelle instance. Le client n'écrit aucun fichier ni stockage HA.
 `has_assigned_device_guid` indique sans divulgation si la valeur diffère des zéros.
 Les GUID ne figurent ni dans `repr`, ni dans `safe_report()`, ni dans les erreurs.
@@ -85,7 +133,7 @@ protocole, autorisation, CloseClient, profil ou Modbus ne sont jamais retentées
 Un verrou asynchrone sérialise les appels concurrents et les mises à jour
 d'identité. L'annulation se propage avec nettoyage. `async_close()` est idempotent,
 annule une opération active, attend sa fermeture et interdit tout nouvel appel
-sur cette instance. Le futur coordinateur HA assurera la planification.
+sur cette instance. Le coordinateur HA assure la planification.
 
 Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
 
@@ -104,13 +152,13 @@ Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
 Aucune commande d'écriture/contrôle, association, boucle permanente ni tâche de
 fond n'est exposée par cette API.
 
-## Installation future via HACS
+## Installation via HACS
 
 La distribution via HACS est prévue. Lorsqu'une version fonctionnelle sera
 publiée, le dépôt pourra être ajouté à HACS comme dépôt personnalisé de catégorie
-« Integration ». Les instructions de configuration et d'utilisation seront
-publiées avec cette version. L'installation du socle actuel ne fournit aucune
-fonctionnalité dans Home Assistant.
+« Integration ». Le socle actuel peut être installé manuellement pour tester
+la configuration et le coordinateur brut, selon les instructions ci-dessus ;
+il ne fournit pas encore de capteurs utilisateur.
 
 ## Contribution et tests
 
@@ -133,7 +181,28 @@ python -m ruff check .
 python -m ruff format --check .
 ```
 
-La CI exécute ces contrôles ainsi que les validateurs officiels HACS et Hassfest.
+Les tests Home Assistant ont un environnement **séparé**. Le harnais est fixé à
+`pytest-homeassistant-custom-component==0.13.367`, qui fixe **Home Assistant
+2026.9.4**, dernière version stable retenue plutôt que la bêta 2026.10 du harnais
+suivant. Cette version de HA nécessite **Python 3.14.2 ou supérieur**. Le groupe
+`ha-test` évite d’installer HA dans l’environnement protocolaire Python 3.12.
+Depuis la racine du dépôt, dans un second environnement :
+
+```sh
+python3.14 -m venv /tmp/hoben-ha-tests
+. /tmp/hoben-ha-tests/bin/activate
+python -m pip install --upgrade pip
+python -m pip install --group ha-test
+python -m pytest -c ha_tests/pytest.ini ha_tests
+```
+
+Les tests chargent les vrais config entries, flux, timers du coordinateur,
+traductions et registre d’appareils HA ; `HobenClient` est simulé. Le harnais
+bloque les sockets externes et un garde interdit toute construction de transport
+Hoben, même si une simulation est oubliée. Aucun test HA ne contacte `myhoben.fr`.
+
+La CI exécute les jobs séparés `tests` et `ha-tests`, ainsi que les validateurs
+officiels HACS et Hassfest.
 L'icône communautaire originale représente trois points reliés ; elle ne reprend
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
@@ -170,7 +239,7 @@ des expressions GitHub ignore la casse.
 2. vérifier le respect de `AGENTS.md`, `project.md` et `protocol.md` ;
 3. vérifier l'absence d'exfiltration, de journalisation d'identifiants et
    d'opérations d'écriture/contrôle non autorisées ;
-4. vérifier la CI hors ligne (`tests`, `hacs`, `hassfest`) ;
+4. vérifier la CI hors ligne (`tests`, `ha-tests`, `hacs`, `hassfest`) ;
 5. consigner dans la revue le **SHA HEAD complet** approuvé ;
 6. ajouter `manager-live-hoben` seulement après cette revue.
 
@@ -190,7 +259,7 @@ python scripts/probe_hoben_connection.py --live-premerge
 Cette suite fixe ignore les surcharges exploratoires, ne prend aucun argument
 libre d'hôte/fonction/registre et n'installe aucune dépendance candidate. Elle
 construit le client sans surcharge de `build` ni `device_info` pour valider
-réellement ses valeurs par défaut destinées au futur usage HA. Elle
+réellement ses valeurs par défaut utilisées par HA. Elle
 utilise **le même HobenClient pour deux rafraîchissements séquentiels**. Le premier
 part du DeviceGuid nul et adopte une identité attribuée ; le second la réutilise
 automatiquement. Chacun ouvre un **nouveau** TLS vérifié vers `myhoben.fr:465` →
@@ -206,9 +275,9 @@ les métadonnées expurgées et le nombre de registres, sans leurs contenus. La
 réussite exige `state: "client_refresh_validated"`, `profile: "v4"`,
 `device_guid_reuse: "validated"`, `refresh_count: 2` et `register_count: 20`.
 Un premier rafraîchissement réussi seul ne suffit pas. Aucun identifiant ne
-figure dans le rapport. `protocol.md` ne confirmera la réutilisation réelle qu'après
-la réussite de cette validation MANAGER sur le SHA exact, sans généraliser aux
-autres modèles.
+figure dans le rapport. `protocol.md` consigne la réutilisation confirmée sur
+l’Osmose de référence après la validation MANAGER de la PR #22, sans généraliser
+aux autres modèles. Chaque nouveau candidat exige sa propre validation.
 Aucun code d'association, fonction 06/16/22, transaction `0xFFF0` ni commande
 de température, ventilation, mode ou ON/OFF n'est envoyé.
 
@@ -235,7 +304,7 @@ Settings → Branches → main
 → add: live-hoben-authenticated
 ```
 
-Les checks requis deviennent **`tests`**, **`hacs`**, **`hassfest`** et
+Les checks requis deviennent **`tests`**, **`ha-tests`**, **`hacs`**, **`hassfest`** et
 **`live-hoben-authenticated`**. Le statut est publié sur le SHA candidat, car
 le contexte du workflow `pull_request_target` est celui de la base. Le succès
 d'un ancien SHA ne satisfait donc pas la protection d'un nouveau commit.
@@ -421,7 +490,7 @@ ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0
 
 C'est le descripteur communautaire partagé par `HobenClient` et les sondes,
 centralisé dans `custom_components/hoben/client.py`. Son nom historique
-`GitHubActions` est conservé, y compris pour le futur usage HA. Il ne s'agit pas
+`GitHubActions` est conservé, y compris pour l’usage HA. Il ne s'agit pas
 d'une valeur extraite de MyHOBEN ni d'un format obligatoire du serveur au-delà
 de la structure documentée.
 

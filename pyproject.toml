@@ -1,9 +1,13 @@
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.16,<0.17", "PyYAML>=6,<7"]
+# Pin the last stable HA release's harness: HA 2026.9.4 requires Python >=3.14.2.
+# Keep it separate so protocol-only development does not install Home Assistant.
+ha-test = ["pytest-homeassistant-custom-component==0.13.367"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-config --strict-markers"
+norecursedirs = ["ha_tests"]
 
 [tool.ruff]
 target-version = "py312"

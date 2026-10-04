@@ -1,0 +1,28 @@
+{
+  "title": "Hoben",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your Hoben stove",
+        "description": "This unofficial integration connects in read-only mode. It polls raw V4 data every 60 seconds and does not create sensor entities yet.",
+        "data": {
+          "user_guid": "HOBEN identifier"
+        },
+        "data_description": {
+          "user_guid": "Enter the HOBEN identifier shown or configured in MyHOBEN, with or without dashes. This value is sensitive."
+        }
+      }
+    },
+    "error": {
+      "invalid_identifier": "The HOBEN identifier is invalid or was rejected by the server.",
+      "authorization_required": "The server requires client authorization. Pairing is not supported by this integration yet. You can retry later.",
+      "cannot_connect": "Cannot connect to the Hoben service. Please try again later.",
+      "unsupported_stove": "This stove's protocol profile is not supported. Only raw V4 reads are available.",
+      "protocol_error": "The Hoben response could not be accepted safely. Please try again later.",
+      "unknown": "An unexpected error occurred. Check the sanitized error context in the logs."
+    },
+    "abort": {
+      "already_configured": "This Hoben stove is already configured."
+    }
+  }
+}
