@@ -2,7 +2,7 @@
 
 **Cible :** développement d'une intégration Home Assistant pour poêles HOBEN (dont HOBEN Osmose)  
 **Source analysée :** application Android MyHOBEN 2.2, build 34 (`com.inovalp.myhoben`)  
-**Date de l'analyse :** 30 septembre 2026  
+**Date de l'analyse :** 30 septembre 2026, approfondie le 4 octobre 2026  
 **Statut :** rétro-ingénierie statique de l'application officielle ; aucune commande n'a été envoyée au poêle pendant l'analyse.
 
 > Cette documentation est non officielle. Les informations marquées **CONFIRMÉ** proviennent directement du code IL de MyHOBEN/HobenCore. Les éléments **À VALIDER** sont ceux qui nécessitent une capture réelle sur un poêle afin de confirmer la sémantique ou l'unité. Pour une première intégration Home Assistant, le mode lecture seule est recommandé par défaut.
@@ -23,8 +23,11 @@ MyHOBEN ne dialogue pas directement avec le poêle lorsqu'il est utilisé via In
 - Port test TLS : `9002`
 - Port test TCP : `9003`
 - Protocole normal : TCP protégé par TLS (`SslStream` dans l'application)
+- Nom TLS/SNI utilisé par l'application : `myhoben.fr` (`AuthenticateAsClient("myhoben.fr")`)
+- Validation certificat : le callback observé refuse la connexion lorsqu'une erreur de certificat TLS est signalée ; aucun contournement de validation n'a été trouvé dans ce chemin utilisateur
+- Timeout de connexion observé dans ce chemin : **5 secondes**
 
-**Recommandation Home Assistant : utiliser exclusivement `myhoben.fr:465` avec vérification normale du certificat TLS.**
+**Recommandation Home Assistant : utiliser exclusivement `myhoben.fr:465` avec vérification normale du certificat TLS et du nom `myhoben.fr`.**
 
 ### API installateur séparée
 
@@ -153,16 +156,82 @@ soit `Ping (10)` → `Pong (11)`.
 
 ## 4. Ouverture de session MyHOBEN
 
+### Origine et normalisation du `UserGuid` — CONFIRMÉ
+
+Dans l'écran **« Ajout d'un nouveau poêle »**, l'utilisateur renseigne un nom
+usuel et un **« Identifiant HOBEN »**, soit au clavier, soit en scannant le QR
+code. L'analyse statique montre que cet identifiant est la source de
+`Stove.UserGuid`.
+
+Le chemin observé est :
+
+```text
+Identifiant HOBEN saisi ou scanné
+        ↓
+suppression des tirets "-"
+        ↓
+validation comme GUID
+        ↓
+stockage dans Stove.UserGuid
+        ↓
+suppression des tirets avant ConnectToServer
+        ↓
+UserGuid réseau : 32 caractères hexadécimaux ASCII
+```
+
+Le résultat du scan QR suit le même chemin que la saisie manuelle : aucun token
+QR distinct, hash, chiffrement ou identifiant dérivé n'a été trouvé. Le
+**nom usuel du poêle n'intervient pas dans l'ouverture de session** ; il sert à
+l'affichage local dans l'application.
+
+Conséquence pour l'intégration : l'entrée utilisateur à demander est
+l'**Identifiant HOBEN** imprimé/affiché pour le poêle. Le client peut accepter
+une représentation GUID avec ou sans tirets, mais la valeur envoyée dans
+`OpenClient` doit être normalisée en **32 caractères hexadécimaux sans tirets**.
+
+### `DeviceGuid` initial et persistance — CONFIRMÉ
+
+Le `DeviceGuid` identifie le client (application/téléphone), pas le poêle.
+
+Lorsqu'aucun DeviceGuid n'a encore été attribué au client, MyHOBEN initialise
+la valeur avec l'équivalent de :
+
+```text
+Guid.Empty.ToString().Replace("-", "")
+= 00000000000000000000000000000000
+```
+
+Les **32 zéros sont donc la valeur initiale normale d'un nouveau client**. Ils ne
+doivent pas être documentés comme un DeviceGuid volontairement invalide.
+
+Après une ouverture/autorisation réussie, `ManageOpened` lit le DeviceGuid
+renvoyé dans `OpenedClient` aux offsets 14..45. Si cette valeur diffère de celle
+enregistrée localement, MyHOBEN la met à jour et la conserve pour les connexions
+suivantes. Le cycle attendu est donc :
+
+```text
+nouveau client
+DeviceGuid = 32 zéros
+        ↓ OpenClient / éventuelle autorisation
+serveur Hoben
+        ↓ OpenedClient
+DeviceGuid attribué par le serveur
+        ↓
+persistance locale puis réutilisation aux connexions suivantes
+```
+
 ### Identifiants utilisés
 
-MyHOBEN utilise :
+MyHOBEN utilise donc :
 
-- le **MyHOBEN User GUID** du poêle (`Stove.UserGuid`) ;
-- un **DeviceGuid** propre au client (application/téléphone) ;
+- le **MyHOBEN User GUID** du poêle (`Stove.UserGuid`), issu de l'Identifiant HOBEN et envoyé sans tirets ;
+- un **DeviceGuid** du client, initialement nul (32 zéros) puis attribué/persisté depuis `OpenedClient` ;
 - la version/build de l'application ;
 - une chaîne descriptive du terminal.
 
-Le GUID MyHOBEN doit être considéré comme une donnée sensible d'association : ne pas l'inscrire dans les logs Home Assistant.
+Le UserGuid, le DeviceGuid attribué et tout code d'autorisation doivent être
+considérés comme sensibles et ne doivent pas être inscrits dans les logs Home
+Assistant.
 
 ### Payload `OpenClient` (type 3) — CONFIRMÉ
 
@@ -194,7 +263,23 @@ Le build Android analysé est 34, donc les deux octets de build sont little-endi
 22 00
 ```
 
-**À VALIDER :** longueur/forme exacte du UserGuid sur le serveur (le code utilise la chaîne telle qu'enregistrée) et format initial du DeviceGuid. La réponse montre cependant un DeviceGuid serveur sur 32 caractères ASCII.
+La nouvelle analyse du chemin d'ajout de poêle lève les deux inconnues précédentes :
+
+- `UserGuid` est envoyé sous forme de **32 caractères hexadécimaux ASCII sans tirets** ;
+- pour un nouveau client, `DeviceGuid` vaut **32 caractères ASCII `0`** ;
+- après association, le `DeviceGuid` renvoyé par le serveur est réutilisé.
+
+Le début d'un `OpenClient` de première association a donc la disposition
+déterministe suivante :
+
+```text
+03
++ UserGuid ASCII[32]
++ 00 01
++ build UInt16 little-endian
++ DeviceGuid ASCII[32]   # "000...000" pour un nouveau client
++ DeviceInfo UTF-8       # jusqu'à la fin du message
+```
 
 ### Réponse `OpenedClient` (type 4) — CONFIRMÉ
 
@@ -211,6 +296,10 @@ offset 14..45 : DeviceGuid ASCII, 32 octets
 offset 46   : version application LSB
 offset 47   : version application MSB
 ```
+
+Après lecture de `offset 14..45`, MyHOBEN compare le DeviceGuid reçu à la
+valeur locale et le persiste s'il a changé. C'est le mécanisme observé
+d'attribution du DeviceGuid au client après la première association.
 
 Note : le code appelle `InstantiateStove(type=octet8, product/rev=octet7, vsoftMaj=octet10, vsoftMin=octet9)`.
 
@@ -263,17 +352,29 @@ Le plugin Home Assistant doit donc **attendre `OpenedClient` et sélectionner dy
 
 Le code contient les échanges :
 
-- `AskNewClient = 42`
-- `CancelAskNewClient = 43`
-- `AskNewClientStatus = 44`
-- `AskNewClientAck = 45`
-- `CancelAskNewClientAck = 46`
-- `DeviceAuthReq = 47`
-- `DeviceAuthRes = 48`
+- `AskNewClient = 42 (0x2A)`
+- `CancelAskNewClient = 43 (0x2B)`
+- `AskNewClientStatus = 44 (0x2C)`
+- `AskNewClientAck = 45 (0x2D)`
+- `CancelAskNewClientAck = 46 (0x2E)`
+- `DeviceAuthReq = 47 (0x2F)`
+- `DeviceAuthRes = 48 (0x30)`
+
+### Déclenchement de la demande de code — CONFIRMÉ
+
+Lorsque le client reçoit `DeviceAuthReq (0x2F)`, MyHOBEN ouvre une demande
+utilisateur **« Code d'authentification ? »**. Cela confirme que ce message est le
+signal utilisé par l'application pour demander le code d'association d'un nouveau
+client.
+
+L'analyse statique ne permet pas encore d'affirmer **où ni comment ce code est
+présenté/généré côté poêle ou infrastructure Hoben**. Cette partie doit être
+observée sur le Hoben Osmose réel avant d'automatiser le flux.
 
 ### Envoi du code d'autorisation — CONFIRMÉ
 
-La méthode `SendDeviceAuth(code)` fabrique un payload de **2 octets little-endian** :
+La méthode `SendDeviceAuth(code)` fabrique un payload de **2 octets
+little-endian** :
 
 ```text
 code_LSB code_MSB
@@ -285,19 +386,74 @@ et l'envoie avec le type **48 / `DeviceAuthRes`** :
 30 <code_LSB> <code_MSB>
 ```
 
-L'application attend ensuite une réponse et, si le premier octet vaut `04` et la longueur est au moins 11 octets, traite la réponse comme `OpenedClient`.
+L'application attend ensuite une réponse et peut traiter un `OpenedClient
+(0x04)` comme réussite. Le DeviceGuid de ce `OpenedClient` est alors le
+candidat à persister pour les connexions suivantes.
 
-**À VALIDER dynamiquement :** séquence exacte qui provoque l'affichage/génération du code côté poêle et les contenus de `AskNewClient*`. Les noms, types et le paquet de réponse au code sont confirmés, mais le workflow complet mérite une capture avant automatisation dans Home Assistant.
+### Rejets/états `CloseClient` observés — CONFIRMÉ
+
+Le chemin de connexion utilisateur interprète plusieurs réponses commençant par
+`CloseClient (0x05)`. Les sous-codes suivants sont associés dans MyHOBEN à ces
+situations :
+
+| Trame minimale observée | Interprétation dans MyHOBEN |
+|---|---|
+| `05 02` | identifiant MyHOBEN/HOBEN invalide |
+| `05 03` | le poêle doit être connecté au serveur pour authentifier l'application mobile |
+| `05 04` | demande d'authentification rejetée |
+| `05 05` | délai d'authentification dépassé |
+| `05 06` | serveur en maintenance |
+
+Ces correspondances viennent du code de l'application. Leur comportement exact
+sur le serveur de production actuel reste à confirmer par un test réel
+non destructif.
+
+### Flux de première association déduit du code — CONFIRMÉ statiquement / À VALIDER dynamiquement
+
+```text
+Identifiant HOBEN
+        ↓ normalisation GUID sans tirets
+UserGuid[32]
+
+DeviceGuid non encore attribué
+        ↓
+00000000000000000000000000000000
+
+        ↓ TLS + OpenClient
+
+serveur
+   ├─ 04 OpenedClient
+   │      → connexion ouverte
+   │      → persister DeviceGuid reçu
+   │
+   ├─ 2F DeviceAuthReq
+   │      → demander le code à l'utilisateur
+   │      → envoyer 30 + UInt16-LE(code)
+   │      → attendre OpenedClient ou rejet
+   │
+   └─ 05 xx CloseClient
+          → traiter le sous-code connu sans retry agressif
+```
+
+La structure de ce flux est confirmée par le code MyHOBEN. L'ordre exact des
+messages du serveur de production, le mécanisme d'obtention du code et les délais
+réels doivent encore être validés sur le poêle.
 
 ### Recommandation pour l'intégration
 
-Prévoir un `config_flow` en deux étapes :
+Prévoir un `config_flow` capable de :
 
-1. saisie du GUID MyHOBEN ;
-2. si le serveur indique `NotAuthorized`/demande d'association, affichage d'une seconde étape demandant le code ;
-3. stockage du `DeviceGuid` retourné par `OpenedClient` dans l'entrée de configuration HA.
+1. demander l'**Identifiant HOBEN** et le normaliser en UserGuid de 32 caractères sans tirets ;
+2. charger un DeviceGuid déjà persisté, ou utiliser **32 zéros** pour un nouveau client ;
+3. envoyer `OpenClient` ;
+4. si `DeviceAuthReq (0x2F)` est reçu, afficher une seconde étape demandant le code ;
+5. envoyer `DeviceAuthRes (0x30)` avec le code sur 2 octets little-endian ;
+6. sur `OpenedClient`, persister le DeviceGuid renvoyé par le serveur ;
+7. présenter proprement les rejets `05 02` à `05 06` sans boucle de reconnexion agressive.
 
-Ne jamais journaliser le GUID du poêle, le DeviceGuid complet ou le code d'association au niveau INFO.
+Ne jamais journaliser le UserGuid, le DeviceGuid complet ou le code
+d'association au niveau INFO/debug partageable.
+
 
 ---
 
@@ -988,39 +1144,75 @@ Règles recommandées :
 
 ## 16. Points encore à valider sur le HOBEN Osmose réel
 
-La rétro-ingénierie statique permet de créer le client et les requêtes, mais quatre validations dynamiques sont nécessaires avant d'activer toutes les commandes :
+La rétro-ingénierie statique permet maintenant de décrire beaucoup plus
+précisément la première connexion. Les validations dynamiques restantes doivent
+être réalisées sans commande de chauffage et en commençant par l'ouverture de
+session :
 
-1. **profil retourné par ton Osmose** (`StoveV6` ou `StoveV6v16`) via les octets 7-10 de `OpenedClient` ;
-2. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
-3. **unité des temporisations/durées de dérogation** ;
-4. contenu des **4 octets de métadonnées de `DataUpdated`**.
+1. **réponse du serveur à un UserGuid réel + DeviceGuid initial nul** : confirmer
+   si le premier retour est `DeviceAuthReq (0x2F)`, `OpenedClient (0x04)` ou
+   un `CloseClient` documenté ;
+2. **association réelle** : déterminer comment le code demandé par MyHOBEN est
+   présenté/généré et confirmer la séquence `2F → 30 + code → 04` ;
+3. **DeviceGuid attribué** : confirmer qu'un `OpenedClient` réussi fournit une
+   valeur réutilisable et qu'une connexion suivante avec cette valeur n'exige
+   plus l'association ;
+4. **profil retourné par l'Osmose** (`StoveV6` ou `StoveV6v16`) via les
+   champs de `OpenedClient` ;
+5. **échelle des températures** en comparant un registre brut et l'affichage MyHOBEN ;
+6. **unité des temporisations/durées de dérogation** ;
+7. contenu des **4 octets de métadonnées de `DataUpdated`**.
 
-Ces validations peuvent être réalisées sans modifier le poêle : une première version du client peut se connecter en lecture seule, enregistrer les trames brutes localement (avec masquage des GUID), et comparer les valeurs à l'application.
+Les trois premières validations concernent uniquement l'authentification du
+client et peuvent être réalisées sans requête Modbus ni commande du poêle.
+Toute capture destinée au dépôt doit être anonymisée avant publication.
+
 
 ---
 
 ## 17. Séquence minimale pour un prototype lecture seule
 
-La sonde manuelle actuelle s'arrête après l'étape 4 puis ferme la connexion.
-Elle répond aux Ping pendant cette ouverture, mais n'effectue aucune des lectures
-Modbus ou opérations Home Assistant des étapes suivantes. Sa préparation ne
-constitue pas une validation réelle du serveur ou des champs encore inconnus.
+La sonde manuelle présente sur `main` ne met pas encore en œuvre tout le flux
+d'association décrit ci-dessous. Elle doit rester ponctuelle, expurgée et sans
+lecture Modbus tant que l'ouverture de session réelle n'a pas été validée.
+
+### Première association d'un client
 
 ```text
-1. TLS connect myhoben.fr:465
-2. SEND 03 + OpenClient payload
-3. WAIT 04 OpenedClient
-4. Parse profil poêle + DeviceGuid
-5. Démarrer boucle de lecture
-6. Si RX 0A -> SEND 0B
-7. SEND 0D + ModbusTCP(FFFF, unit=1, func=04, start=1024, qty=110 si V6)
-8. RX 0E + Modbus response
-9. Décode registres
-10. Publie entités Home Assistant
-11. Accepte RX 1B (DataUpdated), retire 5 octets puis décode Modbus
+1. Obtenir l'Identifiant HOBEN saisi/scanné par MyHOBEN
+2. Normaliser UserGuid = GUID sans tirets, 32 caractères ASCII
+3. Charger DeviceGuid persisté ; si absent, utiliser 32 zéros
+4. TLS connect myhoben.fr:465 avec validation normale du certificat
+5. SEND 03 + OpenClient(UserGuid, build, DeviceGuid, DeviceInfo)
+6. Répondre 0B à tout Ping 0A nécessaire
+7. Si RX 2F DeviceAuthReq :
+      demander le code à l'utilisateur
+      SEND 30 + code UInt16 little-endian
+8. Si RX 05 xx CloseClient :
+      classer le sous-code connu et fermer sans retry agressif
+9. WAIT 04 OpenedClient
+10. Parse profil poêle + DeviceGuid
+11. Persister le DeviceGuid reçu
+12. Fermer la sonde ponctuelle, ou seulement ensuite démarrer la session lecture seule
+```
+
+### Session lecture seule après ouverture réussie
+
+```text
+1. Démarrer boucle de lecture
+2. Si RX 0A -> SEND 0B
+3. SEND 0D + ModbusTCP(FFFF, unit=1, func=04, start=1024, qty=110 si V6)
+4. RX 0E + Modbus response
+5. Décode registres
+6. Publie entités Home Assistant
+7. Accepte RX 1B (DataUpdated), retire 5 octets puis décode Modbus
 ```
 
 Pour V4, utiliser `qty=20`.
+
+Aucune étape d'association ne doit déclencher une commande de fonctionnement du
+poêle.
+
 
 ---
 
@@ -1092,8 +1284,14 @@ FF FF    transaction ID
 - encapsulation 1 octet MyHOBEN + payload ;
 - message types ;
 - Ping/Pong ;
+- origine de `Stove.UserGuid` depuis l'Identifiant HOBEN saisi/scanné ;
+- normalisation du UserGuid en 32 caractères hexadécimaux sans tirets ;
+- DeviceGuid initial = `Guid.Empty` sans tirets (32 zéros) ;
+- persistance du DeviceGuid reçu dans `OpenedClient` ;
 - structure générale OpenClient ;
 - champs majeurs OpenedClient ;
+- déclenchement `DeviceAuthReq (0x2F)` et réponse `DeviceAuthRes (0x30)` avec code UInt16-LE ;
+- interprétation des rejets `CloseClient` sous-codes `02` à `06` ;
 - sélection V4/V6/V6v16 ;
 - MBAP Modbus TCP ;
 - Unit ID 1 ;

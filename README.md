@@ -12,7 +12,11 @@ La version `0.0.1` reste un **socle de développement**, sans fonctionnalité
 utilisable dans Home Assistant : aucun flux de configuration ni entité.
 Une sonde manuelle permet maintenant de préparer le premier test TLS puis
 OpenClient. Elle ferme la connexion après l'ouverture et ne lit aucun registre.
-La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
+L'analyse approfondie de MyHOBEN 2.2 build 34 confirme désormais l'origine du
+UserGuid, le DeviceGuid initial nul et le mécanisme d'autorisation d'un nouveau
+client ; l'implémentation de la sonde doit encore être alignée sur ces faits avant
+le premier test d'association réel. La première version fonctionnelle prévue
+(`v0.1.0`) sera en lecture seule.
 
 ## Installation future via HACS
 
@@ -97,48 +101,66 @@ La sonde utilise `myhoben.fr:465`, les autorités de confiance du système et la
 vérification du nom `myhoben.fr`. Un certificat invalide ou un nom incorrect fait
 échouer la connexion. Aucun mode non vérifié, port 433 ou repli en clair n'existe.
 
-Pour tester ensuite **un seul OpenClient**, fournir les quatre variables :
+Pour tester ensuite **un seul OpenClient avec le code actuellement présent sur
+`main`**, fournir les quatre variables ci-dessous. Cette interface de la sonde
+est transitoire : elle exige encore explicitement des valeurs que MyHOBEN sait
+initialiser lui-même.
 
-| Variable | Valeur fournie par le testeur |
+| Variable | Valeur à utiliser |
 | --- | --- |
-| `HOBEN_USER_GUID` | UserGuid existant, transmis tel quel |
-| `HOBEN_DEVICE_GUID` | DeviceGuid existant, transmis tel quel ; aucune génération |
-| `HOBEN_DEVICE_INFO` | Description du terminal, transmise telle quelle |
-| `HOBEN_BUILD` | Entier de 0 à 65535, obligatoire |
+| `HOBEN_USER_GUID` | **Identifiant HOBEN réel**, normalisé en GUID de 32 caractères hexadécimaux sans tirets |
+| `HOBEN_DEVICE_GUID` | pour une première association : **`00000000000000000000000000000000`** ; ensuite, DeviceGuid attribué par le serveur et persisté |
+| `HOBEN_DEVICE_INFO` | description du terminal ; la sonde actuelle l'exige explicitement |
+| `HOBEN_BUILD` | utiliser **34** pour reproduire le build Android analysé |
 
-Le build **34** est celui de MyHOBEN Android 2.2 analysé dans `protocol.md` ; il
-n'est pas une valeur par défaut. Le format initial du DeviceGuid reste à valider.
-Ne pas inventer un identifiant pour contourner cette incertitude.
+Ces valeurs reflètent maintenant le comportement statiquement confirmé de
+MyHOBEN : le UserGuid provient directement de l'**Identifiant HOBEN** saisi ou
+scanné, sans hash ni dérivation ; un nouveau client démarre avec
+`Guid.Empty` sans tirets, soit 32 zéros. Le nom usuel du poêle n'est pas envoyé
+dans `OpenClient`.
+
+La prochaine modification de la sonde devra faire de ces faits protocolaires des
+valeurs/comportements internes appropriés, plutôt que d'exiger un DeviceGuid
+préexistant pour une première connexion.
 
 Exemple Bash avec saisie masquée, sans placer les identifiants dans l'historique
 ou les arguments du processus (ne pas activer `set -x`) :
 
 ```bash
-IFS= read -r -s -p 'UserGuid : ' HOBEN_USER_GUID
+IFS= read -r -s -p 'Identifiant HOBEN (GUID sans tirets) : ' HOBEN_USER_GUID
 printf '\n'
-IFS= read -r -s -p 'DeviceGuid : ' HOBEN_DEVICE_GUID
-printf '\n'
-IFS= read -r -s -p 'DeviceInfo : ' HOBEN_DEVICE_INFO
-printf '\n'
-read -r -p 'Build (34 = build Android analysé) : ' HOBEN_BUILD
+HOBEN_DEVICE_GUID=00000000000000000000000000000000
+HOBEN_DEVICE_INFO='ha-hoben-community/manual/en/Python/Linux/0/0/1/0/0,0'
+HOBEN_BUILD=34
 export HOBEN_USER_GUID HOBEN_DEVICE_GUID HOBEN_DEVICE_INFO HOBEN_BUILD
 python scripts/probe_hoben_connection.py --session
 unset HOBEN_USER_GUID HOBEN_DEVICE_GUID HOBEN_DEVICE_INFO HOBEN_BUILD
 ```
 
+Le DeviceInfo ci-dessus est un descripteur de sonde communautaire, pas une
+valeur extraite de MyHOBEN. Il ne faut pas le présenter comme un format obligatoire
+du serveur au-delà de la structure générale documentée dans `protocol.md`.
+
 Le rapport JSON contient uniquement l'hôte/port, l'état et, si l'ouverture
 réussit, le type de message, les champs produit/logiciel/application, le profil
 et le nombre d'octets supplémentaires déjà reçus (`unclassified_bytes`).
-Les UserGuid, DeviceGuid, codes d'autorisation et trames brutes sont exclus.
+Les UserGuid, DeviceGuid, codes d'autorisation et trames brutes sont exclus. Le
+UserGuid réel doit être traité comme un secret d'association même s'il est
+imprimé/accessible à l'utilisateur.
 `profile: "unknown"` reste un succès, notamment pour la branche V6/V6v16 ambiguë.
 Le code de sortie vaut 0 pour un succès, 1 pour un échec, 2 pour un usage invalide.
 
 En cas d'échec, `error` distingue TLS, transport, EOF, délai, entrées invalides et
 protocole. Un type inattendu est rapporté uniquement par son numéro
 (`unexpected_message_type`, `message_type`) ; sa charge utile n'est pas décodée.
-L'association/autorisation est volontairement absente : aucun code n'est demandé
-ni envoyé. La sonde envoie uniquement OpenClient et les Pong nécessaires, puis
-ferme, sans requête Modbus, commande de poêle ni reconnexion automatique.
+L'association/autorisation est volontairement absente de la sonde actuelle :
+aucun code n'est demandé ni envoyé. L'analyse de l'APK confirme toutefois que
+`DeviceAuthReq (0x2F)` demande à MyHOBEN un **« Code d'authentification ? »**,
+puis que l'application répond par `DeviceAuthRes (0x30)` avec le code sur deux
+octets little-endian. Ainsi, un `unexpected_message_type` avec
+`message_type: 47` pendant une première association est une observation
+attendue à analyser, pas la preuve d'un protocole erroné. La sonde ferme alors
+sans requête Modbus, commande de poêle ni reconnexion automatique.
 
 Les délais par défaut sont 10 s pour la connexion, chaque lecture et chaque
 écriture/drain, 5 s pour la fermeture et 30 s pour l'échange complet après TLS.

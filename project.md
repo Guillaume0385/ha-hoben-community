@@ -60,9 +60,9 @@ Planned functionality:
 
 - HACS-installable custom integration skeleton;
 - UI-based Home Assistant `config_flow`;
-- MyHOBEN User GUID input;
-- client Device GUID creation/persistence;
-- pairing/authorization flow if required by the server;
+- Identifiant HOBEN input, normalized to the 32-character MyHOBEN User GUID sent without dashes;
+- client Device GUID lifecycle matching MyHOBEN: 32 zero characters before first assignment, then persistence of the server-provided DeviceGuid from `OpenedClient`;
+- pairing/authorization flow using `DeviceAuthReq` / `DeviceAuthRes` when required by the server, with explicit handling of documented `CloseClient` rejection states;
 - TLS connection to `myhoben.fr:465`;
 - `OpenClient` / `OpenedClient` handling;
 - dynamic stove profile detection;
@@ -224,11 +224,20 @@ buffering through the confirmed 48-byte OpenedClient prefix, existing codec and
 profile selection, then close on every outcome. Its safe report omits identifiers.
 
 The opt-in `scripts/probe_hoben_connection.py` exposes TLS-only and session-open
-validation. The full OpenedClient boundary and authorization/pairing remain
-unresolved; a suffix is not reframed and an unexpected message reports only its
-numeric type. No polling, automatic reconnect, long-lived client, generated
-DeviceGuid, Home Assistant setup/entities or stove controls belong to this
-increment. The broader responsibilities below remain roadmap goals.
+validation. The full OpenedClient boundary still remains unresolved. Static APK
+analysis now establishes the identity lifecycle used by MyHOBEN: the user enters
+or scans the HOBEN identifier, it is sent as a 32-character UserGuid without
+dashes, a new client starts with a DeviceGuid of 32 zero characters, and a
+successful OpenedClient can replace/persist that client DeviceGuid. The
+`DeviceAuthReq (0x2F)` → user code → `DeviceAuthRes (0x30)` path and several
+`CloseClient` rejection codes are also documented, but still require live
+validation against the current server before Home Assistant automates pairing.
+
+A suffix after the confirmed OpenedClient prefix is not reframed and an
+unexpected message reports only its numeric type. No polling, automatic
+reconnect, long-lived client, Home Assistant setup/entities or stove controls
+belong to this increment. The broader responsibilities below remain roadmap
+goals.
 
 ### Layer 1 — transport
 
@@ -382,6 +391,9 @@ CI should use a fake/simulated MyHOBEN server or transport abstraction plus sani
 
 This simulation should reproduce:
 
+- first-client `OpenClient` inputs with a normalized 32-character UserGuid and an initial DeviceGuid of 32 zeros;
+- `DeviceAuthReq` / `DeviceAuthRes` association exchanges and documented `CloseClient` rejection codes;
+- persistence/reuse of the DeviceGuid returned by a successful `OpenedClient`;
 - normal `OpenedClient` responses;
 - V4/V6/V6v16 profile responses;
 - Modbus read responses;
@@ -410,6 +422,9 @@ read-only modes will be added incrementally in separate reviewed PRs.
 
 Real-device validation is important for unknown protocol semantics, especially:
 
+- first-association behavior with a real HOBEN identifier and an initial zero DeviceGuid;
+- origin/presentation of the authentication code and the live `0x2F → 0x30 → 0x04` sequence;
+- reuse of the server-assigned DeviceGuid on a subsequent connection;
 - temperature scaling;
 - timing units;
 - profile identity;
