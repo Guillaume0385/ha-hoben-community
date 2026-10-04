@@ -41,13 +41,18 @@ def test_live_events_and_dispatch_choices(workflow) -> None:
     mode = workflow["on"]["workflow_dispatch"]["inputs"]["mode"]
     assert mode["type"] == "choice"
     assert mode["default"] == "tls-only"
-    assert mode["options"] == ["tls-only", "session-open"]
+    assert mode["options"] == ["tls-only", "session-open", "read-v4-state"]
 
 
 def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None:
     """Pin the event boundary: even a same-repo label cannot reach session-open."""
     jobs = workflow["jobs"]
-    assert set(jobs) == {"live-validation", "live-session-negative", "session-open"}
+    assert set(jobs) == {
+        "live-validation",
+        "live-session-negative",
+        "session-open",
+        "read-v4-state",
+    }
     tls = jobs["live-validation"]
     assert " ".join(tls["if"].split()) == (
         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'tls-only') || "
@@ -60,6 +65,7 @@ def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None
     tls_text = json.dumps(tls)
     assert "secrets." not in tls_text
     assert "--session" not in tls_text
+    assert "--read-v4-state" not in tls_text
     assert "python scripts/probe_hoben_connection.py --tls-only" in tls_text
 
 
@@ -84,19 +90,18 @@ def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None
         "push-main",
     ],
 )
+@pytest.mark.parametrize("job_mode", ["session-open", "read-v4-state"])
 def test_session_open_requires_manual_main(
-    workflow, event_name, mode, ref, allowed
+    workflow, event_name, mode, ref, allowed, job_mode
 ) -> None:
-    """Evaluate the real-session YAML gate across refs/events, including labels."""
+    """Both real modes reject labels, tags, other branches and automatic events."""
+    mode = job_mode if mode == "session-open" else mode
     context = {
         "github.event_name": event_name,
         "inputs.mode": mode,
         "github.ref": ref,
     }
-    assert (
-        _and_condition_matches(workflow["jobs"]["session-open"]["if"], context)
-        is allowed
-    )
+    assert _and_condition_matches(workflow["jobs"][job_mode]["if"], context) is allowed
 
 
 @pytest.mark.parametrize(
@@ -137,6 +142,7 @@ def test_negative_job_has_no_secret_or_environment(workflow) -> None:
     assert "hoben-live" not in source
     assert "HOBEN_DEVICE_GUID" not in source
     assert "HOBEN_USER_GUID" not in source
+    assert "--read-v4-state" not in source
     steps = job["steps"]
     checkout = next(
         s for s in steps if s.get("uses", "").startswith("actions/checkout@")
@@ -150,9 +156,13 @@ def test_negative_job_has_no_secret_or_environment(workflow) -> None:
     )
 
 
-def test_environment_and_only_user_secret(workflow) -> None:
+@pytest.mark.parametrize(
+    ("job_mode", "cli_mode"),
+    [("session-open", "--session"), ("read-v4-state", "--read-v4-state")],
+)
+def test_environment_and_only_user_secret(workflow, job_mode, cli_mode) -> None:
     """One environment secret is exposed only to the session probe step."""
-    job = workflow["jobs"]["session-open"]
+    job = workflow["jobs"][job_mode]
     assert job["environment"] == "hoben-live"
     assert "env" not in job
     secret_steps = [step for step in job["steps"] if "secrets." in json.dumps(step)]
@@ -161,14 +171,36 @@ def test_environment_and_only_user_secret(workflow) -> None:
     assert secret_steps[0]["env"] == {
         "HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"
     }
-    assert "--session" in secret_steps[0]["run"]
+    assert cli_mode in secret_steps[0]["run"]
     secret_references = re.findall(r"secrets\.([A-Z_]+)", LIVE_PATH.read_text())
-    assert secret_references == ["HOBEN_USER_GUID"]
+    assert secret_references == ["HOBEN_USER_GUID", "HOBEN_USER_GUID"]
     assert "HOBEN_DEVICE_GUID" not in LIVE_PATH.read_text()
     # The workflow only injects the secret as an environment input to Python.
     # No shell command/summary creates or interpolates the identifier.
     for step in job["steps"]:
         assert "HOBEN_USER_GUID" not in step.get("run", "")
+
+
+@pytest.mark.parametrize("job_mode", ["session-open", "read-v4-state"])
+def test_real_modes_cannot_select_each_other_or_any_pr_label(workflow, job_mode):
+    """Only the exact manual input selects a real job, regardless of PR labels."""
+    condition = workflow["jobs"][job_mode]["if"]
+    for mode in ("tls-only", "session-open", "read-v4-state"):
+        context = {
+            "github.event_name": "workflow_dispatch",
+            "inputs.mode": mode,
+            "github.ref": "refs/heads/main",
+        }
+        assert _and_condition_matches(condition, context) is (mode == job_mode)
+        for label in ("live-validation", "live-session-negative", "read-v4-state"):
+            context.update(
+                {
+                    "github.event_name": "pull_request",
+                    "github.event.action": "labeled",
+                    "github.event.label.name": label,
+                }
+            )
+            assert not _and_condition_matches(condition, context)
 
 
 def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
@@ -230,6 +262,25 @@ def test_minimal_permissions_python_and_sanitized_artifact(workflow) -> None:
             "failure",
         ),
         ("session-open", None, "skipped", "failure"),
+        (
+            "read-v4-state",
+            {"state": "read", "profile": "v4", "registers": [65535] * 20},
+            "success",
+            "read",
+        ),
+        (
+            "read-v4-state",
+            {"state": "modbus_exception", "exception_code": 255},
+            "failure",
+            "failure",
+        ),
+        (
+            "read-v4-state",
+            {"state": "read_not_attempted", "error": "unsupported_profile"},
+            "failure",
+            "failure",
+        ),
+        ("read-v4-state", None, "skipped", "failure"),
         (
             "live-session-negative",
             {"state": "opened", "observation": "informative"},
@@ -305,6 +356,7 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
             "live-validation": "tls-only",
             "session-open": "session-open",
             "live-session-negative": "session-negative",
+            "read-v4-state": "read-v4-state",
         }[job_name],
         "HOBEN_DEVICE_GUID": "SYNTHETIC-PRIVATE-DEVICE",
         "HOBEN_USER_GUID": "SYNTHETIC-PRIVATE-USER",
@@ -325,6 +377,8 @@ def test_actual_summary_preserves_only_sanitized_probe_json(
         assert json.dumps(report) in rendered
     if job_name == "session-open":
         assert "no authentication code requested or sent" in rendered
+    if job_name == "read-v4-state":
+        assert "raw UInt16 registers without semantic interpretation" in rendered
     assert "SYNTHETIC-PRIVATE" not in rendered + result.stdout + result.stderr
 
 

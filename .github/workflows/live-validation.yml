@@ -11,6 +11,7 @@ on:
         options:
           - tls-only
           - session-open
+          - read-v4-state
   pull_request:
     types: [labeled]
 
@@ -88,6 +89,73 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: live-validation-output
+          path: ${{ runner.temp }}/live-validation.json
+          if-no-files-found: ignore
+
+  read-v4-state:
+    # Same protection as session-open: the environment must independently allow
+    # only protected main. No PR label can select this real application read.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'read-v4-state' &&
+      github.ref == 'refs/heads/main'
+    name: One-shot raw V4 read validation
+    environment: hoben-live
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Diagnostic header
+        run: |
+          printf 'Runner OS: %s\n' "$RUNNER_OS"
+          python --version
+          printf '%s\n' 'Mode: read-v4-state' 'Endpoint: myhoben.fr:465'
+
+      - name: Open V4 and read exactly 20 raw registers once
+        id: probe
+        env:
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        run: |
+          # Repository code owns the fixed request and response validation.
+          # Exit 0 requires a matching read; blocked/exception/error exits 1.
+          python scripts/probe_hoben_connection.py --read-v4-state | tee "$RUNNER_TEMP/live-validation.json"
+
+      - name: Summarize raw V4 read or failure
+        if: ${{ always() }}
+        env:
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          result=failure
+          if [ "$PROBE_OUTCOME" = success ]; then
+            result=read
+          fi
+          {
+            printf '%s\n' '## Live Hoben V4 read validation'
+            printf '\nMode: read-v4-state\n\nEndpoint: myhoben.fr:465\n\nResult: %s\n' "$result"
+            printf '\nOne read only; raw UInt16 registers without semantic interpretation.\n'
+            if [ -s "$RUNNER_TEMP/live-validation.json" ]; then
+              printf '\nProbe output (sanitized JSON):\n\n```json\n'
+              cat "$RUNNER_TEMP/live-validation.json"
+              printf '\n```\n'
+            else
+              printf '\nProbe output unavailable (probe did not complete).\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve raw V4 probe JSON
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-v4-read-output
           path: ${{ runner.temp }}/live-validation.json
           if-no-files-found: ignore
 

@@ -14,7 +14,37 @@ from custom_components.hoben.modbus import (
     decode_mbap,
     decode_read_response,
     encode_mbap,
+    modbus_tcp_frame_size,
 )
+
+
+@pytest.mark.parametrize("size", range(6))
+def test_stream_frame_size_needs_complete_mbap_prefix(size):
+    """No stream layer can derive a length from a partial UInt16 field."""
+    with pytest.raises(ValueError, match="Truncated MBAP prefix"):
+        modbus_tcp_frame_size(bytes.fromhex("FF FF 00 00 00 2B")[:size])
+
+
+@pytest.mark.parametrize("length", [2, 3, 43, 254])
+def test_stream_frame_size_from_bounded_mbap_prefix(length):
+    """Size includes the six-byte prefix and the Unit ID counted by Length."""
+    prefix = b"\xff\xff\x00\x00" + length.to_bytes(2, "big")
+    assert modbus_tcp_frame_size(prefix) == 6 + length
+
+
+@pytest.mark.parametrize("length", [0, 1, 255, 65535])
+def test_stream_frame_size_rejects_invalid_length(length):
+    """Reject oversized declarations before waiting for a response body."""
+    with pytest.raises(ValueError, match="MBAP length"):
+        modbus_tcp_frame_size(b"\xff\xff\x00\x00" + length.to_bytes(2, "big"))
+
+
+def test_stream_frame_size_rejects_nonzero_protocol_and_nonbytes():
+    """The prefix API enforces the same protocol/type rules as complete frames."""
+    with pytest.raises(ValueError, match="protocol ID"):
+        modbus_tcp_frame_size(bytes.fromhex("FF FF 00 01 00 2B"))
+    with pytest.raises(TypeError, match="prefix must be bytes"):
+        modbus_tcp_frame_size(bytearray.fromhex("FF FF 00 00 00 2B"))
 
 
 @pytest.mark.parametrize(

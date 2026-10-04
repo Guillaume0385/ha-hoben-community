@@ -20,6 +20,7 @@ _UINT8_MAX = 0xFF
 _UINT16_MAX = 0xFFFF
 # Network byte order: transaction, protocol, length (UInt16), then unit (UInt8).
 _MBAP_HEADER = Struct(">HHHB")
+_MBAP_PREFIX = Struct(">HHH")
 _READ_PDU = Struct(">BHH")
 _UNIT_ID_SIZE = 1
 _MIN_MBAP_LENGTH = _UNIT_ID_SIZE + 1  # Unit ID and at least the function byte.
@@ -84,6 +85,25 @@ def encode_mbap(transaction_id: int, unit_id: int, pdu: bytes) -> bytes:
     return _MBAP_HEADER.pack(transaction_id, MODBUS_PROTOCOL_ID, length, unit_id) + pdu
 
 
+def modbus_tcp_frame_size(prefix: bytes) -> int:
+    """Derive the bounded ADU size from at least six buffered MBAP bytes.
+
+    Validate protocol ID and Length before a stream reader waits for the body.
+    This does not establish completeness or validate the Unit ID/PDU. Those
+    checks still belong to decode_mbap() and the response decoder.
+    """
+    if not isinstance(prefix, bytes):
+        raise TypeError("prefix must be bytes")
+    if len(prefix) < _MBAP_PREFIX_SIZE:
+        raise ValueError("Truncated MBAP prefix")
+    _, protocol_id, length = _MBAP_PREFIX.unpack_from(prefix)
+    if protocol_id != MODBUS_PROTOCOL_ID:
+        raise ValueError("MBAP protocol ID must be zero")
+    if not _MIN_MBAP_LENGTH <= length <= _MAX_MBAP_LENGTH:
+        raise ValueError("MBAP length must be between 2 and 254 (PDU: 1..253 bytes)")
+    return _MBAP_PREFIX_SIZE + length
+
+
 def decode_mbap(frame: bytes) -> ModbusTcpFrame:
     """Validate exactly one complete Modbus/TCP frame and return its fields.
 
@@ -95,13 +115,9 @@ def decode_mbap(frame: bytes) -> ModbusTcpFrame:
         raise TypeError("frame must be bytes")
     if len(frame) < _MBAP_HEADER.size:
         raise ValueError("Truncated MBAP header")
-    transaction_id, protocol_id, length, unit_id = _MBAP_HEADER.unpack_from(frame)
-    if protocol_id != MODBUS_PROTOCOL_ID:
-        raise ValueError("MBAP protocol ID must be zero")
-    if not _MIN_MBAP_LENGTH <= length <= _MAX_MBAP_LENGTH:
-        raise ValueError("MBAP length must be between 2 and 254 (PDU: 1..253 bytes)")
-    if len(frame) != _MBAP_PREFIX_SIZE + length:
+    if len(frame) != modbus_tcp_frame_size(frame):
         raise ValueError("MBAP length does not match the complete frame size")
+    transaction_id, _, _, unit_id = _MBAP_HEADER.unpack_from(frame)
     return ModbusTcpFrame(transaction_id, unit_id, frame[_MBAP_HEADER.size :])
 
 

@@ -1,7 +1,7 @@
-"""Opt-in TLS/OpenClient validation. Importing this module never opens a socket.
+"""Opt-in TLS/OpenClient/V4 read validation; imports never open a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only, --session or --session-negative. A first-client session uses the
+--tls-only, --session, --session-negative or --read-v4-state. A session uses the
 Identifiant HOBEN and a normal initial zero DeviceGuid. Negative mode substitutes
 only a synthetic/unassigned UserGuid and never reads HOBEN_* inputs.
 """
@@ -36,6 +36,11 @@ from custom_components.hoben.transport import (  # noqa: E402
     TransportTimeout,
     TransportTlsError,
 )
+from custom_components.hoben.v4_read import (  # noqa: E402
+    V4ReadProtocolError,
+    V4ReadTimeout,
+    open_and_read_v4_once,
+)
 
 # protocol.md §4 confirms the analyzed Android build.
 DEFAULT_BUILD = 34
@@ -55,9 +60,11 @@ class _SafeArgumentParser(argparse.ArgumentParser):
         )
 
 
-async def _probe(session: bool) -> dict[str, int | str]:
+async def _probe(
+    session: bool, *, read_v4_state: bool = False
+) -> dict[str, int | str | list[int]]:
     """Validate inputs before connecting and return only allowlisted fields."""
-    if session:
+    if session or read_v4_state:
         try:
             user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
             device_info = os.environ.get("HOBEN_DEVICE_INFO", DEFAULT_DEVICE_INFO)
@@ -67,7 +74,8 @@ async def _probe(session: bool) -> dict[str, int | str]:
         except (KeyError, ValueError):
             raise ValueError("Missing or invalid session inputs") from None
 
-        result = await open_session_once(
+        operation = open_and_read_v4_once if read_v4_state else open_session_once
+        result = await operation(
             AsyncTlsTransport(),
             user_guid=user_guid,
             build=build,
@@ -133,8 +141,18 @@ def main(argv: list[str] | None = None) -> int:
             "No secrets or HOBEN_* inputs; does not validate real authentication."
         ),
     )
+    mode.add_argument(
+        "--read-v4-state",
+        action="store_true",
+        help=(
+            "Open one first-client session using HOBEN_USER_GUID, require V4 "
+            "without unclassified OpenedClient bytes, read exactly 20 raw UInt16 "
+            "registers once, then close. No register semantics or control. "
+            "Real validation is reserved for reviewed main."
+        ),
+    )
     args = parser.parse_args(argv)
-    report: dict[str, int | str] = {
+    report: dict[str, int | str | list[int]] = {
         "host": DEFAULT_HOST,
         "port": DEFAULT_PORT,
         "state": "error",
@@ -142,7 +160,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report.update(
             asyncio.run(
-                _probe_negative() if args.session_negative else _probe(args.session)
+                _probe_negative()
+                if args.session_negative
+                else _probe(args.session, read_v4_state=args.read_v4_state)
             )
         )
     except UnexpectedMessageType as error:
@@ -151,12 +171,16 @@ def main(argv: list[str] | None = None) -> int:
         report.update(error="timeout", operation=error.operation)
     except SessionTimeout:
         report.update(error="timeout", operation="handshake")
+    except V4ReadTimeout:
+        report.update(error="timeout", operation="v4_read")
     except TransportEOF:
         report.update(error="eof")
     except TransportTlsError:
         report.update(error="tls_verification_or_negotiation_failed")
     except TransportError:
         report.update(error="transport_failed")
+    except V4ReadProtocolError:
+        report.update(error="invalid_v4_read_response")
     except SessionProtocolError:
         report.update(error="invalid_opened_client")
     except (TypeError, ValueError):
@@ -166,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         # A manual diagnostic must never print arbitrary exception payloads.
         report.update(error="probe_failed")
+    if args.read_v4_state:
+        report["mode"] = "read-v4-state"
     if args.session_negative:
         report["mode"] = "session-negative"
         # An observed reply/EOF is informative, not successful authentication.
@@ -180,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         report["observation"] = "informative" if informative else "inconclusive"
     print(json.dumps(report, sort_keys=True))
+    if args.read_v4_state:
+        return 0 if report["state"] == "read" else 1
     if args.session_negative:
         return 0 if report["observation"] == "informative" else 1
     return 1 if report["state"] == "error" else 0

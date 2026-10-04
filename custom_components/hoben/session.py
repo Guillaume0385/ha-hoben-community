@@ -139,6 +139,43 @@ async def _receive_response(transport: AsyncTlsTransport) -> SessionResult:
             raise
 
 
+async def _open_session(
+    transport: AsyncTlsTransport,
+    *,
+    user_guid: str,
+    build: int,
+    device_guid: str,
+    device_info: str,
+    handshake_timeout: float = 30.0,
+) -> SessionResult:
+    """Shared handshake primitive; the one-shot caller must always close.
+
+    This internal helper exposes no persistent client. It lets the V4 one-shot
+    operation apply its stricter boundary/profile checks before its sole read.
+    """
+    if (
+        not isinstance(handshake_timeout, (int, float))
+        or isinstance(handshake_timeout, bool)
+        or not math.isfinite(handshake_timeout)
+        or handshake_timeout <= 0
+    ):
+        raise ValueError("handshake_timeout must be positive finite seconds")
+    try:
+        request = encode_open_client(user_guid, build, device_guid, device_info)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid OpenClient fields") from None
+    await transport.connect()
+    try:
+        async with asyncio.timeout(handshake_timeout):
+            await transport.write(request)
+            return await _receive_response(transport)
+    except TransportError:
+        # Preserve the operation-specific timeout/EOF instead of relabeling it.
+        raise
+    except TimeoutError:
+        raise SessionTimeout("OpenClient handshake timed out") from None
+
+
 async def open_session_once(
     transport: AsyncTlsTransport,
     *,
@@ -160,27 +197,14 @@ async def open_session_once(
     """
     failed = True
     try:
-        if (
-            not isinstance(handshake_timeout, (int, float))
-            or isinstance(handshake_timeout, bool)
-            or not math.isfinite(handshake_timeout)
-            or handshake_timeout <= 0
-        ):
-            raise ValueError("handshake_timeout must be positive finite seconds")
-        try:
-            request = encode_open_client(user_guid, build, device_guid, device_info)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid OpenClient fields") from None
-        await transport.connect()
-        try:
-            async with asyncio.timeout(handshake_timeout):
-                await transport.write(request)
-                result = await _receive_response(transport)
-        except TransportError:
-            # Preserve the operation-specific timeout/EOF instead of relabeling it.
-            raise
-        except TimeoutError:
-            raise SessionTimeout("OpenClient handshake timed out") from None
+        result = await _open_session(
+            transport,
+            user_guid=user_guid,
+            build=build,
+            device_guid=device_guid,
+            device_info=device_info,
+            handshake_timeout=handshake_timeout,
+        )
         failed = False
         return result
     finally:
