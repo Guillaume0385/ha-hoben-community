@@ -92,8 +92,12 @@ jobs:
           if-no-files-found: ignore
 
   session-open:
-    # Secrets are never available to the PR-label job, including same-repo PRs.
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'session-open'
+    # Defense in depth: hoben-live MUST independently allow only the protected
+    # main branch before adding its secret. An unreviewed branch can edit this if.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'session-open' &&
+      github.ref == 'refs/heads/main'
     name: Session open (UserGuid preflight)
     environment: hoben-live
     runs-on: ubuntu-latest
@@ -118,7 +122,7 @@ jobs:
       - name: Run session preflight and one-shot probe
         id: probe
         env:
-          # Configure this manually as an environment secret in hoben-live.
+          # Add only after verifying hoben-live's main-only deployment policy.
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: |
           # Exit 3 means BLOCKED, not a server/protocol failure. pipefail retains

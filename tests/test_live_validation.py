@@ -46,9 +46,51 @@ def test_label_path_is_tls_only_without_environment_or_secrets(workflow) -> None
     assert "secrets." not in tls_text
     assert "--session" not in tls_text
     assert "python scripts/probe_hoben_connection.py --tls-only" in tls_text
-    assert jobs["session-open"]["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.mode == 'session-open'"
-    )
+
+
+@pytest.mark.parametrize(
+    ("event_name", "mode", "ref", "allowed"),
+    [
+        ("workflow_dispatch", "session-open", "refs/heads/main", True),
+        ("workflow_dispatch", "session-open", "refs/heads/unreviewed", False),
+        ("workflow_dispatch", "session-open", "refs/tags/main", False),
+        ("pull_request", "session-open", "refs/pull/15/merge", False),
+        ("pull_request", "session-open", "refs/heads/main", False),
+        ("workflow_dispatch", "tls-only", "refs/heads/main", False),
+        ("push", "session-open", "refs/heads/main", False),
+    ],
+    ids=[
+        "manual-main",
+        "manual-other-branch",
+        "manual-tag-named-main",
+        "pr-label",
+        "pr-label-even-with-main-ref",
+        "manual-tls-only",
+        "push-main",
+    ],
+)
+def test_session_open_requires_manual_main(
+    workflow, event_name, mode, ref, allowed
+) -> None:
+    """Evaluate the YAML gate across refs/events, without claiming remote policy.
+
+    The gate deliberately uses only equality checks joined with AND. Reject any
+    other expression grammar instead of silently ignoring an added alternative.
+    GitHub string equality is case-insensitive; environment branch restrictions
+    remain a separate, mandatory server-side boundary.
+    """
+    context = {
+        "github.event_name": event_name,
+        "inputs.mode": mode,
+        "github.ref": ref,
+    }
+    clauses = []
+    for term in workflow["jobs"]["session-open"]["if"].split("&&"):
+        match = re.fullmatch(r"([a-z_.]+)\s*==\s*'([^']+)'", term.strip())
+        assert match is not None, f"Unsupported condition term: {term}"
+        key, expected = match.groups()
+        clauses.append(context[key].casefold() == expected.casefold())
+    assert all(clauses) is allowed
 
 
 def test_environment_and_only_device_secret(workflow) -> None:
