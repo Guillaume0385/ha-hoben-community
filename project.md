@@ -688,7 +688,9 @@ derived protocol semantics, especially:
 
 - first-association behavior with a real HOBEN identifier and an initial zero DeviceGuid;
 - origin/presentation of the authentication code and the live `0x2F → 0x30 → 0x04` sequence;
-- reuse of the server-assigned DeviceGuid on a subsequent connection;
+- reuse of the server-assigned DeviceGuid on a subsequent connection: **confirmed
+  on the reference Osmose** (2026-10-04, `protocol.md` §4); **other models
+  unconfirmed**;
 - one simultaneous raw V4/UI comparison to validate the documented /10 °C,
   packed state/power, mode and ventilation mappings;
 - exact V4 warning/information bits and combustion-fault code labels;
