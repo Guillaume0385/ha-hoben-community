@@ -23,9 +23,12 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hoben import HobenRuntimeData
-from custom_components.hoben.client import HobenClient, RawStoveSnapshot
+from custom_components.hoben.client import HobenClient
 from custom_components.hoben.const import CONF_DEVICE_GUID, CONF_USER_GUID, DOMAIN
-from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
+from custom_components.hoben.coordinator import (
+    HobenCoordinatorData,
+    HobenDataUpdateCoordinator,
+)
 from custom_components.hoben.exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
@@ -70,8 +73,8 @@ async def test_setup_runtime_and_safe_device(
     assert entry.runtime_data.client is client
     assert entry.runtime_data.coordinator is coordinator
     assert isinstance(coordinator, HobenDataUpdateCoordinator)
-    assert coordinator.data is snapshot
-    assert isinstance(coordinator.data, RawStoveSnapshot)
+    assert coordinator.data.raw is snapshot
+    assert isinstance(coordinator.data, HobenCoordinatorData)
     assert coordinator.update_interval == timedelta(seconds=60)
 
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
@@ -84,13 +87,15 @@ async def test_setup_runtime_and_safe_device(
     assert device.model == "Protocol V4"
     assert device.sw_version == "8.2"
     assert "Osmose" not in device.model
-    assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert (
+        len(er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)) == 16
+    )
     assert_private_values_absent(
         caplog.text + repr(device) + repr(coordinator) + repr(entry.runtime_data)
     )
 
 
-async def test_polling_without_entities_and_unload_stops_timers(
+async def test_polling_with_entity_listeners_and_unload_stops_timers(
     hass, entry, client_factory, client
 ):
     coordinator = await load_entry(hass, entry)
@@ -184,7 +189,7 @@ async def test_runtime_error_mapping_is_sanitized_without_extra_retry_or_persist
         await coordinator.async_refresh()
     assert not coordinator.last_update_success
     assert isinstance(coordinator.last_exception, expected)
-    assert coordinator.data is snapshot
+    assert coordinator.data.raw is snapshot
     assert client.async_refresh.await_count == 2
     assert entry.data[CONF_DEVICE_GUID] == DEVICE_GUID
     assert_private_values_absent(
@@ -202,7 +207,7 @@ async def test_transient_failure_recovers(
     assert client.async_refresh.await_count == 2
     await advance_poll(hass)
     assert coordinator.last_update_success
-    assert coordinator.data is snapshot
+    assert coordinator.data.raw is snapshot
     assert client.async_refresh.await_count == 3
 
 

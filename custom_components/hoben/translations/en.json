@@ -8,7 +8,7 @@
       },
       "user": {
         "title": "Connect your Hoben stove",
-        "description": "This unofficial integration connects in read-only mode. It polls raw V4 data every 60 seconds and does not create sensor entities yet.",
+        "description": "This unofficial integration reads V4 stove values every 60 seconds. All entities are read-only.",
         "data": {
           "user_guid": "HOBEN identifier"
         },
@@ -21,7 +21,7 @@
       "invalid_identifier": "The HOBEN identifier is invalid or was rejected by the server.",
       "authorization_required": "The server requires client authorization. Pairing is not supported by this integration yet. You can retry later.",
       "cannot_connect": "Cannot connect to the Hoben service. Please try again later.",
-      "unsupported_stove": "This stove's protocol profile is not supported. Only raw V4 reads are available.",
+      "unsupported_stove": "This stove’s protocol profile is not supported. Only V4 is available.",
       "protocol_error": "The Hoben response could not be accepted safely. Please try again later.",
       "unknown": "An unexpected error occurred. Check the sanitized error context in the logs."
     },
@@ -29,6 +29,78 @@
       "already_configured": "This Hoben stove is already configured.",
       "reauth_successful": "The Hoben connection was validated and the integration reloaded.",
       "unique_id_mismatch": "The stored identity does not match this Hoben entry. Configure a new entry to use a different identifier."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ambient_temperature": {
+        "name": "Ambient temperature"
+      },
+      "target_temperature": {
+        "name": "Target temperature"
+      },
+      "power_level": {
+        "name": "Power level"
+      },
+      "operation_state": {
+        "name": "Operation state",
+        "state": {
+          "off": "Off",
+          "end_of_combustion": "End of combustion",
+          "standard_start": "Standard start",
+          "blackout_start": "Blackout start",
+          "stabilization": "Stabilization",
+          "combustion_management": "Combustion management"
+        }
+      },
+      "operation_mode": {
+        "name": "Operation mode",
+        "state": {
+          "automatic": "Automatic",
+          "magasin": "Store",
+          "manual": "Manual"
+        }
+      },
+      "ventilation_mode": {
+        "name": "Ventilation mode",
+        "state": {
+          "normal": "Normal",
+          "silence": "Silence",
+          "boost": "Boost"
+        }
+      },
+      "smoke_temperature": {
+        "name": "Smoke temperature"
+      },
+      "combustion_air_temperature": {
+        "name": "Combustion-air temperature"
+      },
+      "wired_ambient_temperature": {
+        "name": "Wired ambient temperature"
+      },
+      "rf_ambient_temperature": {
+        "name": "RF ambient temperature"
+      },
+      "derogation_temperature": {
+        "name": "Derogation temperature"
+      },
+      "derogation_start_delay": {
+        "name": "Derogation start delay"
+      },
+      "derogation_duration": {
+        "name": "Derogation duration"
+      }
+    },
+    "binary_sensor": {
+      "derogation_active": {
+        "name": "Derogation active"
+      },
+      "derogation_scheduled": {
+        "name": "Derogation scheduled"
+      },
+      "controller_on_off": {
+        "name": "Controller on/off request"
+      }
     }
   }
 }

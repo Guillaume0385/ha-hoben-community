@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .coordinator import HobenDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+PLATFORMS = ("sensor", "binary_sensor")
 
 
 @dataclass(slots=True, repr=False)
@@ -36,7 +37,7 @@ type HobenConfigEntry = ConfigEntry[HobenRuntimeData]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> bool:
-    """Require a successful raw refresh before registering a device or polling."""
+    """Require a decoded refresh before registering a device and its platforms."""
     from homeassistant.exceptions import (
         ConfigEntryAuthFailed,
         ConfigEntryError,
@@ -58,9 +59,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
         raise ConfigEntryError("Unexpected Hoben client failure") from None
 
     coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    platforms_started = False
     try:
         await coordinator.async_config_entry_first_refresh()
-        snapshot = coordinator.data
+        snapshot = coordinator.data.raw
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, user_guid_fingerprint(entry.data[CONF_USER_GUID]))},
@@ -71,13 +73,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
             sw_version=f"{snapshot.software_major}.{snapshot.software_minor}",
         )
         entry.runtime_data = HobenRuntimeData(client, coordinator)
-        # With no entities yet, an entry-owned no-op subscriber keeps DUC polling.
-        # HA runs the removal callback on unload and discards runtime_data itself.
-        entry.async_on_unload(coordinator.async_add_listener(lambda: None))
+        platforms_started = True
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException as error:
         # Includes cancellation; a failed setup must not retain a client or timer.
+        if platforms_started:
+            try:
+                await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+            except Exception as unload_error:
+                log_unexpected_error(_LOGGER, unload_error)
         await coordinator.async_shutdown()
         await client.async_close()
+        # HA clears runtime_data on successful unload, but retains it after a
+        # failed setup. Do not leave a closed client/partial platform runtime.
+        if hasattr(entry, "runtime_data"):
+            del entry.runtime_data
         if isinstance(error, Exception) and not isinstance(
             error, (ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady)
         ):
@@ -88,7 +98,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> bool:
-    """Stop scheduling before cancelling/awaiting any active client refresh."""
-    await entry.runtime_data.coordinator.async_shutdown()
-    await entry.runtime_data.client.async_close()
-    return True
+    """Remove entity listeners, then stop scheduling and any active refresh."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        await entry.runtime_data.coordinator.async_shutdown()
+        await entry.runtime_data.client.async_close()
+    return unload_ok

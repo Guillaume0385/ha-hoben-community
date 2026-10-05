@@ -1,7 +1,8 @@
 """Opt-in TLS/OpenClient/V4 read validation; imports never open a socket.
 
 Run from a checkout with Python 3.12+: python scripts/probe_hoben_connection.py
---tls-only, --session, --session-negative, --read-v4-state or --live-premerge.
+--tls-only, --session, --session-negative, --read-v4-state, --live-premerge or
+--live-v4-validation-values (manual private household-value capture, never CI).
 A session uses the Identifiant HOBEN and a normal initial zero DeviceGuid.
 Negative mode substitutes
 only a synthetic/unassigned UserGuid and never reads HOBEN_* inputs.
@@ -12,6 +13,7 @@ import asyncio
 import json
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Support direct script execution from any directory, without installing HA.
@@ -51,6 +53,8 @@ from custom_components.hoben.v4_read import (  # noqa: E402
     V4ReadTimeout,
     open_and_read_v4_once,
 )
+from custom_components.hoben.v4_state import decode_v4_snapshot  # noqa: E402
+from scripts.v4_validation_values import build_private_v4_report  # noqa: E402
 
 # Syntactically valid, synthetic/unassigned identity; never a real-mode default.
 NEGATIVE_TEST_USER_GUID = "00000000000000000000000000000000"
@@ -65,10 +69,47 @@ class _SafeArgumentParser(argparse.ArgumentParser):
         )
 
 
+class _PrivateCaptureInActionsError(Exception):
+    """Private household values cannot be captured under GitHub Actions."""
+
+
+async def _capture_private_v4_values() -> dict[str, object]:
+    """One manual client refresh, with the Actions guard before identity/client I/O.
+
+    The opt-in flag selects this path separately from --live-premerge. Read only
+    HOBEN_USER_GUID and use client defaults, without exploratory overrides, live
+    retries or identity persistence. Always close; the CLI sanitizes all failures.
+    """
+    if os.environ.get("GITHUB_ACTIONS", "").strip().casefold() == "true":
+        raise _PrivateCaptureInActionsError()
+    try:
+        user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
+    except (KeyError, ValueError):
+        raise ValueError("Missing or invalid session inputs") from None
+
+    client = HobenClient(user_guid=user_guid, max_attempts=1)
+    try:
+        snapshot = await client.async_refresh()
+        timestamp = (
+            datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        )
+        if not client.has_assigned_device_guid:
+            raise HobenProtocolError()
+        return build_private_v4_report(snapshot, timestamp_utc=timestamp)
+    finally:
+        await client.async_close()
+
+
 async def _probe(
-    session: bool, *, read_v4_state: bool = False, live_premerge: bool = False
-) -> dict[str, int | str | list[int]]:
+    session: bool,
+    *,
+    read_v4_state: bool = False,
+    live_premerge: bool = False,
+    live_v4_validation_values: bool = False,
+) -> dict[str, object]:
     """Validate inputs before connecting and return only allowlisted fields."""
+    if live_v4_validation_values:
+        return await _capture_private_v4_values()
     if session or read_v4_state or live_premerge:
         try:
             user_guid = normalize_user_guid(os.environ["HOBEN_USER_GUID"])
@@ -83,16 +124,21 @@ async def _probe(
             # Only the credential is read; no exploratory override is consulted.
             client = HobenClient(user_guid=user_guid, max_attempts=1)
             try:
-                await client.async_refresh()
+                first_snapshot = await client.async_refresh()
+                decode_v4_snapshot(first_snapshot)
                 if not client.has_assigned_device_guid:
                     raise HobenProtocolError()
                 snapshot = await client.async_refresh()
+                decode_v4_snapshot(snapshot)
                 if not client.has_assigned_device_guid:
                     raise HobenProtocolError()
                 return snapshot.safe_report() | {
                     "state": "client_refresh_validated",
                     "device_guid_reuse": "validated",
                     "refresh_count": 2,
+                    # Only completion metadata. Never print decoded household
+                    # values, enum codes, raw registers or either identity.
+                    "v4_decode_count": 2,
                 }
             finally:
                 await client.async_close()
@@ -148,7 +194,7 @@ async def _probe_negative() -> dict[str, int | str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run only after explicit mode selection; print sanitized JSON, no traceback."""
+    """Explicit modes; errors omit private data, only manual capture emits values."""
     parser = _SafeArgumentParser(description=__doc__, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--tls-only", action="store_true", help="Verify TLS, then close")
@@ -184,6 +230,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     mode.add_argument(
+        "--live-v4-validation-values",
+        action="store_true",
+        help=(
+            "Manual private V4 research only: one HobenClient refresh, UTC "
+            "timestamp, twenty addressed raw registers and sixteen decoded/HA "
+            "values. Refused under GITHUB_ACTIONS=true before any connection. "
+            "Uses only HOBEN_USER_GUID; no identifiers, pairing, writes or "
+            "control. Never publish this JSON in CI, GitHub logs or artifacts."
+        ),
+    )
+    mode.add_argument(
         "--read-v4-state",
         action="store_true",
         help=(
@@ -194,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
-    report: dict[str, int | str | list[int]] = {
+    report: dict[str, object] = {
         "host": DEFAULT_HOST,
         "port": DEFAULT_PORT,
         "state": "error",
@@ -208,9 +265,12 @@ def main(argv: list[str] | None = None) -> int:
                     args.session,
                     read_v4_state=args.read_v4_state,
                     live_premerge=args.live_premerge,
+                    live_v4_validation_values=args.live_v4_validation_values,
                 )
             )
         )
+    except _PrivateCaptureInActionsError:
+        report.update(error="private_capture_forbidden_in_github_actions")
     except HobenError as error:
         report.update(error.safe_report())
     except UnexpectedMessageType as error:
@@ -233,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         report.update(error="invalid_opened_client")
     except (TypeError, ValueError):
         report.update(error="invalid_session_inputs")
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         report.update(error="cancelled")
     except Exception:
         # A manual diagnostic must never print arbitrary exception payloads.
@@ -242,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         report["mode"] = "read-v4-state"
     if args.live_premerge:
         report["mode"] = "live-premerge"
+    if args.live_v4_validation_values:
+        report["mode"] = "live-v4-validation-values"
     if args.session_negative:
         report["mode"] = "session-negative"
         # An observed reply/EOF is informative, not successful authentication.
@@ -256,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         report["observation"] = "informative" if informative else "inconclusive"
     print(json.dumps(report, sort_keys=True))
+    if args.live_v4_validation_values:
+        return 0 if report["state"] == "v4_validation_values_captured" else 1
     if args.live_premerge:
         # A classified rejection is useful for research but never passes this
         # authenticated gate. The protocol parser already checks correlation
@@ -266,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             "device_guid_reuse": "validated",
             "refresh_count": 2,
             "register_count": 20,
+            "v4_decode_count": 2,
         }
         return 0 if all(report.get(k) == v for k, v in required.items()) else 1
     if args.read_v4_state:

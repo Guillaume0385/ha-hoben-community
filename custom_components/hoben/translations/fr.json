@@ -8,7 +8,7 @@
       },
       "user": {
         "title": "Connecter votre poêle Hoben",
-        "description": "Cette intégration non officielle se connecte en lecture seule. Elle lit les données V4 brutes toutes les 60 secondes et ne crée pas encore d’entités capteurs.",
+        "description": "Cette intégration non officielle lit les valeurs V4 du poêle toutes les 60 secondes. Toutes les entités sont en lecture seule.",
         "data": {
           "user_guid": "Identifiant HOBEN"
         },
@@ -21,7 +21,7 @@
       "invalid_identifier": "L’identifiant HOBEN est invalide ou a été refusé par le serveur.",
       "authorization_required": "Le serveur demande une autorisation du client. L’association n’est pas encore prise en charge par cette intégration. Vous pouvez réessayer plus tard.",
       "cannot_connect": "Impossible de se connecter au service Hoben. Réessayez plus tard.",
-      "unsupported_stove": "Le profil protocolaire de ce poêle n’est pas pris en charge. Seule la lecture V4 brute est disponible.",
+      "unsupported_stove": "Le profil protocolaire de ce poêle n’est pas pris en charge. Seul V4 est disponible.",
       "protocol_error": "La réponse Hoben n’a pas pu être acceptée en toute sécurité. Réessayez plus tard.",
       "unknown": "Une erreur inattendue s’est produite. Consultez le contexte expurgé dans les journaux."
     },
@@ -29,6 +29,78 @@
       "already_configured": "Ce poêle Hoben est déjà configuré.",
       "reauth_successful": "La connexion Hoben a été validée et l’intégration rechargée.",
       "unique_id_mismatch": "L’identité enregistrée ne correspond pas à cette entrée Hoben. Configurez une nouvelle entrée pour utiliser un autre identifiant."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ambient_temperature": {
+        "name": "Température ambiante"
+      },
+      "target_temperature": {
+        "name": "Température de consigne"
+      },
+      "power_level": {
+        "name": "Niveau de puissance"
+      },
+      "operation_state": {
+        "name": "État de fonctionnement",
+        "state": {
+          "off": "Arrêt",
+          "end_of_combustion": "Fin de combustion",
+          "standard_start": "Démarrage standard",
+          "blackout_start": "Démarrage après coupure de courant",
+          "stabilization": "Stabilisation",
+          "combustion_management": "Gestion de combustion"
+        }
+      },
+      "operation_mode": {
+        "name": "Mode de fonctionnement",
+        "state": {
+          "automatic": "Automatique",
+          "magasin": "Magasin",
+          "manual": "Manuel"
+        }
+      },
+      "ventilation_mode": {
+        "name": "Mode de ventilation",
+        "state": {
+          "normal": "Normal",
+          "silence": "Silence",
+          "boost": "Boost"
+        }
+      },
+      "smoke_temperature": {
+        "name": "Température des fumées"
+      },
+      "combustion_air_temperature": {
+        "name": "Température de l’air comburant"
+      },
+      "wired_ambient_temperature": {
+        "name": "Température ambiante filaire"
+      },
+      "rf_ambient_temperature": {
+        "name": "Température ambiante RF"
+      },
+      "derogation_temperature": {
+        "name": "Température de dérogation"
+      },
+      "derogation_start_delay": {
+        "name": "Délai de début de dérogation"
+      },
+      "derogation_duration": {
+        "name": "Durée de dérogation"
+      }
+    },
+    "binary_sensor": {
+      "derogation_active": {
+        "name": "Dérogation active"
+      },
+      "derogation_scheduled": {
+        "name": "Dérogation programmée"
+      },
+      "controller_on_off": {
+        "name": "Consigne marche/arrêt du contrôleur"
+      }
     }
   }
 }

@@ -52,9 +52,9 @@ _MAX_RETRY_DELAY = 30.0
 class RawStoveSnapshot:
     """Raw UInt16 registers and public opening metadata, with no identity/packet.
 
-    No physical interpretation of V4 registers is established. This immutable
-    model can be passed directly to a future DataUpdateCoordinator; even an
-    asdict export contains no UserGuid, DeviceGuid or underlying session object.
+    Semantic conversion belongs to v4_state.py, not this raw client API. An
+    asdict export contains no UserGuid, DeviceGuid or underlying session object,
+    but register contents are private household data and must not be logged live.
     """
 
     profile: StoveProfile

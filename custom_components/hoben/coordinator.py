@@ -1,6 +1,7 @@
 """Home Assistant scheduling over the HA-independent read-only client API."""
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
@@ -19,6 +20,7 @@ from .exceptions import (
 from .helpers import log_unexpected_error
 from .myhoben import INITIAL_DEVICE_GUID
 from .profiles import StoveProfile
+from .v4_state import V4StoveState, decode_v4_snapshot
 
 if TYPE_CHECKING:
     from . import HobenConfigEntry
@@ -26,8 +28,16 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-class HobenDataUpdateCoordinator(DataUpdateCoordinator[RawStoveSnapshot]):
-    """Poll raw snapshots every 60 seconds; the client alone owns bounded retries."""
+@dataclass(frozen=True, slots=True)
+class HobenCoordinatorData:
+    """Keep raw metadata and decoded state from the same single client refresh."""
+
+    raw: RawStoveSnapshot
+    state: V4StoveState
+
+
+class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
+    """Poll and decode every 60 seconds; the client alone owns bounded retries."""
 
     def __init__(
         self, hass: HomeAssistant, entry: "HobenConfigEntry", client: HobenClient
@@ -43,12 +53,13 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[RawStoveSnapshot]):
         )
         self.client = client
 
-    async def _async_update_data(self) -> RawStoveSnapshot:
-        """Return raw data and persist only a successful nonzero identity change."""
+    async def _async_update_data(self) -> HobenCoordinatorData:
+        """Decode before persisting a successful nonzero identity change."""
         try:
             snapshot = await self.client.async_refresh()
             if snapshot.profile is not StoveProfile.V4:
                 raise HobenUnsupportedProfileError(snapshot.profile)
+            state = decode_v4_snapshot(snapshot)
             device_guid = self.client.device_guid_for_persistence
             if device_guid == INITIAL_DEVICE_GUID:
                 raise ConfigEntryError("Hoben client identity was not assigned")
@@ -60,7 +71,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[RawStoveSnapshot]):
                     self.config_entry,
                     data={**self.config_entry.data, CONF_DEVICE_GUID: device_guid},
                 )
-            return snapshot
+            return HobenCoordinatorData(raw=snapshot, state=state)
         except HobenInvalidCredentialsError:
             raise ConfigEntryAuthFailed("Hoben identifier was rejected") from None
         except HobenAuthorizationRequiredError:

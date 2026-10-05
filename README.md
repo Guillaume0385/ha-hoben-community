@@ -10,14 +10,15 @@ Home Assistant ou HACS.
 
 La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
 être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
-enregistre un appareil et conserve un état V4 brut dans un coordinateur, rafraîchi
-toutes les **60 secondes**. **Aucune entité capteur n’est encore exposée** : le
-code conserve actuellement les 20 registres comme UInt16 bruts. Leur cartographie
-et leurs principaux formats V4 sont désormais documentés statiquement dans
-`protocol.md`, mais une validation dynamique simultanée **raw/UI MyHOBEN** reste
-requise avant d'exposer des valeurs physiques dans Home Assistant. Chaque
-rafraîchissement utilise le client protocolaire réutilisable `HobenClient` et
-une connexion TLS bornée.
+enregistre un appareil et rafraîchit les données V4 toutes les **60 secondes**.
+Le candidat de l’issue #26 ajoute un décodeur typé et **16 entités de lecture**,
+dont deux désactivées par défaut. Il conserve les 20 registres UInt16 bruts en
+mémoire avec les valeurs décodées. La cartographie vient de l’analyse statique
+documentée dans `protocol.md` : **la validation MANAGER sur le HEAD exact et une
+comparaison privée simultanée avec MyHOBEN restent requises avant fusion**.
+Le décodeur et les premières entités ne sont pas encore marqués DONE dans la
+roadmap. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
+TLS bornée. Toutes les entités sont en lecture seule ; le contrôle reste indisponible.
 Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
@@ -51,8 +52,11 @@ n’affichent les GUID.
 
 Lors du setup, une première lecture doit réussir avant l’activation du
 coordinateur. `entry.runtime_data` contient le client et le coordinateur typés.
-Un abonnement lié à l’entrée maintient le sondage même sans entité ; le
-déchargement arrête les timers et ferme le client, y compris une lecture active.
+Le coordinateur conserve `HobenCoordinatorData(raw, state)`, construit avec une
+seule lecture suivie d’un décodage sans I/O. Les entités s’abonnent au coordinateur
+et lisent uniquement sa mémoire. Le déchargement retire leurs abonnements, arrête
+les timers et ferme le client, y compris une lecture active. Un setup partiel
+échoué décharge les plateformes et supprime aussi le runtime incomplet.
 Le rechargement réutilise le DeviceGuid persisté. Après une lecture réussie,
 une nouvelle attribution modifie uniquement `device_guid`, sans réécrire l’entrée
 si la valeur est inchangée. L’appareil expose le fabricant `Hoben`, le profil
@@ -73,8 +77,54 @@ Une réponse protocolaire, Modbus ou un profil non pris en charge fait échouer 
 setup avec un message fixe expurgé.
 
 L’intervalle de 60 secondes n’est pas configurable pour cet incrément. Aucun
-socket permanent, DataUpdated, diagnostic de registres, association, entité
-sémantique ou contrôle du poêle n’est ajouté.
+socket permanent, DataUpdated, dump de registres, association ou contrôle du
+poêle n’est ajouté.
+
+## Entités V4 en lecture seule
+
+| Entité | Unité / type | Catégorie | Activée par défaut |
+|---|---|---|---|
+| Température ambiante | °C, mesure | standard | oui |
+| Température de consigne | °C, lecture de réglage | standard | oui |
+| Niveau de puissance | %, mesure | standard | oui |
+| État de fonctionnement | enum V4 | standard | oui |
+| Mode de fonctionnement | automatique / magasin / manuel | standard | oui |
+| Mode de ventilation | normal / silence / boost | standard | oui |
+| Température des fumées | °C, mesure | diagnostic | oui |
+| Température de l’air comburant | °C, mesure | diagnostic | oui |
+| Température ambiante filaire | °C, mesure | diagnostic | **non** |
+| Température ambiante RF | °C, mesure | diagnostic | **non** |
+| Température de dérogation | °C, lecture de réglage | standard | oui |
+| Délai de début de dérogation | minutes | standard | oui |
+| Durée de dérogation | minutes | standard | oui |
+| Dérogation active | binaire | standard | oui |
+| Dérogation programmée | binaire | standard | oui |
+| Consigne marche/arrêt du contrôleur | binaire OnOff | standard | oui |
+
+La consigne marche/arrêt reflète uniquement l’octet OnOff du contrôleur : elle
+ne prouve pas une combustion en cours. L’état de fonctionnement V4 reste la
+référence pour la phase du poêle. Aucun interrupteur, sélecteur, réglage numérique,
+climate, bouton ou service de contrôle n’est créé, y compris pour le mode magasin.
+
+Les températures utilisent Int16 / 10 °C ; `0x0FFF` donne un état inconnu pour le
+capteur concerné. La consigne principale inférieure à 5 °C est masquée comme dans
+MyHOBEN. Un code enum inconnu, un OnOff différent de 0/1 ou une puissance supérieure
+à 100 % donne aussi un état inconnu, sans devenir arbitrairement automatique,
+arrêt ou zéro. Les codes bruts restent accessibles uniquement dans le modèle
+interne. Les trois valeurs numériques de dérogation sont inconnues lorsqu’elle
+n’est ni active ni programmée ; aucun défaut local de l’interface MyHOBEN n’est
+substitué.
+
+Un échec de rafraîchissement rend toutes les entités actives indisponibles, sans
+effacer les dernières données internes. Un rafraîchissement réussi les rétablit.
+Une seule température indisponible ne rend pas les autres entités indisponibles.
+Les identifiants uniques utilisent l’empreinte non secrète de l’entrée suivie
+d’une clé stable, conservée après rechargement et rotation du DeviceGuid. Toutes
+les entités appartiennent à l’appareil existant. Noms et états enum sont traduits
+en français et anglais dans `translations/`.
+
+Les défauts, warnings, autres bits d’information, date/heure et PVI restent des
+champs bruts internes sans entité, faute de cartographie complète.
 
 ## API protocolaire HobenClient
 
@@ -122,12 +172,13 @@ session ou trame brute, même via `asdict()`. Son rapport sûr conserve seulemen
 les métadonnées et le nombre de registres. `client.profile` conserve le dernier
 profil accepté ; `client.last_snapshot` conserve le dernier rafraîchissement
 réussi. `RawStoveSnapshot` reste volontairement **brut** : il ne transforme
-pas encore ces UInt16 en propriétés physiques. En revanche, `protocol.md`
-documente maintenant la cartographie V4 1024..1043 extraite de MyHOBEN :
-températures en Int16 / 10 °C, puissance/état et mode/marche-arrêt empaquetés,
-ventilation 0/1/2 et temporisations de dérogation en minutes. Le prochain
-increment protocolaire doit implémenter ce décodage dans une couche V4 dédiée,
-avec tests, sans le mélanger au transport/client. V4 reste sélectionné
+pas ces UInt16 en propriétés physiques. La couche indépendante de Home Assistant
+`v4_state.py` expose `decode_v4_snapshot(snapshot) -> V4StoveState`, avec un état
+immuable et hashable et le helper `decode_v4_temperature(raw)`. Elle exige V4 et
+exactement 20 UInt16, sans modifier le snapshot ni accéder au réseau. Elle décode
+les températures, mode/OnOff, puissance/état, ventilation et dérogation selon
+`protocol.md`, et conserve explicitement les champs partiels/codes inconnus.
+Ne pas publier son repr/asdict : il contient des valeurs du foyer. V4 reste sélectionné
 dynamiquement ; les autres profils échouent explicitement, sans supposer que
 tous les Osmose sont V4.
 
@@ -212,9 +263,12 @@ python -m pytest -c ha_tests/pytest.ini ha_tests
 Les tests chargent les vrais config entries, flux, timers du coordinateur,
 traductions et registre d’appareils HA. Ils vérifient notamment le démarrage du
 flux de réauthentification sur une erreur d’authentification, la reprise après
-rechargement et la conservation de l’identité. `HobenClient` est simulé pour
-l’orchestration ; des tests de réauthentification utilisent aussi le vrai client
-sur un transport scripté, pour vérifier l’absence de réponse d’association.
+rechargement et la conservation de l’identité, les métadonnées/valeurs des
+entités, leurs traductions, les sentinelles/codes inconnus, la disponibilité et
+le nettoyage après setup partiel. `HobenClient` est simulé pour l’orchestration ;
+des tests de réauthentification et d’entités utilisent aussi le vrai client sur
+un transport scripté, pour vérifier les trames exactes et l’absence de commande
+ou de réponse d’association.
 Le harnais bloque les sockets externes et un garde interdit toute construction
 de transport Hoben réel, même si une simulation est oubliée. Aucun test HA ne
 contacte `myhoben.fr`.
@@ -285,13 +339,17 @@ OpenClient/OpenedClient → profil dynamiquement V4 sans suffixe déjà reçu �
 **une seule** lecture fonction **04**, transaction **`0xFFFF`**, unité **1**, adresse
 **1024**, quantité **20** → réponse corrélée de **20 UInt16** → fermeture.
 Les retries sont désactivés dans cette suite fixe : exactement deux sessions et
-deux lectures en cas de réussite. Le retry/backoff du client est testé hors ligne.
+deux lectures en cas de réussite. Chacun des deux snapshots passe aussi par le
+décodeur V4, **sans lecture supplémentaire ni publication des valeurs décodées**.
+Le retry/backoff du client est testé hors ligne.
 Une autorisation demandée, un rejet, un autre profil, un timeout, une exception
 Modbus ou une réponse non corrélée fait échouer la validation. Les valeurs des
 registres peuvent changer : aucune valeur exacte n'est exigée. Le JSON exporte
 les métadonnées expurgées et le nombre de registres, sans leurs contenus. La
 réussite exige `state: "client_refresh_validated"`, `profile: "v4"`,
-`device_guid_reuse: "validated"`, `refresh_count: 2` et `register_count: 20`.
+`device_guid_reuse: "validated"`, `refresh_count: 2`, `register_count: 20` et
+`v4_decode_count: 2`. Ce compteur valide l’exécution du décodeur, pas la
+correspondance de ses valeurs avec l’affichage MyHOBEN.
 Un premier rafraîchissement réussi seul ne suffit pas. Aucun identifiant ne
 figure dans le rapport. `protocol.md` consigne la réutilisation confirmée sur
 l’Osmose de référence après la validation MANAGER de la PR #22, sans généraliser
@@ -635,7 +693,7 @@ sémantique V4 est toutefois maintenant documentée dans `protocol.md` après
 analyse de MyHOBEN 2.2 build 34. En particulier, 1031 est la température ambiante,
 1032 la consigne, 1030 contient puissance+état, et les températures V4 utilisent
 un format Int16 en dixièmes de degré. Cette séparation permet de conserver la
-sonde comme outil brut de validation du futur décodeur.
+sonde comme outil brut, distinct du décodeur sémantique du candidat #26.
 Une exception Modbus correspondante donne `state: "modbus_exception"` et le
 `exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
 Les refus après OpenedClient donnent `read_not_attempted` et une raison
@@ -650,6 +708,53 @@ d'association ou dump d'environnement n'entre dans les logs, résumés ou artefa
 Le job conserve ce JSON dans **`live-v4-read-output`**, y compris en cas d'échec.
 Ce mode n'ajoute ni écriture (06/16/22, transaction `0xFFF0`), ni DeviceAuthRes,
 ni polling, reconnexion, client persistant ou contrôle du poêle.
+
+## Capture locale privée pour comparer les valeurs V4
+
+Pour la comparaison simultanée du candidat #26 avec MyHOBEN, un mode manuel
+distinct exporte les valeurs du foyer. Le MANAGER l'utilise depuis le **HEAD
+exact revu**, après CI verte et nouvelle validation authentifiée de ce SHA.
+Avec le seul `HOBEN_USER_GUID` configuré dans l'environnement local privé :
+
+```sh
+python scripts/probe_hoben_connection.py --live-v4-validation-values
+```
+
+Ce mode est réservé au reverse engineering local et privé. **Ne jamais publier
+son JSON dans les logs, artefacts ou commentaires GitHub.** Le responsable peut
+volontairement le partager dans le chat privé avec le MANAGER pendant la
+comparaison. Aucun workflow ne l'appelle ; `GITHUB_ACTIONS=true` le refuse avant
+la lecture de l'identifiant, la création du client ou toute connexion réseau.
+
+Une invocation effectue un seul `HobenClient.async_refresh()` avec les défauts
+du client, sans retry : TLS vérifié, ouverture V4, lecture fonction 04 de 20
+registres à partir de 1024, puis fermeture. Aucun DeviceAuthRes, écriture,
+transaction `0xFFF0` ou contrôle n'est envoyé. Les variables exploratoires
+`HOBEN_DEVICE_GUID`, `HOBEN_BUILD` et `HOBEN_DEVICE_INFO` sont ignorées.
+
+La sortie est un **unique JSON**, sans GUID ni traceback. En réussite :
+
+- `timestamp_utc` indique la fin du rafraîchissement au format UTC `…Z` ;
+- `registers` associe explicitement les adresses `"1024"` à `"1043"` aux 20
+  UInt16 bruts, y compris les champs dont la sémantique reste inconnue ;
+- `entities` contient exactement les 16 clés du tableau des entités ci-dessus,
+  avec `register_address`, `raw_value`, `decoded_value` et `ha_value`.
+
+Pour les champs combinés mode/OnOff et puissance/état, `raw_value` est l'octet
+extrait ; le mot complet reste dans `registers`. Les enums utilisent leurs
+valeurs sémantiques snake_case ; un code inconnu donne `null` et conserve son
+code brut. Les deux indicateurs de dérogation incluent le bit extrait 0/1 et son
+`bit_mask`. Les températures décodées sont en °C, les délais/durées en minutes
+et la puissance en %. `ha_value` correspond à la propriété de l'entité HA,
+y compris pour les sondes filaire/RF désactivées par défaut si on les activait.
+Les trois valeurs numériques de dérogation conservent leur valeur brute et
+leur valeur décodée même si la dérogation est inactive : seul `ha_value` est
+alors `null`, lorsque les indicateurs active **et** programmée sont faux.
+
+Un refus ou une erreur produit uniquement un rapport d'erreur expurgé, sans
+valeur partielle. Le code de sortie vaut **0** pour une capture complète,
+**1** pour un refus/échec et **2** pour un usage CLI invalide. La suite publique
+`--live-premerge` conserve son JSON de métadonnées/compteurs, sans ces valeurs.
 
 ## Format des principales données V4
 
@@ -668,7 +773,17 @@ MyHOBEN établit notamment :
 Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. Les
 captures d'écran 23,5 °C / 19,0 °C sont cohérentes avec le facteur /10, mais
 aucune valeur brute simultanée n'a encore été publiée : une validation réelle
-expurgée reste prévue avant exposition des entités physiques.
+expurgée reste prévue avant fusion des premières entités physiques.
+
+Pour le candidat #26, après CI verte et validation authentifiée sur le HEAD exact,
+le MANAGER compare **en privé et au même instant** l’état décodé et l’interface
+MyHOBEN de l’Osmose : ambiance, consigne, mode, ventilation, OnOff et état/puissance
+selon ce que la phase actuelle permet d’observer. Dans la PR, consigner seulement
+les champs comparés, pass/fail et date/heure, sans GUID ni valeurs du foyer.
+Une contradiction impose de corriger d’abord les preuves protocole, le décodeur
+et les tests, puis de recommencer la validation. Le workflow de confiance reste
+inchangé et ne doit jamais publier ces valeurs privées. Une confirmation
+dynamique documentaire pourra être ajoutée séparément après comparaison réussie.
 
 ## Licence
 

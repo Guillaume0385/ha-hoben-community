@@ -86,6 +86,8 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
     streams.connect.side_effect = connect
     client_factory = Mock(wraps=probe.HobenClient)
     monkeypatch.setattr(probe, "HobenClient", client_factory)
+    decoder = Mock(wraps=probe.decode_v4_snapshot)
+    monkeypatch.setattr(probe, "decode_v4_snapshot", decoder)
     legacy = Mock(side_effect=AssertionError("The public client must own the suite"))
     monkeypatch.setattr(probe, "open_and_read_v4_once", legacy)
     monkeypatch.setattr(probe, "open_session_once", legacy)
@@ -107,6 +109,7 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         "device_guid_reuse": "validated",
         "refresh_count": 2,
         "register_count": 20,
+        "v4_decode_count": 2,
     }
     assert [c.args[0] for c in streams.writer.write.call_args_list] == [
         OPEN_REQUEST,
@@ -122,6 +125,9 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         user_guid=USER_GUID.replace("-", "").lower(), max_attempts=1
     )
     legacy.assert_not_called()
+    assert decoder.call_count == 2
+    assert decoder.call_args_list[0].args[0].registers == tuple(registers)
+    assert decoder.call_args_list[1].args[0].registers == tuple(reversed(registers))
     assert streams.connect.await_count == 2
     for call in streams.connect.call_args_list:
         assert call.args == ("myhoben.fr", 465)
@@ -267,6 +273,7 @@ def test_zero_returned_identity_cannot_validate_assigned_reuse(streams, capsys):
         {"profile": "v6"},
         {"register_count": 19},
         {"state": "read"},
+        {"v4_decode_count": 1},
     ],
 )
 def test_live_gate_requires_complete_two_refresh_result(monkeypatch, capsys, override):
@@ -276,6 +283,7 @@ def test_live_gate_requires_complete_two_refresh_result(monkeypatch, capsys, ove
         "refresh_count": 2,
         "profile": "v4",
         "register_count": 20,
+        "v4_decode_count": 2,
     } | override
     monkeypatch.setattr(probe, "_probe", AsyncMock(return_value=report))
     assert probe.main(["--live-premerge"]) == 1
@@ -296,6 +304,35 @@ def test_bad_credential_fails_before_transport_creation(
     assert json.loads(capsys.readouterr().out)["error"] == "invalid_session_inputs"
     transport.assert_not_called()
     streams.connect.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failed_decode", [1, 2])
+def test_decoder_failure_cannot_pass_gate_or_publish_household_values(
+    streams, monkeypatch, capsys, caplog, failed_decode
+):
+    real_decode = probe.decode_v4_snapshot
+
+    def decode(snapshot):
+        if decoder.call_count == failed_decode:
+            raise RuntimeError("PRIVATE_DECODED_HOUSEHOLD_VALUES")
+        return real_decode(snapshot)
+
+    decoder = Mock(side_effect=decode)
+    monkeypatch.setattr(probe, "decode_v4_snapshot", decoder)
+    streams.reader.read.side_effect = [
+        OPENED,
+        response([0] * 20),
+        OPENED,
+        response([65535] * 20),
+    ]
+    assert probe.main(["--live-premerge"]) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out)["state"] == "error"
+    assert "PRIVATE" not in output.out + output.err + caplog.text
+    assert "v4_decode_count" not in json.loads(output.out)
+    assert decoder.call_count == failed_decode
+    assert streams.connect.await_count == failed_decode
+    assert streams.writer.wait_closed.await_count == failed_decode
 
 
 @pytest.mark.parametrize(
