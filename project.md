@@ -776,34 +776,137 @@ Requirements change over time, so release preparation must always re-check curre
 
 # Development workflow with Codex
 
-Codex should be used as the main coding agent for the repository.
+Development follows a staged multi-agent workflow with independent review before MANAGER approval.
 
-Recommended workflow:
+The canonical state machine is:
 
-1. select one small roadmap item;
-2. create a branch;
-3. implement tests first or alongside implementation;
-4. implement the feature;
-5. update protocol/project documentation when relevant;
-6. run all tests and validation locally/in the Codex environment;
-7. open a pull request;
-8. inspect CI results;
-9. fix failures rather than bypassing checks;
-10. MANAGER reviews the full diff and records the exact HEAD SHA after offline CI;
-11. MANAGER adds `manager-live-hoben` and verifies authenticated success on that SHA;
-12. MANAGER removes the label and merges only if HEAD is unchanged and all
-    required checks pass. Codex leaves implementation PRs open for this process.
+```text
+MANAGER creates/specifies issue
+        ↓
+      ready
+        ↓
+    CODEX DEV
+        ↓
+   in progress
+        ↓
+      review
+        ↓
+   CODEX REVIEW
+        ↓
+     validate
+        ↓
+ MANAGER final review
+        ↓
+authenticated Hoben validation when required
+        ↓
+   merge / close
+```
 
-Use `AGENTS.md` as persistent project instructions for Codex.
+`blocked` is reserved for work that cannot safely continue without an external decision, missing protocol fact, permission, or other required input.
 
-Work/ChatGPT can be used for:
+## Task preparation — MANAGER
+
+The MANAGER selects one small roadmap item and turns it into a precise GitHub issue containing the objective, requirements, architecture constraints, protocol constraints, tests, validation steps, documentation impact, and acceptance criteria.
+
+Only a MANAGER-reviewed issue may receive `ready`. Because the repository is public, an arbitrary issue created by a contributor is never sufficient authorization for autonomous development.
+
+Avoid multiple large concurrent development tasks unless there is a clear need.
+
+## Implementation — CODEX DEV
+
+CODEX DEV first completes an existing `in progress` task or outstanding review corrections. Only when no such work exists may it take a `ready` issue.
+
+For a new task, CODEX DEV:
+
+1. reads `AGENTS.md` first and `project.md` / `protocol.md` when relevant;
+2. moves `ready` to `in progress`;
+3. creates a dedicated branch/worktree;
+4. implements only the requested scope;
+5. adds or updates deterministic tests;
+6. updates documentation when required;
+7. runs the applicable tests and repository validation;
+8. opens or updates one PR linked to the issue;
+9. moves the task to `review`.
+
+CODEX DEV leaves implementation PRs open and never self-approves, adds `validate`, authorizes privileged live validation, or merges.
+
+## Independent review — CODEX REVIEW
+
+CODEX REVIEW works from `review` and independently verifies the current PR HEAD rather than trusting the developer summary.
+
+The review covers, as applicable:
+
+- issue requirements and acceptance criteria;
+- complete diff against `main`;
+- `AGENTS.md`, `project.md`, and `protocol.md` compliance;
+- protocol correctness and explicit handling of unknowns;
+- Home Assistant architecture and async behavior;
+- security and secret redaction;
+- tests, regression coverage, and CI;
+- documentation and maintainability;
+- all previous CODEX REVIEW and MANAGER remarks.
+
+If corrections are required, CODEX REVIEW leaves precise comments or requests changes on the existing PR and moves the task back to `in progress`.
+
+If the current HEAD satisfies the issue and every actionable review remark has been resolved, CODEX REVIEW approves it and moves the task to `validate`.
+
+CODEX REVIEW never performs privileged authenticated Hoben validation and never merges.
+
+## Final review and live validation — MANAGER
+
+The MANAGER reviews a task in `validate` only after CODEX REVIEW has approved the exact current HEAD.
+
+The MANAGER performs the broader project-level review: scope, roadmap, safety, architecture, complete diff, tests, CI, documentation, unresolved review threads, and exact HEAD SHA.
+
+If the MANAGER requests any correction, it leaves the remarks on the same PR and moves the task back to `in progress`. CODEX DEV must address every actionable remark. The corrected PR then returns to `review` and must be independently revalidated by CODEX REVIEW before returning to the MANAGER.
+
+Only after the code review and offline CI are satisfactory may the MANAGER authorize the authenticated Hoben validation defined in `AGENTS.md`, including the existing exact-HEAD `manager-live-hoben` gate where applicable.
+
+The MANAGER merges only when every required check and required authenticated validation succeeds on the exact reviewed HEAD.
+
+## Review loop invariant
+
+Every review remark must be considered and answered. Every actionable remark requesting a change must be corrected before the task can advance.
+
+Any commit after an approval invalidates that approval for workflow purposes. Therefore every correction follows:
+
+```text
+CODEX REVIEW or MANAGER remarks
+            ↓
+       in progress
+            ↓
+      CODEX DEV fixes
+            ↓
+          review
+            ↓
+      CODEX REVIEW
+            ↓
+        validate
+            ↓
+         MANAGER
+```
+
+There is no direct CODEX DEV → MANAGER correction path.
+
+Review history stays on the same PR. Do not create a replacement PR merely to discard requested changes or unresolved review history.
+
+## Source-of-truth boundaries
+
+Use `AGENTS.md` as the persistent development, testing, safety, contribution, and workflow rules.
+
+Use `project.md` for project scope, architecture, roadmap, and release sequencing.
+
+Use `protocol.md` for protocol facts and confidence levels. Neither CODEX DEV nor CODEX REVIEW may invent missing protocol behavior to satisfy an issue.
+
+Work/ChatGPT in the MANAGER role can be used for:
 
 - deeper protocol reverse engineering;
-- web research;
-- design discussions;
-- roadmap decisions;
-- review of diagnostics from real stoves;
-- preparation of protocol documentation.
+- roadmap and architecture decisions;
+- issue preparation and prioritization;
+- final PR review;
+- review of sanitized diagnostics from real stoves;
+- authorization and interpretation of opt-in real-device validation;
+- preparation and maintenance of protocol/project documentation.
 
 ---
 
