@@ -693,7 +693,7 @@ sémantique V4 est toutefois maintenant documentée dans `protocol.md` après
 analyse de MyHOBEN 2.2 build 34. En particulier, 1031 est la température ambiante,
 1032 la consigne, 1030 contient puissance+état, et les températures V4 utilisent
 un format Int16 en dixièmes de degré. Cette séparation permet de conserver la
-sonde comme outil brut de validation du futur décodeur.
+sonde comme outil brut, distinct du décodeur sémantique du candidat #26.
 Une exception Modbus correspondante donne `state: "modbus_exception"` et le
 `exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
 Les refus après OpenedClient donnent `read_not_attempted` et une raison
@@ -708,6 +708,53 @@ d'association ou dump d'environnement n'entre dans les logs, résumés ou artefa
 Le job conserve ce JSON dans **`live-v4-read-output`**, y compris en cas d'échec.
 Ce mode n'ajoute ni écriture (06/16/22, transaction `0xFFF0`), ni DeviceAuthRes,
 ni polling, reconnexion, client persistant ou contrôle du poêle.
+
+## Capture locale privée pour comparer les valeurs V4
+
+Pour la comparaison simultanée du candidat #26 avec MyHOBEN, un mode manuel
+distinct exporte les valeurs du foyer. Le MANAGER l'utilise depuis le **HEAD
+exact revu**, après CI verte et nouvelle validation authentifiée de ce SHA.
+Avec le seul `HOBEN_USER_GUID` configuré dans l'environnement local privé :
+
+```sh
+python scripts/probe_hoben_connection.py --live-v4-validation-values
+```
+
+Ce mode est réservé au reverse engineering local et privé. **Ne jamais publier
+son JSON dans les logs, artefacts ou commentaires GitHub.** Le responsable peut
+volontairement le partager dans le chat privé avec le MANAGER pendant la
+comparaison. Aucun workflow ne l'appelle ; `GITHUB_ACTIONS=true` le refuse avant
+la lecture de l'identifiant, la création du client ou toute connexion réseau.
+
+Une invocation effectue un seul `HobenClient.async_refresh()` avec les défauts
+du client, sans retry : TLS vérifié, ouverture V4, lecture fonction 04 de 20
+registres à partir de 1024, puis fermeture. Aucun DeviceAuthRes, écriture,
+transaction `0xFFF0` ou contrôle n'est envoyé. Les variables exploratoires
+`HOBEN_DEVICE_GUID`, `HOBEN_BUILD` et `HOBEN_DEVICE_INFO` sont ignorées.
+
+La sortie est un **unique JSON**, sans GUID ni traceback. En réussite :
+
+- `timestamp_utc` indique la fin du rafraîchissement au format UTC `…Z` ;
+- `registers` associe explicitement les adresses `"1024"` à `"1043"` aux 20
+  UInt16 bruts, y compris les champs dont la sémantique reste inconnue ;
+- `entities` contient exactement les 16 clés du tableau des entités ci-dessus,
+  avec `register_address`, `raw_value`, `decoded_value` et `ha_value`.
+
+Pour les champs combinés mode/OnOff et puissance/état, `raw_value` est l'octet
+extrait ; le mot complet reste dans `registers`. Les enums utilisent leurs
+valeurs sémantiques snake_case ; un code inconnu donne `null` et conserve son
+code brut. Les deux indicateurs de dérogation incluent le bit extrait 0/1 et son
+`bit_mask`. Les températures décodées sont en °C, les délais/durées en minutes
+et la puissance en %. `ha_value` correspond à la propriété de l'entité HA,
+y compris pour les sondes filaire/RF désactivées par défaut si on les activait.
+Les trois valeurs numériques de dérogation conservent leur valeur brute et
+leur valeur décodée même si la dérogation est inactive : seul `ha_value` est
+alors `null`, lorsque les indicateurs active **et** programmée sont faux.
+
+Un refus ou une erreur produit uniquement un rapport d'erreur expurgé, sans
+valeur partielle. Le code de sortie vaut **0** pour une capture complète,
+**1** pour un refus/échec et **2** pour un usage CLI invalide. La suite publique
+`--live-premerge` conserve son JSON de métadonnées/compteurs, sans ces valeurs.
 
 ## Format des principales données V4
 

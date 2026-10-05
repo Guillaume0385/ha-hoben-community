@@ -270,12 +270,31 @@ The fixed MANAGER probe now decodes both existing client refreshes and reports
 only `v4_decode_count: 2` alongside prior sanitized metadata/counts. It adds no
 session/read/retry and publishes no raw/decoded household values; the trusted
 workflow is unchanged. This execution check cannot replace the private UI
-comparison. Before any physical-value entities enter main, MANAGER must review
+comparison.
+
+The separate manual `--live-v4-validation-values` CLI mode supports that private
+comparison with one `HobenClient.async_refresh()` and no retry. It refuses
+`GITHUB_ACTIONS=true` before credentials, client construction or network I/O and
+is never invoked by a workflow. Its sole JSON includes a UTC timestamp, twenty
+UInt16 words explicitly addressed 1024–1043, and the sixteen entity keys with
+raw codes, decoded values and effective HA properties. Inactive derogation
+numeric values remain in the raw/model fields while their HA values are null.
+Unknown codes retain their raw value with null semantics. The export excludes
+identifiers and tracebacks; it contains household values and must stay out of
+public logs, artifacts and PR comments. Sharing with MANAGER is voluntary and
+only through private chat during validation. Offline tests compare all sixteen
+exported HA values with the real entity properties and protect the unchanged
+public pre-merge report.
+
+Before any physical-value entities enter main, MANAGER must review
 the exact HEAD after green offline CI, pass the authenticated gate, and compare
 ambient/target temperatures, operation mode, ventilation, OnOff and observable
 state/power simultaneously with MyHOBEN. Record only compared fields, pass/fail
 and timestamp in the PR. Stop and fix protocol evidence/tests on contradiction.
 This increment remains strictly **read-only**, open for that review/validation.
+Adding the private capture tool changes HEAD: a previous SHA's approval/live
+result cannot approve this candidate; fresh review and an exact-HEAD gate are
+required before the private comparison.
 
 Next protocol gaps remain separate: warning-bit and fault-label tables,
 date/time packing, PVI's reliable V4 meaning, unknown information bits and

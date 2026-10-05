@@ -836,6 +836,18 @@ comparaison privée simultanée avec MyHOBEN sur l’Osmose de référence reste
 **À VALIDER avant fusion**. Elle ne doit être marquée confirmée qu’après preuve
 réelle, dans un suivi documentaire distinct.
 
+Le mode manuel distinct `--live-v4-validation-values` fournit cette comparaison
+locale privée : un seul rafraîchissement du client existant, horodatage UTC,
+20 UInt16 indexés par adresse 1024–1043 et les 16 valeurs d’entités avec leur
+code brut, leur valeur décodée et leur valeur HA effective. Il conserve les
+valeurs numériques de dérogation dans le modèle même lorsque les entités les
+masquent. Il refuse GitHub Actions avant toute connexion et aucun workflow ne
+l’appelle. Ce JSON contient des valeurs du foyer : partage volontaire seulement
+en chat privé avec le MANAGER, jamais en log/artefact/commentaire public. Aucun
+GUID, traceback, pairing ou écriture n’est ajouté. La disponibilité de cet outil
+et ses tests hors ligne ne constituent pas une preuve dynamique ; le nouveau
+HEAD nécessite sa propre revue, sa CI et sa validation authentifiée MANAGER.
+
 ### V6/V6v16 — zone applicative (lecture, base 1024)
 
 | Adresse | Nom HOBEN | Utilité HA |

@@ -28,6 +28,7 @@ from custom_components.hoben.exceptions import HobenTransportError
 from custom_components.hoben.sensor import SENSORS, HobenSensor
 from custom_components.hoben.transport import AsyncTlsTransport
 from custom_components.hoben.v4_state import decode_v4_snapshot
+from scripts.v4_validation_values import build_private_v4_report
 
 # Independent synthetic examples, not actual reference-stove values.
 WORDS = (
@@ -566,3 +567,36 @@ async def test_translated_names_are_used_by_real_entities(
         if language == "en"
         else "Consigne marche/arrêt du contrôleur"
     )
+
+
+@pytest.mark.parametrize("information", [0, 0x20, 0x40, 0x60, 0xFF9F])
+async def test_private_report_matches_all_sixteen_ha_value_properties(
+    hass, entry, client_factory, client, snapshot, information
+):
+    coordinator = await setup_entities(hass, entry, client, snapshot)
+    await refresh_words(
+        hass,
+        coordinator,
+        client,
+        snapshot,
+        {
+            1035: information,
+            1031: 0x0FFF,
+            1032: 49,
+            1043: 0xFFFF,
+        },
+    )
+    report = build_private_v4_report(
+        coordinator.data.raw, timestamp_utc="2026-10-05T12:34:56Z"
+    )
+    entities = {item.key: HobenSensor(entry, item) for item in SENSORS} | {
+        item.key: HobenBinarySensor(entry, item) for item in BINARY_SENSORS
+    }
+    assert set(report["entities"]) == set(entities)
+    count = client.async_refresh.await_count
+    for key, entity in entities.items():
+        effective = (
+            entity.native_value if isinstance(entity, HobenSensor) else entity.is_on
+        )
+        assert report["entities"][key]["ha_value"] == effective
+    assert client.async_refresh.await_count == count
