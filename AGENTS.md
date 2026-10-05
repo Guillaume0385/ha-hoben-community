@@ -496,6 +496,85 @@ Prefer small pull requests with tests and documentation over one very large chan
 
 ---
 
+## Multi-agent development workflow
+
+Development uses three separated roles:
+
+- **MANAGER**: prepares and prioritizes issues, performs final review, authorizes real-stove validation, and merges;
+- **CODEX DEV**: implements one authorized issue and all requested corrections;
+- **CODEX REVIEW**: independently reviews code, tests, documentation, and protocol compliance before MANAGER review.
+
+The GitHub workflow states are:
+
+```text
+ready
+  ↓
+in progress
+  ↓
+review
+  ↓
+validate
+  ↓
+MANAGER final review + required live validation
+  ↓
+merge / close
+```
+
+Use `blocked` only when work cannot safely continue without a missing fact, decision, permission, or external input.
+
+### State ownership
+
+Only the MANAGER may place an issue in `ready`. Because the repository is public, an arbitrary community issue must never become an automatic coding instruction merely because it exists.
+
+CODEX DEV moves an authorized task from `ready` to `in progress`, implements it on a dedicated branch, adds or updates tests and documentation, and moves it to `review` when the existing PR is ready for independent review.
+
+CODEX REVIEW independently verifies the current PR HEAD against the issue, `AGENTS.md`, `project.md`, `protocol.md`, the complete diff, tests, CI, security rules, and previous review comments. If corrections are required, it comments on the PR and moves the task back to `in progress`. If the current HEAD is satisfactory, it approves it and moves the task to `validate`.
+
+The MANAGER performs the final review only from `validate`. If corrections are required, the MANAGER comments on the PR and moves the task back to `in progress`. After corrections, the task must always pass through CODEX REVIEW again before returning to the MANAGER.
+
+### Mandatory correction loop
+
+Every review remark must be considered and answered. Every actionable remark requesting a change must be corrected before the task can advance.
+
+When CODEX REVIEW or the MANAGER requests changes, CODEX DEV must:
+
+1. reuse the existing branch and PR;
+2. read all unresolved CODEX REVIEW and MANAGER comments;
+3. correct every actionable remark;
+4. add or update regression tests when appropriate;
+5. rerun the relevant deterministic validation;
+6. return the task to `review`.
+
+The correction path is always:
+
+```text
+reviewer remarks
+      ↓
+in progress
+      ↓
+CODEX DEV corrections
+      ↓
+review
+      ↓
+CODEX REVIEW
+      ↓
+validate
+      ↓
+MANAGER
+```
+
+There is no direct CODEX DEV → MANAGER correction path.
+
+Any new commit after a CODEX REVIEW approval or MANAGER review makes that approval stale. The new HEAD must be reviewed again. A previous authenticated live result also does not approve a changed HEAD.
+
+CODEX DEV must never self-approve, add `validate`, add `manager-live-hoben`, perform privileged authenticated validation, or merge.
+
+CODEX REVIEW must not implement fixes on behalf of CODEX DEV, add `manager-live-hoben`, perform privileged authenticated validation, or merge.
+
+Only the MANAGER may authorize the authenticated Hoben validation required by this repository and merge the PR after all required checks, reviews, and exact-HEAD validation succeed.
+
+---
+
 ## Definition of done for a feature
 
 A feature is complete only when:
