@@ -661,11 +661,15 @@ on the event's exact candidate SHA. MANAGER verifies that SHA and the sanitized
 report, confirms success, removes the label and merges only while HEAD still
 matches. New commits require new review and label removal/re-addition.
 
-After the first successful live validation, MANAGER must manually update
-**Settings → Branches → main → Require status checks to pass before merging**
-and add **`live-hoben-authenticated`**, alongside `tests`, `ha-tests`, `hacs`, `hassfest`.
-Only effective branch protection makes this status enforceable for every new
-SHA; a base-context Actions result or an older candidate success is insufficient.
+Main branch protection must require `tests`, `ha-tests`, `hacs`, and
+`hassfest`, and should dismiss stale pull-request approvals when new commits are
+pushed.
+
+Because authenticated Hoben validation is conditional, `live-hoben-authenticated`
+must not be configured as an unconditional required check unless a future trusted
+conditional gate can also publish a safe pass result for explicitly exempt PRs.
+Until then, the MANAGER enforces the live result as a merge requirement only for
+qualifying PRs, always on the exact candidate SHA.
 
 The first installation needs a separate MANAGER decision: a trusted workflow
 cannot run while it exists only in a candidate PR. Install its reviewed
@@ -776,67 +780,107 @@ Requirements change over time, so release preparation must always re-check curre
 
 # Development workflow with Codex
 
-Development follows a staged multi-agent workflow with independent review before MANAGER approval.
+Development follows a staged multi-agent workflow with independent review before
+MANAGER approval.
+
+## Canonical task state
+
+The **GitHub Issue is the single source of truth for workflow state**. Every
+managed development Issue carries **exactly one** of:
+
+- `state:ready`
+- `state:in-progress`
+- `state:review`
+- `state:validate`
+- `state:blocked`
+
+The PR is not a second state store. It contains the implementation diff, reviews,
+discussion, and CI, and must be linked to its Issue with `Closes #N` or an
+equivalent explicit closing reference.
+
+GitHub Projects may later mirror these labels for visualization, but labels on
+the Issue remain authoritative.
 
 The canonical state machine is:
 
 ```text
-MANAGER creates/specifies issue
+MANAGER creates/specifies Issue
         ↓
-      ready
+   state:ready
         ↓
     CODEX DEV
         ↓
-   in progress
+state:in-progress
         ↓
-      review
+    PR + tests
+        ↓
+   state:review
         ↓
    CODEX REVIEW
-        ↓
-     validate
-        ↓
- MANAGER final review
-        ↓
-authenticated Hoben validation when required
-        ↓
-   merge / close
+      ↙       ↘
+ corrections   OK
+    ↓           ↓
+state:in-progress   state:validate
+    ↓                   ↓
+DEV → state:review    MANAGER
+                      ↙    ↘
+               corrections  OK
+                    ↓         ↓
+             state:in-progress
+                              ↓
+                 authenticated live gate
+                    when required
+                              ↓
+                         merge / close
 ```
 
-`blocked` is reserved for work that cannot safely continue without an external decision, missing protocol fact, permission, or other required input.
+`state:blocked` is reserved for work that cannot safely continue without an
+external decision, missing protocol fact, permission, or other required input.
+
+Only one `state:*` label may exist on a managed Issue at a time.
 
 ## Task preparation — MANAGER
 
-The MANAGER selects one small roadmap item and turns it into a precise GitHub issue containing the objective, requirements, architecture constraints, protocol constraints, tests, validation steps, documentation impact, and acceptance criteria.
+The MANAGER selects one small roadmap item and turns it into a precise GitHub
+Issue containing the objective, requirements, architecture constraints, protocol
+constraints, tests, validation steps, documentation impact, and acceptance
+criteria.
 
-Only a MANAGER-reviewed issue may receive `ready`. Because the repository is public, an arbitrary issue created by a contributor is never sufficient authorization for autonomous development.
+Only the MANAGER may add `state:ready`. Because the repository is public, an
+arbitrary Issue created by a contributor is never sufficient authorization for
+autonomous development.
 
 Avoid multiple large concurrent development tasks unless there is a clear need.
 
 ## Implementation — CODEX DEV
 
-CODEX DEV first completes an existing `in progress` task or outstanding review corrections. Only when no such work exists may it take a `ready` issue.
+CODEX DEV first completes an existing `state:in-progress` task or outstanding
+review corrections. Only when no such work exists may it take a
+`state:ready` Issue.
 
 For a new task, CODEX DEV:
 
 1. reads `AGENTS.md` first and `project.md` / `protocol.md` when relevant;
-2. moves `ready` to `in progress`;
+2. moves `state:ready → state:in-progress`;
 3. creates a dedicated branch/worktree;
 4. implements only the requested scope;
 5. adds or updates deterministic tests;
 6. updates documentation when required;
 7. runs the applicable tests and repository validation;
-8. opens or updates one PR linked to the issue;
-9. moves the task to `review`.
+8. opens or updates one PR linked with `Closes #N`;
+9. moves the Issue to `state:review`.
 
-CODEX DEV leaves implementation PRs open and never self-approves, adds `validate`, authorizes privileged live validation, or merges.
+CODEX DEV leaves implementation PRs open and never self-approves, adds
+`state:validate`, authorizes privileged live validation, or merges.
 
 ## Independent review — CODEX REVIEW
 
-CODEX REVIEW works from `review` and independently verifies the current PR HEAD rather than trusting the developer summary.
+CODEX REVIEW works only from `state:review` and independently verifies the exact
+current PR HEAD rather than trusting the developer summary.
 
 The review covers, as applicable:
 
-- issue requirements and acceptance criteria;
+- Issue requirements and acceptance criteria;
 - complete diff against `main`;
 - `AGENTS.md`, `project.md`, and `protocol.md` compliance;
 - protocol correctness and explicit handling of unknowns;
@@ -846,63 +890,138 @@ The review covers, as applicable:
 - documentation and maintainability;
 - all previous CODEX REVIEW and MANAGER remarks.
 
-If corrections are required, CODEX REVIEW leaves precise comments or requests changes on the existing PR and moves the task back to `in progress`.
+If corrections are required, CODEX REVIEW leaves precise comments or requests
+changes on the existing PR and moves the Issue to `state:in-progress`.
 
-If the current HEAD satisfies the issue and every actionable review remark has been resolved, CODEX REVIEW approves it and moves the task to `validate`.
+If the exact current HEAD satisfies the Issue and every actionable review remark
+has been resolved, CODEX REVIEW approves that HEAD and moves the Issue to
+`state:validate`.
 
-CODEX REVIEW never performs privileged authenticated Hoben validation and never merges.
+CODEX REVIEW never performs privileged authenticated Hoben validation and never
+merges.
 
 ## Final review and live validation — MANAGER
 
-The MANAGER reviews a task in `validate` only after CODEX REVIEW has approved the exact current HEAD.
+The MANAGER works only from `state:validate` and only after CODEX REVIEW has
+approved the exact current HEAD.
 
-The MANAGER performs the broader project-level review: scope, roadmap, safety, architecture, complete diff, tests, CI, documentation, unresolved review threads, and exact HEAD SHA.
+The MANAGER performs the broader project-level review: scope, roadmap, safety,
+architecture, complete diff, tests, CI, documentation, unresolved review threads,
+and exact HEAD SHA.
 
-If the MANAGER requests any correction, it leaves the remarks on the same PR and moves the task back to `in progress`. CODEX DEV must address every actionable remark. The corrected PR then returns to `review` and must be independently revalidated by CODEX REVIEW before returning to the MANAGER.
+If the MANAGER requests any correction, it leaves the remarks on the same PR and
+moves the Issue to `state:in-progress`. CODEX DEV must address every actionable
+remark. The corrected PR then returns to `state:review` and must be independently
+revalidated by CODEX REVIEW before returning to the MANAGER.
 
-Only after the code review and offline CI are satisfactory may the MANAGER authorize the authenticated Hoben validation defined in `AGENTS.md`, including the existing exact-HEAD `manager-live-hoben` gate where applicable.
+After review and offline CI are satisfactory, the MANAGER explicitly classifies
+whether authenticated Hoben validation is required and records that decision in
+the PR.
 
-The MANAGER merges only when every required check and required authenticated validation succeeds on the exact reviewed HEAD.
+Authenticated validation is required for PRs that can change runtime or
+real-device behavior, including protocol/transport/client/coordinator/entity/
+config-flow code, runtime dependencies, live-probe scripts, trusted live workflow
+logic, and stove profile/register data or executable protocol interpretation.
+
+It is not required for PRs demonstrably limited to documentation-only changes
+with no executable protocol effect, image/brand assets, non-runtime metadata, or
+CI/test-only changes that cannot alter the live execution path. Mixed or
+ambiguous PRs are treated as requiring live validation.
+
+When required, the MANAGER uses the exact-HEAD `manager-live-hoben` gate defined
+in `AGENTS.md`. A successful result applies only to that exact SHA.
+
+The MANAGER merges only when every applicable check, review, and required
+authenticated validation succeeds on the exact reviewed HEAD.
 
 ## Review loop invariant
 
-Every review remark must be considered and answered. Every actionable remark requesting a change must be corrected before the task can advance.
+Every review remark must be considered and answered. Every actionable requested
+change must be corrected before the task can advance.
 
-Any commit after an approval invalidates that approval for workflow purposes. Therefore every correction follows:
+For explicit REVIEW or MANAGER corrections:
 
 ```text
-CODEX REVIEW or MANAGER remarks
-            ↓
-       in progress
-            ↓
-      CODEX DEV fixes
-            ↓
-          review
-            ↓
-      CODEX REVIEW
-            ↓
-        validate
-            ↓
-         MANAGER
+review remarks
+     ↓
+state:in-progress
+     ↓
+CODEX DEV fixes all actionable remarks
+     ↓
+state:review
+     ↓
+CODEX REVIEW re-reviews exact HEAD
+     ↓
+state:validate
+     ↓
+MANAGER re-reviews
 ```
 
 There is no direct CODEX DEV → MANAGER correction path.
 
-Review history stays on the same PR. Do not create a replacement PR merely to discard requested changes or unresolved review history.
+If any commit is pushed after CODEX REVIEW approval while the Issue is already in
+`state:validate`—including a rebase or trivial follow-up—the approval is stale
+and the Issue must immediately return to:
+
+```text
+state:validate → state:review
+```
+
+CODEX REVIEW must approve the new exact HEAD before the task may return to
+`state:validate`.
+
+A previous authenticated live result also becomes stale when HEAD changes.
+
+Review history stays on the same PR. Do not create a replacement PR merely to
+discard requested changes or unresolved review history.
+
+## Technical guard workflow — follow-up PR
+
+The workflow rules in this section are documented here. A separate small PR
+should implement a GitHub guard workflow that:
+
+- guarantees exactly one `state:*` label on each managed Issue;
+- automatically performs `state:validate → state:review` when a new commit is
+  pushed to the linked PR;
+- never adds `state:ready`;
+- never adds `manager-live-hoben`;
+- never merges;
+- never turns an unreviewed community Issue into authorized work.
+
+The transition to `state:ready` remains exclusively a MANAGER decision.
+
+## Branch protection
+
+Main should require:
+
+- `tests`;
+- `ha-tests`;
+- `hacs`;
+- `hassfest`.
+
+Configure branch protection to dismiss stale approvals when new commits are
+pushed.
+
+Because the authenticated live gate is conditional, do not make
+`live-hoben-authenticated` an unconditional required status unless a future
+trusted conditional gate can safely publish pass for explicitly exempt PRs.
 
 ## Source-of-truth boundaries
 
-Use `AGENTS.md` as the persistent development, testing, safety, contribution, and workflow rules.
+Use `AGENTS.md` as the persistent development, testing, safety, contribution,
+and workflow rules.
 
-Use `project.md` for project scope, architecture, roadmap, and release sequencing.
+Use `project.md` for project scope, architecture, roadmap, and release
+sequencing.
 
-Use `protocol.md` for protocol facts and confidence levels. Neither CODEX DEV nor CODEX REVIEW may invent missing protocol behavior to satisfy an issue.
+Use `protocol.md` for protocol facts and confidence levels. Neither CODEX DEV
+nor CODEX REVIEW may invent missing protocol behavior to satisfy an Issue.
 
 Work/ChatGPT in the MANAGER role can be used for:
 
 - deeper protocol reverse engineering;
 - roadmap and architecture decisions;
-- issue preparation and prioritization;
+- Issue preparation and prioritization;
 - final PR review;
 - review of sanitized diagnostics from real stoves;
 - authorization and interpretation of opt-in real-device validation;
