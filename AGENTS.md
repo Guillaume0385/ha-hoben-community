@@ -261,16 +261,10 @@ No network operation should block the event loop.
 
 ### CI gates
 
-Pull requests should eventually be required to pass:
-
-- unit tests;
-- Home Assistant integration tests;
-- protocol tests;
-- formatting;
-- linting;
-- type checking where adopted;
-- Hassfest/Home Assistant validation;
-- HACS validation.
+Every pull request must pass the deterministic offline CI checks `tests`,
+`ha-tests`, `hacs`, and `hassfest`. They cover unit/protocol tests, Home Assistant
+integration tests, formatting, linting, Hassfest/Home Assistant validation, and
+HACS validation. Include type checking as an additional CI gate when adopted.
 
 Do not weaken or delete a failing test merely to make CI green. Fix the implementation or explicitly update the test because the documented behavior has changed.
 

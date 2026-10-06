@@ -1046,7 +1046,7 @@ The transition to `state:ready` remains exclusively a MANAGER decision.
 
 ## Branch protection
 
-Main should require:
+Main must require:
 
 - `tests`;
 - `ha-tests`;
