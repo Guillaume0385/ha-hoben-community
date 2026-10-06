@@ -83,8 +83,8 @@ def encode_device_auth_response(code: int) -> bytes:
     This pure codec does not send, retain or persist the sensitive code. Never
     log the returned packet. UInt16 bounds describe the wire representation,
     not the server's accepted codes, UI digit count or expiration rules.
-    DeviceAuthReq's complete boundary is not documented; the session/client
-    cannot use this codec to continue a handshake until that fact is established.
+    protocol.md §5 records the MANAGER-reviewed static evidence for the one-byte
+    DeviceAuthReq marker. Session buffering and authorization remain separate.
     """
     if not isinstance(code, int) or isinstance(code, bool):
         raise TypeError("Authorization code must be an integer")

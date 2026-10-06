@@ -220,23 +220,39 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — DeviceAuth association (protocol framing unresolved)
+### Current increment — DeviceAuth association (protocol/client, offline)
 
-Issue #32 prepares the HA-independent first-association support in the existing
-client/session layers; a Home Assistant authorization-code UI is a later task.
-The documented `DeviceAuthRes` encoder is implemented as the pure
-`myhoben.encode_device_auth_response(code: int) -> bytes`, with UInt16-LE wire
-validation and no credential persistence, logs or network I/O.
+Issue #32 adds `HobenClient.async_associate(*, authorization_code_provider=None)`
+to the existing HA-independent client. The async zero-argument provider returns
+an int representable as UInt16 and is awaited only after DeviceAuthReq, at most
+once. The MANAGER's 2026-10-06 static analysis establishes the one-byte `2F`
+marker for this interoperability path (`protocol.md` §5). The shared handshake
+retains coalesced bytes, accumulates fragmented prefixes, answers leading Ping
+and sends the pure encoder's `30 + UInt16-LE(code)` before awaiting OpenedClient
+or a documented CloseClient. A repeated request after submission fails without
+resending. Existing OpenedClient suffix/profile checks still apply; its complete
+length and later-arriving suffixes remain unknown.
 
-The shared opening path cannot yet continue after `DeviceAuthReq`: protocol.md
-establishes its type/signal but not its complete message boundary. Consuming
-exactly one byte would invent an empty payload; discarding buffered bytes or
-using a TLS read as a message boundary would lose framing guarantees. The
-handshake/client association API and its success-flow tests must wait for
-MANAGER-reviewed protocol evidence. The branch/PR preserves the safe preparation
-for resumption; the increment is not complete or ready for independent approval.
-The existing refresh, HA flows and probes still stop on authorization-required
-without sending a code. No privileged live validation is triggered.
+Association performs one fresh verified TLS attempt, with no Modbus read/write
+and no automatic retry, regardless of the refresh retry settings. The existing
+finite handshake_timeout includes provider waiting; this local budget is not an
+inferred code lifetime. Successful supported V4 opening adopts DeviceGuid using
+the existing sensitive persistence accessor. `AssociationResult` contains only
+public opening metadata, without identifiers, code, provider or household data.
+Missing provider surfaces authorization-required; invalid/failed provider gets
+`HobenAuthorizationCodeError`, without arbitrary exception text. Documented
+server closures and transport/protocol failures retain distinct typed errors.
+No credential is written to storage. Association preserves last_snapshot and
+shares the refresh lock; async_close cancels either operation and cleans up.
+
+Offline regressions cover the wire sequence, all two-part receive splits,
+byte-at-a-time reads, coalescence, Ping/Pong, closure/rejection, invalid inputs,
+unsupported/ambiguous openings, timeouts, cancellation, serialization, identity
+reuse, confidentiality and absence of Modbus/control requests. Existing refresh,
+HA flows and probes do not supply a code and keep their observation-only path.
+A Home Assistant authorization-code UI is a later task. The first real
+association, code presentation and server timing still require MANAGER evidence;
+no authenticated validation is triggered by development or ordinary CI.
 
 ### DONE — typed V4 decoder and first read entities (reference Osmose)
 

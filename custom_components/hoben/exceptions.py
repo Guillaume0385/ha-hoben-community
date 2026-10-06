@@ -29,6 +29,12 @@ class HobenAuthorizationRequiredError(HobenError):
     code = "authorization_required"
 
 
+class HobenAuthorizationCodeError(HobenError):
+    """Local code provider failed/returned invalid UInt16; never expose its input."""
+
+    code = "authorization_code_unavailable"
+
+
 class HobenClosedError(HobenError):
     """CloseClient carries a documented reason, never its original payload."""
 

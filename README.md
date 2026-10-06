@@ -24,7 +24,9 @@ Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
 en mémoire puis persistance dans Home Assistant, demande d'autorisation ou rejet
-documenté. Aucun code d'association n'est envoyé. La réutilisation du DeviceGuid
+documenté. L'API protocolaire propose maintenant une association explicite ;
+l'interface Home Assistant et les sondes ne demandent ni n'envoient de code.
+La réutilisation du DeviceGuid
 sur une seconde connexion a été confirmée sur l’Osmose de référence le
 2026-10-04, lors de la validation MANAGER de la PR #22 (voir `protocol.md`).
 La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
@@ -183,14 +185,16 @@ Ne pas publier son repr/asdict : il contient des valeurs du foyer. V4 reste sél
 dynamiquement ; les autres profils échouent explicitement, sans supposer que
 tous les Osmose sont V4.
 
-Chaque tentative ouvre un TLS vérifié vers `myhoben.fr:465`, effectue OpenClient,
+Chaque tentative de `async_refresh()` ouvre un TLS vérifié vers `myhoben.fr:465`,
+effectue OpenClient,
 valide OpenedClient puis une seule lecture **04 / FFFF / unité 1 / adresse 1024 /
 quantité 20**, et ferme la connexion. Les primitives existantes construisent et
 valident les trames. La longueur complète d'OpenedClient restant inconnue, une
 connexion permanente et DataUpdated sont différés. Les suffixes déjà reçus sont
 refusés sans réinterprétation ; un suffixe arrivant plus tard reste une incertitude.
 
-Par défaut, un échec de transport permet **2 tentatives au total**, séparées par
+Pour `async_refresh()`, un échec de transport permet par défaut **2 tentatives au
+total**, séparées par
 **1 seconde** de backoff asynchrone, après fermeture de la première connexion.
 `max_attempts` accepte 1 ou 2, `retry_delay` 0 à 30 secondes ; les délais globaux
 d'ouverture/lecture sont chacun de 30 secondes et configurables. Les erreurs
@@ -207,17 +211,65 @@ Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
 | Entrée locale invalide | `HobenInvalidInputError` |
 | Identifiant rejeté par le serveur | `HobenInvalidCredentialsError` |
 | DeviceAuthReq | `HobenAuthorizationRequiredError` |
+| Fournisseur de code échoué / résultat non représentable en UInt16 | `HobenAuthorizationCodeError` |
 | CloseClient | `HobenClosedError`, avec motif documenté |
 | Profil non pris en charge | `HobenUnsupportedProfileError` |
 | Réponse malformée / suffixe ambigu | `HobenProtocolError` / `HobenAmbiguousSessionError` |
 | Exception Modbus corrélée | `HobenModbusError`, code numérique brut |
 | Transport / timeout après les tentatives permises | `HobenRefreshExhaustedError`, sous-type de `HobenTransportError`, avec cause expurgée (`HobenTimeoutError` pour un timeout) |
+| Transport / timeout pendant l'association sans retry | `HobenTransportError` / `HobenTimeoutError` |
 | Instance fermée | `HobenClientClosedError` |
 
-Aucune commande d'écriture/contrôle, association, boucle permanente ni tâche de
+Aucune commande d'écriture/contrôle, boucle permanente ni tâche de
 fond n'est exposée par cette API.
 
-## Préparation de l’association MyHOBEN — Issue #32
+## Association MyHOBEN dans l'API protocolaire — Issue #32
+
+Depuis une coroutine, un appelant peut fournir le code à la demande :
+
+```python
+client = HobenClient(
+    user_guid=configured_hoben_id,
+    device_guid=persisted_device_guid_or_none,
+)
+try:
+    result = await client.async_associate(
+        authorization_code_provider=request_code_async,
+    )
+    # Stockage explicite et sécurisé seulement ; ne pas journaliser cette valeur.
+    new_device_guid = client.device_guid_for_persistence
+finally:
+    await client.async_close()
+```
+
+`request_code_async` est une fonction asynchrone sans argument qui fournit un
+entier. Elle est appelée seulement après `DeviceAuthReq`, une fois au maximum ;
+elle doit attendre sans bloquer l'event loop. Le handshake partagé consomme le
+marqueur d'un octet `2F`, conformément à l'analyse statique MyHOBEN examinée
+par le MANAGER le 2026-10-06 (`protocol.md` §5), envoie `30 + UInt16-LE(code)`
+puis attend une ouverture valide ou un rejet. Les Ping avant/après la soumission
+reçoivent un Pong ; les octets coalescés sont conservés et les préfixes fragmentés
+accumulés. Un type inconnu ou une seconde demande après soumission échoue sans
+renvoi de code. La longueur complète d'OpenedClient reste inconnue : les suffixes
+déjà reçus restent refusés, sans rechercher ni reconstruire un message dedans.
+
+Un client déjà autorisé réussit sans consulter le fournisseur ni envoyer de code.
+Sans fournisseur, une demande déclenche `HobenAuthorizationRequiredError`.
+Un fournisseur qui échoue ou retourne une valeur invalide donne
+`HobenAuthorizationCodeError`, avec texte fixe sans son exception d'origine.
+Les fermetures conservent les motifs documentés et les erreurs typées existantes.
+
+L'association fait **une seule tentative**, même si `max_attempts=2` pour les
+lectures : aucun retry automatique, aucune lecture/écriture Modbus. Le délai
+local existant `handshake_timeout` inclut l'attente du fournisseur (30 secondes
+par défaut, configurable) ; il ne décrit pas l'expiration du code côté serveur.
+Le fournisseur et le code ne sont pas stockés sur le client.
+Le résultat immuable `AssociationResult` contient seulement les métadonnées
+publiques du profil V4. Une ouverture valide sans suffixe ambigu adopte le
+DeviceGuid via l'accès sensible existant ; une ouverture malformée, ambiguë ou
+non prise en charge ne remplace pas l'identité. L'association ne modifie pas
+`last_snapshot` et partage le verrou avec `async_refresh()` ; `async_close()`
+annule aussi une attente de code et ferme la connexion.
 
 Le codec indépendant de Home Assistant
 `custom_components.hoben.myhoben.encode_device_auth_response(code: int) -> bytes`
@@ -228,15 +280,11 @@ réseau, sans définir les codes acceptés, leur nombre de chiffres ou leur dur�
 de validité. Les octets retournés contiennent le code sensible : ne pas les
 journaliser ou les publier.
 
-**La continuation de session reste bloquée.** `protocol.md` confirme le signal
-`DeviceAuthReq (0x2F)`, mais pas sa longueur totale ou l’absence d’un payload.
-Sans champ longueur MyHOBEN, une lecture TLS ne prouve pas une frontière de
-message. Une preuve protocolaire examinée par le MANAGER est nécessaire pour
-implémenter l’API d’association et ses tests de bout en bout sur la même branche.
-Le client, les sondes et les flux Home Assistant conservent leur comportement
-actuel : autorisation requise, fermeture, aucun code envoyé. La première
-association réelle restera ensuite à valider par le MANAGER ; l’UI HA fera
-l’objet d’une tâche séparée.
+`async_refresh()`, les sondes et les flux Home Assistant restent sans fournisseur
+de code et ferment sur une autorisation requise. La nouvelle association est
+testée avec des séquences synthétiques hors ligne. La première association réelle,
+la provenance/présentation du code et les délais du serveur restent à valider
+par le MANAGER ; l'UI HA fera l'objet d'une tâche séparée.
 
 ## Installation via HACS
 
@@ -649,7 +697,7 @@ Le rapport JSON contient uniquement l'hôte/port et les observations structurée
 
 `authorization_required` signifie que l'OpenClient a atteint la demande
 **« Code d'authentification ? »**. Aucun code n'est demandé ni envoyé par cette
-sonde : **DeviceAuthRes `0x30` n'est pas implémenté**. La provenance du code reste
+sonde : son chemin reste **sans DeviceAuthRes `0x30`**. La provenance du code reste
 à valider ; aucune hypothèse n'est ajoutée. Un `profile: "unknown"` reste une
 ouverture observée, notamment pour la branche V6/V6v16 ambiguë.
 

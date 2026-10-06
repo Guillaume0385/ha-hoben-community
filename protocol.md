@@ -423,17 +423,22 @@ utilisateur **« Code d'authentification ? »**. Cela confirme que ce message es
 signal utilisé par l'application pour demander le code d'association d'un nouveau
 client.
 
-**À VALIDER — frontière de `DeviceAuthReq` :** les sources disponibles établissent
-le type `0x2F` et son effet, mais pas la longueur totale ni l'absence d'un payload.
-Le diagramme `2F → 30 + code → 04` ne constitue pas une preuve d'un message
-`DeviceAuthReq` d'un seul octet. MyHOBEN n'a pas de champ longueur générique (§2)
-et une lecture TLS ne délimite pas un message. Le parseur actuel peut donc
-signaler l'autorisation requise puis fermer, sans interpréter les octets suivants.
-Continuer sur la même connexion nécessite une preuve de la frontière : il ne
-faut ni ignorer un suffixe, ni rechercher arbitrairement `0x04`, ni assimiler la
-lecture TLS suivante à une réponse indépendante. Cette information manque pour
-achever l'API d'association de l'issue #32 ; une preuve protocolaire examinée
-par le MANAGER est nécessaire avant reprise du handshake.
+**Marqueur `DeviceAuthReq` — analyse statique MyHOBEN, décision MANAGER du
+2026-10-06 :** la nouvelle analyse du chemin
+`HobenApp.Services.TcpConnection` compare le premier octet reçu à `0x2F` ;
+aucun champ/payload suivant n'est décodé ou exploité pour cette demande.
+Pour l'interopérabilité de ce chemin, la
+[résolution MANAGER de #32](https://github.com/Guillaume0385/ha-hoben-community/issues/32#issuecomment-6020116376)
+établit donc le marqueur d'un octet `2F`, sans payload supplémentaire.
+La provenance est l'analyse statique de MyHOBEN 2.2 build 34
+(`HobenCore` / `HobenApp`), pas une observation de première association réelle.
+Aucun APK/DLL ou identifiant sensible n'est publié.
+
+La même analyse confirme `30 + UInt16-LE(code)` puis l'attente d'OpenedClient.
+Cela ne fait pas d'une lecture socket une frontière TLS générale : le parseur
+doit conserver les octets coalescés après `2F`, accumuler les préfixes fragmentés
+et refuser les types inconnus sans rechercher arbitrairement un `0x04`.
+La longueur complète d'OpenedClient reste inconnue (§4).
 
 L'analyse statique ne permet pas encore d'affirmer **où ni comment ce code est
 présenté/généré côté poêle ou infrastructure Hoben**. Cette partie doit être
@@ -464,8 +469,28 @@ un entier représentable en UInt16, sans conversion implicite de booléen, chaî
 ou flottant. Cette contrainte de représentation ne définit ni la plage de codes
 acceptés par le serveur, ni un nombre de chiffres, ni leur durée de validité.
 Le paquet retourné contient le code sensible et ne doit jamais être journalisé.
-Aucun chemin de session, client, sonde ou Home Assistant ne l'envoie à ce stade :
-la continuation après `DeviceAuthReq` reste bloquée sur la frontière ci-dessus.
+`HobenClient.async_associate(authorization_code_provider=...)` est le seul appel
+client qui autorise explicitement cette soumission, après le marqueur `2F`.
+Il partage le handshake avec la lecture existante, garde le buffer entre les
+messages et traite Ping/Pong avant/après soumission. Il attend un préfixe
+OpenedClient valide puis applique les vérifications existantes (profil V4 pris
+en charge, absence de suffixe déjà reçu) avant d'adopter le DeviceGuid. Une
+ouverture déjà autorisée ne consulte pas le fournisseur. Sans fournisseur,
+l'autorisation requise reste un résultat/une erreur distincte. Les fermetures
+conservent les sous-codes documentés ci-dessous.
+
+Politique locale explicite, sans affirmation sur le serveur : un seul envoi de
+code et une seule connexion, aucun retry automatique, aucune requête Modbus et
+pas de stockage du code/fournisseur. Une seconde demande après soumission est
+refusée sans renvoi. Le délai global existant du handshake inclut l'attente du
+fournisseur et reste configurable ; il ne représente pas la durée de validité
+du code. Le fournisseur est asynchrone et ses exceptions/valeurs invalides sont
+expurgées sous `HobenAuthorizationCodeError`. L'annulation ferme le transport.
+Le succès retourne `AssociationResult`, métadonnées publiques uniquement ; le
+DeviceGuid reste accessible par le contrat de persistance sensible existant.
+`async_refresh()`, les sondes et les flux HA ne fournissent aucun code et ne
+déclenchent pas cette association. Les séquences d'association sont testées hors
+ligne ; aucune première association réelle n'est revendiquée.
 
 ### Rejets/états `CloseClient` observés — CONFIRMÉ
 
@@ -1445,8 +1470,9 @@ session :
    configuré et DeviceGuid initial nul a reçu `0x04` le 2026-10-04, sans suffixe
    déjà reçu ; la longueur totale universelle, dont un suffixe arrivant plus tard,
    reste à établir ;
-2. **association réelle et framing** : établir la frontière de `DeviceAuthReq`,
-   déterminer comment le code demandé par MyHOBEN est présenté/généré et
+2. **association réelle** : le marqueur `DeviceAuthReq` est établi pour le chemin
+   d'interopérabilité par analyse statique (§5) ; déterminer comment le code
+   demandé par MyHOBEN est présenté/généré et
    confirmer la séquence `2F → 30 + code → 04` ;
 3. **étendre les observations V4** : le jalon #26 / PR #27 est validé et fusionné
    depuis le 2026-10-05 sur l'Osmose de référence (§8). Les autres modèles et
@@ -1588,6 +1614,9 @@ FF FF    transaction ID
 - structure générale OpenClient ;
 - champs majeurs OpenedClient ;
 - déclenchement `DeviceAuthReq (0x2F)` et réponse `DeviceAuthRes (0x30)` avec code UInt16-LE ;
+- marqueur `DeviceAuthReq` d'un octet pour le chemin d'association reproduit,
+  sans champ supplémentaire exploité, selon l'analyse statique examinée par le
+  MANAGER le 2026-10-06 (§5) ;
 - interprétation des rejets `CloseClient` sous-codes `02` à `06` ;
 - sélection V4/V6/V6v16 ;
 - MBAP Modbus TCP ;
