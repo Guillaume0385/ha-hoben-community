@@ -1,7 +1,8 @@
-"""One-shot OpenClient handshake; no polling, pairing or persistent session."""
+"""Bounded shared OpenClient/optional DeviceAuth handshake, without polling."""
 
 import asyncio
 import math
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .myhoben import (
@@ -12,6 +13,7 @@ from .myhoben import (
     OpenedClient,
     decode_close_client,
     decode_opened_client,
+    encode_device_auth_response,
     encode_open_client,
 )
 from .profiles import StoveProfile, select_stove_profile
@@ -22,6 +24,14 @@ _PONG = b"\x0b"
 # Confirmed fields end at offset 47. This is NOT a complete-message length.
 _OPENED_CLIENT_PREFIX_SIZE = 48
 _READ_SIZE = 4096
+
+# A caller may await user input without coupling this layer to Home Assistant.
+# Never retain/log the provider or its sensitive result in a public model.
+AuthorizationCodeProvider = Callable[[], Awaitable[int]]
+
+
+class SessionAuthorizationCodeError(Exception):
+    """The local provider failed or returned a value not representable as UInt16."""
 
 
 class SessionProtocolError(Exception):
@@ -37,7 +47,7 @@ class UnexpectedMessageType(SessionProtocolError):
 
 
 class SessionTimeout(TimeoutError):
-    """The overall OpenClient/first-response exchange exceeded its deadline."""
+    """The overall handshake, including optional code input, exceeded its deadline."""
 
 
 @dataclass(frozen=True)
@@ -96,9 +106,21 @@ class ClosedSessionResult:
 SessionResult = OpenSessionResult | AuthorizationRequiredResult | ClosedSessionResult
 
 
-async def _receive_response(transport: AsyncTlsTransport) -> SessionResult:
-    """Accumulate a small prefix buffer and answer only standalone leading Ping."""
+async def _receive_response(
+    transport: AsyncTlsTransport,
+    *,
+    authorization_code_provider: AuthorizationCodeProvider | None = None,
+) -> SessionResult:
+    """Keep one buffer through association; answer only standalone leading Ping.
+
+    protocol.md §5 establishes DeviceAuthReq as a one-byte marker for this
+    interoperability path. Consume it without dropping coalesced bytes; the
+    existing OpenedClient prefix/suffix policy still applies after a response.
+    One explicit code submission is allowed, with no resend or callback loop.
+    Without a provider, preserve the observation-only authorization result.
+    """
     buffer = bytearray()
+    authorization_sent = False
     while True:
         if buffer:
             message_type = buffer[0]
@@ -107,7 +129,25 @@ async def _receive_response(transport: AsyncTlsTransport) -> SessionResult:
                 await transport.write(_PONG)
                 continue
             if message_type == DEVICE_AUTH_REQ:
-                return AuthorizationRequiredResult()
+                if authorization_code_provider is None:
+                    return AuthorizationRequiredResult()
+                if authorization_sent:
+                    raise SessionProtocolError("Repeated DeviceAuthReq")
+                del buffer[0]
+                try:
+                    code = await authorization_code_provider()
+                    response = encode_device_auth_response(code)
+                    del code
+                except Exception:
+                    # Callback exceptions may themselves contain secrets. Keep
+                    # cancellation (BaseException) and the overall timeout intact.
+                    raise SessionAuthorizationCodeError(
+                        "Authorization code unavailable"
+                    ) from None
+                await transport.write(response)
+                del response
+                authorization_sent = True
+                continue
             if message_type == CLOSE_CLIENT and len(buffer) >= 2:
                 return ClosedSessionResult(decode_close_client(bytes(buffer[:2])))
             if message_type not in (OPENED_CLIENT, CLOSE_CLIENT):
@@ -147,11 +187,14 @@ async def _open_session(
     device_guid: str,
     device_info: str,
     handshake_timeout: float = 30.0,
+    authorization_code_provider: AuthorizationCodeProvider | None = None,
 ) -> SessionResult:
     """Shared handshake primitive; the one-shot caller must always close.
 
-    This internal helper exposes no persistent client. It lets the V4 one-shot
-    operation apply its stricter boundary/profile checks before its sole read.
+    This internal helper exposes no persistent client. A provider is invoked
+    only after DeviceAuthReq, inside the existing finite handshake deadline.
+    That is a local operation budget, not an inferred server code lifetime.
+    Callers still enforce profile/boundary checks and own transport cleanup.
     """
     if (
         not isinstance(handshake_timeout, (int, float))
@@ -160,6 +203,10 @@ async def _open_session(
         or handshake_timeout <= 0
     ):
         raise ValueError("handshake_timeout must be positive finite seconds")
+    if authorization_code_provider is not None and not callable(
+        authorization_code_provider
+    ):
+        raise ValueError("Authorization code provider must be callable")
     try:
         request = encode_open_client(user_guid, build, device_guid, device_info)
     except (TypeError, ValueError):
@@ -168,7 +215,9 @@ async def _open_session(
     try:
         async with asyncio.timeout(handshake_timeout):
             await transport.write(request)
-            return await _receive_response(transport)
+            return await _receive_response(
+                transport, authorization_code_provider=authorization_code_provider
+            )
     except TransportError:
         # Preserve the operation-specific timeout/EOF instead of relabeling it.
         raise

@@ -1,4 +1,4 @@
-"""Stateful read-only identity over bounded TLS sessions, without HA imports.
+"""Stateful identity, explicit association and read-only refresh, without HA.
 
 OpenedClient's complete boundary remains unknown. Each refresh therefore opens
 and closes its own verified connection; no receive worker or polling task exists.
@@ -6,10 +6,13 @@ and closes its own verified connection; no receive worker or polling task exists
 
 import asyncio
 import math
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from .exceptions import (
     HobenAmbiguousSessionError,
+    HobenAuthorizationCodeError,
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
@@ -31,8 +34,11 @@ from .myhoben import (
 )
 from .profiles import StoveProfile
 from .session import (
+    AuthorizationCodeProvider,
     AuthorizationRequiredResult,
     ClosedSessionResult,
+    OpenSessionResult,
+    SessionAuthorizationCodeError,
     SessionProtocolError,
     SessionTimeout,
     _open_session,
@@ -46,6 +52,34 @@ DEFAULT_BUILD = 34
 # It is not official MyHOBEN metadata; only its slash-separated shape is known.
 DEFAULT_DEVICE_INFO = "ha-hoben-community/GitHubActions/en/Python/Linux/0/0/1/0/0,0"
 _MAX_RETRY_DELAY = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class AssociationResult:
+    """Successful supported opening, without credentials, packet or stove values.
+
+    Success can be an already-authorized opening or follow one DeviceAuthRes.
+    Retrieve the assigned identity only via device_guid_for_persistence.
+    """
+
+    profile: StoveProfile
+    product_type: int
+    product_revision: int
+    software_major: int
+    software_minor: int
+    application_version: int
+
+    def safe_report(self) -> dict[str, int | str]:
+        """Allowlist public metadata; do not expose the provider or its code."""
+        return {
+            "state": "associated",
+            "profile": self.profile.value,
+            "product_type": self.product_type,
+            "product_revision": self.product_revision,
+            "software_major": self.software_major,
+            "software_minor": self.software_minor,
+            "application_version": self.application_version,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +143,8 @@ class HobenClient:
     Refreshes are serialized, including backoff and identity changes. Default:
     two total attempts with one 1-second async delay, configurable to 1..2 total
     attempts and 0..30 seconds. Only transport failures/timeouts permit retry.
-    No pairing, command, permanent socket, background task or polling is exposed.
+    Explicit association uses the same lock and handshake, with one attempt and
+    no Modbus read. No control, permanent socket, background task or polling.
     """
 
     def __init__(
@@ -154,7 +189,7 @@ class HobenClient:
         self._profile: StoveProfile | None = None
         self._last_snapshot: RawStoveSnapshot | None = None
         self._lock = asyncio.Lock()
-        self._active_refresh: asyncio.Task | None = None
+        self._active_operation: asyncio.Task | None = None
         self._closed = False
 
     def __repr__(self) -> str:
@@ -199,7 +234,7 @@ class HobenClient:
         async with self._lock:
             if self._closed:
                 raise HobenClientClosedError()
-            self._active_refresh = asyncio.current_task()
+            self._active_operation = asyncio.current_task()
             try:
                 for attempt in range(1, self._max_attempts + 1):
                     try:
@@ -214,23 +249,87 @@ class HobenClient:
                         self._last_snapshot = snapshot
                         return snapshot
             finally:
-                self._active_refresh = None
+                self._active_operation = None
+
+    async def async_associate(
+        self,
+        *,
+        authorization_code_provider: AuthorizationCodeProvider | None = None,
+    ) -> AssociationResult:
+        """Open once, optionally submit a caller's code, adopt identity, then close.
+
+        Await the provider only on DeviceAuthReq, at most once. It must be
+        nonblocking and return an int representable as UInt16, never a bool.
+        No provider means authorization-required, as for the existing refresh.
+        An already-authorized client succeeds without consulting the provider.
+
+        The existing handshake_timeout includes provider waiting; it is a local
+        budget, not server expiration semantics. No automatic retry/resubmission
+        occurs, even on transport failure. The caller decides any later attempt.
+        No Modbus request is sent and last_snapshot is not changed. The provider
+        and code are not stored on this client or in the returned public model.
+        """
+        async with self._lock:
+            if self._closed:
+                raise HobenClientClosedError()
+            if authorization_code_provider is not None and not callable(
+                authorization_code_provider
+            ):
+                raise HobenInvalidInputError()
+            self._active_operation = asyncio.current_task()
+            try:
+                async with self._session_once(
+                    authorization_code_provider=authorization_code_provider
+                ) as (_, session):
+                    opened = session.opened_client
+                    return AssociationResult(
+                        profile=session.profile,
+                        product_type=opened.product_type,
+                        product_revision=opened.product_revision,
+                        software_major=opened.software_major,
+                        software_minor=opened.software_minor,
+                        application_version=opened.application_version,
+                    )
+            finally:
+                self._active_operation = None
 
     async def async_close(self) -> None:
-        """Permanently close, cancel an active refresh, and await its transport cleanup.
+        """Permanently close, cancel an active operation, and await TLS cleanup.
 
-        Idempotent, including during backoff. Queued/new refreshes fail with a
+        Idempotent, including during code input/backoff. Queued/new calls fail with a
         typed closed-client error. The recorded task is the caller's task, not
         a background worker; callers should expect its cancellation on unload.
         """
         self._closed = True
-        if self._active_refresh is not None:
-            self._active_refresh.cancel()
+        if self._active_operation is not None:
+            self._active_operation.cancel()
         async with self._lock:
             pass
 
     async def _refresh_once(self) -> RawStoveSnapshot:
-        """Own one fresh connection; sanitize primitives without retrying protocol."""
+        """One raw refresh; observation-only handshake never sends a code."""
+        async with self._session_once() as (transport, session):
+            response = await _read_v4(transport, read_timeout=self._read_timeout)
+            if isinstance(response, ModbusExceptionResponse):
+                raise HobenModbusError(response.exception_code)
+            opened = session.opened_client
+            return RawStoveSnapshot(
+                profile=session.profile,
+                registers=response.registers,
+                product_type=opened.product_type,
+                product_revision=opened.product_revision,
+                software_major=opened.software_major,
+                software_minor=opened.software_minor,
+                application_version=opened.application_version,
+            )
+
+    @asynccontextmanager
+    async def _session_once(
+        self,
+        *,
+        authorization_code_provider: AuthorizationCodeProvider | None = None,
+    ) -> AsyncIterator[tuple[AsyncTlsTransport, OpenSessionResult]]:
+        """Share checked opening, identity adoption, cleanup and sanitized failures."""
         transport = AsyncTlsTransport()
         failed = True
         try:
@@ -242,6 +341,7 @@ class HobenClient:
                     build=self._build,
                     device_info=self._device_info,
                     handshake_timeout=self._handshake_timeout,
+                    authorization_code_provider=authorization_code_provider,
                 )
                 if isinstance(session, AuthorizationRequiredResult):
                     raise HobenAuthorizationRequiredError()
@@ -260,20 +360,8 @@ class HobenClient:
                     raise HobenProtocolError() from None
                 self._device_guid = assigned
                 self._profile = session.profile
-                response = await _read_v4(transport, read_timeout=self._read_timeout)
-                if isinstance(response, ModbusExceptionResponse):
-                    raise HobenModbusError(response.exception_code)
-                snapshot = RawStoveSnapshot(
-                    profile=session.profile,
-                    registers=response.registers,
-                    product_type=opened.product_type,
-                    product_revision=opened.product_revision,
-                    software_major=opened.software_major,
-                    software_minor=opened.software_minor,
-                    application_version=opened.application_version,
-                )
+                yield transport, session
                 failed = False
-                return snapshot
             finally:
                 try:
                     await transport.close()
@@ -288,3 +376,5 @@ class HobenClient:
             raise HobenTransportError() from None
         except (SessionProtocolError, V4ReadProtocolError):
             raise HobenProtocolError() from None
+        except SessionAuthorizationCodeError:
+            raise HobenAuthorizationCodeError() from None

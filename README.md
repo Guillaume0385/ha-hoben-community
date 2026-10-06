@@ -11,19 +11,22 @@ Home Assistant ou HACS.
 La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
 être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
 enregistre un appareil et rafraîchit les données V4 toutes les **60 secondes**.
-Le candidat de l’issue #26 ajoute un décodeur typé et **16 entités de lecture**,
+L’issue #26 / PR #27 ajoute un décodeur typé et **16 entités de lecture**,
 dont deux désactivées par défaut. Il conserve les 20 registres UInt16 bruts en
 mémoire avec les valeurs décodées. La cartographie vient de l’analyse statique
-documentée dans `protocol.md` : **la validation MANAGER sur le HEAD exact et une
-comparaison privée simultanée avec MyHOBEN restent requises avant fusion**.
-Le décodeur et les premières entités ne sont pas encore marqués DONE dans la
-roadmap. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
+documentée dans `protocol.md`. Ce jalon a été **validé par le MANAGER et fusionné
+le 2026-10-05**, avec comparaison privée simultanée avec MyHOBEN sur l’Osmose de
+référence. Le [rapport PASS](https://github.com/Guillaume0385/ha-hoben-community/pull/27#issuecomment-6001144860)
+concerne ce poêle et les situations observées, sans prouver le support de tous
+les modèles. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
 TLS bornée. Toutes les entités sont en lecture seule ; le contrôle reste indisponible.
 Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
 en mémoire puis persistance dans Home Assistant, demande d'autorisation ou rejet
-documenté. Aucun code d'association n'est envoyé. La réutilisation du DeviceGuid
+documenté. L'API protocolaire propose maintenant une association explicite ;
+l'interface Home Assistant et les sondes ne demandent ni n'envoient de code.
+La réutilisation du DeviceGuid
 sur une seconde connexion a été confirmée sur l’Osmose de référence le
 2026-10-04, lors de la validation MANAGER de la PR #22 (voir `protocol.md`).
 La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
@@ -182,14 +185,16 @@ Ne pas publier son repr/asdict : il contient des valeurs du foyer. V4 reste sél
 dynamiquement ; les autres profils échouent explicitement, sans supposer que
 tous les Osmose sont V4.
 
-Chaque tentative ouvre un TLS vérifié vers `myhoben.fr:465`, effectue OpenClient,
+Chaque tentative de `async_refresh()` ouvre un TLS vérifié vers `myhoben.fr:465`,
+effectue OpenClient,
 valide OpenedClient puis une seule lecture **04 / FFFF / unité 1 / adresse 1024 /
 quantité 20**, et ferme la connexion. Les primitives existantes construisent et
 valident les trames. La longueur complète d'OpenedClient restant inconnue, une
 connexion permanente et DataUpdated sont différés. Les suffixes déjà reçus sont
 refusés sans réinterprétation ; un suffixe arrivant plus tard reste une incertitude.
 
-Par défaut, un échec de transport permet **2 tentatives au total**, séparées par
+Pour `async_refresh()`, un échec de transport permet par défaut **2 tentatives au
+total**, séparées par
 **1 seconde** de backoff asynchrone, après fermeture de la première connexion.
 `max_attempts` accepte 1 ou 2, `retry_delay` 0 à 30 secondes ; les délais globaux
 d'ouverture/lecture sont chacun de 30 secondes et configurables. Les erreurs
@@ -206,15 +211,80 @@ Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
 | Entrée locale invalide | `HobenInvalidInputError` |
 | Identifiant rejeté par le serveur | `HobenInvalidCredentialsError` |
 | DeviceAuthReq | `HobenAuthorizationRequiredError` |
+| Fournisseur de code échoué / résultat non représentable en UInt16 | `HobenAuthorizationCodeError` |
 | CloseClient | `HobenClosedError`, avec motif documenté |
 | Profil non pris en charge | `HobenUnsupportedProfileError` |
 | Réponse malformée / suffixe ambigu | `HobenProtocolError` / `HobenAmbiguousSessionError` |
 | Exception Modbus corrélée | `HobenModbusError`, code numérique brut |
 | Transport / timeout après les tentatives permises | `HobenRefreshExhaustedError`, sous-type de `HobenTransportError`, avec cause expurgée (`HobenTimeoutError` pour un timeout) |
+| Transport / timeout pendant l'association sans retry | `HobenTransportError` / `HobenTimeoutError` |
 | Instance fermée | `HobenClientClosedError` |
 
-Aucune commande d'écriture/contrôle, association, boucle permanente ni tâche de
+Aucune commande d'écriture/contrôle, boucle permanente ni tâche de
 fond n'est exposée par cette API.
+
+## Association MyHOBEN dans l'API protocolaire — Issue #32
+
+Depuis une coroutine, un appelant peut fournir le code à la demande :
+
+```python
+client = HobenClient(
+    user_guid=configured_hoben_id,
+    device_guid=persisted_device_guid_or_none,
+)
+try:
+    result = await client.async_associate(
+        authorization_code_provider=request_code_async,
+    )
+    # Stockage explicite et sécurisé seulement ; ne pas journaliser cette valeur.
+    new_device_guid = client.device_guid_for_persistence
+finally:
+    await client.async_close()
+```
+
+`request_code_async` est une fonction asynchrone sans argument qui fournit un
+entier. Elle est appelée seulement après `DeviceAuthReq`, une fois au maximum ;
+elle doit attendre sans bloquer l'event loop. Le handshake partagé consomme le
+marqueur d'un octet `2F`, conformément à l'analyse statique MyHOBEN examinée
+par le MANAGER le 2026-10-06 (`protocol.md` §5), envoie `30 + UInt16-LE(code)`
+puis attend une ouverture valide ou un rejet. Les Ping avant/après la soumission
+reçoivent un Pong ; les octets coalescés sont conservés et les préfixes fragmentés
+accumulés. Un type inconnu ou une seconde demande après soumission échoue sans
+renvoi de code. La longueur complète d'OpenedClient reste inconnue : les suffixes
+déjà reçus restent refusés, sans rechercher ni reconstruire un message dedans.
+
+Un client déjà autorisé réussit sans consulter le fournisseur ni envoyer de code.
+Sans fournisseur, une demande déclenche `HobenAuthorizationRequiredError`.
+Un fournisseur qui échoue ou retourne une valeur invalide donne
+`HobenAuthorizationCodeError`, avec texte fixe sans son exception d'origine.
+Les fermetures conservent les motifs documentés et les erreurs typées existantes.
+
+L'association fait **une seule tentative**, même si `max_attempts=2` pour les
+lectures : aucun retry automatique, aucune lecture/écriture Modbus. Le délai
+local existant `handshake_timeout` inclut l'attente du fournisseur (30 secondes
+par défaut, configurable) ; il ne décrit pas l'expiration du code côté serveur.
+Le fournisseur et le code ne sont pas stockés sur le client.
+Le résultat immuable `AssociationResult` contient seulement les métadonnées
+publiques du profil V4. Une ouverture valide sans suffixe ambigu adopte le
+DeviceGuid via l'accès sensible existant ; une ouverture malformée, ambiguë ou
+non prise en charge ne remplace pas l'identité. L'association ne modifie pas
+`last_snapshot` et partage le verrou avec `async_refresh()` ; `async_close()`
+annule aussi une attente de code et ferme la connexion.
+
+Le codec indépendant de Home Assistant
+`custom_components.hoben.myhoben.encode_device_auth_response(code: int) -> bytes`
+sérialise exactement `0x30 + code UInt16 little-endian`, sans I/O ni persistance.
+Il refuse les valeurs non représentables sur deux octets et les conversions
+implicites de booléens, chaînes ou flottants. Ces contraintes décrivent le format
+réseau, sans définir les codes acceptés, leur nombre de chiffres ou leur durée
+de validité. Les octets retournés contiennent le code sensible : ne pas les
+journaliser ou les publier.
+
+`async_refresh()`, les sondes et les flux Home Assistant restent sans fournisseur
+de code et ferment sur une autorisation requise. La nouvelle association est
+testée avec des séquences synthétiques hors ligne. La première association réelle,
+la provenance/présentation du code et les délais du serveur restent à valider
+par le MANAGER ; l'UI HA fera l'objet d'une tâche séparée.
 
 ## Installation via HACS
 
@@ -222,7 +292,7 @@ La distribution via HACS est prévue. Lorsqu'une version fonctionnelle sera
 publiée, le dépôt pourra être ajouté à HACS comme dépôt personnalisé de catégorie
 « Integration ». Le socle actuel peut être installé manuellement pour tester
 la configuration et le coordinateur brut, selon les instructions ci-dessus ;
-il ne fournit pas encore de capteurs utilisateur.
+il fournit les entités V4 en lecture seule décrites ci-dessus.
 
 ## Contribution et tests
 
@@ -627,7 +697,7 @@ Le rapport JSON contient uniquement l'hôte/port et les observations structurée
 
 `authorization_required` signifie que l'OpenClient a atteint la demande
 **« Code d'authentification ? »**. Aucun code n'est demandé ni envoyé par cette
-sonde : **DeviceAuthRes `0x30` n'est pas implémenté**. La provenance du code reste
+sonde : son chemin reste **sans DeviceAuthRes `0x30`**. La provenance du code reste
 à valider ; aucune hypothèse n'est ajoutée. Un `profile: "unknown"` reste une
 ouverture observée, notamment pour la branche V6/V6v16 ambiguë.
 
@@ -719,7 +789,7 @@ sémantique V4 est toutefois maintenant documentée dans `protocol.md` après
 analyse de MyHOBEN 2.2 build 34. En particulier, 1031 est la température ambiante,
 1032 la consigne, 1030 contient puissance+état, et les températures V4 utilisent
 un format Int16 en dixièmes de degré. Cette séparation permet de conserver la
-sonde comme outil brut, distinct du décodeur sémantique du candidat #26.
+sonde comme outil brut, distinct du décodeur sémantique validé de la PR #27.
 Une exception Modbus correspondante donne `state: "modbus_exception"` et le
 `exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
 Les refus après OpenedClient donnent `read_not_attempted` et une raison
@@ -737,7 +807,7 @@ ni polling, reconnexion, client persistant ou contrôle du poêle.
 
 ## Capture locale privée pour comparer les valeurs V4
 
-Pour la comparaison simultanée du candidat #26 avec MyHOBEN, un mode manuel
+Pour une comparaison privée simultanée avec MyHOBEN, un mode manuel
 distinct exporte les valeurs du foyer. Le MANAGER l'utilise depuis le **HEAD
 exact revu**, après CI verte et nouvelle validation authentifiée de ce SHA.
 Avec le seul `HOBEN_USER_GUID` configuré dans l'environnement local privé :
@@ -796,20 +866,16 @@ MyHOBEN établit notamment :
 - registres 1025-1027 : dérogation, avec température en dixièmes de degré et
   temporisation/durée en minutes.
 
-Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. Les
-captures d'écran 23,5 °C / 19,0 °C sont cohérentes avec le facteur /10, mais
-aucune valeur brute simultanée n'a encore été publiée : une validation réelle
-expurgée reste prévue avant fusion des premières entités physiques.
-
-Pour le candidat #26, après CI verte et validation authentifiée sur le HEAD exact,
-le MANAGER compare **en privé et au même instant** l’état décodé et l’interface
-MyHOBEN de l’Osmose : ambiance, consigne, mode, ventilation, OnOff et état/puissance
-selon ce que la phase actuelle permet d’observer. Dans la PR, consigner seulement
-les champs comparés, pass/fail et date/heure, sans GUID ni valeurs du foyer.
-Une contradiction impose de corriger d’abord les preuves protocole, le décodeur
-et les tests, puis de recommencer la validation. Le workflow de confiance reste
-inchangé et ne doit jamais publier ces valeurs privées. Une confirmation
-dynamique documentaire pourra être ajoutée séparément après comparaison réussie.
+Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. La
+validation MANAGER du 2026-10-05 pour la PR #27 a confirmé sur l’Osmose de
+référence l’ambiance, la consigne, le mode, la ventilation, OnOff et l’état/
+puissance observable, ainsi que la dérogation et ses temporisations. Le
+chargement HA et la disponibilité des entités ont aussi été vérifiés. Les
+comparaisons ont été faites en privé ; seules les métadonnées de validation ont
+été publiées. Les autres modèles, phases non observées et champs partiels restent
+non confirmés. Une modification future exige une nouvelle revue et les
+validations applicables sur son HEAD exact. Le workflow de confiance ne doit
+jamais publier les valeurs du foyer.
 
 ## Licence
 

@@ -423,6 +423,23 @@ utilisateur **« Code d'authentification ? »**. Cela confirme que ce message es
 signal utilisé par l'application pour demander le code d'association d'un nouveau
 client.
 
+**Marqueur `DeviceAuthReq` — analyse statique MyHOBEN, décision MANAGER du
+2026-10-06 :** la nouvelle analyse du chemin
+`HobenApp.Services.TcpConnection` compare le premier octet reçu à `0x2F` ;
+aucun champ/payload suivant n'est décodé ou exploité pour cette demande.
+Pour l'interopérabilité de ce chemin, la
+[résolution MANAGER de #32](https://github.com/Guillaume0385/ha-hoben-community/issues/32#issuecomment-6020116376)
+établit donc le marqueur d'un octet `2F`, sans payload supplémentaire.
+La provenance est l'analyse statique de MyHOBEN 2.2 build 34
+(`HobenCore` / `HobenApp`), pas une observation de première association réelle.
+Aucun APK/DLL ou identifiant sensible n'est publié.
+
+La même analyse confirme `30 + UInt16-LE(code)` puis l'attente d'OpenedClient.
+Cela ne fait pas d'une lecture socket une frontière TLS générale : le parseur
+doit conserver les octets coalescés après `2F`, accumuler les préfixes fragmentés
+et refuser les types inconnus sans rechercher arbitrairement un `0x04`.
+La longueur complète d'OpenedClient reste inconnue (§4).
+
 L'analyse statique ne permet pas encore d'affirmer **où ni comment ce code est
 présenté/généré côté poêle ou infrastructure Hoben**. Cette partie doit être
 observée sur le Hoben Osmose réel avant d'automatiser le flux.
@@ -445,6 +462,35 @@ et l'envoie avec le type **48 / `DeviceAuthRes`** :
 L'application attend ensuite une réponse et peut traiter un `OpenedClient
 (0x04)` comme réussite. Le DeviceGuid de ce `OpenedClient` est alors le
 candidat à persister pour les connexions suivantes.
+
+`myhoben.encode_device_auth_response(code: int) -> bytes` implémente uniquement
+ce sérialiseur pur, couvert par des vecteurs synthétiques indépendants. Il accepte
+un entier représentable en UInt16, sans conversion implicite de booléen, chaîne
+ou flottant. Cette contrainte de représentation ne définit ni la plage de codes
+acceptés par le serveur, ni un nombre de chiffres, ni leur durée de validité.
+Le paquet retourné contient le code sensible et ne doit jamais être journalisé.
+`HobenClient.async_associate(authorization_code_provider=...)` est le seul appel
+client qui autorise explicitement cette soumission, après le marqueur `2F`.
+Il partage le handshake avec la lecture existante, garde le buffer entre les
+messages et traite Ping/Pong avant/après soumission. Il attend un préfixe
+OpenedClient valide puis applique les vérifications existantes (profil V4 pris
+en charge, absence de suffixe déjà reçu) avant d'adopter le DeviceGuid. Une
+ouverture déjà autorisée ne consulte pas le fournisseur. Sans fournisseur,
+l'autorisation requise reste un résultat/une erreur distincte. Les fermetures
+conservent les sous-codes documentés ci-dessous.
+
+Politique locale explicite, sans affirmation sur le serveur : un seul envoi de
+code et une seule connexion, aucun retry automatique, aucune requête Modbus et
+pas de stockage du code/fournisseur. Une seconde demande après soumission est
+refusée sans renvoi. Le délai global existant du handshake inclut l'attente du
+fournisseur et reste configurable ; il ne représente pas la durée de validité
+du code. Le fournisseur est asynchrone et ses exceptions/valeurs invalides sont
+expurgées sous `HobenAuthorizationCodeError`. L'annulation ferme le transport.
+Le succès retourne `AssociationResult`, métadonnées publiques uniquement ; le
+DeviceGuid reste accessible par le contrat de persistance sensible existant.
+`async_refresh()`, les sondes et les flux HA ne fournissent aucun code et ne
+déclenchent pas cette association. Les séquences d'association sont testées hors
+ligne ; aucune première association réelle n'est revendiquée.
 
 ### Rejets/états `CloseClient` observés — CONFIRMÉ
 
@@ -711,9 +757,10 @@ l'interface masque également les valeurs brutes inférieures à 50.
 
 Les captures MyHOBEN fournies le 2026-10-04 montrent **23,5 °C** en température
 ambiante et **19,0 °C** en consigne. Elles sont cohérentes avec des valeurs brutes
-235 et 190 selon ce convertisseur, mais aucune capture brute simultanée n'a encore
-été enregistrée : ces nombres ne doivent donc pas être présentés comme des valeurs
-de registre observées en production.
+235 et 190 selon ce convertisseur, sans preuve brute simultanée pour ces captures
+du 2026-10-04 : ces nombres restent des illustrations, pas des valeurs de registre
+observées en production. La comparaison privée MANAGER ultérieure du 2026-10-05
+a validé le jalon décodeur/entités (§8), sans publier les valeurs du foyer.
 
 #### V4 — marche/arrêt et mode dans le registre 1024
 
@@ -812,7 +859,7 @@ Le registre 1042 `erarPVIConv` dispose d'un convertisseur d'affichage en
 dans la propriété publique utilisée par l'écran analysé. Il ne doit donc pas
 encore être exposé comme mesure V4 fiable.
 
-#### Implémentation du candidat #26 — lecture seule, validation dynamique en attente
+#### Implémentation #26 / PR #27 — validée sur l'Osmose de référence le 2026-10-05
 
 `v4_state.py` applique cette cartographie statique à un `RawStoveSnapshot` V4 de
 20 UInt16, dans un `V4StoveState` immuable indépendant de Home Assistant. Le
@@ -829,12 +876,17 @@ mais les entités numériques les masquent si les bits 5 et 6 sont tous deux nul
 Les défauts, champ combiné 1033, warnings, bitmap d’information complet,
 date/heure et PVI restent bruts sans interprétation supplémentaire ni entité.
 
-Le candidat ajoute des tests déterministes, pas une confirmation dynamique des
-valeurs. La sonde pré-merge décode les deux snapshots déjà lus et ne rapporte
-qu’un compteur de réussite ; aucune valeur du foyer n’est publiée. Une
-comparaison privée simultanée avec MyHOBEN sur l’Osmose de référence reste
-**À VALIDER avant fusion**. Elle ne doit être marquée confirmée qu’après preuve
-réelle, dans un suivi documentaire distinct.
+Les tests déterministes sont complétés par la **validation dynamique MANAGER
+PASS du 2026-10-05** sur le HEAD
+`288d6408d376dcec875ea09135eab800e5563b4f`, suivie de la fusion de la PR #27.
+La [preuve MANAGER](https://github.com/Guillaume0385/ha-hoben-community/pull/27#issuecomment-6001144860)
+confirme le chargement HA, les entités disponibles et leur comparaison privée
+simultanée avec MyHOBEN : ambiance, consigne, mode, ventilation, OnOff,
+état/puissance dans la phase observée, dérogation et ses temporisations.
+La sonde pré-merge décode les deux snapshots déjà lus et ne rapporte qu'un
+compteur de réussite ; aucune valeur du foyer n'est publiée. Cette validation
+concerne uniquement l'Osmose de référence et les situations observées, sans
+généralisation aux autres modèles ou aux champs encore partiels.
 
 Le mode manuel distinct `--live-v4-validation-values` fournit cette comparaison
 locale privée : un seul rafraîchissement du client existant, horodatage UTC,
@@ -845,8 +897,9 @@ masquent. Il refuse GitHub Actions avant toute connexion et aucun workflow ne
 l’appelle. Ce JSON contient des valeurs du foyer : partage volontaire seulement
 en chat privé avec le MANAGER, jamais en log/artefact/commentaire public. Aucun
 GUID, traceback, pairing ou écriture n’est ajouté. La disponibilité de cet outil
-et ses tests hors ligne ne constituent pas une preuve dynamique ; le nouveau
-HEAD nécessite sa propre revue, sa CI et sa validation authentifiée MANAGER.
+et ses tests hors ligne ne constituent pas à eux seuls une preuve dynamique.
+Toute modification future de ce chemin nécessite sa propre revue, sa CI et la
+décision de validation authentifiée MANAGER sur le nouveau HEAD.
 
 ### V6/V6v16 — zone applicative (lecture, base 1024)
 
@@ -1417,12 +1470,13 @@ session :
    configuré et DeviceGuid initial nul a reçu `0x04` le 2026-10-04, sans suffixe
    déjà reçu ; la longueur totale universelle, dont un suffixe arrivant plus tard,
    reste à établir ;
-2. **association réelle** : déterminer comment le code demandé par MyHOBEN est
-   présenté/généré et confirmer la séquence `2F → 30 + code → 04` ;
-3. **validation dynamique de la cartographie V4 désormais connue statiquement** :
-   capturer de façon expurgée une lecture 1024..1043 pendant un affichage MyHOBEN
-   comparable, afin de confirmer sur le serveur/poêle réel le facteur 0,1 °C,
-   puissance/état, mode et ventilation sans publier d'identifiant ;
+2. **association réelle** : le marqueur `DeviceAuthReq` est établi pour le chemin
+   d'interopérabilité par analyse statique (§5) ; déterminer comment le code
+   demandé par MyHOBEN est présenté/généré et
+   confirmer la séquence `2F → 30 + code → 04` ;
+3. **étendre les observations V4** : le jalon #26 / PR #27 est validé et fusionné
+   depuis le 2026-10-05 sur l'Osmose de référence (§8). Les autres modèles et
+   situations non observées restent non confirmés ;
 4. **bitmaps V4 incomplets** : terminer la correspondance bit par bit de
    `erarWarnings` et `erarInformations`, ainsi que la table exacte code →
    libellé de `erarDefautsCombustion` ;
@@ -1560,6 +1614,9 @@ FF FF    transaction ID
 - structure générale OpenClient ;
 - champs majeurs OpenedClient ;
 - déclenchement `DeviceAuthReq (0x2F)` et réponse `DeviceAuthRes (0x30)` avec code UInt16-LE ;
+- marqueur `DeviceAuthReq` d'un octet pour le chemin d'association reproduit,
+  sans champ supplémentaire exploité, selon l'analyse statique examinée par le
+  MANAGER le 2026-10-06 (§5) ;
 - interprétation des rejets `CloseClient` sous-codes `02` à `06` ;
 - sélection V4/V6/V6v16 ;
 - MBAP Modbus TCP ;
@@ -1595,8 +1652,9 @@ FF FF    transaction ID
 - test négatif précédemment observé avec UserGuid synthétique nul : `CloseClient 05 02`,
   `invalid_identifier`.
 
-La cartographie et le formatage des 20 registres V4 sont maintenant établis
-statiquement dans §8, mais une capture brute simultanée avec l'interface reste
-nécessaire pour transformer ces correspondances en validation dynamique du
-poêle réel. La réutilisation observée du DeviceGuid ne permet pas de généraliser
-ce comportement à tous les modèles Hoben.
+Le jalon V4 #26 / PR #27 a aussi reçu une validation dynamique MANAGER PASS
+le 2026-10-05, avec comparaison privée simultanée des entités et de MyHOBEN sur
+l'Osmose de référence (§8). Les valeurs privées n'ont pas été publiées ; les
+champs partiels et situations non observées restent inconnus. Cette validation,
+comme la réutilisation observée du DeviceGuid, ne prouve pas un support universel
+de tous les modèles Hoben. Une première association avec code reste à valider.

@@ -220,16 +220,54 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — typed V4 decoder and first read entities (validation pending)
+### Current increment — DeviceAuth association (protocol/client, offline)
 
-The issue #26 candidate implements a **Home Assistant-independent V4 semantic
+Issue #32 adds `HobenClient.async_associate(*, authorization_code_provider=None)`
+to the existing HA-independent client. The async zero-argument provider returns
+an int representable as UInt16 and is awaited only after DeviceAuthReq, at most
+once. The MANAGER's 2026-10-06 static analysis establishes the one-byte `2F`
+marker for this interoperability path (`protocol.md` §5). The shared handshake
+retains coalesced bytes, accumulates fragmented prefixes, answers leading Ping
+and sends the pure encoder's `30 + UInt16-LE(code)` before awaiting OpenedClient
+or a documented CloseClient. A repeated request after submission fails without
+resending. Existing OpenedClient suffix/profile checks still apply; its complete
+length and later-arriving suffixes remain unknown.
+
+Association performs one fresh verified TLS attempt, with no Modbus read/write
+and no automatic retry, regardless of the refresh retry settings. The existing
+finite handshake_timeout includes provider waiting; this local budget is not an
+inferred code lifetime. Successful supported V4 opening adopts DeviceGuid using
+the existing sensitive persistence accessor. `AssociationResult` contains only
+public opening metadata, without identifiers, code, provider or household data.
+Missing provider surfaces authorization-required; invalid/failed provider gets
+`HobenAuthorizationCodeError`, without arbitrary exception text. Documented
+server closures and transport/protocol failures retain distinct typed errors.
+No credential is written to storage. Association preserves last_snapshot and
+shares the refresh lock; async_close cancels either operation and cleans up.
+
+Offline regressions cover the wire sequence, all two-part receive splits,
+byte-at-a-time reads, coalescence, Ping/Pong, closure/rejection, invalid inputs,
+unsupported/ambiguous openings, timeouts, cancellation, serialization, identity
+reuse, confidentiality and absence of Modbus/control requests. Existing refresh,
+HA flows and probes do not supply a code and keep their observation-only path.
+A Home Assistant authorization-code UI is a later task. The first real
+association, code presentation and server timing still require MANAGER evidence;
+no authenticated validation is triggered by development or ordinary CI.
+
+### DONE — typed V4 decoder and first read entities (reference Osmose)
+
+Issue #26 / PR #27 implements a **Home Assistant-independent V4 semantic
 decoder** above the unchanged raw `RawStoveSnapshot` API. `v4_state.py` exposes
 `decode_v4_snapshot(snapshot) -> V4StoveState` and `decode_v4_temperature(raw)`.
 The state is frozen/hashable and the decoder requires V4 and exactly 20 UInt16.
 It performs no I/O and does not mutate the snapshot or move transport/session
-concerns into the profile layer. Implementation and offline tests do **not**
-mark this milestone DONE: exact-HEAD MANAGER validation and private simultaneous
-raw/UI comparison on the reference Osmose are still pending before merge.
+concerns into the profile layer. The milestone was validated by MANAGER and
+merged on **2026-10-05**, on exact HEAD
+`288d6408d376dcec875ea09135eab800e5563b4f`.
+The [MANAGER PASS report](https://github.com/Guillaume0385/ha-hoben-community/pull/27#issuecomment-6001144860)
+records authenticated validation, successful HA setup and a private simultaneous
+comparison with MyHOBEN. It applies to the reference Osmose and observed
+situations only, not all models or every possible state.
 
 This increment must at minimum:
 
@@ -256,7 +294,7 @@ failure unloads platforms, shuts down polling, closes the client and discards
 runtime_data. Normal unload removes listeners before shutdown; reload preserves
 entity/device identities and uses the persisted DeviceGuid.
 
-The candidate includes six core sensors (ambient/target temperature, power %, V4
+The increment includes six core sensors (ambient/target temperature, power %, V4
 state/mode, ventilation), diagnostic smoke/combustion-air temperatures, diagnostic
 wired/RF ambient temperatures disabled by default, three derogation value sensors
 and active/scheduled binary flags. A third binary sensor explicitly names the
@@ -286,19 +324,17 @@ only through private chat during validation. Offline tests compare all sixteen
 exported HA values with the real entity properties and protect the unchanged
 public pre-merge report.
 
-Before any physical-value entities enter main, MANAGER must review
-the exact HEAD after green offline CI, pass the authenticated gate, and compare
-ambient/target temperatures, operation mode, ventilation, OnOff and observable
-state/power simultaneously with MyHOBEN. Record only compared fields, pass/fail
-and timestamp in the PR. Stop and fix protocol evidence/tests on contradiction.
-This increment remains strictly **read-only**, open for that review/validation.
-Adding the private capture tool changes HEAD: a previous SHA's approval/live
-result cannot approve this candidate; fresh review and an exact-HEAD gate are
-required before the private comparison.
+The final MANAGER validation passed the exact-HEAD authenticated gate and
+confirmed ambient/target temperatures, operation mode, ventilation, OnOff and
+observable state/power against MyHOBEN, plus the observed derogation behavior.
+Only compared fields, pass/fail and date were published; no household values or
+identifiers were disclosed. This completed increment remains strictly
+**read-only**. Future changes require fresh exact-HEAD review and the applicable
+MANAGER validation; an earlier SHA's approval/live result cannot approve them.
 
 Next protocol gaps remain separate: warning-bit and fault-label tables,
 date/time packing, PVI's reliable V4 meaning, unknown information bits and
-DataUpdated metadata/framing. They have no ordinary HA entities in this candidate.
+DataUpdated metadata/framing. They have no ordinary HA entities in this increment.
 
 ### DONE — Home Assistant config flow and raw coordinator
 
@@ -342,8 +378,8 @@ One device is registered with a neutral name, manufacturer Hoben, safe protocol
 profile and OpenedClient software version. No commercial Osmose model is inferred.
 No semantic entity, permanent connection, DataUpdated, diagnostics, pairing,
 reconfiguration or write/control path belongs to this increment.
-**Validating the semantic mapping of the 20 raw V4 registers is the next protocol
-milestone**, before any sensor values or physical units are exposed.
+The subsequent V4 decoder/entities milestone (#26 / PR #27) completed that
+semantic layer and was validated on the reference Osmose on 2026-10-05.
 
 HA orchestration is tested offline using the separately pinned
 `pytest-homeassistant-custom-component==0.13.367` / HA 2026.9.4 / Python 3.14.2+
@@ -388,9 +424,9 @@ other profiles fail with typed errors. `RawStoveSnapshot` is immutable and holds
 exactly 20 raw UInt16 registers plus public product/software/profile metadata,
 with no GUID, raw packet or session object. The **client still exposes raw values
 by design**, while `protocol.md` now documents the V4 1024..1043 semantics and
-formatting recovered from MyHOBEN. A dedicated V4 semantic decoder is the next
-protocol layer; the raw transport/client model must not be overloaded with UI
-conversion logic.
+formatting recovered from MyHOBEN. The dedicated V4 semantic decoder described
+above implements the next layer; the raw transport/client model must not be
+overloaded with UI conversion logic.
 
 The client shares `_open_session()` and the V4 exchange primitives instead of
 duplicating frames. Existing `open_session_once()` and
@@ -417,8 +453,8 @@ timeout, retry-exhaustion and closed-client failures. Repr, diagnostics and
 errors never contain identities, caller descriptions or server payloads. The
 last accepted profile and last successful snapshot are retained in memory.
 No pairing, file persistence, HA semantic entities or control belongs to this
-completed client increment. Static V4 semantics are now documented separately;
-their implementation belongs to the next dedicated decoder increment.
+completed client increment. V4 semantics and read entities belong to the
+subsequent completed decoder increment described above.
 
 The opt-in probe keeps TLS-only, session-open, synthetic negative and exploratory
 `read-v4-state` modes. The fixed MANAGER-approved `--live-premerge` path now uses
@@ -432,8 +468,8 @@ and two successful 20-register raw V4 reads on the reference Osmose on 2026-10-0
 The lifecycle is **DONE**; `protocol.md` records the reviewed SHA and sanitized
 successful run. This live run did not itself establish V4 register semantics; those semantics
 were subsequently recovered statically from MyHOBEN and are documented in
-`protocol.md`. A real raw/display comparison is still required before treating
-the decoder as dynamically validated. This does not establish all-model support.
+`protocol.md` and validated dynamically by MANAGER on 2026-10-05 in PR #27.
+Neither validation establishes all-model support.
 
 ### Layer 1 — transport
 
@@ -714,10 +750,9 @@ re-adding the chosen label requests another observation. The negative probe
 classifies the actual response without requiring any particular server outcome.
 Neither PR label can reach `read-v4-state`. All live modes remain opt-in, with
 no automatic trigger or retry for the V4 read. These lanes stay separate from
-deterministic/offline `Validate` CI. HA persistence and raw polling are established;
-the current semantic candidate requires the exact-HEAD authenticated gate and
-private raw/UI comparison above. Further pairing and protocol gaps require
-separate reviews.
+deterministic/offline `Validate` CI. HA persistence, raw polling and the semantic
+V4 decoder/entities are established on the reference Osmose. Further pairing and
+protocol gaps require separate reviews and their applicable exact-HEAD gates.
 
 Real-device validation is important for the remaining unknown or statically
 derived protocol semantics, especially:
@@ -727,8 +762,8 @@ derived protocol semantics, especially:
 - reuse of the server-assigned DeviceGuid on a subsequent connection: **confirmed
   on the reference Osmose** (2026-10-04, `protocol.md` §4); **other models
   unconfirmed**;
-- one simultaneous raw V4/UI comparison to validate the documented /10 °C,
-  packed state/power, mode and ventilation mappings;
+- V4 semantic behavior outside the reference Osmose situations validated on
+  2026-10-05; the documented decoder/entities milestone is complete there;
 - exact V4 warning/information bits and combustion-fault code labels;
 - packing of V4 date/time fields and practical meaning of 1033/1042;
 - DataUpdated metadata;
