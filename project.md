@@ -614,15 +614,28 @@ Validation has four separate layers:
    access or credential. Offline simulations remain reproducible and mandatory.
 2. **Secret-free protocol smoke:** optional TLS-only and synthetic-identity
    diagnostics; these observations never establish authenticated success.
-3. **MANAGER-gated authenticated pre-merge validation:** required before each
-   merge, after review of the exact candidate HEAD, using a trusted main workflow
-   and the fixed read-only live suite on that SHA.
+3. **MANAGER-gated authenticated pre-merge validation:** required for PRs that
+   can change runtime or real-device behavior, after MANAGER classification and
+   review of the exact candidate HEAD, using a trusted main workflow and the
+   fixed read-only live suite on that SHA.
 4. **Manual exploratory live validation on main:** the existing dispatch modes
    for reviewed protocol research and diagnostics, separate from merge approval.
 
 The Hoben Osmose remains an opt-in environment for the live lanes; normal pytest
 and `Validate` never require it. Opt-in here means explicit MANAGER authorization
-after review, not permission to skip the authenticated merge requirement.
+after review whenever layer 3 is required by the PR's risk classification. It
+does not waive a required live gate or allow an older SHA's result to approve a
+changed HEAD.
+
+Authenticated Hoben validation is required for runtime protocol/transport/
+client/coordinator/entity/config-flow code, runtime dependencies, live-probe
+scripts, trusted live workflow logic, and stove profile/register data or
+executable protocol interpretation that can affect runtime or real-device
+behavior. It is not required for PRs demonstrably limited to documentation-only
+changes with no executable protocol effect, image/brand assets, non-runtime
+metadata, or CI/test-only changes that cannot alter the live execution path.
+Mixed or ambiguous PRs require the live gate. The MANAGER must explicitly
+classify and record the live-validation decision in the PR before merge.
 
 ### MANAGER-gated authenticated candidate validation
 
@@ -875,8 +888,8 @@ CODEX DEV leaves implementation PRs open and never self-approves, adds
 
 ## Independent review — CODEX REVIEW
 
-CODEX REVIEW works only from `state:review` and independently verifies the exact
-current PR HEAD rather than trusting the developer summary.
+CODEX REVIEW reviews implementations only from `state:review` and independently
+verifies the exact current PR HEAD rather than trusting the developer summary.
 
 The review covers, as applicable:
 
@@ -902,8 +915,8 @@ merges.
 
 ## Final review and live validation — MANAGER
 
-The MANAGER works only from `state:validate` and only after CODEX REVIEW has
-approved the exact current HEAD.
+The MANAGER performs final review only from `state:validate` and only after
+CODEX REVIEW has approved the exact current HEAD.
 
 The MANAGER performs the broader project-level review: scope, roadmap, safety,
 architecture, complete diff, tests, CI, documentation, unresolved review threads,
@@ -933,6 +946,47 @@ in `AGENTS.md`. A successful result applies only to that exact SHA.
 
 The MANAGER merges only when every applicable check, review, and required
 authenticated validation succeeds on the exact reviewed HEAD.
+
+## Blocking and resuming a task
+
+Any active role (CODEX DEV, CODEX REVIEW, or MANAGER) may move its task to
+`state:blocked` when required information, permission, protocol evidence, or an
+external decision is missing and work cannot safely continue. Replace the
+previous state label; keep exactly one `state:*` label and preserve other labels.
+
+The blocking comment must record the previous state, the exact blocker, the
+information or decision needed to resume, and the current PR HEAD SHA when a PR
+exists. Blocking pauses work; it does not discard the branch, PR, review history,
+or outstanding corrections.
+
+Only the MANAGER may declare resolved a blocker that requires a project,
+protocol, or safety decision, or permission. For a routine external blocker that
+requires none of those decisions or permissions, the role that recorded the
+block may verify the missing input or service recovery and record the evidence.
+Neither CODEX role may invent protocol evidence or grant itself permission.
+
+After that resolution is recorded, the role that blocked the task restores its
+recorded previous actionable state; the MANAGER may also perform this
+restoration. Apply these rules to determine the next action:
+
+- Restore `state:in-progress` when DEV implementation or corrections remain.
+- Restore `state:review` when implementation is complete and independent review
+  is the next action.
+- Restore `state:validate` only when that was the recorded previous state, the
+  exact current HEAD already has a valid CODEX REVIEW approval, and no new
+  commit occurred while blocked. Only CODEX REVIEW or MANAGER may restore this
+  state; CODEX DEV must never add it.
+- If HEAD changed while blocked, every earlier approval is stale, including
+  after a rebase. Resume at `state:in-progress` if corrections remain, otherwise
+  at `state:review`; never resume directly at `state:validate`. A qualifying PR
+  also requires fresh exact-HEAD authenticated authorization and validation.
+- Never restore `state:ready` automatically. Only the MANAGER may explicitly
+  re-authorize the task by adding it.
+
+The resumption comment records the resolution, the restored state, and the HEAD
+to which any retained approval applies. Blocking/resumption are administrative
+transitions available to the roles above; they do not bypass the independent
+review or MANAGER final-review rules.
 
 ## Review loop invariant
 

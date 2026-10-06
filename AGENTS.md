@@ -347,7 +347,8 @@ Publish `live-hoben-authenticated` as pending/success/failure on that exact
 candidate SHA, with success only when the whole live job and probe succeed.
 Afterwards MANAGER checks the tested SHA and sanitized result, confirms success,
 removes the label and merges only if HEAD still matches. Each new commit requires
-fresh review and removal/re-addition of the label. The globally required branch-protection checks must include `tests`,
+fresh review and removal/re-addition of the label. The globally required
+branch-protection checks must include `tests`,
 `ha-tests`, `hacs`, and `hassfest`. Branch protection should dismiss stale
 pull-request approvals when new commits are pushed.
 
@@ -573,16 +574,59 @@ CODEX DEV moves `state:ready → state:in-progress`, works on a dedicated branch
 updates the same linked PR, and moves the Issue to `state:review` when ready for
 independent review.
 
-CODEX REVIEW works only on `state:review`. It verifies the exact current PR HEAD,
-Issue requirements, full diff, tests, CI, documentation, security rules, protocol
-sources of truth, and previous review remarks. Required corrections are commented
-on the PR and move the Issue back to `state:in-progress`. Approval of the exact
-HEAD moves the Issue to `state:validate`.
+CODEX REVIEW reviews implementations only on `state:review`. It verifies the
+exact current PR HEAD, Issue requirements, full diff, tests, CI, documentation,
+security rules, protocol sources of truth, and previous review remarks. Required
+corrections are commented on the PR and move the Issue back to
+`state:in-progress`. Approval of the exact HEAD moves the Issue to
+`state:validate`.
 
-The MANAGER works only on `state:validate` and verifies that CODEX REVIEW
-approved the exact current HEAD. Any requested correction is commented on the
-same PR and moves the Issue back to `state:in-progress`. After DEV corrections,
-the task must pass through CODEX REVIEW again before returning to the MANAGER.
+The MANAGER performs final review only on `state:validate` and verifies that
+CODEX REVIEW approved the exact current HEAD. Any requested correction is
+commented on the same PR and moves the Issue back to `state:in-progress`. After
+DEV corrections, the task must pass through CODEX REVIEW again before returning
+to the MANAGER.
+
+### Blocking and resuming a task
+
+Any active role (CODEX DEV, CODEX REVIEW, or MANAGER) may move its task to
+`state:blocked` when required information, permission, protocol evidence, or an
+external decision is missing and work cannot safely continue. Replace the
+previous state label; keep exactly one `state:*` label and preserve other labels.
+
+The blocking comment must record the previous state, the exact blocker, the
+information or decision needed to resume, and the current PR HEAD SHA when a PR
+exists. Blocking pauses work; it does not discard the branch, PR, review history,
+or outstanding corrections.
+
+Only the MANAGER may declare resolved a blocker that requires a project,
+protocol, or safety decision, or permission. For a routine external blocker that
+requires none of those decisions or permissions, the role that recorded the
+block may verify the missing input or service recovery and record the evidence.
+Neither CODEX role may invent protocol evidence or grant itself permission.
+
+After that resolution is recorded, the role that blocked the task restores its
+recorded previous actionable state; the MANAGER may also perform this
+restoration. Apply these rules to determine the next action:
+
+- Restore `state:in-progress` when DEV implementation or corrections remain.
+- Restore `state:review` when implementation is complete and independent review
+  is the next action.
+- Restore `state:validate` only when that was the recorded previous state, the
+  exact current HEAD already has a valid CODEX REVIEW approval, and no new
+  commit occurred while blocked. Only CODEX REVIEW or MANAGER may restore this
+  state; CODEX DEV must never add it.
+- If HEAD changed while blocked, every earlier approval is stale, including
+  after a rebase. Resume at `state:in-progress` if corrections remain, otherwise
+  at `state:review`; never resume directly at `state:validate`. A qualifying PR
+  also requires fresh exact-HEAD authenticated authorization and validation.
+- Never restore `state:ready` automatically. Only the MANAGER may explicitly
+  re-authorize the task by adding it.
+
+The resumption comment records the resolution, the restored state, and the HEAD
+to which any retained approval applies. Blocking/resumption are administrative
+transitions available to the roles above; they do not bypass the independent
+review or MANAGER final-review rules.
 
 ### Mandatory correction loop
 
