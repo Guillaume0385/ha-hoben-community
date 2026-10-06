@@ -18,6 +18,7 @@ CLOSE_CLIENT = 0x05
 DATA_REQUEST_CLIENT = 0x0D
 DATA_RESPONSE_CLIENT = 0x0E
 DEVICE_AUTH_REQ = 0x2F
+DEVICE_AUTH_RES = 0x30
 # Guid.Empty without dashes is the normal first-association client identity.
 INITIAL_DEVICE_GUID = "00000000000000000000000000000000"
 
@@ -74,6 +75,22 @@ def decode_close_client(message: bytes) -> CloseClientReason:
     return _CLOSE_CLIENT_REASONS.get(
         message[1] if len(message) >= 2 else None, CloseClientReason.UNKNOWN
     )
+
+
+def encode_device_auth_response(code: int) -> bytes:
+    """Encode the documented 0x30 + UInt16 little-endian authorization code.
+
+    This pure codec does not send, retain or persist the sensitive code. Never
+    log the returned packet. UInt16 bounds describe the wire representation,
+    not the server's accepted codes, UI digit count or expiration rules.
+    DeviceAuthReq's complete boundary is not documented; the session/client
+    cannot use this codec to continue a handshake until that fact is established.
+    """
+    if not isinstance(code, int) or isinstance(code, bool):
+        raise TypeError("Authorization code must be an integer")
+    if not 0 <= code <= 0xFFFF:
+        raise ValueError("Authorization code must fit UInt16")
+    return bytes([DEVICE_AUTH_RES]) + code.to_bytes(2, "little")
 
 
 @dataclass(frozen=True)

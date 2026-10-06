@@ -11,13 +11,14 @@ Home Assistant ou HACS.
 La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
 être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
 enregistre un appareil et rafraîchit les données V4 toutes les **60 secondes**.
-Le candidat de l’issue #26 ajoute un décodeur typé et **16 entités de lecture**,
+L’issue #26 / PR #27 ajoute un décodeur typé et **16 entités de lecture**,
 dont deux désactivées par défaut. Il conserve les 20 registres UInt16 bruts en
 mémoire avec les valeurs décodées. La cartographie vient de l’analyse statique
-documentée dans `protocol.md` : **la validation MANAGER sur le HEAD exact et une
-comparaison privée simultanée avec MyHOBEN restent requises avant fusion**.
-Le décodeur et les premières entités ne sont pas encore marqués DONE dans la
-roadmap. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
+documentée dans `protocol.md`. Ce jalon a été **validé par le MANAGER et fusionné
+le 2026-10-05**, avec comparaison privée simultanée avec MyHOBEN sur l’Osmose de
+référence. Le [rapport PASS](https://github.com/Guillaume0385/ha-hoben-community/pull/27#issuecomment-6001144860)
+concerne ce poêle et les situations observées, sans prouver le support de tous
+les modèles. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
 TLS bornée. Toutes les entités sont en lecture seule ; le contrôle reste indisponible.
 Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
@@ -216,13 +217,34 @@ Les erreurs de `custom_components.hoben.exceptions` permettent de distinguer :
 Aucune commande d'écriture/contrôle, association, boucle permanente ni tâche de
 fond n'est exposée par cette API.
 
+## Préparation de l’association MyHOBEN — Issue #32
+
+Le codec indépendant de Home Assistant
+`custom_components.hoben.myhoben.encode_device_auth_response(code: int) -> bytes`
+sérialise exactement `0x30 + code UInt16 little-endian`, sans I/O ni persistance.
+Il refuse les valeurs non représentables sur deux octets et les conversions
+implicites de booléens, chaînes ou flottants. Ces contraintes décrivent le format
+réseau, sans définir les codes acceptés, leur nombre de chiffres ou leur durée
+de validité. Les octets retournés contiennent le code sensible : ne pas les
+journaliser ou les publier.
+
+**La continuation de session reste bloquée.** `protocol.md` confirme le signal
+`DeviceAuthReq (0x2F)`, mais pas sa longueur totale ou l’absence d’un payload.
+Sans champ longueur MyHOBEN, une lecture TLS ne prouve pas une frontière de
+message. Une preuve protocolaire examinée par le MANAGER est nécessaire pour
+implémenter l’API d’association et ses tests de bout en bout sur la même branche.
+Le client, les sondes et les flux Home Assistant conservent leur comportement
+actuel : autorisation requise, fermeture, aucun code envoyé. La première
+association réelle restera ensuite à valider par le MANAGER ; l’UI HA fera
+l’objet d’une tâche séparée.
+
 ## Installation via HACS
 
 La distribution via HACS est prévue. Lorsqu'une version fonctionnelle sera
 publiée, le dépôt pourra être ajouté à HACS comme dépôt personnalisé de catégorie
 « Integration ». Le socle actuel peut être installé manuellement pour tester
 la configuration et le coordinateur brut, selon les instructions ci-dessus ;
-il ne fournit pas encore de capteurs utilisateur.
+il fournit les entités V4 en lecture seule décrites ci-dessus.
 
 ## Contribution et tests
 
@@ -719,7 +741,7 @@ sémantique V4 est toutefois maintenant documentée dans `protocol.md` après
 analyse de MyHOBEN 2.2 build 34. En particulier, 1031 est la température ambiante,
 1032 la consigne, 1030 contient puissance+état, et les températures V4 utilisent
 un format Int16 en dixièmes de degré. Cette séparation permet de conserver la
-sonde comme outil brut, distinct du décodeur sémantique du candidat #26.
+sonde comme outil brut, distinct du décodeur sémantique validé de la PR #27.
 Une exception Modbus correspondante donne `state: "modbus_exception"` et le
 `exception_code` numérique brut, avec les mêmes champs de requête, sans retry.
 Les refus après OpenedClient donnent `read_not_attempted` et une raison
@@ -737,7 +759,7 @@ ni polling, reconnexion, client persistant ou contrôle du poêle.
 
 ## Capture locale privée pour comparer les valeurs V4
 
-Pour la comparaison simultanée du candidat #26 avec MyHOBEN, un mode manuel
+Pour une comparaison privée simultanée avec MyHOBEN, un mode manuel
 distinct exporte les valeurs du foyer. Le MANAGER l'utilise depuis le **HEAD
 exact revu**, après CI verte et nouvelle validation authentifiée de ce SHA.
 Avec le seul `HOBEN_USER_GUID` configuré dans l'environnement local privé :
@@ -796,20 +818,16 @@ MyHOBEN établit notamment :
 - registres 1025-1027 : dérogation, avec température en dixièmes de degré et
   temporisation/durée en minutes.
 
-Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. Les
-captures d'écran 23,5 °C / 19,0 °C sont cohérentes avec le facteur /10, mais
-aucune valeur brute simultanée n'a encore été publiée : une validation réelle
-expurgée reste prévue avant fusion des premières entités physiques.
-
-Pour le candidat #26, après CI verte et validation authentifiée sur le HEAD exact,
-le MANAGER compare **en privé et au même instant** l’état décodé et l’interface
-MyHOBEN de l’Osmose : ambiance, consigne, mode, ventilation, OnOff et état/puissance
-selon ce que la phase actuelle permet d’observer. Dans la PR, consigner seulement
-les champs comparés, pass/fail et date/heure, sans GUID ni valeurs du foyer.
-Une contradiction impose de corriger d’abord les preuves protocole, le décodeur
-et les tests, puis de recommencer la validation. Le workflow de confiance reste
-inchangé et ne doit jamais publier ces valeurs privées. Une confirmation
-dynamique documentaire pourra être ajoutée séparément après comparaison réussie.
+Le convertisseur MyHOBEN traite `0x0FFF` comme température indisponible. La
+validation MANAGER du 2026-10-05 pour la PR #27 a confirmé sur l’Osmose de
+référence l’ambiance, la consigne, le mode, la ventilation, OnOff et l’état/
+puissance observable, ainsi que la dérogation et ses temporisations. Le
+chargement HA et la disponibilité des entités ont aussi été vérifiés. Les
+comparaisons ont été faites en privé ; seules les métadonnées de validation ont
+été publiées. Les autres modèles, phases non observées et champs partiels restent
+non confirmés. Une modification future exige une nouvelle revue et les
+validations applicables sur son HEAD exact. Le workflow de confiance ne doit
+jamais publier les valeurs du foyer.
 
 ## Licence
 
