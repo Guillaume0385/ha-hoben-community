@@ -83,7 +83,7 @@ Planned functionality:
 - connection/availability state;
 - warnings and fault diagnostics;
 - Wi-Fi/technical diagnostics where useful;
-- sanitized diagnostics export;
+- sanitized diagnostics export (implemented below, #36);
 - French and English translations;
 - full protocol unit tests and Home Assistant setup/entity tests.
 
@@ -220,7 +220,50 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — Home Assistant authorization pairing (offline)
+### Current increment — privacy-safe Home Assistant diagnostics (#36)
+
+`diagnostics.async_get_config_entry_diagnostics` implements the standard HA
+config-entry download API using existing in-memory runtime state only. The
+integration-owned JSON is an explicit allowlist, intended for public GitHub
+support issues. HA wraps it with its standard system/integration metadata.
+No ConfigEntry data/options, entry ID/title, private identity fingerprint, entity
+state or decoded household value is read by the adapter. No transport, refresh,
+reconnect, association, Modbus operation or background task is started; no client,
+coordinator, registry, entity or ConfigEntry state is mutated.
+
+The payload schema contains the public domain, entry lifecycle/schema versions
+and `runtime_available`. With a runtime, it selects bounded primitive fields from
+`HobenClient.safe_report()` (state, neutral profile, assigned-DeviceGuid boolean)
+and `RawStoveSnapshot.safe_report()` (profile, public product/revision/software/
+application metadata and register count). Coordinator metadata contains last
+update success, the fixed 60-second polling interval, snapshot availability and
+a sanitized last-error category. A retained snapshot describes the last accepted
+read, not current connectivity. Without runtime, only the lifecycle/static
+metadata is returned; without a successful snapshot, `snapshot` is null.
+
+Typed Hoben errors reuse their existing safe-report codes/reasons and limited
+numeric metadata. HA wrappers use fixed authentication/update/config-entry
+categories; arbitrary exceptions use `unexpected_error`. No exception text,
+arguments or chains are inspected. Unknown keys, malformed report contracts,
+non-primitive values and fields outside approved value ranges are omitted.
+GUIDs, authorization codes, credentials, raw frames/register values, private
+fingerprints, household measurements and derogation/entity states are excluded.
+Unresolved warnings/fault labels, information bits, date/time, PVI and DataUpdated
+remain unresolved in `protocol.md`; no mapping or unsafe raw field is added.
+
+Offline HA regressions cover the real diagnostics HTTP download, loaded and
+unloaded entries, missing runtime/snapshot, failed updates, typed/unexpected
+errors and future or malformed safe-report extensions. Synthetic private inputs
+are recursively excluded from keys and values, including the complete HA JSON
+download. Tests enforce JSON bounds, deterministic output, no new I/O/tasks and
+unchanged runtime/storage/registry state. Existing protocol/client, config-flow,
+entity, translation and trusted live code is unchanged. This completes only the
+sanitized-diagnostics implementation item; other v0.1 roadmap gaps remain.
+This runtime addition requires independent CODEX REVIEW and MANAGER exact-HEAD
+authenticated validation before merge under the existing policy. The trusted
+fixed read-only gate remains a regression gate and does not export diagnostics.
+
+### Home Assistant authorization pairing (offline, #34 / PR #35)
 
 Issue #34 connects the reviewed association API to the initial config flow and
 entry-bound reauthentication. The existing normalized private identifier,

@@ -107,6 +107,39 @@ L’intervalle de 60 secondes n’est pas configurable pour cet incrément. Aucu
 socket permanent, DataUpdated, dump de registres ou contrôle du
 poêle n’est ajouté.
 
+## Diagnostics Home Assistant pour le support
+
+Dans **Paramètres → Appareils et services → Hoben**, ouvrir le menu de l’entrée
+puis **Télécharger les diagnostics**. La partie Hoben de ce fichier JSON est
+construite avec une liste explicite de métadonnées autorisées, pour pouvoir
+l’attacher à une issue GitHub publique. Home Assistant ajoute ses métadonnées
+standard de système et d’intégration autour de cette partie.
+
+Le rapport contient le domaine, l’état de chargement et les versions du schéma
+de l’entrée, ainsi que la présence du runtime. Lorsque celui-ci existe, il ajoute
+l’état/profil publics du client, un **booléen** indiquant l’attribution d’un
+DeviceGuid, le résultat du dernier rafraîchissement, l’intervalle fixe de
+60 secondes et la présence d’un instantané. Seuls le profil, les métadonnées
+publiques de produit/révision/logiciel/application et le **nombre** de registres
+de cet instantané sont exportés. Ces métadonnées décrivent la dernière lecture
+conservée en mémoire ; elles ne garantissent pas une connexion actuelle et ne
+déduisent pas un modèle commercial.
+
+Les GUID, le code d’autorisation, les secrets de configuration, l’empreinte
+privée de l’identifiant HOBEN, les paquets et trames bruts, les valeurs des
+registres, toutes les mesures du foyer, les dérogations et les états des entités
+sont exclus. Les erreurs Hoben utilisent uniquement leurs codes et motifs
+expurgés existants. Une erreur enveloppée par Home Assistant reçoit une catégorie
+fixe ; aucun texte, argument, traceback ou chaîne d’exceptions n’est parcouru.
+Les champs inconnus ou non conformes au contrat sûr sont omis.
+
+Le téléchargement lit uniquement la mémoire : il ne lance aucune connexion,
+lecture, association, tâche de fond, réauthentification ou modification de
+l’entrée. Sans runtime chargé, il retourne seulement les métadonnées de cycle
+de vie et `runtime_available: false`. Les warnings, défauts, bits incomplets,
+date/heure, PVI et DataUpdated restent soumis aux incertitudes de
+[protocol.md](protocol.md) et n’enrichissent pas cet export.
+
 ## Entités V4 en lecture seule
 
 | Entité | Unité / type | Catégorie | Activée par défaut |
