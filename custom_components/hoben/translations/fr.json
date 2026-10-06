@@ -2,9 +2,19 @@
   "title": "Hoben",
   "config": {
     "step": {
+      "authorization": {
+        "title": "Autoriser la connexion Hoben",
+        "description": "Le service Hoben a demandé l’autorisation du client. Saisissez le code d’autorisation pour réessayer. Le code n’est jamais enregistré.",
+        "data": {
+          "authorization_code": "Code d’autorisation"
+        },
+        "data_description": {
+          "authorization_code": "Saisissez le code numérique d’autorisation. Cette valeur est sensible."
+        }
+      },
       "reauth_confirm": {
         "title": "Réessayer la connexion Hoben",
-        "description": "La connexion Hoben nécessite une nouvelle validation. Confirmez pour réessayer avec l’identité déjà enregistrée. L’association n’est pas prise en charge. Pour utiliser un autre identifiant HOBEN, configurez une nouvelle entrée."
+        "description": "La connexion Hoben nécessite une nouvelle validation. Confirmez pour réessayer avec l’identité déjà enregistrée. Si le service Hoben demande une autorisation, un code vous sera demandé. Pour utiliser un autre identifiant HOBEN, configurez une nouvelle entrée."
       },
       "user": {
         "title": "Connecter votre poêle Hoben",
@@ -19,7 +29,12 @@
     },
     "error": {
       "invalid_identifier": "L’identifiant HOBEN est invalide ou a été refusé par le serveur.",
-      "authorization_required": "Le serveur demande une autorisation du client. L’association n’est pas encore prise en charge par cette intégration. Vous pouvez réessayer plus tard.",
+      "authorization_required": "Le service Hoben demande une autorisation du client. Saisissez un code d’autorisation pour réessayer.",
+      "invalid_authorization_code": "Le code d’autorisation n’est pas valide. Saisissez le code numérique demandé.",
+      "stove_connection_required": "Le poêle doit être connecté au service Hoben pour autoriser ce client. Vous pouvez réessayer plus tard.",
+      "authorization_rejected": "Le service Hoben a refusé l’autorisation. Vous pouvez saisir un nouveau code pour réessayer.",
+      "authorization_timeout": "Le service Hoben indique que le délai d’autorisation est dépassé. Vous pouvez saisir un nouveau code pour réessayer.",
+      "server_maintenance": "Le service Hoben est en maintenance. Réessayez plus tard.",
       "cannot_connect": "Impossible de se connecter au service Hoben. Réessayez plus tard.",
       "unsupported_stove": "Le profil protocolaire de ce poêle n’est pas pris en charge. Seul V4 est disponible.",
       "protocol_error": "La réponse Hoben n’a pas pu être acceptée en toute sécurité. Réessayez plus tard.",

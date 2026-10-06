@@ -19,7 +19,12 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hoben.client import HobenClient
-from custom_components.hoben.const import CONF_DEVICE_GUID, CONF_USER_GUID, DOMAIN
+from custom_components.hoben.const import (
+    CONF_AUTHORIZATION_CODE,
+    CONF_DEVICE_GUID,
+    CONF_USER_GUID,
+    DOMAIN,
+)
 from custom_components.hoben.exceptions import (
     HobenAuthorizationRequiredError,
     HobenInvalidCredentialsError,
@@ -128,7 +133,6 @@ async def test_auth_failure_starts_reauth_then_reloads_and_resumes_polling(
             HobenInvalidCredentialsError(CloseClientReason.INVALID_IDENTIFIER),
             "invalid_identifier",
         ),
-        (HobenAuthorizationRequiredError(), "authorization_required"),
         (HobenTransportError(), "cannot_connect"),
         (HobenUnsupportedProfileError(StoveProfile.V6), "unsupported_stove"),
         (HobenProtocolError(), "protocol_error"),
@@ -164,7 +168,7 @@ async def test_failed_reauth_keeps_form_and_storage_without_creating_entry(
     assert_private_values_absent(repr(form) + repr(result) + caplog.text)
 
 
-async def test_setup_auth_failure_can_retry_after_reauth_is_still_rejected(
+async def test_setup_authorization_request_can_pair_and_resume_polling(
     hass, entry, client_factory, client, snapshot, caplog
 ):
     client.async_refresh.side_effect = HobenAuthorizationRequiredError()
@@ -180,12 +184,17 @@ async def test_setup_auth_failure_can_retry_after_reauth_is_still_rejected(
     client_factory.side_effect = [denied, validation, resumed]
     failed = await hass.config_entries.flow.async_configure(flow["flow_id"], {})
     assert failed["type"] is FlowResultType.FORM
-    assert failed["step_id"] == "reauth_confirm"
-    assert failed["errors"] == {"base": "authorization_required"}
+    assert failed["step_id"] == "authorization"
+    assert failed["errors"] == {}
     assert entry.data[CONF_DEVICE_GUID] == DEVICE_GUID
     denied.async_close.assert_awaited_once_with()
 
-    result = await hass.config_entries.flow.async_configure(flow["flow_id"], {})
+    validation.async_associate = AsyncMock(
+        return_value=client.async_associate.return_value
+    )
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {CONF_AUTHORIZATION_CODE: "12345"}
+    )
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
@@ -193,6 +202,8 @@ async def test_setup_auth_failure_can_retry_after_reauth_is_still_rejected(
     assert entry.runtime_data.client is resumed
     assert entry.data[CONF_DEVICE_GUID] == ROTATED_DEVICE_GUID
     assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    validation.async_associate.assert_awaited_once()
+    validation.async_refresh.assert_not_awaited()
     validation.async_close.assert_awaited_once_with()
     assert client_factory.call_args_list == [
         call(user_guid=NORMALIZED_USER_GUID, device_guid=DEVICE_GUID),
@@ -220,7 +231,8 @@ async def test_reauth_uses_current_entry_instead_of_supplied_identity(
     client_factory.assert_called_once_with(
         user_guid=NORMALIZED_USER_GUID, device_guid=ROTATED_DEVICE_GUID
     )
-    assert result["errors"] == {"base": "authorization_required"}
+    assert result["step_id"] == "authorization"
+    assert result["errors"] == {}
     assert entry.data[CONF_USER_GUID] == NORMALIZED_USER_GUID
     assert hass.config_entries.async_entries(DOMAIN) == [entry]
     assert_private_values_absent(repr(form) + repr(result) + caplog.text)
@@ -275,7 +287,7 @@ async def test_reauth_cancellation_closes_temporary_client(
 @pytest.mark.parametrize(
     ("response", "expected"),
     [
-        (b"\x2f" + PRIVATE_TEXT.encode(), "authorization_required"),
+        (b"\x2f" + PRIVATE_TEXT.encode(), None),
         (b"\x05\x02", "invalid_identifier"),
     ],
 )
@@ -296,7 +308,10 @@ async def test_real_client_reauth_rejection_never_sends_pairing(
     with caplog.at_level("DEBUG"):
         result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": expected}
+    assert result["step_id"] == (
+        "authorization" if expected is None else "reauth_confirm"
+    )
+    assert result["errors"] == ({} if expected is None else {"base": expected})
     factory.assert_called_once_with()
     transport.connect.assert_awaited_once_with()
     transport.write.assert_awaited_once()

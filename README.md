@@ -24,8 +24,10 @@ Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
 en mémoire puis persistance dans Home Assistant, demande d'autorisation ou rejet
-documenté. L'API protocolaire propose maintenant une association explicite ;
-l'interface Home Assistant et les sondes ne demandent ni n'envoient de code.
+documenté. L'interface Home Assistant propose une association explicite lorsque
+le service demande une autorisation, via l'API protocolaire existante. Cette
+orchestration est testée hors ligne ; la première association réelle avec code
+reste à valider par le MANAGER. Les sondes n'envoient aucun code.
 La réutilisation du DeviceGuid
 sur une seconde connexion a été confirmée sur l’Osmose de référence le
 2026-10-04, lors de la validation MANAGER de la PR #22 (voir `protocol.md`).
@@ -42,8 +44,26 @@ jamais la valeur saisie.
 Le flux normalise l’identifiant avec le validateur du protocole, refuse les
 doublons, effectue un seul appel `HobenClient.async_refresh()` et ferme le client
 temporaire sur chaque résultat. Cet appel conserve les tentatives bornées du
-client. Une lecture V4 réussie et un DeviceGuid attribué non nul sont nécessaires
-avant de créer l’entrée. Les profils V6/V6v16/inconnus sont refusés.
+client. Si le client est déjà autorisé, une lecture V4 réussie et un DeviceGuid
+attribué non nul permettent de créer l’entrée sans demander de code.
+
+Si le service demande une autorisation, un second formulaire propose un champ
+**Code d’autorisation** masqué, sans valeur préremplie. Aucun client, connexion
+TLS ou attente réseau ne reste actif pendant la saisie. Le code n’est jamais
+persisté ni ajouté aux options, métadonnées du flux, erreurs ou journaux.
+Chaque soumission explicite utilise un nouveau client et une seule tentative
+`HobenClient.async_associate()`. Le code est converti localement en entier UInt16
+avant toute connexion ; cela décrit uniquement son format réseau, sans définir
+les codes acceptés par le serveur, leur nombre de chiffres ou leur durée de vie.
+Sa provenance et sa présentation restent à valider par le MANAGER.
+
+Une ouverture V4 valide, non ambiguë et avec un DeviceGuid attribué non nul
+permet de créer l’entrée après association. Ce chemin ne fait aucune lecture
+Modbus supplémentaire : le setup et le coordinateur assurent ensuite la lecture
+habituelle. Les profils V6/V6v16/inconnus sont refusés. Un rejet, un délai dépassé
+ou un autre échec garde le formulaire ouvert avec un message fixe et ferme le
+client ; une nouvelle tentative nécessite une nouvelle soumission explicite.
+Aucun code n’est renvoyé automatiquement.
 
 Les champs sensibles `user_guid` (normalisé) et `device_guid` (attribué) sont
 stockés uniquement dans `ConfigEntry.data`, jamais dans les options. Protéger les
@@ -72,15 +92,19 @@ arrête le sondage et ouvre une confirmation de réauthentification dans Home
 Assistant. Confirmer reteste l’entrée avec ses GUID persistés, sans les afficher
 ni permettre de changer l’identité. Une lecture V4 réussie persiste une éventuelle
 rotation du DeviceGuid et recharge l’intégration, même sans rotation, pour
-reprendre le sondage. Une autorisation toujours requise ou un identifiant encore
-refusé maintient le formulaire avec un message fixe ; l’association reste non
-prise en charge. Le flux initial permet aussi de réessayer plus tard. Pour
+reprendre le sondage. Si le service demande une autorisation, le même formulaire
+de code apparaît, avec le même nettoyage et une tentative par soumission.
+La réauthentification lit l’identité actuelle de l’entrée au moment de chaque
+tentative, vérifie son empreinte et conserve son ID, son nom et ses options.
+Seul un DeviceGuid issu d’une ouverture réussie peut être mis à jour. Un échec
+ou une annulation ne modifie pas l’entrée et n’en crée pas une autre. Le flux
+initial permet aussi de réessayer plus tard. Pour
 utiliser un autre identifiant HOBEN, configurer explicitement une nouvelle entrée.
 Une réponse protocolaire, Modbus ou un profil non pris en charge fait échouer le
 setup avec un message fixe expurgé.
 
 L’intervalle de 60 secondes n’est pas configurable pour cet incrément. Aucun
-socket permanent, DataUpdated, dump de registres, association ou contrôle du
+socket permanent, DataUpdated, dump de registres ou contrôle du
 poêle n’est ajouté.
 
 ## Entités V4 en lecture seule
@@ -280,11 +304,15 @@ réseau, sans définir les codes acceptés, leur nombre de chiffres ou leur dur�
 de validité. Les octets retournés contiennent le code sensible : ne pas les
 journaliser ou les publier.
 
-`async_refresh()`, les sondes et les flux Home Assistant restent sans fournisseur
-de code et ferment sur une autorisation requise. La nouvelle association est
-testée avec des séquences synthétiques hors ligne. La première association réelle,
-la provenance/présentation du code et les délais du serveur restent à valider
-par le MANAGER ; l'UI HA fera l'objet d'une tâche séparée.
+`async_refresh()` et les sondes restent sans fournisseur de code et ferment sur
+une autorisation requise. Les flux Home Assistant ne fournissent un code que
+pour une soumission explicite dans le formulaire d’autorisation, avec une
+nouvelle connexion. L’association et cette orchestration sont testées avec des
+séquences synthétiques hors ligne. La première association réelle, la
+provenance/présentation du code et les délais du serveur restent à valider par
+le MANAGER. Cet ajout au config flow exige la revue indépendante et la validation
+authentifiée MANAGER sur le HEAD exact avant fusion ; la suite privilégiée
+existante reste une régression de lecture et ne soumet aucun code.
 
 ## Installation via HACS
 
@@ -336,9 +364,13 @@ flux de réauthentification sur une erreur d’authentification, la reprise apr�
 rechargement et la conservation de l’identité, les métadonnées/valeurs des
 entités, leurs traductions, les sentinelles/codes inconnus, la disponibilité et
 le nettoyage après setup partiel. `HobenClient` est simulé pour l’orchestration ;
-des tests de réauthentification et d’entités utilisent aussi le vrai client sur
-un transport scripté, pour vérifier les trames exactes et l’absence de commande
-ou de réponse d’association.
+des tests de configuration, réauthentification et d’entités utilisent aussi le
+vrai client sur un transport scripté, pour vérifier les trames exactes. Les
+lectures et demandes d’autorisation initiales n’envoient aucun code ; seule une
+soumission explicite peut émettre la réponse d’association. Les tests couvrent
+aussi la confidentialité, les saisies invalides avant le réseau, les rejets,
+l’annulation et la fermeture de tous les clients temporaires. Aucune commande
+de contrôle n’est émise.
 Le harnais bloque les sockets externes et un garde interdit toute construction
 de transport Hoben réel, même si une simulation est oubliée. Aucun test HA ne
 contacte `myhoben.fr`.

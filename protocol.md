@@ -488,9 +488,15 @@ du code. Le fournisseur est asynchrone et ses exceptions/valeurs invalides sont
 expurgées sous `HobenAuthorizationCodeError`. L'annulation ferme le transport.
 Le succès retourne `AssociationResult`, métadonnées publiques uniquement ; le
 DeviceGuid reste accessible par le contrat de persistance sensible existant.
-`async_refresh()`, les sondes et les flux HA ne fournissent aucun code et ne
-déclenchent pas cette association. Les séquences d'association sont testées hors
-ligne ; aucune première association réelle n'est revendiquée.
+`async_refresh()` et les sondes ne fournissent aucun code et ne déclenchent pas
+cette association. L'orchestration HA (#34) ferme d'abord le client qui constate
+l'autorisation requise, puis affiche un champ masqué sans I/O active. Chaque
+soumission explicite utilise un nouveau client et cette API typée existante,
+sans modifier le framing ni déduire la provenance, la présentation ou la durée
+de vie du code. Le code n'est pas persisté ; seule une ouverture V4 acceptée
+permet l'adoption du DeviceGuid par l'entrée. Les séquences d'association et les
+flux HA sont testés hors ligne ; aucune première association réelle n'est
+revendiquée.
 
 ### Rejets/états `CloseClient` observés — CONFIRMÉ
 

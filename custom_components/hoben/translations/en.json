@@ -2,9 +2,19 @@
   "title": "Hoben",
   "config": {
     "step": {
+      "authorization": {
+        "title": "Authorize the Hoben connection",
+        "description": "The Hoben service requested client authorization. Enter the authorization code to try again. The code is never stored.",
+        "data": {
+          "authorization_code": "Authorization code"
+        },
+        "data_description": {
+          "authorization_code": "Enter the numeric authorization code. This value is sensitive."
+        }
+      },
       "reauth_confirm": {
         "title": "Retry the Hoben connection",
-        "description": "The Hoben connection needs validation again. Confirm to retry using the identity already stored. Pairing is not supported. To use a different HOBEN identifier, configure a new entry."
+        "description": "The Hoben connection needs validation again. Confirm to retry using the identity already stored. If the Hoben service requests authorization, you will be asked for a code. To use a different HOBEN identifier, configure a new entry."
       },
       "user": {
         "title": "Connect your Hoben stove",
@@ -19,7 +29,12 @@
     },
     "error": {
       "invalid_identifier": "The HOBEN identifier is invalid or was rejected by the server.",
-      "authorization_required": "The server requires client authorization. Pairing is not supported by this integration yet. You can retry later.",
+      "authorization_required": "The Hoben service requires client authorization. Submit an authorization code to try again.",
+      "invalid_authorization_code": "The authorization code is not valid. Enter the requested numeric code.",
+      "stove_connection_required": "The stove must be connected to the Hoben service to authorize this client. You can retry later.",
+      "authorization_rejected": "The Hoben service rejected authorization. You can submit a new code to try again.",
+      "authorization_timeout": "The Hoben service reported that authorization timed out. You can submit a new code to try again.",
+      "server_maintenance": "The Hoben service is under maintenance. Please try again later.",
       "cannot_connect": "Cannot connect to the Hoben service. Please try again later.",
       "unsupported_stove": "This stove’s protocol profile is not supported. Only V4 is available.",
       "protocol_error": "The Hoben response could not be accepted safely. Please try again later.",
