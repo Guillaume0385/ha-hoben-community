@@ -6,7 +6,11 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.hoben.client import HobenClient, RawStoveSnapshot
+from custom_components.hoben.client import (
+    AssociationResult,
+    HobenClient,
+    RawStoveSnapshot,
+)
 from custom_components.hoben.const import CONF_DEVICE_GUID, CONF_USER_GUID, DOMAIN
 from custom_components.hoben.helpers import user_guid_fingerprint
 from custom_components.hoben.profiles import StoveProfile
@@ -66,6 +70,16 @@ def client(snapshot):
     """Only replace the network API; all HA orchestration stays real."""
     client = Mock(spec=HobenClient)
     client.async_refresh = AsyncMock(return_value=snapshot)
+    client.async_associate = AsyncMock(
+        return_value=AssociationResult(
+            profile=snapshot.profile,
+            product_type=snapshot.product_type,
+            product_revision=snapshot.product_revision,
+            software_major=snapshot.software_major,
+            software_minor=snapshot.software_minor,
+            application_version=snapshot.application_version,
+        )
+    )
     client.async_close = AsyncMock()
     client.device_guid_for_persistence = DEVICE_GUID
     return client

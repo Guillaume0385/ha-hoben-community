@@ -7,7 +7,11 @@ import pytest
 from homeassistant.helpers.translation import async_get_translations
 
 from custom_components.hoben.binary_sensor import BINARY_SENSORS
-from custom_components.hoben.const import CONF_USER_GUID, DOMAIN
+from custom_components.hoben.const import (
+    CONF_AUTHORIZATION_CODE,
+    CONF_USER_GUID,
+    DOMAIN,
+)
 from custom_components.hoben.sensor import SENSORS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,12 +26,23 @@ async def test_runtime_translations_load_without_core_strings(hass, language):
     assert translations[prefix + "step.user.description"]
     assert translations[prefix + "step.reauth_confirm.title"]
     assert translations[prefix + "step.reauth_confirm.description"]
+    assert translations[prefix + "step.authorization.title"]
+    assert translations[prefix + "step.authorization.description"]
+    assert translations[prefix + f"step.authorization.data.{CONF_AUTHORIZATION_CODE}"]
+    assert translations[
+        prefix + f"step.authorization.data_description.{CONF_AUTHORIZATION_CODE}"
+    ]
     assert translations[prefix + f"step.user.data.{CONF_USER_GUID}"]
     description = translations[prefix + f"step.user.data_description.{CONF_USER_GUID}"]
     assert "MyHOBEN" in description
     for error in (
         "invalid_identifier",
         "authorization_required",
+        "invalid_authorization_code",
+        "stove_connection_required",
+        "authorization_rejected",
+        "authorization_timeout",
+        "server_maintenance",
         "cannot_connect",
         "unsupported_stove",
         "protocol_error",

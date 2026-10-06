@@ -19,7 +19,6 @@ from homeassistant.data_entry_flow import FlowResultType
 from custom_components.hoben.const import CONF_DEVICE_GUID, CONF_USER_GUID, DOMAIN
 from custom_components.hoben.exceptions import (
     HobenAmbiguousSessionError,
-    HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
     HobenInvalidCredentialsError,
@@ -130,7 +129,6 @@ async def test_local_invalid_identifier(hass, client_factory, caplog, identifier
             HobenInvalidCredentialsError(CloseClientReason.INVALID_IDENTIFIER),
             "invalid_identifier",
         ),
-        (HobenAuthorizationRequiredError(), "authorization_required"),
         (HobenTransportError(), "cannot_connect"),
         (HobenTimeoutError(), "cannot_connect"),
         (HobenRefreshExhaustedError(2, HobenTimeoutError()), "cannot_connect"),
@@ -206,12 +204,12 @@ async def test_unsupported_snapshot_never_creates_entry(
 
 
 async def test_error_can_be_retried_later(hass, client_factory, client):
-    client.async_refresh.side_effect = HobenAuthorizationRequiredError()
+    client.async_refresh.side_effect = HobenTransportError()
     flow = await start_flow(hass)
     failed = await hass.config_entries.flow.async_configure(
         flow["flow_id"], {CONF_USER_GUID: USER_GUID}
     )
-    assert failed["errors"] == {"base": "authorization_required"}
+    assert failed["errors"] == {"base": "cannot_connect"}
     client.async_refresh.side_effect = None
     result = await hass.config_entries.flow.async_configure(
         flow["flow_id"], {CONF_USER_GUID: USER_GUID}

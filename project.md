@@ -220,7 +220,44 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — DeviceAuth association (protocol/client, offline)
+### Current increment — Home Assistant authorization pairing (offline)
+
+Issue #34 connects the reviewed association API to the initial config flow and
+entry-bound reauthentication. The existing normalized private identifier,
+fingerprint duplicate check and refresh path remain the entry point. An already
+authorized V4 read succeeds without requesting a code. Authorization-required
+closes the temporary client before showing a password-only authorization form;
+no TLS connection, protocol task or code provider waits between forms. Only the
+initial flow keeps its normalized identifier privately between steps. Reauth
+reads the current ConfigEntry.data at each attempt and checks its fingerprint.
+
+Each explicit code submission locally converts decimal text to UInt16, opens a
+fresh client and calls async_associate exactly once. The client alone owns the
+handshake and decides whether a provider is needed. There is no automatic resend,
+retry, protocol duplication or Modbus read/write on this submission path. Only a
+supported, unambiguous V4 opening with nonzero DeviceGuid is committed; subsequent
+reading belongs to normal setup/coordinator operation. Reauth updates only the
+successful DeviceGuid assignment and reloads the same entry, preserving its ID,
+unique ID, title and options. Concurrent identity changes cannot adopt a stale
+assignment. Failures and cancellation close the client without altering storage.
+
+The authorization code stays local to the active submission and is never stored
+in ConfigEntry data/options, flow attributes/context, logs, exceptions or form
+defaults. English/French forms expose fixed errors for invalid identifiers,
+authorization-required/rejected/timed-out, stove connection required, maintenance,
+transport and unsupported/protocol responses. Retry requires another submission.
+UInt16 is a wire representation constraint, not a server code range, digit-count
+or lifetime claim. Code source/presentation and first real association remain
+unknown pending MANAGER evidence.
+
+Offline HA regressions exercise real form lifecycles, cancellation and cleanup,
+authoritative entry data, identity/duplicate protections, storage and privacy,
+plus real typed-client wire sequences on scripted TLS transports. This runtime
+config-flow change requires independent CODEX REVIEW and the existing exact-HEAD
+MANAGER authenticated gate before merge. The privileged fixed read-only suite,
+live workflows and credential policy are unchanged and do not submit a code.
+
+### Protocol foundation — DeviceAuth association (offline, #32 / PR #33)
 
 Issue #32 adds `HobenClient.async_associate(*, authorization_code_provider=None)`
 to the existing HA-independent client. The async zero-argument provider returns
@@ -248,9 +285,9 @@ shares the refresh lock; async_close cancels either operation and cleans up.
 Offline regressions cover the wire sequence, all two-part receive splits,
 byte-at-a-time reads, coalescence, Ping/Pong, closure/rejection, invalid inputs,
 unsupported/ambiguous openings, timeouts, cancellation, serialization, identity
-reuse, confidentiality and absence of Modbus/control requests. Existing refresh,
-HA flows and probes do not supply a code and keep their observation-only path.
-A Home Assistant authorization-code UI is a later task. The first real
+reuse, confidentiality and absence of Modbus/control requests. Existing refresh
+and probes do not supply a code and keep their observation-only path. The HA
+form above uses this API only on explicit authorization submission. The first real
 association, code presentation and server timing still require MANAGER evidence;
 no authenticated validation is triggered by development or ordinary CI.
 
@@ -343,8 +380,8 @@ The UI accepts one sensitive **Identifiant HOBEN**, validates it with the existi
 normalizer and performs exactly one `HobenClient.async_refresh()` before entry
 creation. The temporary client closes on success, error and cancellation. Only
 a successful V4 raw refresh with a nonzero server-assigned DeviceGuid can create
-an entry. No pairing response is implemented; authorization requests show a
-translated error with an opportunity to retry later.
+an entry on the original path. The later #34 increment above adds an explicit
+authorization form and an association-only opening path.
 
 `ConfigEntry.data` stores normalized `user_guid` and assigned `device_guid`, both
 sensitive. A full SHA-256 fingerprint with fixed `hoben:user_guid:` domain prefix
@@ -370,16 +407,19 @@ persisted UserGuid/DeviceGuid. The fingerprint must still match the existing
 entry. Success updates only a newly assigned DeviceGuid and uses HA's
 update/reload/abort helper to resume polling, even when the identity is unchanged.
 Failure keeps the confirmation open with a sanitized translated error, without
-changing storage or creating another entry. No DeviceAuthRes is sent. A different
+changing storage or creating another entry. The #34 increment transitions an
+authorization request to a separate code form; only a subsequent explicit
+submission can send DeviceAuthRes. A different
 HOBEN identity requires an explicitly new configuration, not a silent reauth
 identity change.
 
 One device is registered with a neutral name, manufacturer Hoben, safe protocol
 profile and OpenedClient software version. No commercial Osmose model is inferred.
-No semantic entity, permanent connection, DataUpdated, diagnostics, pairing,
+No semantic entity, permanent connection, DataUpdated, diagnostics,
 reconfiguration or write/control path belongs to this increment.
 The subsequent V4 decoder/entities milestone (#26 / PR #27) completed that
 semantic layer and was validated on the reference Osmose on 2026-10-05.
+Explicit pairing is added separately by #34 above.
 
 HA orchestration is tested offline using the separately pinned
 `pytest-homeassistant-custom-component==0.13.367` / HA 2026.9.4 / Python 3.14.2+
@@ -388,7 +428,8 @@ stays HA-independent. The trusted MANAGER authenticated exact-HEAD gate is retai
 unchanged; the existing live suite validates the underlying client path.
 HA tests also cover reauth initiation, confirmation, failure/retry, identity
 rotation, reload and resumed polling. Scripted transport tests use the real client
-to prove that reauth authorization requests never cause a pairing response.
+to prove that initial reauth requests never send a pairing response automatically.
+The later #34 tests cover the response only after explicit code submission.
 
 ### DONE — stateful read-only HobenClient and DeviceGuid lifecycle
 
