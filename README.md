@@ -285,12 +285,23 @@ partir de Home Assistant 2026.3.
 | --- | --- |
 | CI déterministe hors ligne | `Validate` : pytest/Ruff, HACS et Hassfest ; aucun accès Hoben ni secret. Les validateurs officiels peuvent accéder à leurs propres services. |
 | Smoke protocolaire sans secret | Labels optionnels `live-validation` (TLS seulement) et `live-session-negative` (identité synthétique), sans authentification réelle. |
-| Validation authentifiée avant fusion | Après revue MANAGER, label exact `manager-live-hoben` ; workflow de confiance sur `main`, code candidat au SHA exact et suite fixe en lecture seule. |
+| Validation authentifiée conditionnelle avant fusion | Pour les PR classées comme l'exigeant, après revue MANAGER, label exact `manager-live-hoben` ; workflow de confiance sur `main`, code candidat au SHA exact et suite fixe en lecture seule. |
 | Exploration manuelle sur main | `Live Validation` / `workflow_dispatch`, dont les modes réels `session-open` et `read-v4-state` réservés à `main` protégé. |
 
-La CI normale reste déterministe. Chaque fusion exige en plus la validation
-authentifiée du **commit candidat exact**, déclenchée volontairement après revue.
-Un smoke TLS ou une observation négative ne satisfait pas cette exigence.
+La CI normale reste déterministe. Le MANAGER doit consigner dans la PR sa
+décision sur la nécessité de la validation authentifiée. Elle est requise pour
+toute PR pouvant modifier le comportement en exécution ou sur le poêle : code
+protocole/transport/client/coordinator/entités/config-flow, dépendances runtime,
+sondes live, logique des workflows live de confiance, profils/registres ou
+interprétation protocolaire exécutable.
+
+Une PR limitée à la documentation sans effet protocolaire exécutable, aux images
+et assets de marque, aux métadonnées hors runtime ou à la CI/aux tests sans effet
+sur le chemin d'exécution live peut être exemptée par une classification
+explicite du MANAGER. Les PR mixtes ou ambiguës exigent la validation live.
+Lorsqu'elle est requise, cette validation porte sur le **commit candidat exact**,
+est déclenchée volontairement après revue et ne peut être remplacée par un smoke
+TLS ou une observation négative.
 
 ### Validation authentifiée avant fusion, après revue MANAGER
 
@@ -353,7 +364,8 @@ correspondance de ses valeurs avec l’affichage MyHOBEN.
 Un premier rafraîchissement réussi seul ne suffit pas. Aucun identifiant ne
 figure dans le rapport. `protocol.md` consigne la réutilisation confirmée sur
 l’Osmose de référence après la validation MANAGER de la PR #22, sans généraliser
-aux autres modèles. Chaque nouveau candidat exige sa propre validation.
+aux autres modèles. Chaque nouveau candidat soumis à cette validation exige sa
+propre exécution sur son SHA exact.
 Aucun code d'association, fonction 06/16/22, transaction `0xFFF0` ni commande
 de température, ventilation, mode ou ON/OFF n'est envoyé.
 
@@ -367,28 +379,42 @@ d'autorisation, paquet brut ou texte d'exception arbitraire n'est exporté.
 **Après le test**, le MANAGER doit vérifier le SHA testé, lire le rapport
 expurgé, confirmer `live-hoben-authenticated = success`, retirer le label, puis
 fusionner uniquement si HEAD est toujours exactement ce SHA et tous les checks
-requis sont verts. Tout nouveau commit exige une nouvelle revue et le retrait /
-réajout du label. Ni `opened`, `synchronize`, `reopened`, push, schedule, label
-déjà présent ni bouton « Re-run jobs » n'autorisent une nouvelle sonde réelle.
+requis sont verts. Pour une PR soumise à cette validation, tout nouveau commit
+exige une nouvelle revue et le retrait / réajout du label. Ni `opened`,
+`synchronize`, `reopened`, push, schedule, label déjà présent ni bouton « Re-run
+jobs » n'autorisent une nouvelle sonde réelle.
 La fusion reste une décision MANAGER ; Codex laisse la PR ouverte.
 
-Après la première validation réussie, configurer manuellement :
+Configurer manuellement les checks hors ligne requis pour toutes les PR :
 
 ```text
 Settings → Branches → main
 → Require status checks to pass before merging
+→ add: tests
 → add: ha-tests
-→ add: live-hoben-authenticated
+→ add: hacs
+→ add: hassfest
 ```
 
-Les checks requis deviennent **`tests`**, **`ha-tests`**, **`hacs`**, **`hassfest`** et
-**`live-hoben-authenticated`**. Le statut est publié sur le SHA candidat, car
-le contexte du workflow `pull_request_target` est celui de la base. Le succès
-d'un ancien SHA ne satisfait donc pas la protection d'un nouveau commit.
-Sans ce réglage effectif, le statut seul ne bloque pas techniquement la fusion.
-Avant toute publication communautaire, vérifier en particulier que `ha-tests`
-est effectivement requis par la protection de `main`, en plus des checks déjà
-présents. La réussite de ce job dans une PR ne configure pas cette protection.
+La protection de `main` doit exiger **`tests`**, **`ha-tests`**, **`hacs`** et
+**`hassfest`**, et devrait invalider les approbations de PR lors de nouveaux
+commits (« Dismiss stale pull request approvals when new commits are pushed »).
+Avant toute publication communautaire, vérifier que ces réglages sont effectifs,
+en particulier que `ha-tests` est requis. La réussite d'un job dans une PR ne
+configure pas cette protection.
+
+Ne pas ajouter **`live-hoben-authenticated`** comme check requis inconditionnel
+tant qu'un futur gate conditionnel de confiance ne peut pas aussi publier un
+résultat sûr pour les PR explicitement exemptées. Si ce check est déjà requis
+inconditionnellement, le MANAGER doit adapter la protection pour respecter cette
+politique. Les PR exemptées n'ont pas à demander un statut live.
+
+En attendant ce gate, le MANAGER exige manuellement
+**`live-hoben-authenticated = success`** avant de fusionner chaque PR classée
+comme nécessitant la validation authentifiée. Le statut est publié sur le SHA
+candidat, car le contexte du workflow `pull_request_target` est celui de la base.
+Le succès d'un ancien SHA ne valide jamais un nouveau commit ; sans gate
+conditionnel, ce contrôle live reste une responsabilité explicite du MANAGER.
 
 **Installation initiale :** GitHub ne peut pas lancer une nouvelle définition de
 confiance qui existe seulement dans cette première PR. Le MANAGER doit décider
