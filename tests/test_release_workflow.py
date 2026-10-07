@@ -507,7 +507,10 @@ def test_stable_release_path_marks_latest(workflow, context):
     assert result["releaseUpdates"][0]["make_latest"] == "true"
 
 
-@pytest.mark.parametrize("api_error", ["create-ref", "create-release", "update-release"])
+@pytest.mark.parametrize(
+    "api_error",
+    ["create-ref", "create-release", "update-release"],
+)
 def test_write_api_failures_fail_closed_and_roll_back_when_possible(
     workflow, context, api_error
 ):
