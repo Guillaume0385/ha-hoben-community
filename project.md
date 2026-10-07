@@ -56,6 +56,13 @@ The version roadmap is intentionally incremental. Protocol and safety validation
 
 Goal: prove stable communication and make the integration useful without sending stove-control commands.
 
+**Pre-release status:** `v0.1.0-beta1` is the first public HACS test candidate.
+It packages the current read-only V4 Home Assistant integration, MyHOBEN
+association/config-flow support and privacy-safe diagnostics. It is intentionally
+a beta rather than a stable `v0.1.0`: validation is centered on the reference
+Hoben Osmose / V4 profile, and unfinished roadmap items below remain open. The
+beta does not authorize or expose any stove-control write command.
+
 Planned functionality:
 
 - HACS-installable custom integration skeleton;
