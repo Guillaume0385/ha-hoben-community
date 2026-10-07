@@ -920,13 +920,16 @@ Requirements change over time, so release preparation must always re-check curre
 # Development workflow with Codex
 
 Development follows a staged multi-agent workflow with independent review before
-MANAGER approval.
+MANAGER approval. HOME ASSISTANT INTEGRATOR is a fourth, read-only operational
+role; it queues observations without interrupting that development loop.
 
 ## Canonical task state
 
 The **GitHub Issue is the single source of truth for workflow state**. Every
-managed development Issue carries **exactly one** of:
+managed Issue, including a problem report awaiting triage, carries **exactly
+one** of these six labels:
 
+- `state:waiting`
 - `state:ready`
 - `state:in-progress`
 - `state:review`
@@ -943,7 +946,11 @@ the Issue remain authoritative.
 The canonical state machine is:
 
 ```text
-MANAGER creates/specifies Issue
+HOME ASSISTANT INTEGRATOR detects a credible anomaly
+        ↓
+   state:waiting
+        ↓ MANAGER triages after the active task is merged/closed
+MANAGER revalidates/specifies/authorizes Issue (or prepares roadmap work)
         ↓
    state:ready
         ↓
@@ -973,10 +980,14 @@ DEV → state:review    MANAGER
                          merge / close
 ```
 
-`state:blocked` is reserved for work that cannot safely continue without an
-external decision, missing protocol fact, permission, or other required input.
+`state:waiting` is a detected problem or improvement awaiting MANAGER triage,
+without authorization for CODEX DEV. It may remain open alongside the active
+development Issue. It is distinct from every authorized development/review state
+and from `state:blocked`, which pauses an already authorized task that cannot
+safely continue without an external decision, missing protocol fact, permission,
+or other required input.
 
-Only one `state:*` label may exist on a managed Issue at a time.
+Only one of the six `state:*` labels above may exist on a managed Issue at a time.
 
 ## Task preparation — MANAGER
 
@@ -991,11 +1002,56 @@ autonomous development.
 
 Avoid multiple large concurrent development tasks unless there is a clear need.
 
+MANAGER interventions prioritize `state:review` and `state:blocked`. Preserve the
+current authorized task and its correction loop; a blocked task still counts as
+active. Waiting reports are backlog candidates and never start CODEX DEV.
+When a successful merge/closure leaves no authorized development task active,
+review waiting reports before inventing new roadmap work. Consolidate equivalent
+reports, revalidate that the evidence remains reproducible/relevant, and add the
+scope, dependencies and acceptance criteria needed for development. Only MANAGER
+may promote `state:waiting → state:ready`, replacing the state label and keeping
+unrelated labels. Promote one report at a time unless an independent necessity
+is documented. A report that is no longer relevant/reproducible may be closed
+with a reason; it need not become a development task.
+
+## Daily observation — HOME ASSISTANT INTEGRATOR
+
+This role observes the real HACS-installed Hoben integration once per day using
+authorized read-only Home Assistant tools. The scheduler configures the cadence;
+no polling service, protocol probe or runtime feature is added to the integration.
+The maintained [canonical prompt and problem-report contract](docs/home-assistant-integrator.md)
+define the bounded checks: installed version/ref if available, ConfigEntry
+lifecycle, privacy-safe diagnostics, structured Hoben WARNING/ERROR logs, a
+bounded raw error-log fallback, and conditional core-entity availability/history.
+Repeated/persistent evidence merits a report; an isolated recovered timeout,
+legitimate unknown optional/derogation value, unrelated HA error or normal HACS
+update does not establish a Hoben fault. Missing history/counters remain unknown.
+
+The observer may only create sanitized `[problem report]` Issues whose sole
+workflow state is `state:waiting`, or add a meaningful occurrence note to an
+equivalent waiting report after a paginated search of all open Issues. It cannot
+edit code/PRs/development states, start DEV, send stove commands, change entries
+or entities, force reauthentication/association, or run live protocol probes.
+The report records time, safe version/state metadata, symptom, observed
+recurrence/window, sanitized error categories/diagnostics, categorical entity
+availability if useful, recovery, suspected layer, missing evidence and the
+absence of stove commands. No GUID, code, private identifier, storage dump,
+frame/register value, household measurement or arbitrary traceback is published.
+`protocol.md` remains authoritative; unknown protocol meanings stay unknown.
+
+Before enabling the observer, MANAGER must create/verify repository metadata
+label `state:waiting`, described as a triage report without DEV authorization,
+and configure the required read access and scheduled GitHub report permissions.
+If those permissions or the label are unavailable, produce a sanitized draft
+and notify the user of the required MANAGER/GitHub action; never claim a write
+succeeded without verification or relabel it as ready/blocked. Documenting this
+role does not activate a scheduled task or grant it credentials.
+
 ## Implementation — CODEX DEV
 
 CODEX DEV first completes an existing `state:in-progress` task or outstanding
 review corrections. Only when no such work exists may it take a
-`state:ready` Issue.
+`state:ready` Issue. A `state:waiting` report is never development authorization.
 
 For a new task, CODEX DEV:
 
@@ -1160,10 +1216,12 @@ discard requested changes or unresolved review history.
 The workflow rules in this section are documented here. A separate small PR
 should implement a GitHub guard workflow that:
 
-- guarantees exactly one `state:*` label on each managed Issue;
+- guarantees exactly one of the six `state:*` labels above on each managed Issue,
+  including `state:waiting` reports;
 - automatically performs `state:validate → state:review` when a new commit is
   pushed to the linked PR;
 - never adds `state:ready`;
+- never promotes `state:waiting` automatically;
 - never adds `manager-live-hoben`;
 - never merges;
 - never turns an unreviewed community Issue into authorized work.
