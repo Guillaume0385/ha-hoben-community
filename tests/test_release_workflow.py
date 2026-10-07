@@ -317,9 +317,7 @@ def test_matching_changelog_section_is_required_and_scoped(workflow, context):
 
 
 def test_stable_release_path_is_supported_without_prerelease(workflow, context):
-    result = execute_script(
-        workflow, context, version="0.1.0", prerelease="false"
-    )
+    result = execute_script(workflow, context, version="0.1.0", prerelease="false")
     assert result["failed"] == []
     release = result["releases"][0]
     assert release["tag_name"] == "v0.1.0"
