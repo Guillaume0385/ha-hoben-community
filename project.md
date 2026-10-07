@@ -63,6 +63,205 @@ a beta rather than a stable `v0.1.0`: validation is centered on the reference
 Hoben Osmose / V4 profile, and unfinished roadmap items below remain open. The
 beta does not authorize or expose any stove-control write command.
 
+### Deferred scope — OpenClient / first-association work (decision 2026-10-07)
+
+Further development of the `OpenClient` / `OpenedClient` and first-association
+path is **suspended until explicitly reactivated by the project owner/MANAGER**.
+The reference Osmose already operates through the currently implemented and
+validated opening path, and no additional identifier is available or required
+for the current read-only target.
+
+This suspension includes:
+
+- first-association live validation and authentication-code origin/presentation;
+- new `DeviceAuthReq` / `DeviceAuthRes` behavior beyond the implementation
+  already merged and covered by deterministic tests;
+- attempts to establish a universal complete `OpenedClient` length/boundary;
+- new `OpenClient` framing, handshake or profile-selection behavior;
+- additional model support that depends on new `OpenClient` / `OpenedClient`
+  reverse engineering.
+
+The existing opening implementation remains a required, frozen compatibility
+dependency for the validated Osmose polling path: do not remove it, weaken its
+tests, or change its protocol semantics merely to bypass unresolved questions.
+Unknown OpenClient/OpenedClient facts remain documented as unknown in
+`protocol.md`, but they are **not blockers for the remaining v0.1 read-only
+work on the reference Osmose**.
+
+New v0.1 tasks should prioritize post-opening read-only behavior, V4 semantic
+decoding, diagnostics, polling reliability and deterministic tests. No new
+OpenClient/association probe or development task should be started unless this
+scope decision is explicitly reversed.
+
+### Active development sequence — persistent post-OpenedClient session
+
+Decision updated 2026-10-07 after comparison with the observed MyHOBEN lifecycle:
+the next v0.1 development series must reproduce a **long-lived post-OpenedClient
+session** instead of opening and closing a TLS connection for every coordinator
+refresh.
+
+The already implemented `OpenClient` / `OpenedClient` codec, validation and
+profile-selection path stays frozen. This series starts **after an opening has
+already been accepted** by the existing strict implementation. It must not invent
+a new OpenClient layout, change association behavior, guess an unresolved
+OpenedClient suffix, or broaden model support.
+
+The intended lifecycle for the reference Osmose is:
+
+```text
+Home Assistant setup / reconnect after a real connection loss
+    ↓
+TLS connect
+    ↓
+existing OpenClient(UserGuid + persisted DeviceGuid)
+    ↓
+existing OpenedClient validation
+    ↓
+adopt/confirm server DeviceGuid
+    ↓
+persistent post-open session
+    ├─ RX Ping        → TX Pong immediately
+    ├─ TX 0x0D + Modbus read → RX 0x0E + correlated Modbus response
+    ├─ RX 0x1B + 4 metadata bytes + Modbus/TCP DataUpdated
+    └─ repeat while the TLS/session remains healthy
+    ↓
+only on EOF / transport failure / unusable session
+    ↓
+close old transport → bounded reconnect/backoff → existing OpenClient path
+```
+
+The UserGuid therefore remains required configuration for future OpenClient
+handshakes after startup/reconnect, but it is **not part of normal post-opening
+Ping/Pong, DataRequestClient, DataResponseClient or DataUpdated traffic**. The
+server-assigned DeviceGuid remains the persisted client identity and is reused
+for later OpenClient handshakes.
+
+A single component must own reads from a live TLS stream. Do not let the HA
+coordinator, a Modbus request coroutine and a DataUpdated listener concurrently
+call `read()` on the same transport. The persistent session/receive loop must
+frame and dispatch messages centrally, correlate solicited Modbus responses to
+their pending request, handle unsolicited notifications, and propagate terminal
+connection loss exactly once.
+
+The current 60-second HA polling interval can remain initially as the cadence for
+issuing a V4 read, but the poll must reuse the already-open session. A healthy
+poll must never trigger TLS reconnect or a new OpenClient handshake. DataUpdated
+may later refresh state between polls once its safe merge semantics are proven.
+
+#### Ordered development tasks
+
+**Task 1 — post-open stream framing and router**
+
+Create a deterministic HA-independent parser/router for traffic received only
+after the accepted OpenedClient boundary. It must support Ping/Pong,
+`DataResponseClient (0x0E)`, `DataUpdated (0x1B)`, documented close/error
+conditions that are valid post-open, and fragmented/coalesced TLS reads.
+
+For `0x0E`, the MyHOBEN prefix is one byte and the embedded Modbus/TCP ADU size
+comes from the MBAP Length field. For `0x1B`, the prefix is five bytes and the
+embedded Modbus/TCP ADU size likewise comes from MBAP. The four notification
+metadata bytes remain opaque; framing must not assign them a meaning. Unknown or
+ambiguous input must fail closed rather than scan arbitrarily for another message
+type.
+
+Required tests include every split point, byte-at-a-time input, multiple
+coalesced messages, Ping adjacent to Modbus traffic, invalid MBAP lengths,
+truncated frames, unsupported types and clean EOF. No real server is required.
+
+**Task 2 — persistent protocol session and receive loop**
+
+Add an HA-independent session object that takes ownership of one accepted TLS
+transport after the existing OpenedClient handshake. It keeps the transport open,
+runs exactly one receive loop, answers Ping immediately, routes solicited Modbus
+responses and unsolicited DataUpdated notifications, serializes writes, and
+supports deterministic cancellation/close.
+
+Only one in-flight read request is required initially unless the existing
+protocol documentation proves safe multiplexing. Pending requests must be
+completed or failed deterministically when the session closes; no task, waiter or
+socket may leak after cancellation/unload. Do not add stove-control writes.
+
+**Task 3 — V4 reads through the persistent session**
+
+Move the established V4 read path to the persistent session. Repeated
+`HobenClient.async_refresh()` calls must reuse one healthy TLS/OpenClient
+session and issue only the documented read-only `0x0D + Modbus/TCP` request,
+then await its correlated `0x0E` response.
+
+Preserve the established V4 request semantics and decoder:
+transaction/correlation rules, unit 1, function 04, address 1024, quantity 20,
+typed errors, immutable snapshots and privacy boundaries. Tests must prove that
+several successful refreshes use one TLS connection/one OpenClient and several
+read exchanges, not several connections.
+
+**Task 4 — reconnect only after session loss**
+
+Integrate session lifecycle/recovery into `HobenClient`. A healthy session must
+be reused indefinitely. Reconnect only after EOF, transport/TLS failure, or a
+session-level failure that makes continued use unsafe. On reconnect, discard the
+old session completely, apply bounded nonblocking backoff, then use the existing
+frozen OpenClient path with the persisted UserGuid + DeviceGuid.
+
+Do not reconnect merely because a polling interval elapsed. Do not create a
+retry/reconnect storm for an application-level Modbus exception or malformed
+data without an explicit session-loss rule. Preserve cancellation, unload,
+typed errors, last accepted snapshot and DeviceGuid persistence semantics.
+Offline tests must cover disconnect during idle receive, during a pending read,
+during Ping/Pong and during coordinator shutdown.
+
+**Task 5 — read-only DataUpdated support**
+
+Accept spontaneous `DataUpdated` while the session is open and expose its
+validated embedded Modbus response to the protocol layer. The confirmed framing
+is `0x1B + 4 opaque metadata bytes + Modbus/TCP`.
+
+Do not infer the meaning of the four metadata bytes. Before modifying the
+canonical V4 snapshot from a DataUpdated message, establish from documented
+MyHOBEN behavior or sanitized real-device evidence exactly how the embedded
+Modbus address/range/value set maps to the current state. If that merge rule is
+not sufficiently proven, complete reception/parsing/diagnostics first and keep
+snapshot mutation blocked rather than guessing.
+
+Add synthetic tests for notification reception before/between/after solicited
+reads, coalescence with Ping/0x0E, invalid/truncated notifications and
+notification handling while a request is pending.
+
+**Task 6 — Home Assistant integration and real-Osmose validation**
+
+Update the coordinator/lifecycle to use the persistent HobenClient session while
+keeping Home Assistant protocol-agnostic. Setup establishes the client/session;
+the 60-second coordinator refresh initially performs a read on the existing
+session; unload closes/cancels the receive loop and transport; reload creates a
+new clean session. DataUpdated-triggered coordinator updates may be enabled only
+after Task 5 establishes safe state-merge behavior.
+
+Extend privacy-safe diagnostics with bounded session/reconnect state only if it
+fits the existing allowlist contract; never expose UserGuid, DeviceGuid, frames,
+metadata bytes, registers or household values.
+
+After deterministic CI and independent review, perform the existing
+MANAGER-controlled opt-in real-Osmose validation appropriate to the changed
+runtime. Validate, without stove-control commands: connection reuse across
+multiple read intervals, Ping/Pong survival, repeated V4 reads, DataUpdated
+reception if naturally observed, deliberate/ordinary connection-loss recovery,
+unload/reload cleanup and absence of reconnect storms. Convert confirmed
+sanitized observations into regression fixtures/tests.
+
+#### Sequencing and dependencies
+
+PR #45 / Issue #43 (typed privacy-safe coordinator error observability) must be
+merged first so this series starts with reliable diagnostics. This documentation
+change (PR #46) must then be rebased/updated as needed against that merged main,
+pass its required checks/review, and merge **before creating/authorizing Task 1**.
+
+Tasks 1→6 are sequential by default. Keep each task in a small dedicated Issue
+and PR with one primary objective. Do not start the next large task until the
+current one is merged unless the MANAGER documents a genuinely independent need.
+
+The secondary V4 mapping work (warning/information bitmaps, combustion-fault
+labels, date/time 1036-1038, practical meaning of 1033/1042 and other nonessential
+fields) is temporarily lower priority than this session-stability series.
+
 Planned functionality:
 
 - HACS-installable custom integration skeleton;
@@ -546,9 +745,13 @@ duplicating frames. Existing `open_session_once()` and
 `open_and_read_v4_once()` remain available for exploratory tools/tests. Leading
 Ping gets Pong; buffered unclassified OpenedClient suffixes and trailing response
 bytes are rejected without reframing. The complete OpenedClient length remains
-unresolved, including possible suffixes arriving in a later TLS read. A permanent
-socket, receive loop, background reconnect worker and DataUpdated handling are
-deferred until framing is sufficiently established.
+unresolved, including possible suffixes arriving in a later TLS read.
+
+The current fresh-session-per-refresh lifecycle is now explicitly transitional.
+The active v0.1 series above introduces a persistent session **only after** the
+existing strict opening path has accepted OpenedClient with no buffered
+unclassified suffix. The persistent work must not resolve the unknown
+OpenedClient boundary by assumption.
 
 The default transport retry policy is two total attempts: immediate first
 attempt, close/discard on a transport failure, one nonblocking 1-second backoff,
@@ -647,7 +850,7 @@ The profile must be selected dynamically from `OpenedClient` data.
 
 ### Layer 5 — stateful protocol client
 
-Current responsibilities:
+Current transitional responsibilities:
 
 - own normalized private UserGuid and in-memory/persistable DeviceGuid;
 - request one raw profile-specific refresh through a bounded TLS session;
@@ -655,9 +858,19 @@ Current responsibilities:
 - expose an immutable raw snapshot and public profile metadata;
 - surface clear exceptions.
 
-Scheduling belongs to the HA coordinator/caller. Long-lived reception and
-`DataUpdated` merging await proven framing; command serialization/read-back
-belong to later control releases.
+Target v0.1 responsibilities defined by the active development series:
+
+- retain one accepted post-OpenedClient TLS session while healthy;
+- own one central post-open receive loop and deterministic frame dispatch;
+- answer Ping with Pong immediately;
+- serialize/correlate read-only Modbus requests and responses;
+- receive spontaneous DataUpdated without inventing metadata semantics;
+- close/cancel cleanly on unload;
+- reconnect only after actual session/transport loss, reusing the persisted
+  DeviceGuid through the existing frozen OpenClient path.
+
+Scheduling remains owned by the HA coordinator/caller. Stove-control command
+serialization/read-back belongs to later releases.
 
 ### Layer 6 — Home Assistant integration
 
@@ -867,14 +1080,14 @@ deterministic/offline `Validate` CI. HA persistence, raw polling and the semanti
 V4 decoder/entities are established on the reference Osmose. Further pairing and
 protocol gaps require separate reviews and their applicable exact-HEAD gates.
 
-Real-device validation is important for the remaining unknown or statically
-derived protocol semantics, especially:
+Real-device validation is important for the remaining **active** unknown or
+statically derived protocol semantics. OpenClient/OpenedClient first-association,
+authorization-code origin, universal opening boundaries and cross-model opening
+behavior are explicitly deferred by the 2026-10-07 scope decision above and must
+not be turned into v0.1 development blockers.
 
-- first-association behavior with a real HOBEN identifier and an initial zero DeviceGuid;
-- origin/presentation of the authentication code and the live `0x2F → 0x30 → 0x04` sequence;
-- reuse of the server-assigned DeviceGuid on a subsequent connection: **confirmed
-  on the reference Osmose** (2026-10-04, `protocol.md` §4); **other models
-  unconfirmed**;
+Active validation priorities are:
+
 - V4 semantic behavior outside the reference Osmose situations validated on
   2026-10-05; the documented decoder/entities milestone is complete there;
 - exact V4 warning/information bits and combustion-fault code labels;
