@@ -158,11 +158,19 @@ Permanent safety rules:
 - derive the tag only from the version committed in
   `custom_components/hoben/manifest.json`; never accept an arbitrary tag name;
 - require the operator-provided expected version to match the manifest exactly;
-- verify the dispatched SHA is still the current `main` HEAD immediately before
-  creating the release;
+- verify the dispatched SHA is still the current `main` HEAD before validation,
+  recheck it immediately before the first write, and recheck again after tag
+  reservation and immediately before publication;
 - require a matching `## v<version>` section in `CHANGELOG.md` and publish only
   that section as release notes;
-- fail closed if the tag or release already exists;
+- reserve `refs/tags/v<version>` atomically on the exact dispatched SHA before
+  creating any release; a tag collision must fail closed rather than falling
+  through to GitHub's existing-tag behavior;
+- create and verify the GitHub Release as a draft first, then make it public only
+  after the exact tag and current `main` SHA are revalidated;
+- if `main` changes before publication, roll back only the exact tag/draft
+  created by that run and fail; never delete an unverified ref;
+- fail closed if a release already exists;
 - require prerelease/stable selection to agree with the manifest version suffix;
 - grant only `contents: write` to the publication job;
 - never attach the `hoben-live` environment, Hoben secrets, candidate code from
