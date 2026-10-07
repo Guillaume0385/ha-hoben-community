@@ -1,6 +1,5 @@
 """Offline security tests for the manual GitHub release publisher."""
 
-import copy
 import json
 import os
 import shutil
@@ -354,7 +353,14 @@ def test_missing_or_empty_changelog_section_fails_closed(workflow, context):
 
 @pytest.mark.parametrize(
     "api_error",
-    ["branch", "custom_components/hoben/manifest.json", "CHANGELOG.md", "ref", "release-read", "release-create"],
+    [
+        "branch",
+        "custom_components/hoben/manifest.json",
+        "CHANGELOG.md",
+        "ref",
+        "release-read",
+        "release-create",
+    ],
 )
 def test_api_failures_are_sanitized_and_never_reported_as_success(
     workflow, context, api_error
