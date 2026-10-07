@@ -195,6 +195,21 @@ Required tests include every split point, byte-at-a-time input, multiple
 coalesced messages, Ping adjacent to Modbus traffic, invalid MBAP lengths,
 truncated frames, unsupported types and clean EOF. No real server is required.
 
+Task 1 bounded analysis (#48, 2026-10-07) has not established the safe handoff.
+The [evidence inventory and resumption condition](docs/post-open-handoff-analysis.md)
+record the remaining prerequisite. Twelve offline cases preserve the frozen
+one-shot gate's refusal of coalesced opaque suffixes and demonstrate that a
+delayed suffix can remain unread while the opening report still matches the
+sanitized reference metadata, including `unclassified_bytes == 0`.
+These synthetic cases are evidence about the existing code's limits, not
+observations of a production suffix or proof of a complete opening length.
+The parser/router remains unimplemented pending a MANAGER-reviewed deterministic
+boundary rule for the already accepted reference-Osmose opening context. No
+runtime/opening behavior or universal protocol fact changes in this intermediate
+deliverable. Resume the same Issue/branch/PR from `state:in-progress` only after
+the required protocol evidence and resolution are recorded; Tasks 2 through 6
+remain dependent on completion and merge of Task 1.
+
 **Task 2 — persistent protocol session and receive loop**
 
 Add an HA-independent session object that takes ownership of one accepted TLS
