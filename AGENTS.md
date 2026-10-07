@@ -144,6 +144,36 @@ Reference:
 
 Do not merge a release candidate while HACS validation or Home Assistant validation is failing.
 
+### Release publication workflow
+
+`.github/workflows/publish-release.yml` is the trusted manual publication path
+for GitHub tags/releases. Keep it independent from Hoben credentials and runtime
+validation.
+
+Permanent safety rules:
+
+- only `workflow_dispatch` may trigger publication;
+- only exact actor `Guillaume0385` on exact `refs/heads/main` may publish;
+- reject reruns: each publication attempt requires a fresh manual dispatch;
+- derive the tag only from the version committed in
+  `custom_components/hoben/manifest.json`; never accept an arbitrary tag name;
+- require the operator-provided expected version to match the manifest exactly;
+- verify the dispatched SHA is still the current `main` HEAD immediately before
+  creating the release;
+- require a matching `## v<version>` section in `CHANGELOG.md` and publish only
+  that section as release notes;
+- fail closed if the tag or release already exists;
+- require prerelease/stable selection to agree with the manifest version suffix;
+- grant only `contents: write` to the publication job;
+- never attach the `hoben-live` environment, Hoben secrets, candidate code from
+  another branch, arbitrary shell inputs or third-party release tooling;
+- pin the GitHub API action used by the workflow and cover the gate with offline
+  tests.
+
+A release workflow change is security-sensitive GitHub automation and requires
+normal independent review and CI, but it does not require authenticated Hoben
+live validation unless it also changes runtime/real-device behavior.
+
 ---
 
 # Testing strategy — highest priority
