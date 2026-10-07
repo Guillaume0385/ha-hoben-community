@@ -29,6 +29,7 @@ from .exceptions import (
 )
 from .myhoben import CloseClientReason
 from .profiles import StoveProfile
+from .v4_state import V4DecodeError
 
 PROFILES = frozenset(profile.value for profile in StoveProfile)
 _ERROR_CODES = frozenset(
@@ -42,6 +43,7 @@ _ERROR_CODES = frozenset(
         HobenInvalidCredentialsError,
         HobenUnsupportedProfileError,
         HobenProtocolError,
+        V4DecodeError,
         HobenAmbiguousSessionError,
         HobenModbusError,
         HobenTransportError,

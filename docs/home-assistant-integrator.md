@@ -102,10 +102,12 @@ métadonnées typées ne révèlent pas à elles seules la cause protocolaire. L
 codes Hoben conservés dans le diagnostic et le message fixe du coordinator
 distinguent des catégories de code ; ils ne prouvent pas une cause historique ni
 un nouveau fait serveur. Un exception_code Modbus n’autorise aucune signification
-non établie. Ne reconstruis jamais une catégorie depuis un texte d’exception
-arbitraire. Les logs HA sont dédupliqués : leur nombre ne compte pas tous les
-refresh échoués. En cas de récidive, retiens seulement la ref réellement installée,
-la catégorie typée, la récurrence/fenêtre fiable, la disponibilité et la récupération,
+non établie. invalid_v4_snapshot décrit un refus du décodeur V4 local, sans
+établir l’origine du snapshot invalide. Ne reconstruis jamais une catégorie
+depuis un texte d’exception arbitraire. Les logs HA sont dédupliqués : leur
+nombre ne compte pas tous les refresh échoués. En cas de récidive, retiens
+seulement la ref réellement installée, la catégorie typée, la récurrence/fenêtre
+fiable, la disponibilité et la récupération,
 dans les limites de collecte ci-dessus. Ne déduis aucun registre, bit ou comportement
 inconnu ; classe la couche unknown si les éléments ne suffisent pas.
 

@@ -252,10 +252,12 @@ The HA error boundary (#43) preserves typed Hoben categories through a real
 coordinator failure. The shared HA-only `safe_reports.py` validates and copies
 existing safe-report codes/reasons and limited numeric metadata into the existing
 HA exception class. Its message suffix lets HA's existing failure log distinguish
-those same categories without a new logger, traceback or event journal. HA keeps
-its normal logging/deduplication lifecycle. Diagnostics revalidate the copied
-primitives using the same allowlist, without retaining a source exception for
-export. Unannotated HA wrappers retain fixed authentication/update/config-entry
+those same categories without a new logger, traceback or event journal. This
+includes the existing decoder's `invalid_v4_snapshot` category when it rejects a
+local V4 snapshot, without exposing registers or attributing the failure to the
+server. HA keeps its normal logging/deduplication lifecycle. Diagnostics revalidate
+the copied primitives using the same allowlist, without retaining a source
+exception for export. Unannotated HA wrappers retain fixed authentication/update/config-entry
 categories; arbitrary errors or unusable Hoben error contracts use
 `unexpected_error`. No exception text, arguments, traceback or chains are
 inspected to reconstruct a cause. Unknown keys, malformed report contracts,

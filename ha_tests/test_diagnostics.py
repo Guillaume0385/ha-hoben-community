@@ -7,7 +7,7 @@ from http import HTTPStatus
 from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
-from conftest import DEVICE_GUID, NORMALIZED_USER_GUID, USER_GUID
+from conftest import DEVICE_GUID, NORMALIZED_USER_GUID, ROTATED_DEVICE_GUID, USER_GUID
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
@@ -20,7 +20,11 @@ from test_runtime import advance_poll
 
 from custom_components.hoben import HobenRuntimeData
 from custom_components.hoben.client import HobenClient, RawStoveSnapshot
-from custom_components.hoben.const import CONF_AUTHORIZATION_CODE, DOMAIN
+from custom_components.hoben.const import (
+    CONF_AUTHORIZATION_CODE,
+    CONF_DEVICE_GUID,
+    DOMAIN,
+)
 from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
 from custom_components.hoben.diagnostics import async_get_config_entry_diagnostics
 from custom_components.hoben.exceptions import (
@@ -93,6 +97,7 @@ def assert_private_absent(payload, entry):
         USER_GUID,
         NORMALIZED_USER_GUID,
         DEVICE_GUID,
+        ROTATED_DEVICE_GUID,
         str(CODE),
         SECRET,
         entry.unique_id,
@@ -473,6 +478,70 @@ async def test_actual_polling_failure_keeps_typed_metadata_and_private_logs(
     for key, value in expected.items():
         assert f"{key}={value}" in str(loaded.coordinator.last_exception)
         assert f"{key}={value}" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "registers",
+    [WORDS[:-1], (*WORDS[:-1], 65536)],
+    ids=["wrong_register_count", "outside_uint16"],
+)
+async def test_v4_decode_failure_keeps_category_and_recovers_on_normal_timer(
+    hass, private_entry, client, loaded, caplog, registers
+):
+    """Reject real invalid snapshots before identity persistence, then recover."""
+    coordinator = loaded.coordinator
+    old_snapshot = coordinator.data
+    old_data, old_options = dict(private_entry.data), dict(private_entry.options)
+    invalid_snapshot = replace(old_snapshot.raw, registers=registers)
+    assert isinstance(invalid_snapshot, RawStoveSnapshot)
+    assert invalid_snapshot.profile is StoveProfile.V4
+    client.async_refresh.side_effect = [invalid_snapshot, old_snapshot.raw]
+    client.device_guid_for_persistence = ROTATED_DEVICE_GUID
+    caplog.clear()
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_update_entry",
+            wraps=hass.config_entries.async_update_entry,
+        ) as update,
+        caplog.at_level("DEBUG", logger="custom_components.hoben.coordinator"),
+    ):
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        report = await async_get_config_entry_diagnostics(hass, private_entry)
+        assert type(coordinator.last_exception) is ConfigEntryError
+        assert not report["coordinator"]["last_update_success"]
+        assert report["coordinator"]["last_error"] == {"error": "invalid_v4_snapshot"}
+        assert "error=invalid_v4_snapshot" in str(coordinator.last_exception)
+        assert "error=invalid_v4_snapshot" in caplog.text
+        assert all(
+            state.state == STATE_UNAVAILABLE
+            for state in states(hass, private_entry).values()
+        )
+        assert coordinator.data is old_snapshot
+        assert client.async_refresh.await_count == 2  # setup plus failed decoding
+        update.assert_not_called()
+        assert private_entry.data == old_data and private_entry.options == old_options
+        assert_private_absent(report, private_entry)
+
+        await advance_poll(hass)
+        report = await async_get_config_entry_diagnostics(hass, private_entry)
+        assert report["coordinator"]["last_update_success"]
+        assert report["coordinator"]["last_error"] is None
+        assert all(
+            state.state != STATE_UNAVAILABLE
+            for state in states(hass, private_entry).values()
+        )
+        assert coordinator.data == old_snapshot
+        assert client.async_refresh.await_count == 3  # only the next scheduled poll
+        update.assert_called_once_with(
+            private_entry, data={**old_data, CONF_DEVICE_GUID: ROTATED_DEVICE_GUID}
+        )
+    assert private_entry.data == {**old_data, CONF_DEVICE_GUID: ROTATED_DEVICE_GUID}
+    assert private_entry.options == old_options
+    client.async_associate.assert_not_awaited()
+    assert_private_absent(report, private_entry)
+    assert_private_absent({"public": caplog.text}, private_entry)
 
 
 async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io(

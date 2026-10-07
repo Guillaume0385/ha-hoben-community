@@ -135,6 +135,8 @@ codes et métadonnées expurgés de l’erreur Hoben dans l’exception Home Ass
 Le message d’échec HA existant et `coordinator.last_error` conservent ainsi les
 catégories telles que `malformed_response`, `unclassified_opened_client_bytes`,
 `modbus_exception` et `server_closed`, avec leurs seuls champs déjà autorisés.
+`invalid_v4_snapshot` identifie le refus d’un snapshot par le décodeur V4
+existant, sans publier son contenu ni attribuer ce refus au serveur.
 Un code Modbus est conservé sans lui inventer une signification. Le helper
 partagé `safe_reports.py` contrôle les clés et les valeurs pour les logs et les
 diagnostics ; les champs inconnus ou non conformes au contrat sûr sont omis.
