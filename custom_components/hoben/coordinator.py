@@ -20,6 +20,7 @@ from .exceptions import (
 from .helpers import log_unexpected_error
 from .myhoben import INITIAL_DEVICE_GUID
 from .profiles import StoveProfile
+from .safe_reports import wrap_error
 from .v4_state import V4StoveState, decode_v4_snapshot
 
 if TYPE_CHECKING:
@@ -72,22 +73,36 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                     data={**self.config_entry.data, CONF_DEVICE_GUID: device_guid},
                 )
             return HobenCoordinatorData(raw=snapshot, state=state)
-        except HobenInvalidCredentialsError:
-            raise ConfigEntryAuthFailed("Hoben identifier was rejected") from None
-        except HobenAuthorizationRequiredError:
-            raise ConfigEntryAuthFailed(
-                "Hoben authorization is required; pairing is not supported yet"
+        except HobenInvalidCredentialsError as error:
+            raise wrap_error(
+                ConfigEntryAuthFailed, "Hoben identifier was rejected", error
             ) from None
-        except HobenTransportError:
-            raise UpdateFailed("Cannot connect to the Hoben service") from None
-        except HobenUnsupportedProfileError:
-            raise ConfigEntryError("Hoben stove profile is not supported") from None
-        except HobenError:
-            raise ConfigEntryError(
-                "Hoben protocol response could not be accepted"
+        except HobenAuthorizationRequiredError as error:
+            raise wrap_error(
+                ConfigEntryAuthFailed,
+                "Hoben authorization is required; pairing is not supported yet",
+                error,
             ) from None
-        except ConfigEntryError:
-            raise
+        except HobenTransportError as error:
+            raise wrap_error(
+                UpdateFailed, "Cannot connect to the Hoben service", error
+            ) from None
+        except HobenUnsupportedProfileError as error:
+            raise wrap_error(
+                ConfigEntryError, "Hoben stove profile is not supported", error
+            ) from None
+        except HobenError as error:
+            raise wrap_error(
+                ConfigEntryError,
+                "Hoben protocol response could not be accepted",
+                error,
+            ) from None
+        except ConfigEntryError as error:
+            raise wrap_error(
+                ConfigEntryError, "Hoben client setup failed", error
+            ) from None
         except Exception as error:
             log_unexpected_error(_LOGGER, error)
-            raise ConfigEntryError("Unexpected Hoben client failure") from None
+            raise wrap_error(
+                ConfigEntryError, "Unexpected Hoben client failure", error
+            ) from None

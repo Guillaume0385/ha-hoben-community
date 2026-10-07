@@ -248,11 +248,24 @@ a sanitized last-error category. A retained snapshot describes the last accepted
 read, not current connectivity. Without runtime, only the lifecycle/static
 metadata is returned; without a successful snapshot, `snapshot` is null.
 
-Typed Hoben errors reuse their existing safe-report codes/reasons and limited
-numeric metadata. HA wrappers use fixed authentication/update/config-entry
-categories; arbitrary exceptions use `unexpected_error`. No exception text,
-arguments or chains are inspected. Unknown keys, malformed report contracts,
+The HA error boundary (#43) preserves typed Hoben categories through a real
+coordinator failure. The shared HA-only `safe_reports.py` validates and copies
+existing safe-report codes/reasons and limited numeric metadata into the existing
+HA exception class. Its message suffix lets HA's existing failure log distinguish
+those same categories without a new logger, traceback or event journal. This
+includes the existing decoder's `invalid_v4_snapshot` category when it rejects a
+local V4 snapshot, without exposing registers or attributing the failure to the
+server. HA keeps its normal logging/deduplication lifecycle. Diagnostics revalidate
+the copied primitives using the same allowlist, without retaining a source
+exception for export. Unannotated HA wrappers retain fixed authentication/update/config-entry
+categories; arbitrary errors or unusable Hoben error contracts use
+`unexpected_error`. No exception text, arguments, traceback or chains are
+inspected to reconstruct a cause. Unknown keys, malformed report contracts,
 non-primitive values and fields outside approved value ranges are omitted.
+After a successful refresh, `last_error` is null even if HA retains its previous
+`last_exception`: this is current status, without error history or counters.
+Error classes, authentication polling stop, availability, the 60-second interval,
+client retries/backoff, accepted data, identity persistence and cleanup are retained.
 GUIDs, authorization codes, credentials, raw frames/register values, private
 fingerprints, household measurements and derogation/entity states are excluded.
 Unresolved warnings/fault labels, information bits, date/time, PVI and DataUpdated
@@ -269,6 +282,15 @@ sanitized-diagnostics implementation item; other v0.1 roadmap gaps remain.
 This runtime addition requires independent CODEX REVIEW and MANAGER exact-HEAD
 authenticated validation before merge under the existing policy. The trusted
 fixed read-only gate remains a regression gate and does not export diagnostics.
+
+The #43 regressions use real coordinator refreshes, scripted synthetic TLS
+responses, normal HA polling timers and full HTTP diagnostics downloads to cover
+typed categories, failure/recovery, deduplication, bounds, privacy and unchanged
+I/O/storage. They establish the observability defect and its correction only;
+the cause of the historical outages and the then-installed commit remain unknown.
+A future passive report needs the actual installed public ref, typed category,
+reliably observed recurrence/window, categorical availability and recovery.
+Deduplicated HA log counts do not establish the number of failed refreshes.
 
 ### Home Assistant authorization pairing (offline, #34 / PR #35)
 
