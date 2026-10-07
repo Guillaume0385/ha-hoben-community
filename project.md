@@ -206,9 +206,23 @@ observations of a production suffix or proof of a complete opening length.
 The parser/router remains unimplemented pending a MANAGER-reviewed deterministic
 boundary rule for the already accepted reference-Osmose opening context. No
 runtime/opening behavior or universal protocol fact changes in this intermediate
-deliverable. Resume the same Issue/branch/PR from `state:in-progress` only after
-the required protocol evidence and resolution are recorded; Tasks 2 through 6
-remain dependent on completion and merge of Task 1.
+deliverable. The owner's later 2026-10-07 amendment resumes the same Issue/branch/
+PR for a narrower preparatory phase: two isolated H1/H2 exploratory probes,
+their offline tests and a manual protected GitHub Actions capture path. This
+preparation proceeds without pretending that the boundary is known. Its reviewed
+intermediate HEAD can return to `state:review`; it does not finish Task 1 or
+authorize merge. The [campaign procedure](docs/opened-client-boundary-campaign.md)
+defines six sessions per hypothesis, explicit client pauses, read-only limits,
+private authenticated-encrypted captures and anonymized offline replay.
+
+Before real execution, MANAGER separately installs the reviewed workflow/gate
+and bounded capture policy on protected main, verifies the `hoben-live` protection
+and public recipient certificate, then dispatches the exact reviewed candidate
+SHA. No candidate can bootstrap access to the existing secret; the old
+`--live-premerge` contract remains unchanged. No real observations are supplied
+by the synthetic tests. Implement the router only after MANAGER analyzes the
+private results and records a sufficient local boundary rule/resolution.
+Tasks 2 through 6 remain dependent on completion and merge of Task 1.
 
 **Task 2 — persistent protocol session and receive loop**
 

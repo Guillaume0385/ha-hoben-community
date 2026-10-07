@@ -69,7 +69,9 @@ limitée au chemin d'ouverture déjà accepté sur l'Osmose de référence, qui 
 
 Une analyse statique vérifiable établissant cette frontière peut contribuer à
 cette preuve. Toute observation réelle complémentaire relève d'une intervention
-MANAGER séparément autorisée et contrôlée. Une capture ou une absence de suffixe
+MANAGER séparément contrôlée. L'amendement propriétaire du 2026-10-07 autorise
+maintenant la préparation des sondes H1/H2 décrites ci-dessous, puis leur campagne
+pilotée par MANAGER depuis GitHub. Une capture ou une absence de suffixe
 sur quelques lectures n'établit pas, seule, une règle générale d'absence future.
 Ne publier aucun identifiant, code, paquet privé ou valeur domestique.
 
@@ -87,13 +89,32 @@ suffixe incomplet borné, catégories réponse/notification distinctes, EOF prop
 distinct d'une troncature et refus terminal sans resynchronisation arbitraire.
 Les tailles documentées restent `1 + 6 + MBAP.Length` pour 0x0E et
 `5 + 6 + MBAP.Length` pour 0x1B ; les quatre octets de notification restent opaques.
-Les codecs MBAP existants seront réutilisés. Aucun nouveau contrat exécutable,
-routeur, lecteur TLS, contrôle du poêle ou règle de fusion n'est ajouté ici.
+Les codecs MBAP existants seront réutilisés. Les annotations exécutables H2 de
+l'outil exploratoire sont isolées dans `scripts/` ; elles ne sont pas ce futur
+routeur et ne sont jamais utilisées par HobenClient/HA.
 
 ## Livrable intermédiaire
 
-Cette analyse et ses tests conservent le prérequis bloquant de #48. Le code
-runtime, les formats d'ouverture, les workflows live et les faits de
-`protocol.md` restent inchangés. Le statut canonique est porté par l'Issue ; une
-PR conservant ce travail reste ouverte et non prête à fusionner jusqu'à
-résolution du prérequis et réalisation du périmètre complet de la tâche 1.
+La reprise de #48 prépare `scripts/probe_opened_client_boundary.py`, un collecteur
+RX intact, deux analyses hypothétiques et le workflow manuel dédié. H1 reste
+passif après le début d'ouverture. H2 place seulement dans la sonde un début
+supposé à 48 octets, traite les enveloppes documentées et autorise deux lectures
+V4 bornées. Un framing invalide arrête les émissions ; un waiter FFFF abandonné
+ferme la session avant toute autre lecture.
+
+Les fichiers privés du runner sont archivés puis chiffrés par CMS AES-256-GCM,
+avec transport de clé RSA-OAEP/SHA256 au certificat public du MANAGER. La clé
+privée reste hors GitHub. Aucun octet privé n'entre dans les rapports anonymisés.
+Le replay hors ligne conserve les temps originaux pour H1 et teste H2 avec des
+coupures de 1/48/257 octets. Les modèles ne sont pas exclusifs ; une capture peut
+être compatible avec les deux ou rester insuffisante.
+
+La [procédure complète](opened-client-boundary-campaign.md) précise les paramètres,
+la récupération privée, la rétention et le périmètre de l'installation séparée
+de gouvernance sur main. Les sondes n'ont pas été exécutées contre le serveur :
+seules les validations synthétiques et de chiffrement hors ligne sont disponibles.
+Le code runtime, les formats d'ouverture, les voies live existantes et les faits
+de `protocol.md` restent inchangés. Le livrable de préparation revient en REVIEW
+indépendante du HEAD exact ; #49 reste en brouillon et non prête à fusionner.
+La preuve de frontière, le routeur et les tâches dépendantes attendent la décision
+MANAGER après observations réelles.

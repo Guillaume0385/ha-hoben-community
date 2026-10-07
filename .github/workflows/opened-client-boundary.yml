@@ -1,0 +1,143 @@
+name: MANAGER OpenedClient H1 H2 observations
+
+# Install this definition and its gate separately on protected main first.
+# A candidate PR cannot authorize its own workflow or credential access.
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Exact PR 49 HEAD examined and trusted by MANAGER
+        type: string
+        required: true
+      mode:
+        description: Six sequential sessions per selected hypothesis
+        type: choice
+        required: true
+        default: both
+        options: [H1, H2, both]
+      observation_seconds:
+        description: Experimental window after first OpenedClient byte (30 to 90)
+        type: string
+        required: true
+        default: '90'
+      recipient_sha256:
+        description: SHA256 of MANAGER public RSA certificate DER (64 lowercase hex)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hoben-boundary-campaign
+  cancel-in-progress: false
+
+jobs:
+  manager-dispatch:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Guillaume0385'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+      sha: ${{ steps.gate.outputs.sha }}
+      mode: ${{ steps.gate.outputs.mode }}
+      seconds: ${{ steps.gate.outputs.seconds }}
+      recipient: ${{ steps.gate.outputs.recipient }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - id: gate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const verify = require('./trusted/.github/scripts/opened-client-boundary-gate.cjs');
+            await verify({github, context, core});
+
+  observations:
+    needs: manager-dispatch
+    if: needs.manager-dispatch.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: hoben-live
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: Guillaume0385/ha-hoben-community
+          ref: ${{ needs.manager-dispatch.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Recheck main and candidate after protected-environment waiting
+        id: recheck
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const verify = require('./trusted/.github/scripts/opened-client-boundary-gate.cjs');
+            await verify({github, context, core});
+
+      - name: Collect privately and seal before export
+        if: steps.recheck.outputs.approved == 'true'
+        env:
+          HOBEN_BOUNDARY_APPROVED_SHA: ${{ needs.manager-dispatch.outputs.sha }}
+          BOUNDARY_MODE: ${{ needs.manager-dispatch.outputs.mode }}
+          BOUNDARY_SECONDS: ${{ needs.manager-dispatch.outputs.seconds }}
+          BOUNDARY_RECIPIENT: ${{ needs.manager-dispatch.outputs.recipient }}
+          HOBEN_CAPTURE_CERTIFICATE: ${{ vars.HOBEN_CAPTURE_CERTIFICATE }}
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: |
+          # No dependency installation, GitHub token, raw logs or plaintext export.
+          # These inputs are validated by trusted main code and are shell quoted.
+          python candidate/scripts/probe_opened_client_boundary.py --live \
+            --mode "$BOUNDARY_MODE" --seconds "$BOUNDARY_SECONDS" \
+            --recipient-sha256 "$BOUNDARY_RECIPIENT" >/dev/null 2>/dev/null
+
+      - name: Preserve authenticated ciphertext only
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-ciphertext-${{ needs.manager-dispatch.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-boundary-exports/captures.cms
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 0
+
+      - name: Preserve separate anonymized observation report
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-report-${{ needs.manager-dispatch.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-boundary-exports/report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summarize exploration status without capture data
+        if: ${{ always() }}
+        env:
+          CANDIDATE_SHA: ${{ needs.manager-dispatch.outputs.sha }}
+        run: |
+          {
+            printf '%s\n' 'OpenedClient exploration; hypotheses remain unproven.'
+            printf 'Reviewed candidate SHA: %s\n' "$CANDIDATE_SHA"
+            printf '%s\n' 'Inspect the anonymized report and decrypt captures privately.'
+          } >> "$GITHUB_STEP_SUMMARY"
