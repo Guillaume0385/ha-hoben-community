@@ -422,9 +422,7 @@ def test_main_is_rechecked_immediately_before_tag_reservation(workflow, context)
     assert "create-ref" not in operations
 
 
-def test_main_change_after_tag_reservation_rolls_back_before_release(
-    workflow, context
-):
+def test_main_change_after_tag_reservation_rolls_back_before_release(workflow, context):
     result = execute_script(
         workflow,
         context,
