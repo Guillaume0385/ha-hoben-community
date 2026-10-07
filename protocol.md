@@ -152,6 +152,40 @@ il répond immédiatement :
 
 soit `Ping (10)` → `Pong (11)`.
 
+### Cycle post-`OpenedClient` persistant — OBSERVÉ statiquement, validation réelle encore partielle
+
+L'analyse statique de MyHOBEN **2.2 build 34** montre que, dans le chemin
+utilisateur, la connexion TLS n'est pas destinée à être fermée après chaque
+lecture applicative. Après traitement d'un `OpenedClient`, l'application
+conserve la connexion et sa boucle `ReadLoopAsync` continue de lire sur le même
+flux. Cette boucle traite notamment :
+
+- `Ping (0x0A)` et répond `Pong (0x0B)` ;
+- `DataResponseClient (0x0E)`, dont le premier octet MyHOBEN est retiré avant
+  décodage Modbus ;
+- `DataUpdated (0x1B)`, dont cinq octets MyHOBEN sont retirés avant décodage
+  Modbus.
+
+Le `UserGuid` appartient à la construction d'`OpenClient` ; il n'est pas
+présent dans ces messages post-ouverture. Le `DeviceGuid` attribué par
+`OpenedClient` est conservé pour une future ouverture/reconnexion.
+
+**Portée de cette preuve :** cela établit le cycle visé par cette version de
+l'application MyHOBEN et justifie l'architecture de session persistante. Cela ne
+prouve pas encore, sur l'Osmose de référence, la durée maximale d'une session
+silencieuse, la cadence serveur des Ping, une politique de timeout d'inactivité,
+la sémantique de reconnexion après chaque type d'erreur, ni la longueur totale
+universelle d'`OpenedClient`. Ces points restent à valider sans inventer de
+comportement.
+
+La boucle de l'application observée effectue des lectures du flux et traite le
+bloc retourné comme directement exploitable ; cela **ne constitue pas** une
+preuve que TCP/TLS respecte les frontières des messages. Le client communautaire
+doit donc conserver son propre buffer et ses règles de framing déterministes.
+
+Aucun APK, DLL, identifiant réel ou capture privée n'est publié dans cette
+documentation.
+
 ---
 
 ## 4. Ouverture de session MyHOBEN
