@@ -208,6 +208,17 @@ protocol documentation proves safe multiplexing. Pending requests must be
 completed or failed deterministically when the session closes; no task, waiter or
 socket may leak after cancellation/unload. Do not add stove-control writes.
 
+The receive loop must distinguish **idle silence** from connection loss. The
+current finite transport/read timeout used by one-shot exchanges must not cause a
+healthy but quiet persistent session to reconnect merely because no Ping,
+DataUpdated or response arrived during that interval. Persistent reception must
+either wait without that one-shot application timeout or treat an idle timeout as
+a non-terminal idle event while the underlying stream remains usable. Only EOF,
+a real transport/TLS error, or a separately documented liveness rule may mark the
+session lost. Add deterministic tests in which the session remains quiet for
+longer than the current read timeout and across at least one coordinator polling
+interval without reconnecting.
+
 **Task 3 — V4 reads through the persistent session**
 
 Move the established V4 read path to the persistent session. Repeated
@@ -220,6 +231,30 @@ transaction/correlation rules, unit 1, function 04, address 1024, quantity 20,
 typed errors, immutable snapshots and privacy boundaries. Tests must prove that
 several successful refreshes use one TLS connection/one OpenClient and several
 read exchanges, not several connections.
+
+Because the documented V4 path currently uses the fixed transaction ID `FFFF`,
+an abandoned request cannot safely be followed by another request on the same
+session: a late `0x0E` could otherwise satisfy the later refresh. Once a request
+has been written, any timeout, cancellation or failure that ends the waiter
+without consuming its one correlated terminal response must mark that session
+unusable and close it before another request is allowed. A correlated Modbus
+exception is itself a terminal response and does not imply this stale-response
+ambiguity. Add a regression where a delayed response arrives after timeout or
+cancellation and prove that it is discarded with the old session and cannot
+satisfy the next refresh.
+
+Task 3 also changes the assumptions of the currently trusted authenticated
+`--live-premerge` gate, whose present contract deliberately performs two fresh
+sessions. **Before the Task 3 runtime PR is authorized/merged, land a separate
+reviewed governance/gate update on protected `main`**; do not let the candidate
+runtime PR bootstrap or weaken its own privileged validation. The replacement
+fixed gate should remain read-only and prove both properties required by the new
+architecture: two consecutive V4 reads on one healthy post-OpenedClient session,
+then a controlled close and a fresh client/session initialized with the assigned
+DeviceGuid to prove identity reuse across reconnect. It must keep the same
+privacy, exact-HEAD trust and no-control-command rules. Until that trusted update
+is installed on `main`, the existing two-fresh-session gate remains the source
+of truth and Task 3 cannot advance past the applicable validation boundary.
 
 **Task 4 — reconnect only after session loss**
 
@@ -284,6 +319,10 @@ pass its required checks/review, and merge **before creating/authorizing Task 1*
 Tasks 1→6 are sequential by default. Keep each task in a small dedicated Issue
 and PR with one primary objective. Do not start the next large task until the
 current one is merged unless the MANAGER documents a genuinely independent need.
+The trusted live-gate governance update described under Task 3 is a prerequisite
+subtask to stage on protected `main` before Task 3 can cross its privileged
+validation boundary; it is not permission to weaken or bypass authenticated
+validation.
 
 The secondary V4 mapping work (warning/information bitmaps, combustion-fault
 labels, date/time 1036-1038, practical meaning of 1033/1042 and other nonessential
