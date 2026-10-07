@@ -1,0 +1,317 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact manifest version without leading v (for example 0.1.0-beta1)
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a GitHub pre-release
+        required: true
+        default: true
+        type: boolean
+      confirm:
+        description: Type RELEASE to confirm publication
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Guillaume0385'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Verify exact main and publish tag/release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          PRE_RELEASE: ${{ inputs.prerelease }}
+          CONFIRM_RELEASE: ${{ inputs.confirm }}
+        with:
+          script: |
+            const repository = 'Guillaume0385/ha-hoben-community';
+            const manager = 'Guillaume0385';
+
+            if (context.eventName !== 'workflow_dispatch' ||
+                context.ref !== 'refs/heads/main' ||
+                `${context.repo.owner}/${context.repo.repo}` !== repository ||
+                context.actor !== manager ||
+                context.payload.sender?.login !== manager ||
+                process.env.GITHUB_TRIGGERING_ACTOR !== manager ||
+                process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+                process.env.CONFIRM_RELEASE !== 'RELEASE') {
+              core.setFailed('Fresh manual release approval from the repository owner on main is required.');
+              return;
+            }
+
+            const expectedVersion = process.env.EXPECTED_VERSION || '';
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(expectedVersion)) {
+              core.setFailed('Expected version must be a simple SemVer-style value without a leading v.');
+              return;
+            }
+
+            const prerelease = process.env.PRE_RELEASE === 'true';
+            if (prerelease !== expectedVersion.includes('-')) {
+              core.setFailed('Prerelease selection must match whether the manifest version has a prerelease suffix.');
+              return;
+            }
+
+            const tag = `v${expectedVersion}`;
+            let reservedTag = false;
+            let draftReleaseId = null;
+            let publicationAttempted = false;
+
+            const decodeFile = async (path) => {
+              const response = await github.rest.repos.getContent({
+                ...context.repo, path, ref: context.sha
+              });
+              if (Array.isArray(response.data) ||
+                  response.data.type !== 'file' ||
+                  typeof response.data.content !== 'string') {
+                throw new Error('unexpected_file_shape');
+              }
+              return Buffer.from(response.data.content, 'base64').toString('utf8');
+            };
+
+            const readMainSha = async () => {
+              const response = await github.rest.repos.getBranch({
+                ...context.repo, branch: 'main'
+              });
+              return response.data.commit.sha;
+            };
+
+            const deleteReservedTag = async () => {
+              if (!reservedTag) {
+                return;
+              }
+              try {
+                const current = await github.rest.git.getRef({
+                  ...context.repo, ref: `tags/${tag}`
+                });
+                if (current.data.object.type === 'commit' &&
+                    current.data.object.sha === context.sha) {
+                  await github.rest.git.deleteRef({
+                    ...context.repo, ref: `tags/${tag}`
+                  });
+                }
+              } catch {
+                // Best-effort cleanup only. Never delete an unverified ref.
+              }
+              reservedTag = false;
+            };
+
+            const rollbackDraft = async () => {
+              // Once publication has been attempted, GitHub may already have made
+              // the release public even if the API response was lost. From that
+              // point forward, never delete the release or its tag automatically.
+              if (publicationAttempted) {
+                return;
+              }
+              if (draftReleaseId !== null) {
+                try {
+                  await github.rest.repos.deleteRelease({
+                    ...context.repo, release_id: draftReleaseId
+                  });
+                } catch {
+                  // Best-effort cleanup; the workflow still fails closed.
+                }
+                draftReleaseId = null;
+              }
+              await deleteReservedTag();
+            };
+
+            try {
+              if (await readMainSha() !== context.sha) {
+                core.setFailed('main changed after dispatch; start a fresh release run.');
+                return;
+              }
+
+              const manifestText = await decodeFile('custom_components/hoben/manifest.json');
+              const manifest = JSON.parse(manifestText);
+              if (manifest.version !== expectedVersion) {
+                core.setFailed('Expected version does not match custom_components/hoben/manifest.json.');
+                return;
+              }
+
+              const changelog = await decodeFile('CHANGELOG.md');
+              const lines = changelog.split(/\r?\n/);
+              const heading = `## ${tag}`;
+              const start = lines.findIndex(line => line === heading || line.startsWith(`${heading} —`));
+              if (start < 0) {
+                core.setFailed('CHANGELOG.md has no section for the requested release.');
+                return;
+              }
+              let end = lines.length;
+              for (let index = start + 1; index < lines.length; index++) {
+                if (lines[index].startsWith('## ')) {
+                  end = index;
+                  break;
+                }
+              }
+              const notes = lines.slice(start + 1, end).join('\n').trim();
+              if (!notes) {
+                core.setFailed('The matching CHANGELOG.md release section is empty.');
+                return;
+              }
+
+              // getReleaseByTag omits draft releases. Enumerate all authenticated
+              // releases so a draft left by an interrupted earlier run also
+              // blocks publication. github.paginate covers repositories with
+              // more than one API page of releases.
+              const existingReleases = await github.paginate(
+                github.rest.repos.listReleases,
+                {...context.repo, per_page: 100}
+              );
+              if (existingReleases.some(release => release.tag_name === tag)) {
+                core.setFailed('A GitHub Release or draft already exists for this tag.');
+                return;
+              }
+
+              // Recheck immediately before the first write. A stale dispatch may
+              // validate files for an old main SHA but must never publish it.
+              if (await readMainSha() !== context.sha) {
+                core.setFailed('main changed before tag reservation; start a fresh release run.');
+                return;
+              }
+
+              try {
+                await github.rest.git.createRef({
+                  ...context.repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: context.sha
+                });
+                reservedTag = true;
+              } catch (error) {
+                if (error?.status === 422) {
+                  core.setFailed('The release tag already exists or could not be reserved atomically.');
+                  return;
+                }
+                throw error;
+              }
+
+              // Close the tiny race between the branch check and atomic tag
+              // creation. If main advanced, remove only our exact reserved tag.
+              if (await readMainSha() !== context.sha) {
+                await deleteReservedTag();
+                core.setFailed('main changed while reserving the tag; the reserved tag was rolled back.');
+                return;
+              }
+
+              const draft = await github.rest.repos.createRelease({
+                ...context.repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: tag,
+                body: notes,
+                draft: true,
+                prerelease
+              });
+              draftReleaseId = draft.data.id;
+
+              const reservedRef = await github.rest.git.getRef({
+                ...context.repo, ref: `tags/${tag}`
+              });
+              if (reservedRef.data.object.type !== 'commit' ||
+                  reservedRef.data.object.sha !== context.sha ||
+                  draft.data.tag_name !== tag ||
+                  draft.data.draft !== true ||
+                  draft.data.prerelease !== prerelease) {
+                await rollbackDraft();
+                core.setFailed('Draft release verification failed before publication.');
+                return;
+              }
+
+              // The release is still private/draft here. Verify main one final
+              // time immediately before making anything public.
+              if (await readMainSha() !== context.sha) {
+                await rollbackDraft();
+                core.setFailed('main changed before publication; draft release and tag were rolled back.');
+                return;
+              }
+
+              let published;
+              const publishingReleaseId = draftReleaseId;
+              publicationAttempted = true;
+              try {
+                published = await github.rest.repos.updateRelease({
+                  ...context.repo,
+                  release_id: publishingReleaseId,
+                  draft: false,
+                  prerelease,
+                  make_latest: prerelease ? 'false' : 'true'
+                });
+              } catch {
+                // The request can succeed server-side while its response is lost.
+                // Never roll back after publication was attempted. Recover only
+                // when the exact release is observable as public; otherwise retain
+                // the tag/draft state for explicit inspection instead of risking
+                // deletion of a public release.
+                try {
+                  const recovered = await github.rest.repos.getReleaseByTag({
+                    ...context.repo, tag
+                  });
+                  if (recovered.data.id === publishingReleaseId &&
+                      recovered.data.tag_name === tag &&
+                      recovered.data.draft === false &&
+                      recovered.data.prerelease === prerelease) {
+                    published = recovered;
+                  } else {
+                    core.setFailed('Release publication state is ambiguous; resources were retained for manual inspection.');
+                    return;
+                  }
+                } catch {
+                  core.setFailed('Release publication state is ambiguous; resources were retained for manual inspection.');
+                  return;
+                }
+              }
+
+              if (published.data.id !== publishingReleaseId ||
+                  published.data.tag_name !== tag ||
+                  published.data.draft !== false ||
+                  published.data.prerelease !== prerelease) {
+                core.setFailed('Published release metadata did not match the requested release; resources were retained.');
+                return;
+              }
+
+              // Crossing this boundary means the release is confirmed public.
+              // Disable every automatic rollback before any later API read.
+              draftReleaseId = null;
+              reservedTag = false;
+
+              let finalRef;
+              try {
+                finalRef = await github.rest.git.getRef({
+                  ...context.repo, ref: `tags/${tag}`
+                });
+              } catch {
+                core.setFailed('Release is public, but post-publication tag verification was unavailable; inspect GitHub manually.');
+                return;
+              }
+              if (finalRef.data.object.type !== 'commit' ||
+                  finalRef.data.object.sha !== context.sha) {
+                core.setFailed('Release is public, but its tag failed exact-SHA verification; inspect GitHub manually.');
+                return;
+              }
+              core.info(`Published ${tag} at ${context.sha}`);
+              await core.summary
+                .addHeading('Hoben release published')
+                .addRaw(`\nTag: ${tag}\n\nCommit: ${context.sha}\n\nPrerelease: ${prerelease}\n`)
+                .addLink('Open release', published.data.html_url)
+                .write();
+            } catch {
+              await rollbackDraft();
+              core.setFailed('Release publication failed during repository verification or GitHub API execution.');
+            }
