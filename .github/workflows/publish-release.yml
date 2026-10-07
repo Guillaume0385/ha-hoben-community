@@ -70,6 +70,8 @@ jobs:
             }
 
             const tag = `v${expectedVersion}`;
+            let reservedTag = false;
+            let draftReleaseId = null;
 
             const decodeFile = async (path) => {
               const response = await github.rest.repos.getContent({
@@ -83,11 +85,49 @@ jobs:
               return Buffer.from(response.data.content, 'base64').toString('utf8');
             };
 
-            try {
-              const currentMain = await github.rest.repos.getBranch({
+            const readMainSha = async () => {
+              const response = await github.rest.repos.getBranch({
                 ...context.repo, branch: 'main'
               });
-              if (currentMain.data.commit.sha !== context.sha) {
+              return response.data.commit.sha;
+            };
+
+            const deleteReservedTag = async () => {
+              if (!reservedTag) {
+                return;
+              }
+              try {
+                const current = await github.rest.git.getRef({
+                  ...context.repo, ref: `tags/${tag}`
+                });
+                if (current.data.object.type === 'commit' &&
+                    current.data.object.sha === context.sha) {
+                  await github.rest.git.deleteRef({
+                    ...context.repo, ref: `tags/${tag}`
+                  });
+                }
+              } catch {
+                // Best-effort cleanup only. Never delete an unverified ref.
+              }
+              reservedTag = false;
+            };
+
+            const rollbackDraft = async () => {
+              if (draftReleaseId !== null) {
+                try {
+                  await github.rest.repos.deleteRelease({
+                    ...context.repo, release_id: draftReleaseId
+                  });
+                } catch {
+                  // Best-effort cleanup; the workflow still fails closed.
+                }
+                draftReleaseId = null;
+              }
+              await deleteReservedTag();
+            };
+
+            try {
+              if (await readMainSha() !== context.sha) {
                 core.setFailed('main changed after dispatch; start a fresh release run.');
                 return;
               }
@@ -121,16 +161,6 @@ jobs:
               }
 
               try {
-                await github.rest.git.getRef({...context.repo, ref: `tags/${tag}`});
-                core.setFailed('The release tag already exists.');
-                return;
-              } catch (error) {
-                if (error?.status !== 404) {
-                  throw error;
-                }
-              }
-
-              try {
                 await github.rest.repos.getReleaseByTag({...context.repo, tag});
                 core.setFailed('A GitHub Release already exists for this tag.');
                 return;
@@ -140,33 +170,117 @@ jobs:
                 }
               }
 
-              const release = await github.rest.repos.createRelease({
+              // Recheck immediately before the first write. A stale dispatch may
+              // validate files for an old main SHA but must never publish it.
+              if (await readMainSha() !== context.sha) {
+                core.setFailed('main changed before tag reservation; start a fresh release run.');
+                return;
+              }
+
+              try {
+                await github.rest.git.createRef({
+                  ...context.repo,
+                  ref: `refs/tags/${tag}`,
+                  sha: context.sha
+                });
+                reservedTag = true;
+              } catch (error) {
+                if (error?.status === 422) {
+                  core.setFailed('The release tag already exists or could not be reserved atomically.');
+                  return;
+                }
+                throw error;
+              }
+
+              // Close the tiny race between the branch check and atomic tag
+              // creation. If main advanced, remove only our exact reserved tag.
+              if (await readMainSha() !== context.sha) {
+                await deleteReservedTag();
+                core.setFailed('main changed while reserving the tag; the reserved tag was rolled back.');
+                return;
+              }
+
+              const draft = await github.rest.repos.createRelease({
                 ...context.repo,
                 tag_name: tag,
                 target_commitish: context.sha,
                 name: tag,
                 body: notes,
-                draft: false,
+                draft: true,
                 prerelease
               });
+              draftReleaseId = draft.data.id;
 
-              const createdRef = await github.rest.git.getRef({
+              const reservedRef = await github.rest.git.getRef({
                 ...context.repo, ref: `tags/${tag}`
               });
-              if (createdRef.data.object.type !== 'commit' ||
-                  createdRef.data.object.sha !== context.sha ||
-                  release.data.tag_name !== tag ||
-                  release.data.prerelease !== prerelease) {
+              if (reservedRef.data.object.type !== 'commit' ||
+                  reservedRef.data.object.sha !== context.sha ||
+                  draft.data.tag_name !== tag ||
+                  draft.data.draft !== true ||
+                  draft.data.prerelease !== prerelease) {
+                await rollbackDraft();
+                core.setFailed('Draft release verification failed before publication.');
+                return;
+              }
+
+              // The release is still private/draft here. Verify main one final
+              // time immediately before making anything public.
+              if (await readMainSha() !== context.sha) {
+                await rollbackDraft();
+                core.setFailed('main changed before publication; draft release and tag were rolled back.');
+                return;
+              }
+
+              let published;
+              try {
+                published = await github.rest.repos.updateRelease({
+                  ...context.repo,
+                  release_id: draftReleaseId,
+                  draft: false,
+                  prerelease,
+                  make_latest: prerelease ? 'false' : 'true'
+                });
+              } catch (error) {
+                // An API response can fail after GitHub accepted the update.
+                // Recover only if the exact release is already public as intended.
+                try {
+                  const recovered = await github.rest.repos.getReleaseByTag({
+                    ...context.repo, tag
+                  });
+                  if (recovered.data.id === draftReleaseId &&
+                      recovered.data.draft === false &&
+                      recovered.data.prerelease === prerelease) {
+                    published = recovered;
+                  } else {
+                    throw error;
+                  }
+                } catch {
+                  throw error;
+                }
+              }
+
+              draftReleaseId = null;
+              const finalRef = await github.rest.git.getRef({
+                ...context.repo, ref: `tags/${tag}`
+              });
+              if (finalRef.data.object.type !== 'commit' ||
+                  finalRef.data.object.sha !== context.sha ||
+                  published.data.tag_name !== tag ||
+                  published.data.draft !== false ||
+                  published.data.prerelease !== prerelease) {
                 core.setFailed('Release verification failed after publication.');
                 return;
               }
 
+              reservedTag = false;
               core.info(`Published ${tag} at ${context.sha}`);
               await core.summary
                 .addHeading('Hoben release published')
                 .addRaw(`\nTag: ${tag}\n\nCommit: ${context.sha}\n\nPrerelease: ${prerelease}\n`)
-                .addLink('Open release', release.data.html_url)
+                .addLink('Open release', published.data.html_url)
                 .write();
             } catch {
+              await rollbackDraft();
               core.setFailed('Release publication failed during repository verification or GitHub API execution.');
             }
