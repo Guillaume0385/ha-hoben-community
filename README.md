@@ -130,10 +130,27 @@ déduisent pas un modèle commercial.
 Les GUID, le code d’autorisation, les secrets de configuration, l’empreinte
 privée de l’identifiant HOBEN, les paquets et trames bruts, les valeurs des
 registres, toutes les mesures du foyer, les dérogations et les états des entités
-sont exclus. Les erreurs Hoben utilisent uniquement leurs codes et motifs
-expurgés existants. Une erreur enveloppée par Home Assistant reçoit une catégorie
-fixe ; aucun texte, argument, traceback ou chaîne d’exceptions n’est parcouru.
-Les champs inconnus ou non conformes au contrat sûr sont omis.
+sont exclus. Lors d’un échec réel du polling, le coordinator valide et copie les
+codes et métadonnées expurgés de l’erreur Hoben dans l’exception Home Assistant.
+Le message d’échec HA existant et `coordinator.last_error` conservent ainsi les
+catégories telles que `malformed_response`, `unclassified_opened_client_bytes`,
+`modbus_exception` et `server_closed`, avec leurs seuls champs déjà autorisés.
+Un code Modbus est conservé sans lui inventer une signification. Le helper
+partagé `safe_reports.py` contrôle les clés et les valeurs pour les logs et les
+diagnostics ; les champs inconnus ou non conformes au contrat sûr sont omis.
+Une exception HA sans métadonnées fiables garde sa catégorie fixe ; une erreur
+arbitraire ou un contrat d’erreur Hoben inutilisable donne `unexpected_error`.
+Aucun texte, argument, traceback ou chaîne d’exceptions n’est parcouru pour
+reconstruire une cause. Après un rafraîchissement réussi, `last_error` redevient
+`null` : cet export décrit l’erreur courante, sans historique ni compteur de panne.
+
+La correction d’observabilité de [#43](https://github.com/Guillaume0385/ha-hoben-community/issues/43)
+est vérifiée avec des erreurs entièrement synthétiques. La cause des incidents
+historiques et le commit alors installé restent inconnus. En cas de récidive,
+les seuls éléments passifs anonymisés nécessaires sont la ref réellement
+installée, la catégorie typée, une récurrence/fenêtre fiable, la disponibilité
+et la récupération. HA déduplique les logs : leur nombre ne compte pas tous les
+rafraîchissements échoués.
 
 Le téléchargement lit uniquement la mémoire : il ne lance aucune connexion,
 lecture, association, tâche de fond, réauthentification ou modification de

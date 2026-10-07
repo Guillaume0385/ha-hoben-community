@@ -60,8 +60,10 @@ Vérifications bornées
    Distingue une désactivation/maintenance intentionnelle d’un échec de setup.
 2. Lis les diagnostics sûrs existants : entry.state, runtime_available,
    coordinator.last_update_success, coordinator.snapshot_available et
-   coordinator.last_error quand
-   présents. Un snapshot conservé ou client.state=ready ne prouve pas une
+   coordinator.last_error quand présents. Pendant un échec, ce dernier conserve
+   la catégorie typée et ses seules métadonnées sûres à travers l’exception HA.
+   Après un refresh réussi, il redevient null ; il ne contient ni historique ni
+   compteur de panne. Un snapshot conservé ou client.state=ready ne prouve pas une
    connexion actuelle ; sans runtime/snapshot, marque l’information indisponible.
    N’inspecte/exporte pas ConfigEntry.data/options ou l’état brut du client.
 3. Consulte d’abord les journaux système structurés HA, uniquement les entrées
@@ -95,8 +97,16 @@ si les éléments observables les établissent. Aucun seuil numérique de panne
 n’est imposé : les limites de lecture ci-dessus bornent la collecte uniquement.
 Ne crée pas une issue pour un timeout isolé immédiatement récupéré, une erreur
 HA sans lien Hoben, ou le comportement normal d’une mise à jour/préversion HACS.
-Les catégories HA update_failed/authentication_failed ne révèlent pas à elles
-seules la cause protocolaire. Ne déduis aucun registre, bit ou comportement
+Les catégories HA update_failed/authentication_failed/config_entry_error sans
+métadonnées typées ne révèlent pas à elles seules la cause protocolaire. Les
+codes Hoben conservés dans le diagnostic et le message fixe du coordinator
+distinguent des catégories de code ; ils ne prouvent pas une cause historique ni
+un nouveau fait serveur. Un exception_code Modbus n’autorise aucune signification
+non établie. Ne reconstruis jamais une catégorie depuis un texte d’exception
+arbitraire. Les logs HA sont dédupliqués : leur nombre ne compte pas tous les
+refresh échoués. En cas de récidive, retiens seulement la ref réellement installée,
+la catégorie typée, la récurrence/fenêtre fiable, la disponibilité et la récupération,
+dans les limites de collecte ci-dessus. Ne déduis aucun registre, bit ou comportement
 inconnu ; classe la couche unknown si les éléments ne suffisent pas.
 
 Confidentialité et format de rapport
@@ -109,7 +119,8 @@ snapshot.state/profile/product_type/product_revision/software_major/
 software_minor/application_version/register_count. Ne publie que les champs
 utiles au symptôme. Pour coordinator.last_error, retiens seulement les champs
 error/reason/profile/failure typés et exception_code/attempts déjà autorisés
-par diagnostics.py ; aucun texte/argument/chaîne d’exception.
+par l’allowlist partagée de safe_reports.py, utilisée par diagnostics.py et le
+coordinator ; aucun texte/argument/chaîne d’exception.
 Exclus aussi les champs inconnus d’une future extension et les données privées
 éventuelles de l’enveloppe HA. Reformule les logs en catégories/messages fixes
 expurgés. Avant chaque publication, vérifie les clés ET valeurs du rapport et de
