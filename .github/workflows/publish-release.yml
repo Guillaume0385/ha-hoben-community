@@ -1,0 +1,172 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact manifest version without leading v (for example 0.1.0-beta1)
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a GitHub pre-release
+        required: true
+        default: true
+        type: boolean
+      confirm:
+        description: Type RELEASE to confirm publication
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Guillaume0385'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Verify exact main and publish tag/release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          PRE_RELEASE: ${{ inputs.prerelease }}
+          CONFIRM_RELEASE: ${{ inputs.confirm }}
+        with:
+          script: |
+            const repository = 'Guillaume0385/ha-hoben-community';
+            const manager = 'Guillaume0385';
+
+            if (context.eventName !== 'workflow_dispatch' ||
+                context.ref !== 'refs/heads/main' ||
+                `${context.repo.owner}/${context.repo.repo}` !== repository ||
+                context.actor !== manager ||
+                context.payload.sender?.login !== manager ||
+                process.env.GITHUB_TRIGGERING_ACTOR !== manager ||
+                process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+                process.env.CONFIRM_RELEASE !== 'RELEASE') {
+              core.setFailed('Fresh manual release approval from the repository owner on main is required.');
+              return;
+            }
+
+            const expectedVersion = process.env.EXPECTED_VERSION || '';
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(expectedVersion)) {
+              core.setFailed('Expected version must be a simple SemVer-style value without a leading v.');
+              return;
+            }
+
+            const prerelease = process.env.PRE_RELEASE === 'true';
+            if (prerelease !== expectedVersion.includes('-')) {
+              core.setFailed('Prerelease selection must match whether the manifest version has a prerelease suffix.');
+              return;
+            }
+
+            const tag = `v${expectedVersion}`;
+
+            const decodeFile = async (path) => {
+              const response = await github.rest.repos.getContent({
+                ...context.repo, path, ref: context.sha
+              });
+              if (Array.isArray(response.data) ||
+                  response.data.type !== 'file' ||
+                  typeof response.data.content !== 'string') {
+                throw new Error('unexpected_file_shape');
+              }
+              return Buffer.from(response.data.content, 'base64').toString('utf8');
+            };
+
+            try {
+              const currentMain = await github.rest.repos.getBranch({
+                ...context.repo, branch: 'main'
+              });
+              if (currentMain.data.commit.sha !== context.sha) {
+                core.setFailed('main changed after dispatch; start a fresh release run.');
+                return;
+              }
+
+              const manifestText = await decodeFile('custom_components/hoben/manifest.json');
+              const manifest = JSON.parse(manifestText);
+              if (manifest.version !== expectedVersion) {
+                core.setFailed('Expected version does not match custom_components/hoben/manifest.json.');
+                return;
+              }
+
+              const changelog = await decodeFile('CHANGELOG.md');
+              const lines = changelog.split(/\r?\n/);
+              const heading = `## ${tag}`;
+              const start = lines.findIndex(line => line === heading || line.startsWith(`${heading} —`));
+              if (start < 0) {
+                core.setFailed('CHANGELOG.md has no section for the requested release.');
+                return;
+              }
+              let end = lines.length;
+              for (let index = start + 1; index < lines.length; index++) {
+                if (lines[index].startsWith('## ')) {
+                  end = index;
+                  break;
+                }
+              }
+              const notes = lines.slice(start + 1, end).join('\n').trim();
+              if (!notes) {
+                core.setFailed('The matching CHANGELOG.md release section is empty.');
+                return;
+              }
+
+              try {
+                await github.rest.git.getRef({...context.repo, ref: `tags/${tag}`});
+                core.setFailed('The release tag already exists.');
+                return;
+              } catch (error) {
+                if (error?.status !== 404) {
+                  throw error;
+                }
+              }
+
+              try {
+                await github.rest.repos.getReleaseByTag({...context.repo, tag});
+                core.setFailed('A GitHub Release already exists for this tag.');
+                return;
+              } catch (error) {
+                if (error?.status !== 404) {
+                  throw error;
+                }
+              }
+
+              const release = await github.rest.repos.createRelease({
+                ...context.repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: tag,
+                body: notes,
+                draft: false,
+                prerelease
+              });
+
+              const createdRef = await github.rest.git.getRef({
+                ...context.repo, ref: `tags/${tag}`
+              });
+              if (createdRef.data.object.type !== 'commit' ||
+                  createdRef.data.object.sha !== context.sha ||
+                  release.data.tag_name !== tag ||
+                  release.data.prerelease !== prerelease) {
+                core.setFailed('Release verification failed after publication.');
+                return;
+              }
+
+              core.info(`Published ${tag} at ${context.sha}`);
+              await core.summary
+                .addHeading('Hoben release published')
+                .addRaw(`\nTag: ${tag}\n\nCommit: ${context.sha}\n\nPrerelease: ${prerelease}\n`)
+                .addLink('Open release', release.data.html_url)
+                .write();
+            } catch {
+              core.setFailed('Release publication failed during repository verification or GitHub API execution.');
+            }
