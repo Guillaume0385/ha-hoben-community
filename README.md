@@ -368,6 +368,27 @@ sur le Hoben Osmose de référence utilisant le profil V4. Les autres profils et
 modèles ne sont pas encore garantis. Aucun contrôle marche/arrêt, température ou
 ventilation n'est inclus dans cette release.
 
+### Publication d'une release
+
+Le dépôt fournit le workflow manuel **Publish release** dans GitHub Actions. Il
+ne contacte pas Hoben et n'utilise aucun secret Hoben. Il vérifie que le lancement
+vient de `Guillaume0385` sur le HEAD courant de `main`, que la version demandée
+correspond exactement à `custom_components/hoben/manifest.json`, qu'une section
+`## v<version>` existe dans `CHANGELOG.md`, puis crée le tag et la GitHub
+Release sur ce commit exact.
+
+Pour publier cette bêta après fusion du workflow :
+
+1. ouvrir **GitHub → Actions → Publish release → Run workflow** sur `main`;
+2. saisir `0.1.0-beta1` dans **expected_version** ;
+3. laisser **prerelease** activé ;
+4. saisir exactement `RELEASE` dans **confirm** ;
+5. lancer le workflow et vérifier son résumé.
+
+Le workflow refuse un tag/release déjà existant, un `main` qui a changé pendant
+le lancement, un rerun d'une ancienne exécution ou une incohérence entre version
+et statut pre-release.
+
 ## Contribution et tests
 
 Lire [AGENTS.md](AGENTS.md), [project.md](project.md) (architecture et roadmap,
