@@ -18,7 +18,15 @@ NEW_SHA = "b" * 40
 NODE_DRIVER = r"""
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const output = {
-  failed: [], logs: [], releases: [], reads: [], summary: [], created: false
+  failed: [],
+  logs: [],
+  operations: [],
+  releases: [],
+  releaseUpdates: [],
+  createdRefs: [],
+  deletedRefs: [],
+  deletedReleases: [],
+  summary: []
 };
 const core = {
   setFailed: value => output.failed.push(value),
@@ -35,16 +43,30 @@ const missing = () => {
   error.status = 404;
   throw error;
 };
-let releaseCreated = false;
+const collision = () => {
+  const error = new Error('PRIVATE-REF-COLLISION');
+  error.status = 422;
+  throw error;
+};
+let branchReads = 0;
+let reserved = false;
+let draft = null;
+let published = null;
+const nextMainSha = () => {
+  const values = input.branch_shas;
+  const index = Math.min(branchReads, values.length - 1);
+  branchReads++;
+  return values[index];
+};
 const github = {rest: {
   repos: {
     getBranch: async args => {
-      output.reads.push(['branch', args]);
+      output.operations.push(['branch', args.branch]);
       if (input.api_error === 'branch') throw new Error('PRIVATE-API-ERROR');
-      return {data: {commit: {sha: input.current_main_sha}}};
+      return {data: {commit: {sha: nextMainSha()}}};
     },
     getContent: async args => {
-      output.reads.push(['content', args.path, args.ref]);
+      output.operations.push(['content', args.path, args.ref]);
       if (input.api_error === args.path) throw new Error('PRIVATE-API-ERROR');
       const text = input.files[args.path];
       if (text === undefined) return {data: []};
@@ -54,32 +76,86 @@ const github = {rest: {
       }};
     },
     getReleaseByTag: async args => {
-      output.reads.push(['release', args.tag]);
-      if (input.api_error === 'release-read') throw new Error('PRIVATE-API-ERROR');
-      if (!input.existing_release) return missing();
-      return {data: {tag_name: args.tag}};
+      output.operations.push(['release-read', args.tag]);
+      if (input.api_error === 'release-read') {
+        throw new Error('PRIVATE-API-ERROR');
+      }
+      if (published !== null) return {data: published};
+      if (input.existing_release) {
+        return {data: {
+          id: 999,
+          tag_name: args.tag,
+          draft: false,
+          prerelease: true,
+          html_url: 'https://github.example/existing'
+        }};
+      }
+      return missing();
     },
     createRelease: async args => {
-      if (input.api_error === 'release-create') throw new Error('PRIVATE-API-ERROR');
+      output.operations.push(['create-release', args.tag_name]);
+      if (input.api_error === 'create-release') {
+        throw new Error('PRIVATE-API-ERROR');
+      }
       output.releases.push(args);
-      releaseCreated = true;
-      output.created = true;
-      return {data: {
+      draft = {
+        id: 123,
         tag_name: args.tag_name,
+        draft: args.draft,
         prerelease: args.prerelease,
-        html_url: 'https://github.example/release'
-      }};
+        html_url: 'https://github.example/draft'
+      };
+      return {data: draft};
+    },
+    deleteRelease: async args => {
+      output.operations.push(['delete-release', args.release_id]);
+      output.deletedReleases.push(args.release_id);
+      if (draft?.id === args.release_id) draft = null;
+      return {status: 204};
+    },
+    updateRelease: async args => {
+      output.operations.push(['update-release', args.release_id]);
+      output.releaseUpdates.push(args);
+      const value = {
+        id: args.release_id,
+        tag_name: input.expected_tag,
+        draft: args.draft,
+        prerelease: args.prerelease,
+        html_url: 'https://github.example/published'
+      };
+      if (input.api_error === 'update-release') {
+        if (input.update_applied_before_error) published = value;
+        throw new Error('PRIVATE-API-ERROR');
+      }
+      published = value;
+      return {data: published};
     }
   },
   git: {
+    createRef: async args => {
+      output.operations.push(['create-ref', args.ref, args.sha]);
+      if (input.api_error === 'create-ref') {
+        throw new Error('PRIVATE-API-ERROR');
+      }
+      if (input.existing_tag) return collision();
+      reserved = true;
+      output.createdRefs.push(args);
+      return {data: {ref: args.ref, object: {type: 'commit', sha: args.sha}}};
+    },
     getRef: async args => {
-      output.reads.push(['ref', args.ref]);
-      if (input.api_error === 'ref') throw new Error('PRIVATE-API-ERROR');
-      if (!releaseCreated && !input.existing_tag) return missing();
+      output.operations.push(['get-ref', args.ref]);
+      if (input.api_error === 'get-ref') throw new Error('PRIVATE-API-ERROR');
+      if (!reserved) return missing();
       return {data: {object: {
         type: input.created_ref_type || 'commit',
         sha: input.created_ref_sha || input.context.sha
       }}};
+    },
+    deleteRef: async args => {
+      output.operations.push(['delete-ref', args.ref]);
+      output.deletedRefs.push(args.ref);
+      reserved = false;
+      return {status: 204};
     }
   }
 }};
@@ -135,7 +211,7 @@ def execute_script(
     version="0.1.0-beta1",
     prerelease="true",
     confirm="RELEASE",
-    current_main_sha=SHA,
+    branch_shas=None,
     files=None,
     existing_tag=False,
     existing_release=False,
@@ -149,7 +225,7 @@ def execute_script(
     payload = {
         "script": step["with"]["script"],
         "context": context,
-        "current_main_sha": current_main_sha,
+        "branch_shas": branch_shas or [SHA, SHA, SHA, SHA],
         "files": files
         or {
             "custom_components/hoben/manifest.json": _manifest(version),
@@ -157,6 +233,7 @@ def execute_script(
         },
         "existing_tag": existing_tag,
         "existing_release": existing_release,
+        "expected_tag": f"v{version}",
         **extra,
     }
     result = subprocess.run(
@@ -234,7 +311,7 @@ def test_script_rejects_non_owner_or_non_main_dispatch(
     result = execute_script(workflow, context)
     assert result["failed"]
     assert result["releases"] == []
-    assert result["reads"] == []
+    assert result["operations"] == []
 
 
 @pytest.mark.parametrize(
@@ -247,12 +324,16 @@ def test_script_rejects_non_owner_or_non_main_dispatch(
 )
 def test_rerun_or_other_triggering_actor_cannot_publish(workflow, context, env):
     result = execute_script(workflow, context, env=env)
-    assert result["failed"] and result["releases"] == [] and result["reads"] == []
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["operations"] == []
 
 
 def test_explicit_confirmation_is_required(workflow, context):
     result = execute_script(workflow, context, confirm="release")
-    assert result["failed"] and result["releases"] == [] and result["reads"] == []
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["operations"] == []
 
 
 @pytest.mark.parametrize(
@@ -268,22 +349,9 @@ def test_explicit_confirmation_is_required(workflow, context):
 )
 def test_version_input_cannot_be_an_arbitrary_tag(workflow, context, version):
     result = execute_script(workflow, context, version=version)
-    assert result["failed"] and result["releases"] == [] and result["reads"] == []
-
-
-def test_current_main_must_still_equal_dispatch_sha(workflow, context):
-    result = execute_script(workflow, context, current_main_sha=NEW_SHA)
-    assert result["failed"] and result["releases"] == []
-    assert result["reads"][0][0] == "branch"
-
-
-def test_manifest_version_must_match_input(workflow, context):
-    files = {
-        "custom_components/hoben/manifest.json": _manifest("0.1.0-beta2"),
-        "CHANGELOG.md": _changelog("0.1.0-beta1"),
-    }
-    result = execute_script(workflow, context, files=files)
-    assert result["failed"] and result["releases"] == []
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["operations"] == []
 
 
 @pytest.mark.parametrize(
@@ -294,84 +362,187 @@ def test_prerelease_flag_must_match_version_suffix(
     workflow, context, version, prerelease
 ):
     result = execute_script(workflow, context, version=version, prerelease=prerelease)
-    assert result["failed"] and result["releases"] == [] and result["reads"] == []
+    assert result["failed"]
+    assert result["operations"] == []
 
 
-def test_matching_changelog_section_is_required_and_scoped(workflow, context):
-    result = execute_script(workflow, context)
-    assert result["failed"] == []
-    assert len(result["releases"]) == 1
-    release = result["releases"][0]
-    assert release["tag_name"] == "v0.1.0-beta1"
-    assert release["target_commitish"] == SHA
-    assert release["name"] == "v0.1.0-beta1"
-    assert release["draft"] is False
-    assert release["prerelease"] is True
-    assert "Included release notes." in release["body"]
-    assert "Known limitations" in release["body"]
-    assert "Old notes must not be published." not in release["body"]
-    assert "v0.0.1" not in release["body"]
-    assert result["created"]
-    assert SHA in " ".join(result["logs"])
-    assert "v0.1.0-beta1" in " ".join(result["summary"])
+def test_dispatch_sha_must_initially_be_current_main(workflow, context):
+    result = execute_script(workflow, context, branch_shas=[NEW_SHA])
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["createdRefs"] == []
 
 
-def test_stable_release_path_is_supported_without_prerelease(workflow, context):
-    result = execute_script(workflow, context, version="0.1.0", prerelease="false")
-    assert result["failed"] == []
-    release = result["releases"][0]
-    assert release["tag_name"] == "v0.1.0"
-    assert release["prerelease"] is False
+def test_manifest_version_must_match_input(workflow, context):
+    files = {
+        "custom_components/hoben/manifest.json": _manifest("0.1.0-beta2"),
+        "CHANGELOG.md": _changelog("0.1.0-beta1"),
+    }
+    result = execute_script(workflow, context, files=files)
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["createdRefs"] == []
 
 
-@pytest.mark.parametrize(
-    ("existing_tag", "existing_release"),
-    [(True, False), (False, True)],
-)
-def test_existing_tag_or_release_fails_closed(
-    workflow, context, existing_tag, existing_release
-):
-    result = execute_script(
-        workflow,
-        context,
-        existing_tag=existing_tag,
-        existing_release=existing_release,
-    )
-    assert result["failed"] and result["releases"] == []
-
-
-def test_missing_or_empty_changelog_section_fails_closed(workflow, context):
+def test_matching_changelog_section_is_required(workflow, context):
     files = {
         "custom_components/hoben/manifest.json": _manifest("0.1.0-beta1"),
         "CHANGELOG.md": "# Changelog\n\n## v0.1.0-beta2\n\nOther release.\n",
     }
     result = execute_script(workflow, context, files=files)
-    assert result["failed"] and result["releases"] == []
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["createdRefs"] == []
 
 
-@pytest.mark.parametrize(
-    "api_error",
-    [
-        "branch",
-        "custom_components/hoben/manifest.json",
-        "CHANGELOG.md",
-        "ref",
-        "release-read",
-        "release-create",
-    ],
-)
-def test_api_failures_are_sanitized_and_never_reported_as_success(
+def test_existing_release_fails_before_any_tag_write(workflow, context):
+    result = execute_script(workflow, context, existing_release=True)
+    assert result["failed"]
+    assert result["createdRefs"] == []
+    assert result["releases"] == []
+
+
+def test_tag_is_reserved_atomically_before_any_release(workflow, context):
+    result = execute_script(workflow, context, existing_tag=True)
+    assert result["failed"]
+    assert result["releases"] == []
+    assert result["deletedRefs"] == []
+    operations = [item[0] for item in result["operations"]]
+    assert "create-ref" in operations
+    assert "create-release" not in operations
+
+
+def test_main_is_rechecked_immediately_before_tag_reservation(workflow, context):
+    result = execute_script(workflow, context, branch_shas=[SHA, NEW_SHA])
+    assert result["failed"]
+    assert result["createdRefs"] == []
+    assert result["releases"] == []
+    operations = [item[0] for item in result["operations"]]
+    assert operations.count("branch") == 2
+    assert "create-ref" not in operations
+
+
+def test_main_change_after_tag_reservation_rolls_back_before_release(
+    workflow, context
+):
+    result = execute_script(
+        workflow,
+        context,
+        branch_shas=[SHA, SHA, NEW_SHA],
+    )
+    assert result["failed"]
+    assert len(result["createdRefs"]) == 1
+    assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
+    assert result["releases"] == []
+    operations = [item[0] for item in result["operations"]]
+    assert operations.index("create-ref") < operations.index("delete-ref")
+    assert "create-release" not in operations
+
+
+def test_main_change_before_publication_removes_draft_and_reserved_tag(
+    workflow, context
+):
+    result = execute_script(
+        workflow,
+        context,
+        branch_shas=[SHA, SHA, SHA, NEW_SHA],
+    )
+    assert result["failed"]
+    assert len(result["releases"]) == 1
+    assert result["releases"][0]["draft"] is True
+    assert result["deletedReleases"] == [123]
+    assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
+    assert result["releaseUpdates"] == []
+
+
+def test_valid_beta_publishes_exact_tag_after_draft_verification(workflow, context):
+    result = execute_script(workflow, context)
+    assert result["failed"] == []
+    assert len(result["createdRefs"]) == 1
+    created_ref = result["createdRefs"][0]
+    assert created_ref == {
+        "owner": "Guillaume0385",
+        "repo": "ha-hoben-community",
+        "ref": "refs/tags/v0.1.0-beta1",
+        "sha": SHA,
+    }
+
+    assert len(result["releases"]) == 1
+    draft = result["releases"][0]
+    assert draft["tag_name"] == "v0.1.0-beta1"
+    assert draft["target_commitish"] == SHA
+    assert draft["name"] == "v0.1.0-beta1"
+    assert draft["draft"] is True
+    assert draft["prerelease"] is True
+    assert "Included release notes." in draft["body"]
+    assert "Known limitations" in draft["body"]
+    assert "Old notes must not be published." not in draft["body"]
+
+    assert len(result["releaseUpdates"]) == 1
+    publication = result["releaseUpdates"][0]
+    assert publication["release_id"] == 123
+    assert publication["draft"] is False
+    assert publication["prerelease"] is True
+    assert publication["make_latest"] == "false"
+
+    operations = [item[0] for item in result["operations"]]
+    assert operations.count("branch") == 4
+    assert operations.index("create-ref") < operations.index("create-release")
+    assert operations.index("create-release") < operations.index("update-release")
+    assert result["deletedRefs"] == []
+    assert result["deletedReleases"] == []
+    assert SHA in " ".join(result["logs"])
+    assert "v0.1.0-beta1" in " ".join(result["summary"])
+
+
+def test_stable_release_path_marks_latest(workflow, context):
+    result = execute_script(
+        workflow,
+        context,
+        version="0.1.0",
+        prerelease="false",
+    )
+    assert result["failed"] == []
+    assert result["releaseUpdates"][0]["prerelease"] is False
+    assert result["releaseUpdates"][0]["make_latest"] == "true"
+
+
+@pytest.mark.parametrize("api_error", ["create-ref", "create-release", "update-release"])
+def test_write_api_failures_fail_closed_and_roll_back_when_possible(
     workflow, context, api_error
 ):
     result = execute_script(workflow, context, api_error=api_error)
     assert result["failed"]
     assert "PRIVATE" not in json.dumps(result)
-    if api_error != "release-create":
+    if api_error == "create-ref":
+        assert result["createdRefs"] == []
         assert result["releases"] == []
+    elif api_error == "create-release":
+        assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
+    else:
+        assert result["deletedReleases"] == [123]
+        assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
 
 
-def test_post_creation_ref_must_point_to_exact_dispatched_main(workflow, context):
+def test_lost_publish_response_recovers_only_the_exact_public_release(
+    workflow, context
+):
+    result = execute_script(
+        workflow,
+        context,
+        api_error="update-release",
+        update_applied_before_error=True,
+    )
+    assert result["failed"] == []
+    assert len(result["releaseUpdates"]) == 1
+    assert result["deletedReleases"] == []
+    assert result["deletedRefs"] == []
+    assert any(item[0] == "release-read" for item in result["operations"])
+
+
+def test_post_publication_ref_must_still_point_to_exact_sha(workflow, context):
     result = execute_script(workflow, context, created_ref_sha=NEW_SHA)
     assert result["failed"]
-    assert len(result["releases"]) == 1
-    assert not any("published" in log.lower() for log in result["logs"])
+    assert len(result["releaseUpdates"]) == 0
+    assert result["deletedReleases"] == [123]
+    assert result["deletedRefs"] == []
