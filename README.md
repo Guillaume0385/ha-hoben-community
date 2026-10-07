@@ -8,9 +8,11 @@ Home Assistant ou HACS.
 
 ## État du projet
 
-La version `0.0.1` reste un **socle de développement**. L’intégration peut désormais
-être ajoutée depuis l’interface Home Assistant : elle teste la connexion,
-enregistre un appareil et rafraîchit les données V4 toutes les **60 secondes**.
+La préversion `0.1.0-beta1` est la **première bêta publique en lecture seule**.
+Elle est destinée aux premiers tests via HACS/Home Assistant et ne doit pas encore
+être considérée comme une version stable. L’intégration peut être ajoutée depuis
+l’interface Home Assistant : elle teste la connexion, enregistre un appareil et
+rafraîchit les données V4 toutes les **60 secondes**.
 L’issue #26 / PR #27 ajoute un décodeur typé et **16 entités de lecture**,
 dont deux désactivées par défaut. Il conserve les 20 registres UInt16 bruts en
 mémoire avec les valeurs décodées. La cartographie vient de l’analyse statique
@@ -31,7 +33,7 @@ reste à valider par le MANAGER. Les sondes n'envoient aucun code.
 La réutilisation du DeviceGuid
 sur une seconde connexion a été confirmée sur l’Osmose de référence le
 2026-10-04, lors de la validation MANAGER de la PR #22 (voir `protocol.md`).
-La première version fonctionnelle prévue (`v0.1.0`) sera en lecture seule.
+La bêta `v0.1.0-beta1` et la future version stable `v0.1.0` restent strictement en lecture seule : aucune commande de chauffage n’est exposée.
 
 ## Configuration dans Home Assistant
 
@@ -349,11 +351,22 @@ existante reste une régression de lecture et ne soumet aucun code.
 
 ## Installation via HACS
 
-La distribution via HACS est prévue. Lorsqu'une version fonctionnelle sera
-publiée, le dépôt pourra être ajouté à HACS comme dépôt personnalisé de catégorie
-« Integration ». Le socle actuel peut être installé manuellement pour tester
-la configuration et le coordinateur brut, selon les instructions ci-dessus ;
-il fournit les entités V4 en lecture seule décrites ci-dessus.
+La préversion `v0.1.0-beta1` est destinée aux premiers tests communautaires via
+HACS. Dans HACS, ajouter le dépôt
+`https://github.com/Guillaume0385/ha-hoben-community` comme **dépôt personnalisé**
+de catégorie **Integration**, puis installer **Hoben** et redémarrer Home
+Assistant. Une fois la GitHub pre-release `v0.1.0-beta1` publiée, sélectionner
+cette version lorsqu'elle est proposée par HACS.
+
+Après redémarrage, ouvrir **Paramètres → Appareils et services → Ajouter une
+intégration → Hoben** puis saisir l'Identifiant HOBEN. Si le service MyHOBEN
+demande une nouvelle association, Home Assistant affiche l'étape de saisie du
+code d'autorisation prévue par le config flow.
+
+Cette bêta reste **strictement en lecture seule** et a été validée principalement
+sur le Hoben Osmose de référence utilisant le profil V4. Les autres profils et
+modèles ne sont pas encore garantis. Aucun contrôle marche/arrêt, température ou
+ventilation n'est inclus dans cette release.
 
 ## Contribution et tests
 
