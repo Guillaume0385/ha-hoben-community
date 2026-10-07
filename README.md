@@ -142,6 +142,14 @@ de vie et `runtime_available: false`. Les warnings, défauts, bits incomplets,
 date/heure, PVI et DataUpdated restent soumis aux incertitudes de
 [protocol.md](protocol.md) et n’enrichissent pas cet export.
 
+Un observateur quotidien **HOME ASSISTANT INTEGRATOR**, lorsqu’il est configuré,
+peut signaler une anomalie persistante ou répétée dans une issue expurgée
+`[problem report]` avec le label `state:waiting`. Ce rapport attend le triage du
+MANAGER ; il n’autorise aucun développement et n’interrompt pas la tâche active.
+La [procédure et le prompt canonique](docs/home-assistant-integrator.md) définissent
+les accès requis, les vérifications en lecture seule et les données publiables.
+Cette documentation n’active pas la tâche planifiée.
+
 ## Entités V4 en lecture seule
 
 | Entité | Unité / type | Catégorie | Activée par défaut |
