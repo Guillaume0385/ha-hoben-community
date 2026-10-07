@@ -73,10 +73,12 @@ for the current read-only target.
 
 This suspension includes:
 
-- first-association live validation and authentication-code origin/presentation;
+- new first-association / DeviceAuth feature development and investigation of
+  authentication-code origin/presentation;
 - new `DeviceAuthReq` / `DeviceAuthRes` behavior beyond the implementation
   already merged and covered by deterministic tests;
-- attempts to establish a universal complete `OpenedClient` length/boundary;
+- general/all-model attempts to establish a universal complete
+  `OpenedClient` layout or length;
 - new `OpenClient` framing, handshake or profile-selection behavior;
 - additional model support that depends on new `OpenClient` / `OpenedClient`
   reverse engineering.
@@ -84,14 +86,31 @@ This suspension includes:
 The existing opening implementation remains a required, frozen compatibility
 dependency for the validated Osmose polling path: do not remove it, weaken its
 tests, or change its protocol semantics merely to bypass unresolved questions.
+
+Two narrow activities are **not** considered new OpenClient development and
+remain allowed:
+
+1. the existing MANAGER-controlled authenticated `--live-premerge` regression
+   gate, including its zero-DeviceGuid → assigned-DeviceGuid → reuse check, when
+   `AGENTS.md` requires that gate for a qualifying runtime PR; it validates the
+   already implemented opening path and does not authorize new pairing behavior;
+2. the minimum evidence needed to prove a safe handoff from the already accepted
+   `OpenedClient` result to the post-open persistent receive loop on the
+   reference Osmose. This may validate message-length/type-transition behavior
+   but must not invent or change an OpenClient/OpenedClient format. If the
+   handoff cannot be established safely, the persistent-session task must block
+   rather than guess.
+
 Unknown OpenClient/OpenedClient facts remain documented as unknown in
-`protocol.md`, but they are **not blockers for the remaining v0.1 read-only
-work on the reference Osmose**.
+`protocol.md`. Universal boundary knowledge is not a prerequisite for the
+reference-Osmose v0.1 target, but the **local handoff needed by the persistent
+session must itself be proven safe** before long-lived reception or DataUpdated
+state handling is enabled.
 
 New v0.1 tasks should prioritize post-opening read-only behavior, V4 semantic
 decoding, diagnostics, polling reliability and deterministic tests. No new
-OpenClient/association probe or development task should be started unless this
-scope decision is explicitly reversed.
+OpenClient/association feature or generalized reverse-engineering task should be
+started unless this scope decision is explicitly reversed.
 
 ### Active development sequence — persistent post-OpenedClient session
 
@@ -152,8 +171,16 @@ may later refresh state between polls once its safe merge semantics are proven.
 
 **Task 1 — post-open stream framing and router**
 
-Create a deterministic HA-independent parser/router for traffic received only
-after the accepted OpenedClient boundary. It must support Ping/Pong,
+First prove the safe handoff from the existing accepted OpenedClient path to
+post-open reception on the reference Osmose. This is a bounded validation of the
+transition only, not authorization to redesign OpenClient/OpenedClient. The
+implementation must never reinterpret unknown trailing opening bytes as a
+post-open message. If delayed/unclassified opening bytes are observed or the
+handoff cannot be established deterministically, stop and mark the task blocked
+for MANAGER/protocol review.
+
+Then create a deterministic HA-independent parser/router for traffic received
+after that proven handoff. It must support Ping/Pong,
 `DataResponseClient (0x0E)`, `DataUpdated (0x1B)`, documented close/error
 conditions that are valid post-open, and fragmented/coalesced TLS reads.
 
@@ -749,9 +776,10 @@ unresolved, including possible suffixes arriving in a later TLS read.
 
 The current fresh-session-per-refresh lifecycle is now explicitly transitional.
 The active v0.1 series above introduces a persistent session **only after** the
-existing strict opening path has accepted OpenedClient with no buffered
-unclassified suffix. The persistent work must not resolve the unknown
-OpenedClient boundary by assumption.
+existing strict opening path has accepted OpenedClient and Task 1 has established
+a safe reference-Osmose handoff to post-open reception. The persistent work must
+not resolve the unknown universal OpenedClient boundary by assumption. If the
+handoff remains ambiguous, persistent reception stays blocked.
 
 The default transport retry policy is two total attempts: immediate first
 attempt, close/discard on a transport failure, one nonblocking 1-second backoff,
