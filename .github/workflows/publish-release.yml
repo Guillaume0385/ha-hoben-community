@@ -72,6 +72,7 @@ jobs:
             const tag = `v${expectedVersion}`;
             let reservedTag = false;
             let draftReleaseId = null;
+            let publicationAttempted = false;
 
             const decodeFile = async (path) => {
               const response = await github.rest.repos.getContent({
@@ -113,6 +114,12 @@ jobs:
             };
 
             const rollbackDraft = async () => {
+              // Once publication has been attempted, GitHub may already have made
+              // the release public even if the API response was lost. From that
+              // point forward, never delete the release or its tag automatically.
+              if (publicationAttempted) {
+                return;
+              }
               if (draftReleaseId !== null) {
                 try {
                   await github.rest.repos.deleteRelease({
@@ -160,14 +167,17 @@ jobs:
                 return;
               }
 
-              try {
-                await github.rest.repos.getReleaseByTag({...context.repo, tag});
-                core.setFailed('A GitHub Release already exists for this tag.');
+              // getReleaseByTag omits draft releases. Enumerate all authenticated
+              // releases so a draft left by an interrupted earlier run also
+              // blocks publication. github.paginate covers repositories with
+              // more than one API page of releases.
+              const existingReleases = await github.paginate(
+                github.rest.repos.listReleases,
+                {...context.repo, per_page: 100}
+              );
+              if (existingReleases.some(release => release.tag_name === tag)) {
+                core.setFailed('A GitHub Release or draft already exists for this tag.');
                 return;
-              } catch (error) {
-                if (error?.status !== 404) {
-                  throw error;
-                }
               }
 
               // Recheck immediately before the first write. A stale dispatch may
@@ -233,47 +243,68 @@ jobs:
               }
 
               let published;
+              const publishingReleaseId = draftReleaseId;
+              publicationAttempted = true;
               try {
                 published = await github.rest.repos.updateRelease({
                   ...context.repo,
-                  release_id: draftReleaseId,
+                  release_id: publishingReleaseId,
                   draft: false,
                   prerelease,
                   make_latest: prerelease ? 'false' : 'true'
                 });
-              } catch (error) {
-                // An API response can fail after GitHub accepted the update.
-                // Recover only if the exact release is already public as intended.
+              } catch {
+                // The request can succeed server-side while its response is lost.
+                // Never roll back after publication was attempted. Recover only
+                // when the exact release is observable as public; otherwise retain
+                // the tag/draft state for explicit inspection instead of risking
+                // deletion of a public release.
                 try {
                   const recovered = await github.rest.repos.getReleaseByTag({
                     ...context.repo, tag
                   });
-                  if (recovered.data.id === draftReleaseId &&
+                  if (recovered.data.id === publishingReleaseId &&
+                      recovered.data.tag_name === tag &&
                       recovered.data.draft === false &&
                       recovered.data.prerelease === prerelease) {
                     published = recovered;
                   } else {
-                    throw error;
+                    core.setFailed('Release publication state is ambiguous; resources were retained for manual inspection.');
+                    return;
                   }
                 } catch {
-                  throw error;
+                  core.setFailed('Release publication state is ambiguous; resources were retained for manual inspection.');
+                  return;
                 }
               }
 
-              draftReleaseId = null;
-              const finalRef = await github.rest.git.getRef({
-                ...context.repo, ref: `tags/${tag}`
-              });
-              if (finalRef.data.object.type !== 'commit' ||
-                  finalRef.data.object.sha !== context.sha ||
+              if (published.data.id !== publishingReleaseId ||
                   published.data.tag_name !== tag ||
                   published.data.draft !== false ||
                   published.data.prerelease !== prerelease) {
-                core.setFailed('Release verification failed after publication.');
+                core.setFailed('Published release metadata did not match the requested release; resources were retained.');
                 return;
               }
 
+              // Crossing this boundary means the release is confirmed public.
+              // Disable every automatic rollback before any later API read.
+              draftReleaseId = null;
               reservedTag = false;
+
+              let finalRef;
+              try {
+                finalRef = await github.rest.git.getRef({
+                  ...context.repo, ref: `tags/${tag}`
+                });
+              } catch {
+                core.setFailed('Release is public, but post-publication tag verification was unavailable; inspect GitHub manually.');
+                return;
+              }
+              if (finalRef.data.object.type !== 'commit' ||
+                  finalRef.data.object.sha !== context.sha) {
+                core.setFailed('Release is public, but its tag failed exact-SHA verification; inspect GitHub manually.');
+                return;
+              }
               core.info(`Published ${tag} at ${context.sha}`);
               await core.summary
                 .addHeading('Hoben release published')
