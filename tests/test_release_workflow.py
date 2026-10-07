@@ -49,6 +49,7 @@ const collision = () => {
   throw error;
 };
 let branchReads = 0;
+let refReads = 0;
 let reserved = false;
 let draft = null;
 let published = null;
@@ -74,6 +75,13 @@ const github = {rest: {
         type: 'file',
         content: Buffer.from(text, 'utf8').toString('base64')
       }};
+    },
+    listReleases: async args => {
+      output.operations.push(['list-releases', args.per_page]);
+      if (input.api_error === 'list-releases') {
+        throw new Error('PRIVATE-API-ERROR');
+      }
+      return {data: input.existing_releases || []};
     },
     getReleaseByTag: async args => {
       output.operations.push(['release-read', args.tag]);
@@ -144,7 +152,11 @@ const github = {rest: {
     },
     getRef: async args => {
       output.operations.push(['get-ref', args.ref]);
-      if (input.api_error === 'get-ref') throw new Error('PRIVATE-API-ERROR');
+      refReads++;
+      if (input.api_error === 'get-ref' ||
+          input.get_ref_error_on === refReads) {
+        throw new Error('PRIVATE-API-ERROR');
+      }
       if (!reserved) return missing();
       return {data: {object: {
         type: input.created_ref_type || 'commit',
@@ -159,6 +171,10 @@ const github = {rest: {
     }
   }
 }};
+github.paginate = async (method, args) => {
+  output.operations.push(['paginate', args.per_page]);
+  return (await method(args)).data;
+};
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 const run = new AsyncFunction('github', 'context', 'core', input.script);
 run(github, input.context, core)
@@ -215,6 +231,7 @@ def execute_script(
     files=None,
     existing_tag=False,
     existing_release=False,
+    existing_releases=None,
     env=None,
     **extra,
 ):
@@ -233,6 +250,7 @@ def execute_script(
         },
         "existing_tag": existing_tag,
         "existing_release": existing_release,
+        "existing_releases": existing_releases or [],
         "expected_tag": f"v{version}",
         **extra,
     }
@@ -395,11 +413,29 @@ def test_matching_changelog_section_is_required(workflow, context):
     assert result["createdRefs"] == []
 
 
-def test_existing_release_fails_before_any_tag_write(workflow, context):
-    result = execute_script(workflow, context, existing_release=True)
+@pytest.mark.parametrize("draft", [False, True])
+def test_existing_published_or_draft_release_fails_before_any_tag_write(
+    workflow, context, draft
+):
+    result = execute_script(
+        workflow,
+        context,
+        existing_releases=[
+            {
+                "id": 999,
+                "tag_name": "v0.1.0-beta1",
+                "draft": draft,
+                "prerelease": True,
+            }
+        ],
+    )
     assert result["failed"]
     assert result["createdRefs"] == []
     assert result["releases"] == []
+    operations = [item[0] for item in result["operations"]]
+    assert "paginate" in operations
+    assert "list-releases" in operations
+    assert "create-ref" not in operations
 
 
 def test_tag_is_reserved_atomically_before_any_release(workflow, context):
@@ -507,7 +543,7 @@ def test_stable_release_path_marks_latest(workflow, context):
 
 @pytest.mark.parametrize(
     "api_error",
-    ["create-ref", "create-release", "update-release"],
+    ["list-releases", "create-ref", "create-release", "update-release"],
 )
 def test_write_api_failures_fail_closed_and_roll_back_when_possible(
     workflow, context, api_error
@@ -515,14 +551,19 @@ def test_write_api_failures_fail_closed_and_roll_back_when_possible(
     result = execute_script(workflow, context, api_error=api_error)
     assert result["failed"]
     assert "PRIVATE" not in json.dumps(result)
-    if api_error == "create-ref":
+    if api_error == "list-releases":
+        assert result["createdRefs"] == []
+        assert result["releases"] == []
+    elif api_error == "create-ref":
         assert result["createdRefs"] == []
         assert result["releases"] == []
     elif api_error == "create-release":
         assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
     else:
-        assert result["deletedReleases"] == [123]
-        assert result["deletedRefs"] == ["tags/v0.1.0-beta1"]
+        # Once publication is attempted, a lost response is ambiguous. The
+        # workflow must retain both draft/release and tag for manual inspection.
+        assert result["deletedReleases"] == []
+        assert result["deletedRefs"] == []
 
 
 def test_lost_publish_response_recovers_only_the_exact_public_release(
@@ -547,3 +588,28 @@ def test_post_publication_ref_must_still_point_to_exact_sha(workflow, context):
     assert len(result["releaseUpdates"]) == 0
     assert result["deletedReleases"] == [123]
     assert result["deletedRefs"] == []
+
+
+def test_post_publication_ref_read_failure_never_deletes_public_resources(
+    workflow, context
+):
+    result = execute_script(workflow, context, get_ref_error_on=2)
+    assert result["failed"]
+    assert len(result["releaseUpdates"]) == 1
+    assert result["deletedReleases"] == []
+    assert result["deletedRefs"] == []
+    assert any(
+        "post-publication" in message.lower() or "public" in message.lower()
+        for message in result["failed"]
+    )
+
+
+def test_release_enumeration_is_paginated_before_first_write(workflow, context):
+    result = execute_script(workflow, context)
+    assert result["failed"] == []
+    operations = result["operations"]
+    paginate = next(item for item in operations if item[0] == "paginate")
+    assert paginate == ["paginate", 100]
+    assert operations.index(paginate) < next(
+        index for index, item in enumerate(operations) if item[0] == "create-ref"
+    )
