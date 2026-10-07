@@ -166,10 +166,15 @@ Permanent safety rules:
 - reserve `refs/tags/v<version>` atomically on the exact dispatched SHA before
   creating any release; a tag collision must fail closed rather than falling
   through to GitHub's existing-tag behavior;
+- enumerate authenticated GitHub Releases with pagination before the first write,
+  including drafts, and fail if any existing release already uses the target tag;
 - create and verify the GitHub Release as a draft first, then make it public only
   after the exact tag and current `main` SHA are revalidated;
 - if `main` changes before publication, roll back only the exact tag/draft
   created by that run and fail; never delete an unverified ref;
+- once publication is attempted, never automatically delete the tag or release:
+  an API response can be lost after GitHub has already published it, so ambiguous
+  post-publication state must fail closed and be inspected manually;
 - fail closed if a release already exists;
 - require prerelease/stable selection to agree with the manifest version suffix;
 - grant only `contents: write` to the publication job;
