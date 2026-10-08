@@ -460,7 +460,9 @@ async def collect_session(
                     if first_response is None:
                         first_response = received_at
     except TransportEOF:
-        outcome.stop = "peer_eof"
+        outcome.stop = (
+            "pending_response_eof" if pending_since is not None else "peer_eof"
+        )
     except CollectionBudgetExpired:
         outcome.stop = (
             "response_timeout"
@@ -558,10 +560,14 @@ async def run_campaign(
                 sessions.append(outcome.report)
                 if outcome.assigned_identity is not None:
                     device_guid = outcome.assigned_identity
+                # Finishing passive RX cannot erase an earlier H2 failure.
+                # An opaque terminal CloseClient is an observation limit, not
+                # a framing/correlation error; a pending waiter still fails.
                 errors = (
                     errors + 1
                     if not outcome.report["opening_context"]["eligible"]
                     or outcome.stop not in ("observation_budget", "peer_eof")
+                    or outcome.emission_stop not in (None, "terminal_close_h2")
                     else 0
                 )
                 if (

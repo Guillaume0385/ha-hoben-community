@@ -113,8 +113,11 @@ pauses volontaires avant le premier RX de **0 ms ×2**, **100 ms ×2**, **1 s ×
 Le délai entre sessions est de **15 s**. Il n'y a aucun retry/reconnect d'une
 session ; une demande d'association ou un refus arrête immédiatement la
 campagne. Deux erreurs consécutives l'arrêtent aussi, avec le nombre réellement
-exécuté. EOF observé, notamment sous H1 passif, est une limitation enregistrée,
-sans attribution certaine à un manque de keepalive.
+exécuté : aucun troisième transport ni passage au mode suivant n'est lancé.
+Une session réellement sans erreur remet le compteur à zéro ; le changement
+de mode, un EOF ou une fin de fenêtre n'effacent pas une anomalie antérieure.
+EOF passif sans réponse attendue, notamment sous H1, reste une limitation
+enregistrée, sans attribution certaine à un manque de keepalive.
 
 Budgets fixes : connexion vérifiée `myhoben.fr:465` ≤5 s, ouverture ≤15 s après
 OpenClient, observation ≤90 s après réception du premier octet 0x04, RX ≤1 Mio,
@@ -172,6 +175,16 @@ Si la fenêtre globale expire avec une requête FFFF en vol, l'arrêt est
 `response_timeout`, le résultat est partiel et le lecteur/transport ferment.
 Il compte comme erreur pour l'arrêt après deux erreurs consécutives ; une
 fenêtre complète exige l'absence de waiter abandonné.
+Un EOF avec une lecture FFFF encore en attente reçoit la catégorie
+`pending_response_eof`, reste partiel et compte aussi comme erreur. Le lecteur
+et le transport sont fermés avant de retourner le résultat ; aucune requête
+ne réutilise cette session.
+Une anomalie de framing/corrélation dans `emission_stop` compte comme erreur
+de campagne même si le RX passif se poursuit jusqu'à `observation_budget` ou
+`peer_eof`, avant la première requête comme entre deux lectures. Les émissions
+restent arrêtées et tous les octets retournés sont conservés. La catégorie
+`terminal_close_h2` seule décrit une fermeture opaque, sans erreur de framing ;
+si elle interrompt une réponse attendue, la session est néanmoins en erreur.
 
 Les conclusions H1/H2 exigent un préfixe de 48 octets **accepté** par le
 collecteur : décodage existant, profil V4 reconnu, DeviceGuid ASCII et différent
@@ -240,6 +253,13 @@ complètes ne portent que sur les sessions admissibles. Toutes les sessions,
 y compris celles exclues, gardent leurs métadonnées d'arrêt et leur capture.
 Une session sans préfixe accepté compte comme erreur et ne remet pas à zéro
 la série d'erreurs de campagne, même si le transport se termine par EOF.
+Le schéma reste 2 ; `stop` décrit la fin de collecte, `emission_stop` conserve
+l'anomalie H2 et `pending_response_eof` distingue une lecture abandonnée à EOF.
+`partial` et `complete_windows` mesurent la collecte de la fenêtre RX, pas le
+succès des lectures ni l'absence d'erreur H2 : une fenêtre entièrement collectée
+peut garder `partial=false` et compter dans `complete_windows` tout en portant
+une anomalie et en arrêtant la campagne après sa répétition. Les compteurs
+`v4_requests` et `correlated_responses` restent distincts.
 
 Après analyse, MANAGER consigne dans #48 les conclusions anonymisées, provenance,
 portée et limites. Il décide si une preuve suffisante permet le routeur, si une

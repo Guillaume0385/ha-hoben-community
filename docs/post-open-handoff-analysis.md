@@ -107,6 +107,10 @@ Ping/0x04 et classent l'expiration globale avec réponse attendue comme arrêt
 partiel. Collecte, replay et agrégats excluent les ouvertures refusées ou non
 acceptées ; les octets bruts restent intacts. Les régressions couvrent ces
 défauts avec des arrivées et identités synthétiques, sans connexion réelle.
+L'arrêt de campagne conserve aussi les anomalies H2 après une fin de collecte
+passive et compte comme erreur un EOF avec réponse FFFF attendue. Deux erreurs
+consécutives empêchent toute session suivante ; une fenêtre RX complète reste
+distincte d'une lecture réussie. Ces régressions sont elles aussi hors ligne.
 
 Les fichiers privés du runner sont archivés puis chiffrés par CMS AES-256-GCM,
 avec transport de clé RSA-OAEP/SHA256 au certificat public du MANAGER. La clé
