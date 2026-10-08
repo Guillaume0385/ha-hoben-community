@@ -542,6 +542,31 @@ Provide a helper for consistent redaction rather than relying on every log state
 
 Diagnostic exports should be designed so users can attach them to GitHub issues safely.
 
+### Bounded private RX capture exception — Issue #48
+
+The owner's 2026-10-07 H1/H2 amendment authorizes complete decrypted RX capture
+only for the reference-Osmose exploratory campaign, driven by MANAGER from
+GitHub Actions after exact-code review. It does not authorize runtime logging,
+ordinary pytest/PR CI, scheduled DEV live execution or any stove-control write.
+Keep raw RX, journals and assigned identity in private files outside the checkout
+(0700 directories, 0600 files). Never print them or upload plaintext captures.
+
+The dedicated manual `opened-client-boundary.yml` and its dispatch gate must
+first be independently installed on protected main. Require exact MANAGER actor,
+fresh main dispatch, current reviewed same-repository #49 HEAD and the main-only
+`hoben-live` environment policy. Preserve the existing live workflows/gate.
+Preflight the MANAGER public recipient certificate before network I/O; export
+only authenticated AES-256-GCM CMS ciphertext and a separate numeric/categorical
+anonymized report. The RSA-OAEP/SHA256 private decryption key stays with MANAGER,
+never on GitHub or the runner. Artifacts expire after seven days.
+
+This exception preserves all prohibitions on publishing GUIDs, codes, packets,
+registers and household values. Hypothesis annotations cannot establish a
+production boundary. See the [campaign procedure](docs/opened-client-boundary-campaign.md)
+for fixed experimental budgets, stops, replay and the separate trusted-installation
+prerequisite. CODEX DEV prepares and tests these tools; MANAGER runs and interprets
+the real observations. Task 1's router and Tasks 2–6 await the evidence decision.
+
 ---
 
 ## Version and feature discipline
