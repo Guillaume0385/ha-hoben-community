@@ -1257,6 +1257,18 @@ equivalent explicit closing reference.
 GitHub Projects may later mirror these labels for visualization, but labels on
 the Issue remain authoritative.
 
+**The following state machine applies to PRs targeting `main`.** The
+read-only research branch `experimental` uses a shorter route: CODEX DEV →
+`state:review` → **MANAGER alone** → merge to `experimental`, with
+`state:in-progress` corrections returning directly to MANAGER. No CODEX REVIEW
+step, no `state:validate`, and no authenticated pre-merge live gate are
+required merely to merge a research PR. MANAGER checks the exact HEAD, targeted
+tests, protocol-read-only scope, and secret/logging safety. Experimental live
+runs remain separately authorized and controlled; they are never triggered just
+by merging code. The final `experimental` → `main` PR receives full CODEX
+REVIEW, MANAGER approval, CI and conditional live acceptance. See
+[experimental branch policy](docs/experimental-protocol-workflow.md).
+
 The canonical state machine is:
 
 ```text
@@ -1392,9 +1404,10 @@ For a new task, CODEX DEV:
 CODEX DEV leaves implementation PRs open and never self-approves, adds
 `state:validate`, authorizes privileged live validation, or merges.
 
-## Independent review — CODEX REVIEW
+## Independent review — CODEX REVIEW (PRs targeting `main` only)
 
-CODEX REVIEW reviews implementations only from `state:review` and independently
+For PRs with base `main` only, CODEX REVIEW reviews implementations from
+`state:review` and independently
 verifies the exact current PR HEAD rather than trusting the developer summary.
 
 The review covers, as applicable:
@@ -1419,7 +1432,7 @@ has been resolved, CODEX REVIEW approves that HEAD and moves the Issue to
 CODEX REVIEW never performs privileged authenticated Hoben validation and never
 merges.
 
-## Final review and live validation — MANAGER
+## Final review and live validation — MANAGER (PRs targeting `main`)
 
 The MANAGER performs final review only from `state:validate` and only after
 CODEX REVIEW has approved the exact current HEAD.
@@ -1495,6 +1508,11 @@ transitions available to the roles above; they do not bypass the independent
 review or MANAGER final-review rules.
 
 ## Review loop invariant
+
+For PRs targeting `experimental`, MANAGER is the sole reviewer: review remarks
+return the Issue to `state:in-progress` for CODEX DEV, then `state:review` for
+another MANAGER pass. No CODEX REVIEW, no `state:validate`, and no pre-merge
+live Hoben requirement. The full loop below applies to PRs targeting `main`.
 
 Every review remark must be considered and answered. Every actionable requested
 change must be corrected before the task can advance.
