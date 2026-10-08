@@ -262,7 +262,9 @@ async def collect_session(
             )
             if now >= deadline:
                 outcome.stop = (
-                    "observation_budget"
+                    "response_timeout"
+                    if pending_since is not None
+                    else "observation_budget"
                     if opening_started is not None
                     else "opening_timeout"
                 )
@@ -283,7 +285,11 @@ async def collect_session(
                 and emissions
                 and prefix_ready is not None
                 and pending_since is None
+                and not framer.partial_frame
             ):
+                # A frame begun before this request is not its response. While
+                # it is incomplete, remove the due timer as well as the TX so
+                # an expired scheduling deadline cannot spin the reader loop.
                 if outcome.requests == 0:
                     due = prefix_ready + FIRST_READ_DELAY
                 elif outcome.requests == 1 and first_response is not None:
@@ -317,10 +323,22 @@ async def collect_session(
             if outcome.opening_offset is None:
                 cursor = 0
                 while cursor < len(data) and data[cursor] == 0x0A:
-                    await send("pong_before_open", b"\x0b")
-                    outcome.pongs_before_open += 1
                     cursor += 1
-                    leading_offset += 1
+                opening_in_batch = cursor < len(data) and data[cursor] == 0x04
+                if mode == "H1" and opening_in_batch:
+                    if cursor:
+                        capture.event(
+                            {
+                                "kind": "h1_pongs_suppressed",
+                                "count": cursor,
+                                "received_at": received_at,
+                            }
+                        )
+                else:
+                    for _ in range(cursor):
+                        await send("pong_before_open", b"\x0b")
+                        outcome.pongs_before_open += 1
+                leading_offset += cursor
                 data = data[cursor:]
                 if not data:
                     continue
@@ -355,6 +373,14 @@ async def collect_session(
                     break
                 outcome.assigned_identity = opened.device_guid
                 outcome.prefix_complete = True
+                capture.event(
+                    {
+                        "kind": "opening_accepted",
+                        "offset": outcome.opening_offset,
+                        "read_index": capture.reads[-1].index,
+                        "received_at": received_at,
+                    }
+                )
                 prefix_ready = received_at
                 framer = H2Framer(outcome.opening_offset + 48)
             if mode == "H1" or not emissions:
@@ -459,14 +485,18 @@ async def collect_session(
             capture.event({"kind": "close_error"})
         finally:
             analysis = analyze_capture(
-                bytes(capture.data), capture.reads, outcome.opening_offset
+                bytes(capture.data),
+                capture.reads,
+                outcome.opening_offset,
+                prefix_accepted=outcome.prefix_complete,
             )
             outcome.report = {
                 "mode": mode,
                 "pause_seconds": pause,
                 "repetition": repetition,
                 "stop": outcome.stop,
-                "partial": outcome.stop != "observation_budget",
+                "partial": outcome.stop != "observation_budget"
+                or not outcome.prefix_complete,
                 "rx_bytes": len(capture.data),
                 "read_calls": len(capture.reads),
                 "opening_offset": outcome.opening_offset,
@@ -530,7 +560,8 @@ async def run_campaign(
                     device_guid = outcome.assigned_identity
                 errors = (
                     errors + 1
-                    if outcome.stop not in ("observation_budget", "peer_eof")
+                    if not outcome.report["opening_context"]["eligible"]
+                    or outcome.stop not in ("observation_budget", "peer_eof")
                     else 0
                 )
                 if (
@@ -543,26 +574,32 @@ async def run_campaign(
                 break
         if stop_campaign:
             break
+    eligible = [s for s in sessions if s["opening_context"]["eligible"]]
     gaps = [
         t["h1"]["completion_gaps_seconds"]["median"]
-        for t in sessions
+        for t in eligible
         if t["h1"]["completion_gaps_seconds"]["median"] is not None
     ]
     report = {
-        "schema": 1,
+        "schema": 2,
         "campaign_mode": mode,
         "planned_sessions": planned,
         "executed_sessions": len(sessions),
-        "complete_windows": sum(not s["partial"] for s in sessions),
+        "eligible_sessions": len(eligible),
+        "excluded_sessions": len(sessions) - len(eligible),
+        "opening_context_counts": dict(
+            Counter(s["opening_context"]["status"] for s in sessions)
+        ),
+        "complete_windows": sum(not s["partial"] for s in eligible),
         "stopped_early": stop_campaign,
         "boundary_proven": False,
         "median_client_gap_distribution_seconds": distribution(gaps),
         "received_size_distribution_bytes": distribution(
-            [s["rx_bytes"] for s in sessions]
+            [s["rx_bytes"] for s in eligible]
         ),
-        "h1_status_counts": dict(Counter(s["h1"]["status"] for s in sessions)),
-        "h2_status_counts": dict(Counter(s["h2"]["status"] for s in sessions)),
-        "comparison_counts": dict(Counter(s["comparison"] for s in sessions)),
+        "h1_status_counts": dict(Counter(s["h1"]["status"] for s in eligible)),
+        "h2_status_counts": dict(Counter(s["h2"]["status"] for s in eligible)),
+        "comparison_counts": dict(Counter(s["comparison"] for s in eligible)),
         "sessions": sessions,
     }
     private_json(directory / "campaign.json", report)

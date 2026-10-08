@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from statistics import median
 
 from custom_components.hoben.modbus import decode_mbap, modbus_tcp_frame_size
+from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID, decode_opened_client
+from custom_components.hoben.profiles import StoveProfile, select_stove_profile
 
 PAUSE_THRESHOLDS = (0.05, 0.2, 1.0)
 REPLAY_SIZES = (1, 48, 257)
@@ -77,6 +79,11 @@ class H2Framer:
     def __repr__(self) -> str:
         return f"H2Framer(offset={self.offset}, error={self.error!r})"
 
+    @property
+    def partial_frame(self) -> bool:
+        """An already received candidate must finish before any new request."""
+        return bool(self.buffer) and not self.error and not self.terminal
+
     def feed(self, data: bytes) -> list[CandidateFrame]:
         """Use existing bounded MBAP codecs; never search for a plausible marker."""
         if self.error or self.terminal:
@@ -142,7 +149,7 @@ class H2Framer:
             ),
             "anomaly": self.error or ("terminal_close_h2" if self.terminal else None),
             "anomaly_offset": self.offset if self.error or self.terminal else None,
-            "partial_frame": bool(self.buffer) and not self.error and not self.terminal,
+            "partial_frame": self.partial_frame,
         }
 
 
@@ -223,18 +230,61 @@ def h1_analysis(reads: list[RxRead], opening_offset: int | None) -> dict:
     return result
 
 
-def analyze_capture(
-    data: bytes, reads: list[RxRead], opening_offset: int | None
+def opening_context(
+    data: bytes, opening_offset: int | None, *, prefix_accepted: bool
 ) -> dict:
-    """Analyze the same immutable capture under both models and re-chunk H2."""
-    h1 = h1_analysis(reads, opening_offset)
-    start = opening_offset + 48 if opening_offset is not None else len(data)
-    if opening_offset is None or len(data) < start:
+    """Check the collector's V4 context independently, without exposing identity.
+
+    A valid prefix is necessary but does not establish its total length. No
+    marker search or suffix interpretation can turn a rejected context into
+    evidence. Acceptance must also have occurred before collection stopped.
+    """
+    status = "missing_opening"
+    if opening_offset is not None:
+        if (
+            type(opening_offset) is not int
+            or not 0 <= opening_offset < len(data)
+            or any(value != 0x0A for value in data[:opening_offset])
+        ):
+            status = "invalid_opening_offset"
+        elif len(data) < opening_offset + 48:
+            status = "incomplete_opening_prefix"
+        else:
+            try:
+                opened = decode_opened_client(
+                    data[opening_offset : opening_offset + 48]
+                )
+                status = (
+                    "unsupported_opening"
+                    if select_stove_profile(opened) is not StoveProfile.V4
+                    or opened.device_guid == INITIAL_DEVICE_GUID
+                    else "accepted_v4_prefix"
+                    if prefix_accepted
+                    else "unaccepted_opening_prefix"
+                )
+            except (TypeError, ValueError):
+                status = "invalid_opening_prefix"
+    return {"eligible": status == "accepted_v4_prefix", "status": status}
+
+
+def analyze_capture(
+    data: bytes,
+    reads: list[RxRead],
+    opening_offset: int | None,
+    *,
+    prefix_accepted: bool = True,
+) -> dict:
+    """Analyze only accepted V4 contexts; direct fixtures still validate raw bytes."""
+    context = opening_context(data, opening_offset, prefix_accepted=prefix_accepted)
+    h1 = h1_analysis(reads, opening_offset if context["eligible"] else None)
+    if not context["eligible"]:
         return {
+            "opening_context": context,
             "h1": h1,
             "h2": {"status": "inconclusive"},
             "comparison": "insufficient_data",
         }
+    start = opening_offset + 48
     suffix = data[start:]
     framer = H2Framer(start)
     # Preserve original chunk boundaries for one analysis; replay only changes
@@ -269,4 +319,10 @@ def analyze_capture(
         if h2["status"] == "compatible"
         else "insufficient_data"
     )
-    return {"h1": h1, "h2": h2, "replay": replay, "comparison": comparison}
+    return {
+        "opening_context": context,
+        "h1": h1,
+        "h2": h2,
+        "replay": replay,
+        "comparison": comparison,
+    }

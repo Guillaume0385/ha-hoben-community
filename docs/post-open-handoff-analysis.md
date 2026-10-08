@@ -101,6 +101,12 @@ passif après le début d'ouverture. H2 place seulement dans la sonde un début
 supposé à 48 octets, traite les enveloppes documentées et autorise deux lectures
 V4 bornées. Un framing invalide arrête les émissions ; un waiter FFFF abandonné
 ferme la session avant toute autre lecture.
+Les corrections de revue du 2026-10-08 empêchent une trame commencée avant une
+requête de satisfaire son waiter, rendent H1 passif dès une lecture coalescée
+Ping/0x04 et classent l'expiration globale avec réponse attendue comme arrêt
+partiel. Collecte, replay et agrégats excluent les ouvertures refusées ou non
+acceptées ; les octets bruts restent intacts. Les régressions couvrent ces
+défauts avec des arrivées et identités synthétiques, sans connexion réelle.
 
 Les fichiers privés du runner sont archivés puis chiffrés par CMS AES-256-GCM,
 avec transport de clé RSA-OAEP/SHA256 au certificat public du MANAGER. La clé

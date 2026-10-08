@@ -113,7 +113,7 @@ class VirtualStream:
         return task.done()
 
 
-def observe(tmp_path, world, *, mode="H2", pause=0.0, cancelled=False):
+def observe(tmp_path, world, *, mode="H2", pause=0.0, seconds=90.0, cancelled=False):
     capture = PrivateCapture(tmp_path / "session")
 
     async def run():
@@ -124,6 +124,7 @@ def observe(tmp_path, world, *, mode="H2", pause=0.0, cancelled=False):
             device_guid=FIELDS["device_guid"],
             pause=pause,
             repetition=1,
+            seconds=seconds,
             transport_factory=world.factory,
             clock=world.clock,
             sleep=world.sleep,

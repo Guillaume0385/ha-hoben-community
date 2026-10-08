@@ -136,6 +136,10 @@ les octets encore dans la pile TLS ou sur le serveur.
 
 H1 n'émet que l'ouverture et les Pong correspondant à des Ping **avant** son
 début. Après le premier octet 0x04, il observe passivement, sans Modbus/Pong.
+Le lot RX entier est examiné avant tout Pong : si un ou plusieurs Ping sont
+suivis du premier 0x04 dans cette même lecture, même fragmentaire, aucun Pong
+n'est émis pour ce lot. Un lot contenant uniquement des Ping avant l'ouverture
+conserve ses Pong. Les octets et la suppression sont consignés sans scan.
 L'analyse examine tous les seuils préchoisis **50 ms, 200 ms, 1 s**, groupes,
 tailles autour du préfixe et données suivantes. Les temps sont ceux du client,
 pas des émissions serveur. Une réception coalescée, l'absence de gap mesuré ou
@@ -152,6 +156,11 @@ longueur universelle inventée.
 H2 autorise les Pong ainsi candidats et au maximum deux lectures V4 fixes
 FFFF/unit 1/fonction 04/adresse 1024/quantité 20. La première part ≥5 s après
 le préfixe complet ; la seconde ≥20 s après la première réponse corrélée valide.
+Une trame H2 déjà commencée mais incomplète suspend toute nouvelle lecture V4
+et son timer d'émission jusqu'à sa complétion, sans boucle sur un timer expiré.
+Une réponse ainsi commencée avant la requête ne peut donc pas lui être attribuée.
+Si elle se termine sans waiter, sa corrélation est refusée et les émissions
+restent désactivées ; le RX continue d'être conservé passivement.
 Un seul lecteur reste actif pendant les timers/TX. Notifications et réponses
 sont distinctes, sans fusion dans un snapshot. Timeout, annulation, corrélation
 invalide ou absence de réponse terminale clôturent le waiter écrit avant toute
@@ -159,6 +168,18 @@ autre requête. Une exception Modbus corrélée est terminale et n'entraîne auc
 deuxième lecture. Un framing invalide arrête les émissions tout en conservant
 le RX jusqu'à fermeture/budget ; si un waiter était en vol, la session ferme.
 Une même livraison valide puis invalide ne produit aucun Pong de ce lot.
+Si la fenêtre globale expire avec une requête FFFF en vol, l'arrêt est
+`response_timeout`, le résultat est partiel et le lecteur/transport ferment.
+Il compte comme erreur pour l'arrêt après deux erreurs consécutives ; une
+fenêtre complète exige l'absence de waiter abandonné.
+
+Les conclusions H1/H2 exigent un préfixe de 48 octets **accepté** par le
+collecteur : décodage existant, profil V4 reconnu, DeviceGuid ASCII et différent
+de la valeur initiale nulle. Ce contrôle ne prouve toujours pas la longueur
+totale d'OpenedClient. Préfixe incomplet, refusé ou non accepté avant l'arrêt :
+les octets et les timings restent conservés, mais les deux hypothèses sont
+inconclusives et la comparaison indique `insufficient_data`. Un suffixe
+ressemblant à Ping/0x0E/0x1B ne peut pas rendre ce contexte admissible.
 
 Ni association forcée ni fonction 06/16/22, FFF0, commande de chauffage,
 paramètre installateur ou essai moteur n'est envoyé. Le framing H2 est contenu
@@ -198,6 +219,10 @@ H1, analyse les mêmes octets sous H2 et compare les coupures synthétiques
 **1/48/257 octets**. Il écrit `reanalysis.json` séparément et ne modifie aucun
 fichier brut. Ne pas réécrire les temps H1 lors du re-chunking, ni exiger des
 valeurs domestiques ou identités identiques entre essais.
+Il valide lui-même les octets du préfixe et exige l'événement privé
+`opening_accepted`, lié à la lecture qui a permis cette acceptation. Un marqueur
+0x04 isolé, une déclaration contredite par les octets ou une ancienne capture
+sans cet événement ne produisent aucune conclusion compatible.
 
 Le rapport public contient les tailles/offsets, catégories, couverture du
 suffixe, corrélations/comptages et délais min/médian/max par session, ainsi que
@@ -207,6 +232,14 @@ n'est pas présentée comme une médiane de tous les gaps. Les résultats permet
 « données insuffisantes » ; ces états ne prouvent jamais une frontière.
 Les hypothèses ne sont pas exhaustives et une longueur fixe peut aussi être
 suivie d'une pause.
+Le rapport de campagne utilise le schéma 2 : `opening_context` indique
+l'admissibilité et sa catégorie par session ; `eligible_sessions`,
+`excluded_sessions` et `opening_context_counts` rendent les exclusions visibles.
+Comptages H1/H2/comparaison, distributions agrégées des tailles/gaps et fenêtres
+complètes ne portent que sur les sessions admissibles. Toutes les sessions,
+y compris celles exclues, gardent leurs métadonnées d'arrêt et leur capture.
+Une session sans préfixe accepté compte comme erreur et ne remet pas à zéro
+la série d'erreurs de campagne, même si le transport se termine par EOF.
 
 Après analyse, MANAGER consigne dans #48 les conclusions anonymisées, provenance,
 portée et limites. Il décide si une preuve suffisante permet le routeur, si une

@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
                 for path in sorted(private.glob("session-*/analysis.json"))
             ]
             report = {
-                "schema": 1,
+                "schema": 2,
                 "campaign_mode": args.mode,
                 "executed_sessions": len(sessions),
                 "interrupted": True,
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             interrupted = True
             report = {
-                "schema": 1,
+                "schema": 2,
                 "campaign_mode": args.mode,
                 "interrupted": True,
                 "boundary_proven": False,

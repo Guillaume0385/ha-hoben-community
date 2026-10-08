@@ -21,9 +21,27 @@ def replay(directory: Path) -> dict:
     reads = []
     offset = 0
     previous = None
+    accepted_offset = None
     with (directory / "journal.jsonl").open() as journal:
         for line in journal:
             record = json.loads(line)
+            if record.get("kind") == "opening_accepted":
+                accepted = record["offset"]
+                read_index = record["read_index"]
+                received_at = record["received_at"]
+                if (
+                    accepted_offset is not None
+                    or type(accepted) is not int
+                    or not 0 <= accepted <= offset - 48
+                    or type(read_index) is not int
+                    or read_index != len(reads) - 1
+                    or type(received_at) not in (int, float)
+                    or not math.isfinite(received_at)
+                    or received_at != previous
+                ):
+                    raise ValueError("Invalid private opening acceptance")
+                accepted_offset = accepted
+                continue
             if record.get("kind") != "rx":
                 continue
             fields = (
@@ -55,7 +73,17 @@ def replay(directory: Path) -> dict:
         opening_offset += 1
     if opening_offset == len(raw) or raw[opening_offset] != 0x04:
         opening_offset = None
-    return {"boundary_proven": False, **analyze_capture(raw, reads, opening_offset)}
+    if accepted_offset is not None and accepted_offset != opening_offset:
+        raise ValueError("Inconsistent private opening acceptance")
+    return {
+        "boundary_proven": False,
+        **analyze_capture(
+            raw,
+            reads,
+            opening_offset,
+            prefix_accepted=accepted_offset is not None,
+        ),
+    }
 
 
 class SafeParser(argparse.ArgumentParser):
