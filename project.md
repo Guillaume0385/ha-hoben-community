@@ -1066,6 +1066,18 @@ metadata, or CI/test-only changes that cannot alter the live execution path.
 Mixed or ambiguous PRs require the live gate. The MANAGER must explicitly
 classify and record the live-validation decision in the PR before merge.
 
+### Proposed experimental protocol branch — independent of release validation
+
+The branch `experimental` is reserved for bounded, opt-in, **read-only** Hoben
+protocol research. Short research PRs may use lighter merge checks than `main`,
+but this does **not** grant access to the live environment's credentials. A
+trusted workflow, reviewed exact code, an explicitly selected deployment branch
+and an independent approval before exposing secrets are still required.
+Confirmed protocol observations return to `main` through a separate final PR
+with complete offline CI, independent review, HACS/Hassfest and conditional
+pre-merge validation. See [the experimental workflow proposal](docs/experimental-protocol-workflow.md).
+This proposal does not alter current gates or authorize a live run by itself.
+
 ### MANAGER-gated authenticated candidate validation
 
 `.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
