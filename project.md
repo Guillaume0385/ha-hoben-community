@@ -195,6 +195,35 @@ Required tests include every split point, byte-at-a-time input, multiple
 coalesced messages, Ping adjacent to Modbus traffic, invalid MBAP lengths,
 truncated frames, unsupported types and clean EOF. No real server is required.
 
+Task 1 bounded analysis (#48, 2026-10-07) has not established the safe handoff.
+The [evidence inventory and resumption condition](docs/post-open-handoff-analysis.md)
+record the remaining prerequisite. Twelve offline cases preserve the frozen
+one-shot gate's refusal of coalesced opaque suffixes and demonstrate that a
+delayed suffix can remain unread while the opening report still matches the
+sanitized reference metadata, including `unclassified_bytes == 0`.
+These synthetic cases are evidence about the existing code's limits, not
+observations of a production suffix or proof of a complete opening length.
+The parser/router remains unimplemented pending a MANAGER-reviewed deterministic
+boundary rule for the already accepted reference-Osmose opening context. No
+runtime/opening behavior or universal protocol fact changes in this intermediate
+deliverable. The owner's later 2026-10-07 amendment resumes the same Issue/branch/
+PR for a narrower preparatory phase: two isolated H1/H2 exploratory probes,
+their offline tests and a manual protected GitHub Actions capture path. This
+preparation proceeds without pretending that the boundary is known. Its reviewed
+intermediate HEAD can return to `state:review`; it does not finish Task 1 or
+authorize merge. The [campaign procedure](docs/opened-client-boundary-campaign.md)
+defines six sessions per hypothesis, explicit client pauses, read-only limits,
+private authenticated-encrypted captures and anonymized offline replay.
+
+Before real execution, MANAGER separately installs the reviewed workflow/gate
+and bounded capture policy on protected main, verifies the `hoben-live` protection
+and public recipient certificate, then dispatches the exact reviewed candidate
+SHA. No candidate can bootstrap access to the existing secret; the old
+`--live-premerge` contract remains unchanged. No real observations are supplied
+by the synthetic tests. Implement the router only after MANAGER analyzes the
+private results and records a sufficient local boundary rule/resolution.
+Tasks 2 through 6 remain dependent on completion and merge of Task 1.
+
 **Task 2 — persistent protocol session and receive loop**
 
 Add an HA-independent session object that takes ownership of one accepted TLS
