@@ -38,19 +38,30 @@ texte libre « MANAGER/CODEX REVIEW approuve ». Revue supprimée/modifiée,
 changements demandés, thread non résolu ou nouveau HEAD refusent la demande.
 Une nouvelle revue/HEAD exige une politique main séparément revue.
 
+La décision effective est calculée par reviewer à partir des reviews actives
+`APPROVED` et `CHANGES_REQUESTED`, dans leur ordre chronologique. Un commentaire
+`COMMENTED`, une review `PENDING` ou la dismissal d'une autre review ne lève
+jamais une demande de corrections. Seule sa propre dismissal explicite ou une
+approbation ultérieure de ce reviewer la remplace. Ce contrôle vaut à l'entrée
+et au recheck après attente de l'environnement ; l'attestation exacte et les
+threads restent vérifiés séparément.
+
 ## Installation séparée et prérequis GitHub
 
 1. Faire examiner #51 indépendamment par CODEX REVIEW, vérifier `tests`,
    `ha-tests`, `hacs`, `hassfest` sur son HEAD et enregistrer la classification
-   MANAGER selon `AGENTS.md`. Si l'ancien gate live est requis pour cette
-   installation, suivre sa procédure existante. Seul MANAGER fusionne #51.
+   MANAGER selon `AGENTS.md`. La classification MANAGER du 2026-10-08 exige la
+   validation authentifiée pré-merge existante pour #51 après corrections et
+   review indépendante du HEAD final. Suivre son gate existant. Seul MANAGER
+   fusionne #51.
 2. Vérifier main protégée et `hoben-live` avec **une seule** politique de
    déploiement : type `branch`, nom `main`, `custom_branch_policies=true`,
    `protected_branches=false`. Aucun tag, wildcard ou branche candidate.
    Une ancienne exception ou politique inaccessible à l'API refuse même le
    dry-run (`environment_policy_unverified`/`github_or_configuration_unavailable`).
-   DEV ne modifie aucun réglage ; une correction indispensable relève du
-   MANAGER dans GitHub, avec décision enregistrée.
+   MANAGER constate et documente le refus. Toute correction de droits,
+   protections ou secrets relève du propriétaire avec autorisation distincte,
+   hors de cette tâche ; ni DEV ni la tâche MANAGER ne modifient ces réglages.
 3. Vérifier que la politique réelle du dépôt public permet ce workflow
    `pull_request_target` et le checkout v7 **same-repository** épinglé. Ne pas
    supposer une exception ni contourner un refus. Les nouvelles politiques
@@ -71,10 +82,11 @@ Une nouvelle revue/HEAD exige une politique main séparément revue.
    création n'autorise rien. Ne les appliquer qu'après installation selon
    la procédure ci-dessous, avec la connexion MANAGER dont l'acteur est prouvé.
 
-Fusion protégée et interventions éventuelles sur paramètres/labels restent
-humaines si Work n'expose pas leur API. La passerelle ne change ni secrets,
-permissions/protections du dépôt, états d'Issue, voies de validation existantes
-ni automatisations périodiques.
+MANAGER utilise les opérations GitHub déjà disponibles dans Work. Une opération
+ou configuration inaccessible impose un refus documenté, sans contournement.
+Toute modification nécessaire de droits, protections ou secrets relève du
+propriétaire avec autorisation distincte. La passerelle et la tâche MANAGER ne
+changent pas ces réglages ; aucune automatisation n'est modifiée par DEV.
 
 Références GitHub :
 [sécurité pull_request_target](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target),
@@ -119,6 +131,13 @@ candidat pour recevoir le credential dans cette campagne H1/H2 bornée ».
 MANAGER enregistre sa décision exact-HEAD dans #48/#49 avant l'ajout. Ce
 commentaire assure la traçabilité humaine ; l'autorisation machine vient de
 l'événement authentifié et des vérifications serveur, jamais du texte.
+
+La tâche MANAGER autonome peut prendre et enregistrer cette décision ponctuelle
+depuis Work, y compris lors d'un passage planifié, après tous les prérequis.
+L'autorisation propriétaire couvre déjà cette campagne : aucune nouvelle
+demande manuelle utilisateur n'est requise. Le tick seul ne constitue pas une
+décision et ne justifie jamais un lancement systématique, un rerun ou un retry.
+DEV et PRE-REVIEW ne peuvent ni demander la campagne ni poser ces labels.
 
 1. Relever à nouveau les SHA. Main changée : réexaminer puis refaire le dry-run.
    Candidat changé : politique main/revue nouvelle obligatoire. Arrêter jusqu'à
@@ -185,13 +204,19 @@ Rien ne clôture automatiquement #48, fusionne #49 ou lance la roadmap suivante.
 
 > Pour #48, après installation/revue indépendante de #51 sur main, vérifier les
 > prérequis/SHA, demander via Work le dry-run unique avec
-> `manager-hoben-boundary-dry-run` et lire son run/statut/rapport. Sur demande
-> **ponctuelle explicite** du MANAGER uniquement, après PASS réel et décision de
-> confiance exact-HEAD enregistrée, retirer ce label puis demander
+> `manager-hoben-boundary-dry-run` et lire son run/statut/rapport. La tâche
+> MANAGER autonome, y compris lors d'un passage planifié, peut décider une seule
+> campagne déjà autorisée par le propriétaire, après PASS réel et décision de
+> confiance exact-HEAD enregistrée, sans nouvelle demande manuelle utilisateur.
+> Retirer ce label puis demander
 > `manager-hoben-boundary-live`. Attendre la demande unique, lire les catégories
 > anonymisées et faire analyser privément le ciphertext avant toute reprise de
 > #48. Tick périodique, manque de crédits, ancien label/run ou statut vert ne
 > vaut jamais autorisation nouvelle ; aucune campagne live récurrente, rerun,
 > suppression de claim ou boucle de relance.
+> Si une configuration GitHub manque ou est inaccessible, constater/documenter
+> le refus. Toute modification de droits, protections ou secrets relève du
+> propriétaire avec autorisation distincte, hors de cette tâche. DEV/PRE-REVIEW
+> ne pose aucun label de demande live.
 
 Ce texte est prêt à examiner ; DEV ne modifie pas l'automatisation MANAGER/REVIEW.

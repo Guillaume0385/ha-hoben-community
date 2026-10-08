@@ -117,9 +117,17 @@ async function verify({ github, context, core, recheck = false }) {
       review.user.id === policy.review.actor_id &&
       crypto.createHash('sha256').update(review.body).digest('hex') ===
         policy.review.body_sha256, 'independent_review_missing_or_changed');
-    const latestReviews = new Map();
-    for (const r of reviews) latestReviews.set(r.user.id, r.state);
-    requireFact(![...latestReviews.values()].includes('CHANGES_REQUESTED'),
+    // The API returns reviews chronologically. Only a submitted APPROVED or
+    // CHANGES_REQUESTED decision supersedes that reviewer's active decision.
+    // COMMENTED/PENDING are non-decisional. A dismissed record is inactive;
+    // ignoring it removes only that record, never another blocking review.
+    const effectiveReviews = new Map();
+    for (const r of reviews) {
+      if (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED') {
+        effectiveReviews.set(r.user.id, r.state);
+      }
+    }
+    requireFact(![...effectiveReviews.values()].includes('CHANGES_REQUESTED'),
       'changes_requested');
     let cursor = null;
     do {

@@ -76,6 +76,7 @@ const gate=require(input.gate);
   if(op.phase){context.payload.label.name=`manager-hoben-boundary-${op.phase}`;
    input.pr.labels=[{name:context.payload.label.name}];}
   if(op.id)context.runId=op.id;
+  if(op.reviews)input.reviews=op.reviews;
   if(op.report)require('fs').writeFileSync(
    `${process.env.GITHUB_WORKSPACE}/public-report/report.json`,
    JSON.stringify(op.report));
@@ -388,6 +389,157 @@ def test_new_changes_requested_or_unresolved_thread_blocks(event):
     event["reviews"].pop()
     event["threads"][0]["nodes"][0]["isResolved"] = False
     assert not execute(event)["writes"]
+
+
+REVIEW_GATE_CONTEXTS = [
+    ("dry-run", "verify"),
+    ("live", "verify"),
+    ("dry-run", "recheck"),
+    ("live", "recheck"),
+]
+NON_DECISIONAL_REVIEW_SEQUENCES = [
+    ["CHANGES_REQUESTED", "COMMENTED"],
+    ["CHANGES_REQUESTED", "PENDING"],
+    ["CHANGES_REQUESTED", "COMMENTED", "PENDING", "COMMENTED"],
+    # A different dismissed record must not dismiss the blocking review.
+    ["CHANGES_REQUESTED", "DISMISSED"],
+    ["CHANGES_REQUESTED", "APPROVED", "CHANGES_REQUESTED", "COMMENTED"],
+]
+
+
+def review_history(reviews, states, *, reviewer=42, paginated=False):
+    history = copy.deepcopy(reviews)
+    next_id = max(r.get("id", 0) for r in history) + 1
+    for index, state in enumerate(states):
+        if index == 1 and paginated:
+            while len(history) < 100:
+                history.append(
+                    {"id": next_id, "user": {"id": 99}, "state": "COMMENTED"}
+                )
+                next_id += 1
+        history.append({"id": next_id, "user": {"id": reviewer}, "state": state})
+        next_id += 1
+    return history
+
+
+def review_gate_context(event, phase, operation):
+    if phase == "live":
+        live(event)
+    if operation == "recheck":
+        # Simulate a claim accepted before an environment wait. Dry-run has no
+        # secret-bearing recheck job, but must also reject active change requests.
+        claim(event, phase)
+    event["operations"] = [{"name": operation}]
+
+
+def assert_review_refused_without_new_permission(result, original_claims):
+    outcome = result["results"][0]
+    assert outcome["failed"] and outcome["outputs"]["reason"] == "changes_requested"
+    assert outcome["outputs"].get("approved") != "true"
+    assert outcome["outputs"].get("claimed") != "true"
+    assert not result["writes"] and result["claims"] == original_claims
+
+
+@pytest.mark.parametrize("phase,operation", REVIEW_GATE_CONTEXTS)
+@pytest.mark.parametrize("states", NON_DECISIONAL_REVIEW_SEQUENCES)
+@pytest.mark.parametrize("paginated", [False, True])
+def test_non_decisional_reviews_preserve_active_change_requests(
+    event, phase, operation, states, paginated
+):
+    review_gate_context(event, phase, operation)
+    event["reviews"] = review_history(event["reviews"], states, paginated=paginated)
+    original_claims = copy.deepcopy(event.get("claims", {}))
+    result = execute(event)
+    assert_review_refused_without_new_permission(result, original_claims)
+    if paginated:
+        assert any(
+            c["name"] == "reviews" and c["args"]["page"] == 2 for c in result["calls"]
+        )
+
+
+@pytest.mark.parametrize("phase,operation", REVIEW_GATE_CONTEXTS)
+def test_other_reviewer_approval_does_not_clear_remaining_change_request(
+    event, phase, operation
+):
+    review_gate_context(event, phase, operation)
+    event["reviews"] = review_history(
+        event["reviews"], ["CHANGES_REQUESTED", "COMMENTED"]
+    )
+    event["reviews"] = review_history(
+        event["reviews"], ["CHANGES_REQUESTED", "APPROVED", "COMMENTED"], reviewer=43
+    )
+    original_claims = copy.deepcopy(event.get("claims", {}))
+    assert_review_refused_without_new_permission(execute(event), original_claims)
+
+
+@pytest.mark.parametrize("phase,operation", REVIEW_GATE_CONTEXTS)
+def test_pinned_commented_attestation_does_not_clear_its_author_change_request(
+    event, phase, operation
+):
+    review_gate_context(event, phase, operation)
+    event["reviews"].insert(
+        0,
+        {
+            "id": POLICY["review"]["id"] - 1,
+            "user": copy.deepcopy(event["reviews"][0]["user"]),
+            "state": "CHANGES_REQUESTED",
+        },
+    )
+    original_claims = copy.deepcopy(event.get("claims", {}))
+    assert_review_refused_without_new_permission(execute(event), original_claims)
+
+
+@pytest.mark.parametrize("states", NON_DECISIONAL_REVIEW_SEQUENCES)
+@pytest.mark.parametrize("paginated", [False, True])
+def test_new_review_during_environment_wait_refuses_secret_recheck(
+    event, states, paginated
+):
+    live(event)
+    event["operations"] = [
+        {"name": "verify"},
+        {
+            "name": "recheck",
+            "reviews": review_history(event["reviews"], states, paginated=paginated),
+        },
+    ]
+    result = execute(event)
+    admitted, rechecked = result["results"]
+    assert admitted["outputs"]["approved"] == "true" and not admitted["failed"]
+    assert rechecked["failed"]
+    assert rechecked["outputs"]["reason"] == "changes_requested"
+    assert rechecked["outputs"].get("approved") != "true"
+    assert rechecked["outputs"].get("claimed") != "true"
+    # Only the original admission may write. Recheck adds no claim or status.
+    assert [w["name"] for w in result["writes"]] == ["tag", "ref", "status"]
+    assert result["writes"][-1]["args"]["state"] == "pending"
+    assert len(result["claims"]) == 2
+
+
+@pytest.mark.parametrize(
+    "phase,operation", [c for c in REVIEW_GATE_CONTEXTS if c != ("dry-run", "recheck")]
+)
+@pytest.mark.parametrize("paginated", [False, True])
+@pytest.mark.parametrize(
+    "states",
+    [
+        ["CHANGES_REQUESTED", "COMMENTED", "APPROVED", "PENDING"],
+        ["CHANGES_REQUESTED", "APPROVED", "COMMENTED", "DISMISSED"],
+        # The API changes the original blocking record's state to DISMISSED;
+        # it does not append a dismissal that clears other active records.
+        ["DISMISSED", "COMMENTED"],
+    ],
+)
+def test_actual_approval_or_dismissal_allows_correctly_reviewed_request(
+    event, phase, operation, paginated, states
+):
+    review_gate_context(event, phase, operation)
+    event["reviews"] = review_history(event["reviews"], states, paginated=paginated)
+    result = execute(event)
+    assert not result["results"][0]["failed"]
+    assert result["results"][0]["outputs"]["approved"] == "true"
+    assert [w["name"] for w in result["writes"]] == (
+        [] if operation == "recheck" else ["tag", "ref", "status"]
+    )
 
 
 def test_review_and_thread_pagination_inspects_later_pages(event):

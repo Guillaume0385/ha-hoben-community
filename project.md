@@ -214,6 +214,13 @@ records separate trusted installation, the no-Hoben dry-run, exact-HEAD MANAGER
 trust and the remaining GitHub protection prerequisites. Existing manual/live
 gates and runtime code do not change.
 
+The autonomous MANAGER Work task may make the owner's authorized one-off trust
+decision during a scheduled invocation after all prerequisites succeed. A tick
+alone never authorizes a run; no repeated campaign, rerun or automatic retry is
+permitted and no new manual user request is needed for the authorized campaign.
+Missing GitHub configuration is documented and refused. Rights, protections and
+secret changes require separate owner authorization and are outside this task.
+
 **Task 2 — persistent protocol session and receive loop**
 
 Add an HA-independent session object that takes ownership of one accepted TLS

@@ -31,6 +31,11 @@ séparément sur main avant utilisation. Le [mode opératoire GitHub Work](manag
 décrit les deux labels réservés, le dry-run réel obligatoire sans Hoben, les
 claims anti-doublon et la lecture du statut/rapport depuis la PR. Cette
 préparation ne prouve pas encore le fonctionnement réel du nouveau canal.
+La tâche MANAGER Work peut décider ponctuellement la campagne déjà autorisée,
+y compris à un passage planifié, après vérification de tous les prérequis et
+enregistrement de sa confiance exact-HEAD. Le tick seul n'autorise rien : aucun
+lancement systématique, rerun, retry ou demande par DEV/PRE-REVIEW. Une nouvelle
+demande manuelle utilisateur n'est pas requise pour cette campagne.
 La campagne H1/H2 reste **NOT RUN** ; ni l'installation #50 ni son ancien gate
 live réussi ne constituent une observation H1/H2 ou un dry-run de #51.
 
@@ -42,10 +47,14 @@ Il vérifie le HEAD courant de la PR #49, sa branche et son dépôt. Une seconde
 vérification intervient après l'attente de protection et le checkout, avant
 l'injection du credential dans le seul step de collecte.
 
+Si une configuration manque ou est inaccessible, MANAGER constate/documente le
+refus et ne lance rien. Les changements de droits, protections ou secrets
+relèvent du propriétaire avec autorisation distincte, hors de la tâche MANAGER.
+
 La disponibilité de l'environnement, de son secret existant `HOBEN_USER_GUID`
 et du canal de chiffrement doit être vérifiée par MANAGER avant dispatch.
-Si un DeviceGuid déjà persisté est disponible, MANAGER peut le fournir via le
-secret protégé optionnel `HOBEN_DEVICE_GUID`. Sinon, les 32 zéros restent la
+Si un DeviceGuid déjà persisté est configuré dans le secret protégé optionnel
+`HOBEN_DEVICE_GUID`, la collecte l'utilise. Sinon, les 32 zéros restent la
 valeur initiale normale ; l'identité attribuée est conservée privément et
 réutilisée automatiquement entre les sessions du même run. Aucun nouvel
 Identifiant HOBEN n'est demandé et aucun secret n'est copié par CODEX DEV.

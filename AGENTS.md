@@ -564,8 +564,13 @@ Issue #51 adds a separate **on-demand MANAGER label channel**,
 `hoben-boundary-request.yml`, independently reviewed/installed on protected main.
 Only `Guillaume0385`'s authenticated `pull_request_target: labeled` event on the
 same-repository draft PR #49 may request `manager-hoben-boundary-dry-run`, then
-`manager-hoben-boundary-live`. Neither CODEX DEV nor an hourly automation adds
-these labels or runs the campaign. Keep the existing manual dispatch and
+`manager-hoben-boundary-live`. The MANAGER Work task, including a scheduled
+invocation, may make and record the owner's authorized one-off exact-HEAD trust
+decision, then add these labels after all prerequisites succeed. No further
+manual user request is required for this already authorized campaign. A periodic
+tick alone never grants permission. CODEX DEV/PRE-REVIEW must not add the labels
+or run the campaign; systematic runs at each tick, reruns and automatic retries
+are prohibited. Keep the existing manual dispatch and
 `manager-live-hoben`/`--live-premerge` contracts unchanged.
 
 Main's reviewed `.github/config/hoben-boundary.json` fixes the sole allowlisted
@@ -578,6 +583,17 @@ trust decision must confirm that attestation. The gate rejects missing/changed
 attestation, changes requested, unresolved threads, failed/missing exact-HEAD CI,
 forks, changed candidate/main, reruns and unverifiable main-only environment
 policy. No request grants merge approval or changes an Issue's workflow state.
+
+Compute each reviewer's effective decision from active `APPROVED` and
+`CHANGES_REQUESTED` reviews in chronological order. `COMMENTED`, `PENDING`, or
+the dismissal of another review never clears an active change request. Its own
+explicit dismissal or a later `APPROVED` decision by that reviewer may lift it.
+Apply this rule both at initial admission and after environment waiting.
+
+MANAGER records missing or inaccessible GitHub configuration and refuses the
+run. Changes to rights, protections or secrets are outside this task; only the
+owner may authorize the necessary configuration separately. Never weaken the
+gate or delegate those changes to the scheduled MANAGER task.
 
 Use only main's pinned **public** capture certificate, supplied by MANAGER in
 [#48 comment 6054724678](https://github.com/Guillaume0385/ha-hoben-community/issues/48#issuecomment-6054724678),
