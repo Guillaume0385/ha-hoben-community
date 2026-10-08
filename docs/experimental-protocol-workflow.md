@@ -9,12 +9,44 @@
 
 | Circuit | Branche cible | Objectif | Conditions de fusion |
 | --- | --- | --- | --- |
-| Recherche protocolaire | `experimental` | Expérimentations H1/H2, trames, Ping/Pong, observations Modbus **en lecture seule** | PR courte, diff examiné, tests ciblés hors ligne et absence de fuite/commande ; revue humaine pour tout script susceptible de recevoir des identifiants |
-| Intégration publiée | `main` | Code stable Home Assistant/HACS et bibliothèques protocolaires validées | Revue indépendante, tests complets, HACS/Hassfest et gate live pré-fusion si applicable, selon `AGENTS.md` |
+| Recherche protocolaire | `experimental` | Expérimentations H1/H2, trames, Ping/Pong, observations Modbus **en lecture seule** | **Revue simplifiée MANAGER uniquement**, tests ciblés et vérification de sécurité ; **pas de CODEX REVIEW** ni de `state:validate` |
+| Intégration publiée | `main` | Code stable Home Assistant/HACS et bibliothèques protocolaires validées | **CODEX REVIEW indépendant, puis MANAGER**, tests complets, HACS/Hassfest et gate live pré-fusion si applicable, selon `AGENTS.md` |
 
 Le propriétaire peut appliquer à `experimental` des vérifications de merge
 plus légères que celles de `main`. Cela concerne **la fusion de code**, pas
 l'autorisation de remettre les identifiants Hoben à ce code.
+
+## Revue MANAGER simplifiée pour les PR vers `experimental`
+
+Le **critère de routage est la branche cible de la PR** (champ GitHub `base.ref`),
+non son nom, ses labels ou la branche source :
+
+- **Base `experimental` :** aucune pré-revue CODEX REVIEW, aucune approbation
+  indépendante ni passage obligé par `state:validate`. CODEX DEV termine
+  l'implémentation, exécute les tests ciblés puis place l'Issue en `state:review`.
+  Le MANAGER prend **directement** la PR en revue, vérifie le diff, le scénario,
+  les résultats des tests ciblés, l'absence de fuite d'identifiants, et
+  l'absence de commande ou écriture réelle. Si ces points sont satisfaits,
+  il peut fusionner vers `experimental` sans attendre la campagne live H1/H2 ;
+  la campagne sera lancée séparément après autorisation du MANAGER. Des
+  corrections retournent à CODEX DEV (`state:in-progress` puis `state:review`),
+  **sans étape CODEX REVIEW**. Une erreur CI pertinente ou un risque de
+  sécurité réel reste un motif de correction, pas une dérogation silencieuse.
+- **Base `main` :** circuit complet inchangé : `state:review` → CODEX REVIEW
+  indépendant → `state:validate` → MANAGER → validations requises → merge.
+  La promotion depuis `experimental` passe obligatoirement par une PR dédiée
+  ciblant `main`; une revue passée sur `experimental` ne remplace jamais celle
+  du code finalement livré.
+
+Les agents et tâches programmées doivent appliquer ce filtrage : **PRE-REVIEW
+ignore toute PR dont la base est `experimental`**, et MANAGER ne réclame pas
+son approbation avant une fusion expérimentale. Les approbations GitHub
+éventuellement exigées par une règle de protection de branche sont distinctes :
+leur réglage doit correspondre à cette politique. Les accès aux secrets sont
+gérés séparément dans la section suivante. Si l'Issue couvre aussi une future
+livraison stable, conserver sa traçabilité jusqu'à la PR finale vers `main` ;
+ne pas marquer cette livraison comme réalisée après une simple fusion de
+recherche.
 
 ## Cycle expérimental
 
