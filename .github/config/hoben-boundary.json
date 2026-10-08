@@ -1,0 +1,12 @@
+{
+  "scenario": "h1h2",
+  "candidate_sha": "00215ef0589d34e9cf9c2ed5f3c3d2fe9f51ee06",
+  "review": {
+    "id": 5452887287,
+    "actor": "Guillaume0385",
+    "actor_id": 18246624,
+    "state": "COMMENTED",
+    "body_sha256": "c3bc1b2c367390c0aefdb9952845a7f96d71c70ef7a440845c7e43713ef80281"
+  },
+  "recipient_sha256": "f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246"
+}

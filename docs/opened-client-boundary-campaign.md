@@ -8,9 +8,8 @@ La PR #49 conserve la branche `codex/issue-48` et reste en brouillon.
 
 ## Prérequis de confiance avant la première exécution
 
-Le workflow dédié n'existe actuellement que dans le candidat : il ne peut pas
-s'accorder l'accès à `hoben-live`. MANAGER doit préparer une **installation de
-gouvernance séparée**, revue et validée sur main, limitée à :
+La PR #50 a installé séparément la voie manuelle sur main (commit
+`2b8d1b520ffdb46102b0784ba49021ed16cc189e`) :
 
 - `.github/workflows/opened-client-boundary.yml` ;
 - `.github/scripts/opened-client-boundary-gate.cjs` et son test hors ligne
@@ -23,6 +22,17 @@ et une revue indépendante restent requis pour cette installation. MANAGER
 enregistre sa classification de validation live conformément à `AGENTS.md`.
 Aucun changement des voies existantes, du gate `--live-premerge`, de secrets ou
 de protections n'est effectué par CODEX DEV.
+
+La connexion GitHub Work du MANAGER ne fournit pas `workflow_dispatch` ni
+l'écriture de variables d'environnement. Le complément **#51** prépare donc
+`hoben-boundary-request.yml`, un gate main, un point d'entrée main, le certificat
+**public** et sa politique épinglée. Il doit, lui aussi, être revu et installé
+séparément sur main avant utilisation. Le [mode opératoire GitHub Work](manager-boundary-request.md)
+décrit les deux labels réservés, le dry-run réel obligatoire sans Hoben, les
+claims anti-doublon et la lecture du statut/rapport depuis la PR. Cette
+préparation ne prouve pas encore le fonctionnement réel du nouveau canal.
+La campagne H1/H2 reste **NOT RUN** ; ni l'installation #50 ni son ancien gate
+live réussi ne constituent une observation H1/H2 ou un dry-run de #51.
 
 MANAGER vérifie ensuite, dans les paramètres GitHub, que main est protégée et
 que `hoben-live` autorise **exactement la branche protégée main**, sans branche
@@ -61,6 +71,19 @@ secrète ne sont jamais envoyées à GitHub. Le MANAGER compare l'empreinte DER
 SHA256 obtenue et saisit ses 64 caractères hexadécimaux minuscules lors du
 dispatch. Ce hash concerne seulement le certificat public, jamais un identifiant
 ou une trame du poêle.
+
+Ces instructions de variable/input restent propres à la **voie manuelle**.
+La voie GitHub Work #51 utilise directement le PEM public fourni dans
+[#48, commentaire 6054724678](https://github.com/Guillaume0385/ha-hoben-community/issues/48#issuecomment-6054724678),
+copié dans `.github/config/hoben-capture-recipient.pem` sur main, et l'empreinte
+DER `f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246`
+dans `.github/config/hoben-boundary.json`. MANAGER a attesté la conservation
+durable et la concordance de sa clé privée. **Ne pas régénérer une clé pour
+contourner un échec** : toute rotation requiert revue et installation sur main.
+Le dry-run chiffre uniquement des données synthétiques avec ce destinataire ;
+il ne prouve pas à lui seul que MANAGER peut déchiffrer ou dispose toujours de
+sa clé. Celle-ci reste hors de GitHub. Aucune nouvelle variable d'environnement
+ni transmission de clé privée n'est nécessaire pour #51.
 
 Avant toute connexion, la sonde vérifie cette empreinte, la validité du
 certificat pendant au moins une heure, RSA ≥3072 et un chiffrement de préflight.
@@ -266,6 +289,17 @@ portée et limites. Il décide si une preuve suffisante permet le routeur, si un
 autre observation est nécessaire ou si le blocage protocolaire persiste. Aucun
 silence, fixture synthétique ou résultat favorable isolé n'autorise une règle
 universelle, la fusion de #49 ou les tâches 2–6.
+
+La voie #51 publie un **rapport compact distinct**, schéma 1 : provenance
+main/candidat/run, fenêtre 90 s, sessions planifiées/réalisées/admissibles et,
+par session, mode, pause/répétition, arrêt, contexte d'ouverture, comptages et
+catégories H1/H2/comparaison. Le publisher main revalide ce JSON et poste un
+tableau de catégories et de lectures émises/corrélées sur #49, lisible depuis
+GitHub Work. Il ne recopie aucun texte libre du candidat. Les annotations
+complètes schéma 2 et leurs détails temporels restent disponibles **à l'intérieur
+du ciphertext**, avec les octets/journaux pour l'analyse privée hors ligne.
+`inconclusive`/`hypotheses_unproven` reste le résultat d'une collecte achevée ;
+succès Actions ou crypto n'est jamais une preuve de frontière.
 
 ## Interruptions et limites de conservation
 

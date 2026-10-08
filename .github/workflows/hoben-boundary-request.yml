@@ -1,0 +1,181 @@
+name: MANAGER H1 H2 label request
+
+# Install/review independently on protected main before MANAGER requests a run.
+# Neither hourly DEV, a PR workflow, a comment nor a rerun grants live access.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: hoben-boundary-campaign
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: request
+    if: >-
+      github.actor == 'Guillaume0385' && github.event.pull_request.number == 49 &&
+      (github.event.label.name == 'manager-hoben-boundary-dry-run' ||
+       github.event.label.name == 'manager-hoben-boundary-live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
+      issues: read
+      statuses: write
+    outputs:
+      recognized: ${{ steps.gate.outputs.recognized }}
+      approved: ${{ steps.gate.outputs.approved }}
+      claimed: ${{ steps.gate.outputs.claimed }}
+      phase: ${{ steps.gate.outputs.phase }}
+      sha: ${{ steps.gate.outputs.sha }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - id: gate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-boundary-request.cjs');
+            await gate.verify({github, context, core});
+
+  dry-run:
+    name: dry-run
+    needs: request
+    if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Prove synthetic encryption without a Hoben connection
+        env:
+          BOUNDARY_PHASE: dry-run
+          HOBEN_BOUNDARY_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+        run: python trusted/scripts/run_boundary_request.py dry-run >/dev/null 2>/dev/null
+      - uses: actions/upload-artifact@v7
+        with:
+          name: boundary-dry-run-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-boundary-request-exports/report.json
+          if-no-files-found: error
+          retention-days: 7
+
+  observations:
+    name: observations
+    needs: request
+    if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: hoben-live
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: Guillaume0385/ha-hoben-community
+          ref: ${{ needs.request.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - id: recheck
+        name: Recheck all trust facts after environment waiting
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-boundary-request.cjs');
+            await gate.verify({github, context, core, recheck: true});
+      - name: Collect the fixed reviewed H1 H2 campaign and encrypt privately
+        if: steps.recheck.outputs.approved == 'true'
+        env:
+          BOUNDARY_PHASE: live
+          HOBEN_BOUNDARY_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: python trusted/scripts/run_boundary_request.py live >/dev/null 2>/dev/null
+      - name: Export authenticated ciphertext only
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-ciphertext-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-boundary-request-exports/captures.cms
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Export separate bounded anonymized report
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-boundary-request-exports/report.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: [request, dry-run, observations]
+    if: ${{ always() && needs.request.outputs.recognized == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
+      pull-requests: write
+    steps:
+      # A fresh runner; never checkout candidate/download private artifacts here.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Read only the separate dry-run public report
+        if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'dry-run' && needs.dry-run.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: boundary-dry-run-report-${{ github.run_id }}
+          path: public-report
+      - name: Read only the separate live public report
+        if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'live' && needs.observations.result == 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: boundary-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: public-report
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        if: ${{ always() }}
+        env:
+          BOUNDARY_APPROVED: ${{ needs.request.outputs.approved }}
+          BOUNDARY_CLAIMED: ${{ needs.request.outputs.claimed }}
+          BOUNDARY_GATE_REASON: ${{ needs.request.outputs.reason }}
+          BOUNDARY_JOB_RESULT: ${{ needs.request.outputs.phase == 'dry-run' && needs.dry-run.result || needs.observations.result }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-boundary-request.cjs');
+            await gate.publish({github, context, core});
