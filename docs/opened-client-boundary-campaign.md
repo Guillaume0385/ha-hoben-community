@@ -276,3 +276,32 @@ de chiffrement/stockage peut empêcher la récupération ; aucun résultat ni
 artefact complet n'est alors revendiqué. Les uploads ciblent seulement les deux
 fichiers d'export, jamais un wildcard du dossier privé. Les logs de la collecte
 sont supprimés, les summaries ne contiennent que le SHA et un statut générique.
+
+## Voie expérimentale distincte préparée par #54
+
+#54 réutilise les primitives H1/H2, capture, chiffrement et replay examinées dans
+#49/#52 sur une PR ciblant `experimental`, sans modifier ces deux PR ni conclure
+sur la frontière. L’entrée `run_experimental_boundary.py` fixe le scénario et
+la projection publique ; elle appelle la bibliothèque de campagne, sans lancer
+le CLI historique `workflow_dispatch` ni contourner ses contrôles.
+
+Son petit bootstrap main indépendant propose `hoben-experimental-request.yml`,
+consommant une décision JSON MANAGER puis un label sur #54 via le connecteur.
+La référence de déploiement `issues:labeled` est main : son environnement dédié
+`hoben-experimental` est **Branch main uniquement**, avec approbation indépendante
+et prevent-self-review, sans modification de `hoben-live` ni des anciens gates.
+Le candidat est le HEAD expérimental fusionné/revu, pas celui du run main.
+Voir [l’opération précise](experimental-protocol-workflow.md) pour le dry-run,
+les labels réservés, les Settings du propriétaire, la réservation et la lecture
+corrélée du run/rapport une heure plus tard.
+
+Les artefacts de cette voie sont `experimental-ciphertext-<SHA>-<run_id>` et
+`experimental-report-<SHA>-<run_id>`, rétention 7 jours ; le déchiffrement privé
+CMS décrit plus haut reste applicable. Le certificat public de #52 est épinglé
+sur main avant TLS ; aucun secret certificat ni clé privée n’est demandé à DEV.
+Les budgets, stops et hypothèses restent ceux de cette campagne. Les workflows
+historiques conservent leur procédure ; aucune substitution de validation stable.
+
+La préparation offline de #54 ne prouve ni installation, ni dry-run GitHub réel,
+ni observation Hoben et ne débloque pas #48/#51. Ces preuves et décisions restent
+à fournir par MANAGER après les revues et fusions autorisées.

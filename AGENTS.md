@@ -567,6 +567,25 @@ for fixed experimental budgets, stops, replay and the separate trusted-installat
 prerequisite. CODEX DEV prepares and tests these tools; MANAGER runs and interprets
 the real observations. Task 1's router and Tasks 2–6 await the evidence decision.
 
+### Post-merge experimental channel — Issue #54
+
+Issue #54 authorizes preparation of the fixed H1/H2 tooling from #49/#52 on
+`experimental`, with direct MANAGER review, and a separate trusted-main bootstrap
+with independent CODEX REVIEW and normal main validation. `issues:labeled`
+deploys from main: require a dedicated main-only `hoben-experimental` environment,
+prevent-self-review and an actually verified independent User approval. Owner
+alone configures settings/secrets. No candidate workflow decides admission.
+
+Extend only the bounded private-RX exception above, with the same read-only
+budgets, pinned public recipient, pre-TLS CMS, private cleanup, numeric/categorical
+report and seven-day ciphertext retention. Trusted main must remove every runner/
+GitHub token before candidate execution, bind current main and experimental HEAD
+to MANAGER's exact review, require a real secret-free GitHub dry-run and recheck
+after environment approval. Immutable per-SHA/scenario/phase reservations prevent
+replay. Missing evidence means NOT RUN. No scheduled DEV live run, production
+boundary inference, automatic retry or unblocking of #48/#51. See [the concrete
+procedure](docs/experimental-protocol-workflow.md).
+
 ---
 
 ## Version and feature discipline
