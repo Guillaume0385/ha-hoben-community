@@ -1066,6 +1066,18 @@ metadata, or CI/test-only changes that cannot alter the live execution path.
 Mixed or ambiguous PRs require the live gate. The MANAGER must explicitly
 classify and record the live-validation decision in the PR before merge.
 
+### Proposed experimental protocol branch — independent of release validation
+
+The branch `experimental` is reserved for bounded, opt-in, **read-only** Hoben
+protocol research. Short research PRs may use lighter merge checks than `main`,
+but this does **not** grant access to the live environment's credentials. A
+trusted workflow, reviewed exact code, an explicitly selected deployment branch
+and an independent approval before exposing secrets are still required.
+Confirmed protocol observations return to `main` through a separate final PR
+with complete offline CI, independent review, HACS/Hassfest and conditional
+pre-merge validation. See [the experimental workflow proposal](docs/experimental-protocol-workflow.md).
+This proposal does not alter current gates or authorize a live run by itself.
+
 ### MANAGER-gated authenticated candidate validation
 
 `.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
@@ -1245,6 +1257,18 @@ equivalent explicit closing reference.
 GitHub Projects may later mirror these labels for visualization, but labels on
 the Issue remain authoritative.
 
+**The following state machine applies to PRs targeting `main`.** The
+read-only research branch `experimental` uses a shorter route: CODEX DEV →
+`state:review` → **MANAGER alone** → merge to `experimental`, with
+`state:in-progress` corrections returning directly to MANAGER. No CODEX REVIEW
+step, no `state:validate`, and no authenticated pre-merge live gate are
+required merely to merge a research PR. MANAGER checks the exact HEAD, targeted
+tests, protocol-read-only scope, and secret/logging safety. Experimental live
+runs remain separately authorized and controlled; they are never triggered just
+by merging code. The final `experimental` → `main` PR receives full CODEX
+REVIEW, MANAGER approval, CI and conditional live acceptance. See
+[experimental branch policy](docs/experimental-protocol-workflow.md).
+
 The canonical state machine is:
 
 ```text
@@ -1377,12 +1401,18 @@ For a new task, CODEX DEV:
 8. opens or updates one PR linked with `Closes #N`;
 9. moves the Issue to `state:review`.
 
+For PRs with base `experimental`, `state:review` hands the PR directly to
+MANAGER rather than CODEX REVIEW. Do not await independent approval to merge
+research code; the final PR to `main` retains independent review and all
+required release checks.
+
 CODEX DEV leaves implementation PRs open and never self-approves, adds
 `state:validate`, authorizes privileged live validation, or merges.
 
-## Independent review — CODEX REVIEW
+## Independent review — CODEX REVIEW (PRs targeting `main` only)
 
-CODEX REVIEW reviews implementations only from `state:review` and independently
+For PRs with base `main` only, CODEX REVIEW reviews implementations from
+`state:review` and independently
 verifies the exact current PR HEAD rather than trusting the developer summary.
 
 The review covers, as applicable:
@@ -1407,7 +1437,7 @@ has been resolved, CODEX REVIEW approves that HEAD and moves the Issue to
 CODEX REVIEW never performs privileged authenticated Hoben validation and never
 merges.
 
-## Final review and live validation — MANAGER
+## Final review and live validation — MANAGER (PRs targeting `main`)
 
 The MANAGER performs final review only from `state:validate` and only after
 CODEX REVIEW has approved the exact current HEAD.
@@ -1483,6 +1513,11 @@ transitions available to the roles above; they do not bypass the independent
 review or MANAGER final-review rules.
 
 ## Review loop invariant
+
+For PRs targeting `experimental`, MANAGER is the sole reviewer: review remarks
+return the Issue to `state:in-progress` for CODEX DEV, then `state:review` for
+another MANAGER pass. No CODEX REVIEW, no `state:validate`, and no pre-merge
+live Hoben requirement. The full loop below applies to PRs targeting `main`.
 
 Every review remark must be considered and answered. Every actionable requested
 change must be corrected before the task can advance.
