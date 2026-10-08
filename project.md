@@ -1401,6 +1401,11 @@ For a new task, CODEX DEV:
 8. opens or updates one PR linked with `Closes #N`;
 9. moves the Issue to `state:review`.
 
+For PRs with base `experimental`, `state:review` hands the PR directly to
+MANAGER rather than CODEX REVIEW. Do not await independent approval to merge
+research code; the final PR to `main` retains independent review and all
+required release checks.
+
 CODEX DEV leaves implementation PRs open and never self-approves, adds
 `state:validate`, authorizes privileged live validation, or merges.
 
