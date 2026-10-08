@@ -634,6 +634,10 @@ Do not duplicate the workflow state in GitHub Projects, PR labels, PR titles, or
 other fields. Projects may later visualize the process, but they are not the
 authoritative state machine.
 
+For PRs targeting `experimental`, `state:review` means **MANAGER review**,
+not CODEX REVIEW, and a MANAGER-reviewed experimental merge does not require
+`state:validate`. The state diagram below describes the `main` delivery route.
+
 The linked Pull Request carries the diff, reviews, discussion, and CI only.
 CODEX DEV links it to the Issue with `Closes #N` or an equivalent explicit
 closing reference so merge closes the task automatically.
