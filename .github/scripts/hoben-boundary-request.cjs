@@ -81,6 +81,41 @@ async function claim(github, context, phase) {
   return stamp;
 }
 
+async function environmentPolicy(github, api) {
+  try {
+    const { data: environment } = await github.rest.repos.getEnvironment({
+      ...api, environment_name: 'hoben-live' });
+    requireFact(environment.name === 'hoben-live' &&
+      environment.deployment_branch_policy?.custom_branch_policies === true &&
+      environment.deployment_branch_policy.protected_branches === false,
+    'environment_policy_unverified');
+    const policies = await github.paginate(github.rest.repos.listDeploymentBranchPolicies,
+      { ...api, environment_name: 'hoben-live', per_page: 100 });
+    requireFact(policies.length === 1 && policies[0].name === 'main' &&
+      Number.isSafeInteger(policies[0].id) && policies[0].id > 0 &&
+      typeof policies[0].node_id === 'string' && policies[0].node_id.length > 0,
+    'environment_policy_unverified');
+    let policy = policies[0];
+    // GitHub's list example omits type; both list/detail schemas make it
+    // optional. Read the same policy by ID when absent, but never infer branch
+    // from its name, node_id, endpoint name or a creation default. The detail
+    // must explicitly prove branch/main and match both listed identifiers.
+    // If neither endpoint supplies type, the environment remains unverified.
+    if (!Object.hasOwn(policy, 'type')) {
+      const { data: detail } = await github.rest.repos.getDeploymentBranchPolicy({
+        ...api, environment_name: 'hoben-live', branch_policy_id: policy.id });
+      requireFact(detail?.id === policy.id && detail.node_id === policy.node_id &&
+        detail.name === policy.name, 'environment_policy_unverified');
+      policy = detail;
+    }
+    requireFact(policy.type === 'branch', 'environment_policy_unverified');
+  } catch {
+    // Null/missing policy, optional fields, 403/404 and API failures all refuse
+    // before a claim or secrets, including the recheck after environment wait.
+    throw new Refusal('environment_policy_unverified');
+  }
+}
+
 async function verify({ github, context, core, recheck = false }) {
   try {
     const phase = request(context);
@@ -160,15 +195,7 @@ async function verify({ github, context, core, recheck = false }) {
       ci.event === 'pull_request' && ci.head_sha === policy.candidate_sha &&
       ci.status === 'completed' && ci.conclusion === 'success', 'unverifiable_ci');
 
-    const { data: environment } = await github.rest.repos.getEnvironment({
-      ...api, environment_name: 'hoben-live' });
-    const branches = await github.paginate(github.rest.repos.listDeploymentBranchPolicies,
-      { ...api, environment_name: 'hoben-live', per_page: 100 });
-    requireFact(environment.name === 'hoben-live' &&
-      environment.deployment_branch_policy?.custom_branch_policies === true &&
-      environment.deployment_branch_policy.protected_branches === false &&
-      branches.length === 1 && branches[0].name === 'main' && branches[0].type === 'branch',
-    'environment_policy_unverified');
+    await environmentPolicy(github, api);
     const livePaths = ['opened-client-boundary.yml', 'manager-live-hoben.yml',
       'live-validation.yml', 'hoben-boundary-request.yml'];
     for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {

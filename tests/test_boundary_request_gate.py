@@ -32,7 +32,9 @@ const github={rest:{
  repos:{get:a=>invoke('repository',a,input.repository),
   getBranch:a=>invoke('branch',a,input.branch),
   getEnvironment:a=>invoke('environment',a,input.environment),
-  listDeploymentBranchPolicies:a=>invoke('policies',a,page(input.policies,a)),
+  listDeploymentBranchPolicies:a=>invoke('policies',a,{
+   total_count:input.policies.length,branch_policies:page(input.policies,a)}),
+  getDeploymentBranchPolicy:a=>invoke('policy',a,input.policy),
   createCommitStatus:a=>{writes.push({name:'status',args:a});
    return invoke('status',a,{})}},
  pulls:{get:a=>invoke('pr',a,input.pr),
@@ -58,7 +60,8 @@ const github={rest:{
     writes.push({name:'ref',args:a});return r})}}
 },paginate:async(method,args)=>{
  const all=[];for(let p=1;p<=20;p++){const result=await method({...args,page:p});
- all.push(...result.data);if(result.data.length<100)return all;}
+ const entries=Array.isArray(result.data)?result.data:result.data.branch_policies;
+ all.push(...entries);if(entries.length<100)return all;}
  throw Error('PRIVATE_PAGINATION');
 },graphql:async(query,args)=>{
  const p=args.cursor===null?0:Number(args.cursor);const data=input.threads[p];
@@ -77,6 +80,9 @@ const gate=require(input.gate);
    input.pr.labels=[{name:context.payload.label.name}];}
   if(op.id)context.runId=op.id;
   if(op.reviews)input.reviews=op.reviews;
+  for(const key of ['environment','policies','policy','error_at']){
+   if(Object.hasOwn(op,key))input[key]=op[key];
+  }
   if(op.report)require('fs').writeFileSync(
    `${process.env.GITHUB_WORKSPACE}/public-report/report.json`,
    JSON.stringify(op.report));
@@ -170,7 +176,19 @@ def event(tmp_path):
                 "protected_branches": False,
             },
         },
-        "policies": [{"name": "main", "type": "branch"}],
+        # GitHub's list example omits the optional type. Its response is an
+        # object containing branch_policies, normalized by Octokit paginate.
+        "policies": [
+            {"id": 361471, "node_id": "SYNTHETIC_POLICY_NODE", "name": "main"}
+        ],
+        # A detail response may explicitly prove the type, but neither REST
+        # schema guarantees it. Tests below refuse when both omit that proof.
+        "policy": {
+            "id": 361471,
+            "node_id": "SYNTHETIC_POLICY_NODE",
+            "name": "main",
+            "type": "branch",
+        },
         "active": [],
         "runs": {
             "10": {
@@ -438,6 +456,174 @@ def assert_review_refused_without_new_permission(result, original_claims):
     assert outcome["outputs"].get("approved") != "true"
     assert outcome["outputs"].get("claimed") != "true"
     assert not result["writes"] and result["claims"] == original_claims
+
+
+ENVIRONMENT_GATE_CONTEXTS = [
+    ("dry-run", "verify"),
+    ("live", "verify"),
+    ("live", "recheck"),
+]
+
+
+@pytest.mark.parametrize("phase,operation", ENVIRONMENT_GATE_CONTEXTS)
+@pytest.mark.parametrize("listed_type", [True, False])
+def test_environment_branch_type_must_be_proven_by_list_or_matching_detail(
+    event, phase, operation, listed_type
+):
+    review_gate_context(event, phase, operation)
+    if listed_type:
+        event["policies"][0]["type"] = "branch"
+        event["error_at"] = "policy"  # No redundant detail call is necessary.
+    result = execute(event)
+    outcome = result["results"][0]
+    assert not outcome["failed"] and outcome["outputs"]["approved"] == "true"
+    detail_calls = [c["args"] for c in result["calls"] if c["name"] == "policy"]
+    assert bool(detail_calls) is not listed_type
+    if detail_calls:
+        assert detail_calls == [
+            {
+                "owner": "Guillaume0385",
+                "repo": "ha-hoben-community",
+                "environment_name": "hoben-live",
+                "branch_policy_id": 361471,
+            }
+        ]
+    assert [w["name"] for w in result["writes"]] == (
+        [] if operation == "recheck" else ["tag", "ref", "status"]
+    )
+
+
+@pytest.mark.parametrize("phase,operation", ENVIRONMENT_GATE_CONTEXTS)
+@pytest.mark.parametrize(
+    "change",
+    [
+        "unrestricted_environment",
+        "all_protected_branches",
+        "wrong_environment",
+        "environment_unavailable",
+        "list_unavailable",
+        "detail_unavailable",
+        "missing_detail",
+        "untyped_detail",
+        "tag_detail",
+        "wrong_detail_id",
+        "wrong_detail_node",
+        "wrong_detail_name",
+        "wildcard_detail",
+        "tag_list",
+        "invalid_list_type",
+        "invalid_list_id",
+        "missing_list_node",
+        "wildcard_list",
+        "other_branch_list",
+        "additional_tag",
+    ],
+)
+def test_unverifiable_or_broader_environment_refuses_without_new_permission(
+    event, phase, operation, change
+):
+    review_gate_context(event, phase, operation)
+    if change == "unrestricted_environment":
+        # Non-secret REST observation on this repository, 2026-10-08: the
+        # environment returned deployment_branch_policy=null; list gave 404.
+        event["environment"]["deployment_branch_policy"] = None
+        event["error_at"] = "policies"
+    elif change == "all_protected_branches":
+        event["environment"]["deployment_branch_policy"] = {
+            "protected_branches": True,
+            "custom_branch_policies": False,
+        }
+    elif change == "wrong_environment":
+        event["environment"]["name"] = "other"
+    elif change.endswith("unavailable"):
+        event["error_at"] = {
+            "environment_unavailable": "environment",
+            "list_unavailable": "policies",
+            "detail_unavailable": "policy",
+        }[change]
+    elif change == "missing_detail":
+        event["policy"] = None
+    elif change == "untyped_detail":
+        event["policy"].pop("type")
+    elif change == "tag_detail":
+        event["policy"]["type"] = "tag"
+    elif change == "wrong_detail_id":
+        event["policy"]["id"] += 1
+    elif change == "wrong_detail_node":
+        event["policy"]["node_id"] = "OTHER_POLICY_NODE"
+    elif change == "wrong_detail_name":
+        event["policy"]["name"] = "codex/issue-48"
+    elif change == "wildcard_detail":
+        event["policy"]["name"] = "*"
+    elif change == "tag_list":
+        event["policies"][0]["type"] = "tag"
+    elif change == "invalid_list_type":
+        event["policies"][0]["type"] = None
+    elif change == "invalid_list_id":
+        event["policies"][0]["id"] = "361471"
+    elif change == "missing_list_node":
+        event["policies"][0].pop("node_id")
+    elif change == "wildcard_list":
+        event["policies"][0]["name"] = "*"
+    elif change == "other_branch_list":
+        event["policies"][0]["name"] = "codex/issue-48"
+    elif change == "additional_tag":
+        event["policies"].append(
+            {"id": 361472, "node_id": "TAG_POLICY_NODE", "name": "main", "type": "tag"}
+        )
+    original_claims = copy.deepcopy(event.get("claims", {}))
+    result = execute(event)
+    outcome = result["results"][0]
+    assert outcome["failed"]
+    assert outcome["outputs"]["reason"] == "environment_policy_unverified"
+    assert outcome["outputs"].get("approved") != "true"
+    assert outcome["outputs"].get("claimed") != "true"
+    assert not result["writes"] and result["claims"] == original_claims
+
+
+def test_environment_policy_pagination_does_not_hide_later_tag(event):
+    event["policies"] *= 100
+    event["policies"].append(
+        {"id": 361472, "node_id": "TAG_POLICY_NODE", "name": "main", "type": "tag"}
+    )
+    result = execute(event)
+    assert result["results"][0]["outputs"]["reason"] == "environment_policy_unverified"
+    assert not result["writes"]
+    assert any(
+        c["name"] == "policies" and c["args"]["page"] == 2 for c in result["calls"]
+    )
+
+
+@pytest.mark.parametrize("change", ["untyped", "tag", "replaced", "unrestricted"])
+def test_changed_environment_during_wait_refuses_secret_recheck(event, change):
+    live(event)
+    updated_policy = copy.deepcopy(event["policy"])
+    updated_environment = copy.deepcopy(event["environment"])
+    if change == "untyped":
+        updated_policy.pop("type")
+    elif change == "tag":
+        updated_policy["type"] = "tag"
+    elif change == "replaced":
+        updated_policy["id"] += 1
+    else:
+        updated_environment["deployment_branch_policy"] = None
+    event["operations"] = [
+        {"name": "verify"},
+        {
+            "name": "recheck",
+            "policy": updated_policy,
+            "environment": updated_environment,
+        },
+    ]
+    result = execute(event)
+    admitted, rechecked = result["results"]
+    assert admitted["outputs"]["approved"] == "true" and not admitted["failed"]
+    assert rechecked["failed"]
+    assert rechecked["outputs"]["reason"] == "environment_policy_unverified"
+    assert rechecked["outputs"].get("approved") != "true"
+    assert rechecked["outputs"].get("claimed") != "true"
+    assert [w["name"] for w in result["writes"]] == ["tag", "ref", "status"]
+    assert len(result["claims"]) == 2
 
 
 @pytest.mark.parametrize("phase,operation", REVIEW_GATE_CONTEXTS)

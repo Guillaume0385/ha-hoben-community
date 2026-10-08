@@ -220,6 +220,9 @@ alone never authorizes a run; no repeated campaign, rerun or automatic retry is
 permitted and no new manual user request is needed for the authorized campaign.
 Missing GitHub configuration is documented and refused. Rights, protections and
 secret changes require separate owner authorization and are outside this task.
+An optional REST policy type must be verified explicitly from the sole policy
+or its matching detail; missing type on both endpoints blocks live validation.
+The Work procedure records the non-secret API observation and external limit.
 
 **Task 2 — persistent protocol session and receive loop**
 

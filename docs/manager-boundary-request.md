@@ -58,7 +58,10 @@ threads restent vérifiés séparément.
    déploiement : type `branch`, nom `main`, `custom_branch_policies=true`,
    `protected_branches=false`. Aucun tag, wildcard ou branche candidate.
    Une ancienne exception ou politique inaccessible à l'API refuse même le
-   dry-run (`environment_policy_unverified`/`github_or_configuration_unavailable`).
+   dry-run (`environment_policy_unverified`). Un champ `type` absent de la liste
+   exige une preuve explicite dans le détail de **la même** politique ; absent
+   également du détail, il bloque toute autorisation. Voir le contrat REST et
+   la limite observée ci-dessous.
    MANAGER constate et documente le refus. Toute correction de droits,
    protections ou secrets relève du propriétaire avec autorisation distincte,
    hors de cette tâche ; ni DEV ni la tâche MANAGER ne modifient ces réglages.
@@ -92,6 +95,55 @@ Références GitHub :
 [sécurité pull_request_target](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target),
 [checkout v7 et têtes de forks](https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/),
 [main et environnements](https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/).
+
+### Contrat REST des politiques et limite vérifiée
+
+Vérification en lecture seule le **2026-10-08**, avec la version REST
+`2022-11-28` et sans lire de secret :
+
+| Endpoint du dépôt / environnement `hoben-live` | Réponse observée |
+| --- | --- |
+| `GET /repos/Guillaume0385/ha-hoben-community/environments/hoben-live` | HTTP 200 ; `name=hoben-live`, `deployment_branch_policy=null` |
+| `GET /repos/Guillaume0385/ha-hoben-community/environments/hoben-live/deployment-branch-policies` | HTTP 404 |
+
+Cette observation provient de l'environnement DEV, pas d'un run privilégié ni
+du token `GITHUB_TOKEN` du futur runner. Elle **n'atteste aucune restriction à
+main** et ne donne aucune information sur les valeurs ou la présence des
+secrets. Aucun objet de politique ni son type n'a été obtenu sur ce dépôt ;
+le défaut d'un champ `type` absent n'y est donc pas reproduit. La connexion
+Work du MANAGER n'expose toujours pas cet endpoint. La validation live reste
+interdite tant que la politique requise ne peut pas être vérifiée. MANAGER
+documente ce préalable externe ; tout changement de droits/protections/secrets
+exige une autorisation distincte du propriétaire, hors de cette tâche.
+
+Le [schéma REST officiel de liste](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies)
+est `{total_count, branch_policies:[{id,node_id,name,type?}]}`. Le champ `type`
+est une propriété du schéma (`branch` ou `tag`), **sans garantie de présence** ;
+l'exemple de réponse omet ce champ. Le
+[détail par ID](https://docs.github.com/en/rest/deployments/branch-policies#get-a-deployment-branch-policy)
+emploie le même schéma à champ facultatif. Sources revérifiées : documentation
+officielle et [description OpenAPI GitHub](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json),
+schéma `deployment-branch-policy`. Le paramètre `type` d'une création n'est pas
+une preuve du type d'une politique lue.
+
+Le gate, à l'admission **et au recheck**, exige les deux flags d'environnement
+exactement attendus, puis liste toutes les pages et exige **une seule** règle
+nommée exactement `main`. Si la liste fournit `type=branch`, cette réponse
+constitue la preuve. Si elle omet `type`, le gate lit le détail avec l'ID reçu,
+exige les mêmes `id`, `node_id`, `name` et `type=branch` explicite. Cette lecture
+de détail est une possibilité de preuve, **pas une garantie de réponse plus
+complète**. Elle n'ajoute aucune permission d'écriture ou d'administration.
+
+Si le détail omet également `type`, indique `tag`, change d'identité/nom ou
+reste inaccessible, le gate refuse avec `environment_policy_unverified`.
+Idem pour une politique nulle, toutes les branches protégées, une autre branche,
+un wildcard, une règle supplémentaire ou une API en erreur. Il ne déduit jamais
+le type du nom `main`, du `node_id`, du nom de l'endpoint ou d'une valeur par
+défaut. Une configuration sûre mais insuffisamment décrite par GitHub reste
+**non vérifiée** : aucun claim, statut pending ou nouvel `approved=true` n'est
+créé sur ce refus, et le recheck ne permet pas le step recevant les secrets.
+Les tests hors ligne couvrent le schéma sans `type`, les preuves explicites et
+ces refus ; ils ne démontrent pas la configuration effective de `hoben-live`.
 
 ## Dry-run obligatoire depuis Work
 

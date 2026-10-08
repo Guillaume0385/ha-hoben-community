@@ -594,6 +594,10 @@ MANAGER records missing or inaccessible GitHub configuration and refuses the
 run. Changes to rights, protections or secrets are outside this task; only the
 owner may authorize the necessary configuration separately. Never weaken the
 gate or delegate those changes to the scheduled MANAGER task.
+The REST policy type is optional: require an explicit `branch/main` proof from
+the sole listed policy or its same-ID/node-ID detail. If both omit the type or
+the environment is unrestricted/inaccessible, refuse admission and secret
+recheck. Never infer branch from a policy name or relax the main-only boundary.
 
 Use only main's pinned **public** capture certificate, supplied by MANAGER in
 [#48 comment 6054724678](https://github.com/Guillaume0385/ha-hoben-community/issues/48#issuecomment-6054724678),
