@@ -195,6 +195,35 @@ Required tests include every split point, byte-at-a-time input, multiple
 coalesced messages, Ping adjacent to Modbus traffic, invalid MBAP lengths,
 truncated frames, unsupported types and clean EOF. No real server is required.
 
+The separate tooling prerequisite #51 prepares an on-demand GitHub Work channel:
+authenticated MANAGER-only labels on draft PR #49, with the workflow/gate and a
+public recipient certificate pinned on protected main. Its only scenario is
+both H1/H2 at 90 seconds on the reviewed #49 HEAD
+`00215ef0589d34e9cf9c2ed5f3c3d2fe9f51ee06`; the independent-role review is attested
+by a reviewed main policy, not inferred from free-text approval claims. Exact
+main/HEAD, four offline checks, current review, main-only environment policy and
+an actual successful dry-run of this new channel precede secret access.
+Atomic per-phase/main/HEAD claims prevent duplicates/reruns; campaign concurrency
+and a second trust check preserve the bounded read-only experiment. A fresh
+trusted publisher exposes only validated categories/counts and the run link,
+with separate seven-day encrypted capture and anonymized report artifacts.
+Installing #51 neither merges #49 nor resolves #48. H1/H2 is still **NOT RUN**;
+boundary evidence, Task 1 completion and Tasks 2–6 remain pending. CODEX DEV
+delivers/tests tooling only. The [GitHub Work procedure](docs/manager-boundary-request.md)
+records separate trusted installation, the no-Hoben dry-run, exact-HEAD MANAGER
+trust and the remaining GitHub protection prerequisites. Existing manual/live
+gates and runtime code do not change.
+
+The autonomous MANAGER Work task may make the owner's authorized one-off trust
+decision during a scheduled invocation after all prerequisites succeed. A tick
+alone never authorizes a run; no repeated campaign, rerun or automatic retry is
+permitted and no new manual user request is needed for the authorized campaign.
+Missing GitHub configuration is documented and refused. Rights, protections and
+secret changes require separate owner authorization and are outside this task.
+An optional REST policy type must be verified explicitly from the sole policy
+or its matching detail; missing type on both endpoints blocks live validation.
+The Work procedure records the non-secret API observation and external limit.
+
 **Task 2 — persistent protocol session and receive loop**
 
 Add an HA-independent session object that takes ownership of one accepted TLS

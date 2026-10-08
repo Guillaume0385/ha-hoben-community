@@ -560,6 +560,67 @@ only authenticated AES-256-GCM CMS ciphertext and a separate numeric/categorical
 anonymized report. The RSA-OAEP/SHA256 private decryption key stays with MANAGER,
 never on GitHub or the runner. Artifacts expire after seven days.
 
+Issue #51 adds a separate **on-demand MANAGER label channel**,
+`hoben-boundary-request.yml`, independently reviewed/installed on protected main.
+Only `Guillaume0385`'s authenticated `pull_request_target: labeled` event on the
+same-repository draft PR #49 may request `manager-hoben-boundary-dry-run`, then
+`manager-hoben-boundary-live`. The MANAGER Work task, including a scheduled
+invocation, may make and record the owner's authorized one-off exact-HEAD trust
+decision, then add these labels after all prerequisites succeed. No further
+manual user request is required for this already authorized campaign. A periodic
+tick alone never grants permission. CODEX DEV/PRE-REVIEW must not add the labels
+or run the campaign; systematic runs at each tick, reruns and automatic retries
+are prohibited. Keep the existing manual dispatch and
+`manager-live-hoben`/`--live-premerge` contracts unchanged.
+
+Main's reviewed `.github/config/hoben-boundary.json` fixes the sole allowlisted
+scenario: both H1/H2 at 90 seconds, at most six sessions each, reviewed candidate
+`00215ef0589d34e9cf9c2ed5f3c3d2fe9f51ee06`. It attests the exact independent-role
+review #5452887287 on that SHA, including its author, `COMMENTED` state and body
+digest. This is deliberately **not GitHub APPROVED** or a parser of a role claim
+in free text: independent review of the main installation and MANAGER's recorded
+trust decision must confirm that attestation. The gate rejects missing/changed
+attestation, changes requested, unresolved threads, failed/missing exact-HEAD CI,
+forks, changed candidate/main, reruns and unverifiable main-only environment
+policy. No request grants merge approval or changes an Issue's workflow state.
+
+Compute each reviewer's effective decision from active `APPROVED` and
+`CHANGES_REQUESTED` reviews in chronological order. `COMMENTED`, `PENDING`, or
+the dismissal of another review never clears an active change request. Its own
+explicit dismissal or a later `APPROVED` decision by that reviewer may lift it.
+Apply this rule both at initial admission and after environment waiting.
+
+MANAGER records missing or inaccessible GitHub configuration and refuses the
+run. Changes to rights, protections or secrets are outside this task; only the
+owner may authorize the necessary configuration separately. Never weaken the
+gate or delegate those changes to the scheduled MANAGER task.
+The REST policy type is optional: require an explicit `branch/main` proof from
+the sole listed policy or its same-ID/node-ID detail. If both omit the type or
+the environment is unrestricted/inaccessible, refuse admission and secret
+recheck. Never infer branch from a policy name or relax the main-only boundary.
+
+Use only main's pinned **public** capture certificate, supplied by MANAGER in
+[#48 comment 6054724678](https://github.com/Guillaume0385/ha-hoben-community/issues/48#issuecomment-6054724678),
+DER SHA256 `f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246`.
+No environment-variable write or private key is required by this channel.
+An unavailable, expired, weak or changed recipient refuses before collection.
+Rotation, new candidate HEAD/review or another scenario requires a separately
+reviewed main policy change, never a label/comment parameter or automatic retry.
+
+An actual successful **new-channel dry-run on the same main/candidate pair** is
+mandatory before live: no Hoben environment/secret, candidate import or Hoben
+connection, but real CMS encryption preflight. Offline tests, the legacy live
+gate and old manual dispatch are not this proof. Atomic main-pointing audit tags
+`hoben-boundary-<phase>-<main_sha>-<candidate_sha>` claim each phase once; never
+delete/update them to repeat a run. A failed/cancelled request consumes its claim.
+The existing H1/H2 concurrency group serializes campaigns; check other active
+Hoben workflows before admission and again after environment waiting. MANAGER
+must not launch a different live gate during collection. Candidate runners have
+read-only GitHub permissions and step-scoped Hoben secrets; only fresh trusted
+runners claim requests/publish status. Revalidate the separate allowlisted
+public report before posting categories/counts; never download raw ciphertext
+into the publisher. Issue #48 and draft PR #49 remain pending real evidence.
+
 This exception preserves all prohibitions on publishing GUIDs, codes, packets,
 registers and household values. Hypothesis annotations cannot establish a
 production boundary. See the [campaign procedure](docs/opened-client-boundary-campaign.md)
