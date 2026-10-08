@@ -1,0 +1,184 @@
+name: MANAGER experimental H1 H2 request
+run-name: Experimental H1/H2 issue ${{ github.event.issue.number }} — ${{ github.event.label.name }}
+
+# issues:labeled loads the installed default-branch definition. It never runs
+# candidate YAML and has no dispatch, push, ordinary PR or scheduled live trigger.
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: hoben-boundary-campaign
+  cancel-in-progress: false
+
+jobs:
+  request:
+    if: >-
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      github.event.issue.number == 54 &&
+      !github.event.issue.pull_request &&
+      (github.event.label.name == 'manager-hoben-experimental-dry-run' ||
+       github.event.label.name == 'manager-hoben-experimental-live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      recognized: ${{ steps.gate.outputs.recognized }}
+      phase: ${{ steps.gate.outputs.phase }}
+      sha: ${{ steps.gate.outputs.sha }}
+      approved: ${{ steps.gate.outputs.approved }}
+      claimed: ${{ steps.gate.outputs.claimed }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - id: gate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            await gate.verify({github, context, core});
+
+  dry-run:
+    needs: request
+    if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Synthetic CMS preflight and report only
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            gate.dryReport(context);
+      - uses: actions/upload-artifact@v7
+        with:
+          name: experimental-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-experimental-exports/report.json
+          retention-days: 7
+          if-no-files-found: error
+
+  observations:
+    needs: request
+    if: needs.request.outputs.approved == 'true' && needs.request.outputs.phase == 'live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # The deployment ref is main, not the checked-out candidate branch.
+    # Owner configures exact main-only policy and independent required reviewers.
+    environment: hoben-experimental
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      issues: read
+      pull-requests: read
+    outputs:
+      collect_result: ${{ steps.collect.outcome }}
+      reason: ${{ steps.recheck.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: Guillaume0385/ha-hoben-community
+          ref: ${{ needs.request.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Recheck decision, HEADs, settings and actual environment approval
+        id: recheck
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            await gate.verify({github, context, core, recheck: true});
+      - name: Collect privately with a token-free process
+        id: collect
+        if: steps.recheck.outputs.approved == 'true'
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+          EXPERIMENTAL_PHASE: live
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: |
+          python -I trusted/scripts/launch_experimental_boundary.py >/dev/null 2>/dev/null
+      - name: Authenticated ciphertext only
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: experimental-ciphertext-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-experimental-exports/captures.cms
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Separate anonymized report
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: experimental-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-experimental-exports/report.json
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: [request, dry-run, observations]
+    if: ${{ always() && needs.request.outputs.recognized == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Download only public metadata on a fresh trusted runner
+        if: needs.request.outputs.claimed == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: experimental-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
+          path: public-report
+      - name: Revalidate and publish bounded result
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+          EXPERIMENTAL_APPROVED: ${{ needs.request.outputs.approved }}
+          EXPERIMENTAL_CLAIMED: ${{ needs.request.outputs.claimed }}
+          EXPERIMENTAL_GATE_REASON: ${{ needs.observations.outputs.reason || needs.request.outputs.reason }}
+          EXPERIMENTAL_COLLECT_RESULT: ${{ needs.observations.outputs.collect_result }}
+          EXPERIMENTAL_JOB_RESULT: ${{ needs.request.outputs.phase == 'dry-run' && needs.dry-run.result || needs.observations.result }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            await gate.publish({github, context, core});

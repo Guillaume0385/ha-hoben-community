@@ -567,6 +567,28 @@ for fixed experimental budgets, stops, replay and the separate trusted-installat
 prerequisite. CODEX DEV prepares and tests these tools; MANAGER runs and interprets
 the real observations. Task 1's router and Tasks 2–6 await the evidence decision.
 
+### Post-merge experimental channel — Issue #54
+
+Issue #54 authorizes a separate, fixed H1/H2 channel after MANAGER merges and
+reviews the exact same-repository `experimental` HEAD. Its minimal bootstrap PR
+targets `main` and retains independent CODEX REVIEW, normal CI and MANAGER risk
+classification; the candidate PR targets `experimental` with MANAGER-only review.
+The reviewed main `hoben-experimental-request.yml` consumes fresh owner-authored
+Issue labels/strict JSON decisions, never candidate YAML. `issues:labeled` has a
+main deployment ref: the dedicated `hoben-experimental` environment must allow
+exactly Branch `main`, with prevent-self-review and a verified independent User
+approval. Owner configures settings/secrets; agents never relax them.
+
+This extends only the bounded private-RX exception above: fixed 6 H1 + 6 H2,
+90 seconds/1 MiB per session, read-only messages, verified public recipient and
+CMS before TLS, ciphertext and allowlisted metadata only, seven-day retention.
+The main launcher removes all GitHub/runner tokens before candidate execution.
+Require exact-current main/experimental SHA, traceable MANAGER review, successful
+real secret-free dry-run, immutable per-SHA/scenario/phase reservation and
+post-wait rechecks. Missing evidence means NOT RUN. No automatic retries, live
+CI, bootstrap self-approval, production-boundary conclusion, or automatic
+unblocking of #48/#51. See [the bootstrap procedure](docs/experimental-request-bootstrap.md).
+
 ---
 
 ## Version and feature discipline
