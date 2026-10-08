@@ -590,6 +590,33 @@ The workflow uses four separated roles:
   in read-only mode and files sanitized problem reports for MANAGER triage;
   never develops code or starts CODEX DEV.
 
+### Branch-specific review routes
+
+The mandatory independent CODEX REVIEW → `state:validate` → MANAGER sequence
+applies to PRs **targeting `main`** (including the final promotion of reviewed
+protocol code from `experimental`). For short **read-only protocol research PRs
+targeting `experimental`**, use a lighter, MANAGER-only review:
+
+1. CODEX DEV prepares a small PR and deterministic targeted tests, then sets
+   the authorized Issue to `state:review`.
+2. MANAGER inspects the exact diff/HEAD, the read-only experimental scope,
+   targeted test results, privacy/secrets handling, and any unsafe server or
+   stove write. No separate CODEX REVIEW approval is required.
+3. MANAGER may merge that PR into `experimental` directly after this review,
+   without an intermediate `state:validate` or pre-merge authenticated live
+   test. For corrections, return to `state:in-progress` → CODEX DEV →
+   `state:review` → MANAGER, not CODEX REVIEW.
+4. CODEX REVIEW and scheduled PRE-REVIEW must **ignore PRs with base
+   `experimental`**. They resume for the final PR with base `main`.
+
+Do not relax `main` review, production quality, or conditional live-gate
+requirements. Do not run a real Hoben experiment simply because a PR was
+merged: the secret-bearing run still requires separately reviewed exact code,
+manual authorization and appropriate environment access controls. Follow
+[experimental workflow](docs/experimental-protocol-workflow.md).
+When an Issue covers work destined for `main`, record an experimental merge as
+research progress rather than as production delivery.
+
 ### Canonical GitHub state
 
 The **GitHub Issue is the single source of truth for task state**. Each managed
@@ -662,14 +689,16 @@ CODEX DEV moves `state:ready → state:in-progress`, works on a dedicated branch
 updates the same linked PR, and moves the Issue to `state:review` when ready for
 independent review.
 
-CODEX REVIEW reviews implementations only on `state:review`. It verifies the
+For PRs targeting `main`, CODEX REVIEW reviews implementations only on
+`state:review`. It verifies the
 exact current PR HEAD, Issue requirements, full diff, tests, CI, documentation,
 security rules, protocol sources of truth, and previous review remarks. Required
 corrections are commented on the PR and move the Issue back to
 `state:in-progress`. Approval of the exact HEAD moves the Issue to
 `state:validate`.
 
-The MANAGER performs final review only on `state:validate` and verifies that
+For PRs targeting `main`, the MANAGER performs final review only on
+`state:validate` and verifies that
 CODEX REVIEW approved the exact current HEAD. Any requested correction is
 commented on the same PR and moves the Issue back to `state:in-progress`. After
 DEV corrections, the task must pass through CODEX REVIEW again before returning
@@ -767,6 +796,11 @@ The resumption comment records the resolution, the restored state, and the HEAD
 to which any retained approval applies. Blocking/resumption are administrative
 transitions available to the roles above; they do not bypass the independent
 review or MANAGER final-review rules.
+
+The correction loop below is for PRs targeting `main`. For PRs targeting
+`experimental`, CODEX DEV corrections go straight back to MANAGER review as
+described in *Branch-specific review routes*; independent CODEX REVIEW and
+`state:validate` are not prerequisites.
 
 ### Mandatory correction loop
 
