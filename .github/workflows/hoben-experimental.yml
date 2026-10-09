@@ -63,7 +63,7 @@ jobs:
               core.setOutput('approved', 'true');
               await core.summary.addRaw('PENDING APPROVAL: reserved h1h2 on this experimental SHA. GitHub environment approval remains mandatory.').write();
             } catch (error) {
-              // Fixed enum only: never print error.message, stack, API data or headers.
+              // Fixed enum only: never forward raw exception text, stack, API data or headers.
               const category = gate.refusalCategory(error);
               core.setFailed('NOT RUN: admission refused; category=' + category);
               await core.summary.addRaw('NOT RUN: admission refused before Hoben secrets; category=' + category + '.').write();
