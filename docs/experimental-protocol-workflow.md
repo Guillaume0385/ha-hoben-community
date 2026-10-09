@@ -97,9 +97,13 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
    lie explicitement run CI, PR et HEAD ; leurs métadonnées doivent toujours
    correspondre. Une association contradictoire, une preuve manquante ou un
    check échoué sous un run vert refuse. Elle vérifie ensuite la politique réelle
-   de `hoben-experimental` : exactement Branch `experimental`, required reviewer
-   User indépendant et `prevent_self_review=true`. API inaccessible, type de
-   politique absent de la liste **et** du détail, Team non vérifiable, branche
+   de `hoben-experimental` : exactement Branch `experimental` et
+   protection effective de la branche. La décision propriétaire du 9 octobre
+   autorise **aucune règle de reviewers obligatoires** dans cet environnement
+   géré par un seul mainteneur, comme pour `hoben-live`. Si une règle existe,
+   le gate exige toujours `prevent_self_review=true` et un reviewer User
+   indépendant, puis vérifie son approbation réelle. Règle malformée, API
+   inaccessible, type de politique absent de la liste et du détail, branche
    wildcard ou mauvais environnement donnent **NOT RUN**, avant secrets.
 5. Une réservation atomique, tag annoté non destiné aux releases
    `hoben-experimental-h1h2-<SHA_FUSION>`, lie SHA/scénario/run/PR/décision et
@@ -110,12 +114,15 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
    100 demandes peuvent attendre sans remplacement. Les futures voies live
    devront partager ce groupe. Les probes historiques actives sont refusées ;
    MANAGER ne doit pas en démarrer pendant cette campagne.
-6. **PENDING APPROVAL** décrit l'attente réelle du job `collect` attaché à
-   `hoben-experimental`. GitHub garde son approbation obligatoire. Après celle-ci,
-   le runner revalide HEAD, décision, CI, politique inchangée, réservation du
-   même run et historique d'approbation du reviewer User indépendant attendu.
-   Bypass administrateur, rejet, absence de preuve ou déplacement du HEAD :
-   **NOT RUN**, aucune collecte. Ce contrôle n'ajoute aucune permission GitHub.
+6. **PENDING APPROVAL** est réservé aux environnements qui exigent
+   effectivement une approbation GitHub. Sans `required_reviewers`, le job
+   `admission` produit **READY FOR ENVIRONMENT** après réservation ; le job
+   `collect` conserve son environnement dédié et son recheck indépendant
+   HEAD/décision/CI/politique/réservation avant tout secret. Si GitHub exige une
+   approbation, le runner vérifie en plus l'historique d'approbation d'un User
+   indépendant. Rejet, absence de preuve requise ou déplacement du HEAD :
+   **NOT RUN**, aucune collecte. Ce modèle renonce à l'approbation humaine
+   indépendante lorsqu'elle n'est pas configurée, sans changer les autres gates.
 7. Seul le step `capture` reçoit `HOBEN_USER_GUID` et le DeviceGuid optionnel.
    Un lanceur fixe transmet au processus Python une liste fermée de variables,
    sans token GitHub/Actions/OIDC, fichiers de commandes Actions, dépendances
@@ -155,13 +162,16 @@ administrateur ni nouvelle permission n'est demandé.
 
 Le code lit ces trois endpoints avant la création de la réservation dans le job
 `admission`. Une réponse 401/403/404, une API absente, un corps incomplet, une
-politique de branche non strictement `experimental`, une absence de reviewers
-User indépendants ou `prevent_self_review != true` donnent un refus
-`environment_unverified`, rendu **NOT RUN** sans message d'exception brut.
+politique de branche non strictement `experimental` ou une règle
+`required_reviewers` effectivement configurée mais non conforme donnent
+un refus catégoriel **NOT RUN** sans message d'exception brut. **L'absence de
+règle de reviewers** est désormais admise par la décision propriétaire
+(mono-mainteneur) : le gate ne simule pas une approbation inexistante.
 Au job `collect`, après l'éventuelle attente d'approbation GitHub, une seconde
-lecture identique et l'historique d'approbation doivent réussir **avant le step
-qui reçoit les identifiants**. Un refus ne réserve aucun nouveau SHA/scénario
-et n'appelle pas la collecte.
+lecture de la politique et de la réservation doit réussir **avant le step
+qui reçoit les identifiants**. Si une approbation est effectivement requise,
+son historique est aussi vérifié. Un refus ne réserve aucun nouveau
+SHA/scénario et n'appelle pas la collecte.
 
 ### Catégories publiques d'admission (correction après le run #37923236744)
 
@@ -180,7 +190,7 @@ Pour l'environnement, distinguer strictement :
 | `environment_api` | API GitHub inaccessible/refusée (y compris 401/403/404, problème de transport) : sous-cause exacte indéterminée |
 | `environment_response` | Réponse API absente ou structure/champ obligatoire incomplet |
 | `environment_branch` | Identité ou politique de branche incohérente : doit être strictement `experimental`, sans wildcard ou tag |
-| `environment_reviewers` | Règle des reviewers, identité User ou protection contre l'auto-approbation non conforme |
+| `environment_reviewers` | Règle de reviewers réellement configurée mais incorrecte (absence de règle acceptée pour ce dépôt mono-mainteneur) |
 
 Les autres catégories localisent la famille du refus sans révéler les entrées
 API : `merge` (PR/SHA/arbre), `decision` (Issue, commentaire MANAGER, review),
@@ -208,9 +218,10 @@ configuration GitHub. Aucun accès Hoben n'est effectué par DEV.
 - **Runner réel :** `admission` est la preuve de lecture effective des politiques.
   Si 403, refus ou données invérifiables : **NOT RUN**, pas de réservation et
   aucune tentative de réexécuter avec un jeton plus puissant. Si admis, le job
-  `collect` attend la politique GitHub et recontrôle réellement l'approbation.
-  `PENDING APPROVAL` n'est pas un succès de collecte. Vérifier le bon environnement
-  dans la page GitHub du run avant toute approbation.
+  `collect` recontrôle réellement la politique GitHub et, **si obligatoire**,
+  l'approbation indépendante. `PENDING APPROVAL` n'est pas un succès de collecte.
+  `READY FOR ENVIRONMENT` non plus : seule une collecte avec rapport expurgé
+  peut établir une observation. Vérifier le bon environnement dans le run.
 
 Le commentaire `hoben-experimental-approval:v1` est une **décision réelle du
 MANAGER, déposée sans édition avant fusion**, jamais un texte produit par DEV
@@ -235,6 +246,27 @@ le tar privé 0600, avec la même clé/certificat. **Deux déchiffrements réuss
 sont indispensables avant extraction ; supprimer toute sortie partielle après
 un échec GCM. Ne joindre aucun résultat brut, clé, identité ou valeur domestique
 aux Issues, artefacts publics ou logs.
+
+
+### Décision mono-mainteneur et preuve du prochain SHA (9 octobre 2026)
+
+Le propriétaire ne dispose pas d'un autre compte GitHub pouvant être ajouté comme
+`required reviewer`. Par décision explicite consignée dans l'Issue #54, le
+laboratoire adopte le **même modèle d'environnement sans reviewer obligatoire
+que les anciens workflows `hoben-live`**, mais garde son environnement **distinct
+`hoben-experimental`** et sa politique de branches limitée à `experimental`.
+Une approbation GitHub déjà activée dans les Settings n'est jamais contournée :
+si GitHub la déclare, le job doit rester en attente puis vérifier sa preuve.
+Cette décision supprime une garantie d'approbation humaine indépendante,
+compensée partiellement par la revue MANAGER du diff et des quatre jobs CI,
+l'identité du merge, la décision immuable portant sur le SHA exact, la
+réservation atomique et les restrictions d'accès aux secrets.
+
+L'ancien run #37936003393 a refusé l'admission avec `environment_reviewers`
+et n'a contacté aucun serveur Hoben. La correction n'est **pas** une autorisation
+de le relancer : un nouveau SHA revu et fusionné est obligatoire. Les détails
+réels de configuration GitHub restent à confirmer via le prochain runner, et
+les tests de PR ne constituent **pas** une preuve de connexion MyHOBEN.
 
 ## Gouvernance des secrets et protections
 
