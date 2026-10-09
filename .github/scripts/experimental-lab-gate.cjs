@@ -16,6 +16,31 @@ const SHA = /^[a-f0-9]{40}$/;
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const digest = v => crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const need = (fact, reason) => { if (!fact) throw new Error(reason); };
+// Only these fixed, non-sensitive categories may appear in Actions summaries.
+// Never publish an exception message, API response, URL or reviewer identity.
+const PUBLIC_REFUSALS = Object.freeze({
+  invalid_policy: "provenance",
+  invalid_provenance: "provenance",
+  preflight_unverified: "preflight",
+  merge_changed: "merge",
+  merged_tree_unreviewed: "merge",
+  issue_scope_unverified: "decision",
+  manager_decision_unverified: "decision",
+  review_unverified: "decision",
+  ci_unverified: "ci",
+  environment_api_inaccessible: "environment_api",
+  environment_response_incomplete: "environment_response",
+  environment_branch_invalid: "environment_branch",
+  environment_reviewers_invalid: "environment_reviewers",
+  concurrent_observation: "claim",
+  claim_unverified: "claim",
+  approval_unverified: "approval",
+});
+function refusalCategory(error) {
+  const reason = error instanceof Error ? error.message : null;
+  return typeof reason === "string" && Object.hasOwn(PUBLIC_REFUSALS, reason)
+    ? PUBLIC_REFUSALS[reason] : "other";
+}
 const sameRepo = r => r?.full_name === push.REPOSITORY && r.id === REPO_ID;
 const certificate = path.join(__dirname, "../config/hoben-experimental-recipient.pem");
 
@@ -136,45 +161,59 @@ async function readEnvironmentEvidence(operation) {
   try {
     return await operation();
   } catch (_) {
-    // Never surface raw API exceptions (which may contain headers or URLs).
-    throw new Error("environment_unverified");
+    // Includes 401/403/404 and transport errors; raw API errors never escape.
+    throw new Error("environment_api_inaccessible");
   }
 }
 
 async function environmentPolicy(github) {
   const { data: environment } = await readEnvironmentEvidence(() =>
     github.rest.repos.getEnvironment({ ...API, environment_name: policy.environment }));
-  need(environment && environment.name === policy.environment && positive(environment.id) &&
-    environment.deployment_branch_policy?.protected_branches === false &&
-    environment.deployment_branch_policy.custom_branch_policies === true, "environment_unverified");
+  need(environment && typeof environment === "object" &&
+    typeof environment.name === "string" && positive(environment.id) &&
+    environment.deployment_branch_policy &&
+    typeof environment.deployment_branch_policy.protected_branches === "boolean" &&
+    typeof environment.deployment_branch_policy.custom_branch_policies === "boolean" &&
+    Array.isArray(environment.protection_rules), "environment_response_incomplete");
+  need(environment.name === policy.environment &&
+    environment.deployment_branch_policy.protected_branches === false &&
+    environment.deployment_branch_policy.custom_branch_policies === true,
+  "environment_branch_invalid");
   const branches = await readEnvironmentEvidence(() =>
     github.paginate(github.rest.repos.listDeploymentBranchPolicies,
       { ...API, environment_name: policy.environment, per_page: 100 }));
-  need(Array.isArray(branches) && branches.length === 1 && branches[0]?.name === "experimental" &&
-    positive(branches[0].id) && typeof branches[0].node_id === "string" && branches[0].node_id.length > 0,
-  "environment_unverified");
+  need(Array.isArray(branches), "environment_response_incomplete");
+  need(branches.length === 1 && branches[0]?.name === "experimental", "environment_branch_invalid");
+  need(positive(branches[0].id) && typeof branches[0].node_id === "string" &&
+    branches[0].node_id.length > 0, "environment_response_incomplete");
   let branch = branches[0];
   if (!Object.hasOwn(branch, "type")) {
     const { data: detail } = await readEnvironmentEvidence(() =>
       github.rest.repos.getDeploymentBranchPolicy({ ...API,
         environment_name: policy.environment, branch_policy_id: branch.id }));
-    need(detail.id === branch.id && detail.node_id === branch.node_id && detail.name === branch.name,
-      "environment_unverified");
+    need(detail && typeof detail === "object" && positive(detail.id) &&
+      typeof detail.node_id === "string" && typeof detail.name === "string" &&
+      typeof detail.type === "string", "environment_response_incomplete");
+    need(detail.id === branch.id && detail.node_id === branch.node_id &&
+      detail.name === branch.name, "environment_branch_invalid");
     branch = detail;
   }
-  need(branch.type === "branch", "environment_unverified");
+  need(branch.type === "branch", "environment_branch_invalid");
   const rules = environment.protection_rules;
-  need(Array.isArray(rules) && rules.every(r =>
-    ["required_reviewers", "branch_policy", "wait_timer"].includes(r.type)), "environment_unverified");
+  need(rules.every(r => r && ["required_reviewers", "branch_policy", "wait_timer"].includes(r.type)),
+    "environment_reviewers_invalid");
   const required = rules.filter(r => r.type === "required_reviewers");
-  need(required.length === 1 && positive(required[0].id) && required[0].prevent_self_review === true &&
-    Array.isArray(required[0].reviewers) && required[0].reviewers.length > 0 &&
+  need(required.length === 1, "environment_reviewers_invalid");
+  need(positive(required[0].id) && Array.isArray(required[0].reviewers),
+    "environment_response_incomplete");
+  need(required[0].prevent_self_review === true && required[0].reviewers.length > 0 &&
     required[0].reviewers.every(r => r.type === "User" && r.reviewer?.type === "User" &&
-      positive(r.reviewer.id) && typeof r.reviewer.login === "string" && r.reviewer.login.length > 0),
-  "environment_unverified");
+      positive(r.reviewer.id) && typeof r.reviewer.login === "string" &&
+      r.reviewer.login.length > 0), "environment_reviewers_invalid");
   const reviewers = required[0].reviewers.map(r => ({ id: r.reviewer.id, login: r.reviewer.login }))
     .sort((a, b) => a.id - b.id);
-  need(reviewers.some(r => r.id !== MANAGER_ID && r.login !== "Guillaume0385"), "environment_unverified");
+  need(reviewers.some(r => r.id !== MANAGER_ID && r.login !== "Guillaume0385"),
+    "environment_reviewers_invalid");
   return { id: environment.id, reviewers, digest: digest({ id: environment.id,
     name: environment.name, deployment_branch_policy: environment.deployment_branch_policy,
     protection_rules: environment.protection_rules, branch }) };
@@ -243,4 +282,4 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   return { sha: context.sha, pr: pr.number, scenario: "h1h2", status: recheck ? "approved" : "PENDING APPROVAL" };
 }
 
-module.exports = { dryRun, verify, WORKFLOW: push.LAB_WORKFLOW, MARKER, workflowPath };
+module.exports = { dryRun, verify, refusalCategory, WORKFLOW: push.LAB_WORKFLOW, MARKER, workflowPath };
