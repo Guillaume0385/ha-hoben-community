@@ -119,13 +119,14 @@ class FakeClient:
         self.refreshes = 0
         self.closed = False
         self.has_assigned_device_guid = False
-        self.received = None
+        self.device_guid_for_persistence = "0" * 32
 
     async def async_refresh(self):
         self.refreshes += 1
         if self.refreshes == self.fail_at:
             raise RuntimeError("SYNTHETIC_PRIVATE_EXCEPTION")
         self.has_assigned_device_guid = True
+        self.device_guid_for_persistence = "a" * 32
         return SimpleNamespace(profile=StoveProfile.V4, registers=(0,) * 20)
 
     async def async_close(self):
