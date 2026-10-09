@@ -1078,6 +1078,46 @@ with complete offline CI, independent review, HACS/Hassfest and conditional
 pre-merge validation. See [the experimental workflow proposal](docs/experimental-protocol-workflow.md).
 This proposal does not alter current gates or authorize a live run by itself.
 
+### Prepared post-merge H1/H2 tooling — Issue #54
+
+Issue #54 prepares one experimental research PR and a separate minimal trusted
+main bootstrap. Reuse the examined #49 capture/analysis/replay tools and #52 CMS
+primitives; leave their PRs and the blocked #48/#51 work distinct. The initial
+scenario is fixed H1/H2 (at most six sessions each, 90 seconds/1 MiB per session),
+read-only V4 observations with early stops, never a confirmed OpenedClient
+boundary or a production router change. No HA/client/register/runtime change.
+
+The proposed main `hoben-experimental-request.yml` consumes explicit owner
+`issues:labeled` requests on #54 with strict, immutable JSON review decisions.
+It binds current main and merged experimental HEAD, PR, fixed scenario,
+certificate and run ID; an immutable per-SHA/phase claim prevents replay. No
+push, PR CI, cron or hourly MANAGER read triggers Hoben. The secret-free real
+GitHub dry-run must pass before an independently approved live request.
+Because this event deploys from main, the dedicated `hoben-experimental`
+environment selects exactly Branch main, not the checked-out experimental
+branch, and requires a named independent User reviewer with prevent-self-review.
+Only Owner configures/verifies settings and secrets. Unverifiable policy or
+approval means NOT RUN; ordinary Work confirmation does not replace GitHub's
+gate. Main gate code is never selected from the candidate branch.
+
+Before collection, trusted main removes every runner/GitHub token and checks
+immutable checkouts. The candidate entry preflights the pinned public RSA
+recipient and AES-256-GCM CMS/RSA-OAEP SHA-256 before TLS. Private plaintext is
+removed; only ciphertext and a numeric/categorical report, independently
+validated by trusted main before upload and revalidated by a secret-free main
+publisher, are exported for seven days. Inconclusive success requires all twelve
+executed sessions (six H1 then six H2); an early campaign stop remains failure.
+All installed Hoben network workflows must share the same concurrency mutex,
+including environment waits; unrelated labels must use run-specific groups.
+Experimental statuses/reports never satisfy `live-hoben-authenticated`.
+
+See [the concrete experimental procedure](docs/experimental-protocol-workflow.md).
+Code prepared, bootstrap installed, secret-free GitHub dry-run and real Hoben
+observation are separate milestones. DEV offline tests do not prove installation
+or device behavior. The main bootstrap retains independent CODEX REVIEW, normal
+checks and MANAGER's applicable live-risk decision; only the research PR uses
+MANAGER-only review. No automatic merge, Issue closure or unblocking follows.
+
 ### MANAGER-gated authenticated candidate validation
 
 `.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
