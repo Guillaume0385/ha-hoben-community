@@ -1066,57 +1066,66 @@ metadata, or CI/test-only changes that cannot alter the live execution path.
 Mixed or ambiguous PRs require the live gate. The MANAGER must explicitly
 classify and record the live-validation decision in the PR before merge.
 
-### Proposed experimental protocol branch — independent of release validation
+### Autonomous experimental testing and owner-controlled release — Issue #54
 
-The branch `experimental` is reserved for bounded, opt-in, **read-only** Hoben
-protocol research. Short research PRs may use lighter merge checks than `main`,
-but this does **not** grant access to the live environment's credentials. A
-trusted workflow, reviewed exact code, an explicitly selected deployment branch
-and an independent approval before exposing secrets are still required.
-Confirmed protocol observations return to `main` through a separate final PR
-with complete offline CI, independent review, HACS/Hassfest and conditional
-pre-merge validation. See [the experimental workflow proposal](docs/experimental-protocol-workflow.md).
-This proposal does not alter current gates or authorize a live run by itself.
+**Owner decision of 2026-10-09 overrides the earlier proposed main-bootstrap
+approach:** development, experimental GitHub Actions and protocol validation
+happen on `experimental`; the closed PR #56 targeting `main` is **not** a
+dependency. MANAGER must **never prepare, open or merge** a promotion PR targeting
+`main` unless the owner explicitly asks for it. The stable review/CI/live
+gates documented below remain applicable **only if** that future request is
+made. No test success alone authorizes release preparation.
 
-### Prepared post-merge H1/H2 tooling — Issue #54
+Two independent GitHub environments may be used by MANAGER after reviewing and
+merging code on `experimental`:
 
-Issue #54 prepares one experimental research PR and a separate minimal trusted
-main bootstrap. Reuse the examined #49 capture/analysis/replay tools and #52 CMS
-primitives; leave their PRs and the blocked #48/#51 work distinct. The initial
-scenario is fixed H1/H2 (at most six sessions each, 90 seconds/1 MiB per session),
-read-only V4 observations with early stops, never a confirmed OpenedClient
-boundary or a production router change. No HA/client/register/runtime change.
+| Lane | Purpose | Boundary |
+| --- | --- | --- |
+| `hoben-live` | Exercise the **actual Home Assistant integration**: verified TLS, authentication, assigned/persisted DeviceGuid, real client/transport/Modbus reads, session and refresh behavior, loss/reconnect and lifecycle as implemented by the tested commit. | Reuse the real HA client logic wherever possible; only read the stove; document deviations and missing features rather than silently substituting a research probe. |
+| `hoben-experimental` | Observe H1/H2/OpenClient/Ping/Pong/DataUpdated network behavior with bounded raw RX capture, replay and hypothesis classification. | **Non-runtime research code:** capture/analysis scripts are not imported into Home Assistant; export only encrypted RX and sanitized findings. |
 
-The proposed main `hoben-experimental-request.yml` consumes explicit owner
-`issues:labeled` requests on #54 with strict, immutable JSON review decisions.
-It binds current main and merged experimental HEAD, PR, fixed scenario,
-certificate and run ID; an immutable per-SHA/phase claim prevents replay. No
-push, PR CI, cron or hourly MANAGER read triggers Hoben. The secret-free real
-GitHub dry-run must pass before an independently approved live request.
-Because this event deploys from main, the dedicated `hoben-experimental`
-environment selects exactly Branch main, not the checked-out experimental
-branch, and requires a named independent User reviewer with prevent-self-review.
-Only Owner configures/verifies settings and secrets. Unverifiable policy or
-approval means NOT RUN; ordinary Work confirmation does not replace GitHub's
-gate. Main gate code is never selected from the candidate branch.
+The manager-driven loop is **CODEX DEV → targeted offline tests and PR to
+`experimental` → MANAGER-only review of exact diff/HEAD/CI and automatic
+merge → MANAGER-authorized `hoben-live` and/or `hoben-experimental` GitHub
+run → verified anonymized results → documented findings/next Issue →
+CODEX DEV**. Multiple small PRs may merge sequentially to `experimental`
+without owner confirmation; no CODEX REVIEW nor `state:validate` is required
+for this branch. MANAGER informs the owner after each completed step and
+continues without awaiting a reply. The **effective GitHub environment
+approval and secret protections remain mandatory** and cannot be bypassed
+by a general automation authorization.
 
-Before collection, trusted main removes every runner/GitHub token and checks
-immutable checkouts. The candidate entry preflights the pinned public RSA
-recipient and AES-256-GCM CMS/RSA-OAEP SHA-256 before TLS. Private plaintext is
-removed; only ciphertext and a numeric/categorical report, independently
-validated by trusted main before upload and revalidated by a secret-free main
-publisher, are exported for seven days. Inconclusive success requires all twelve
-executed sessions (six H1 then six H2); an early campaign stop remains failure.
-All installed Hoben network workflows must share the same concurrency mutex,
-including environment waits; unrelated labels must use run-specific groups.
-Experimental statuses/reports never satisfy `live-hoben-authenticated`.
+Implementation must use a trigger ACTUALLY usable from a workflow definition
+installed on `experimental`, with a MANAGER action available in the GitHub
+connector. `issues:labeled` loads its YAML from the default branch, and a new
+workflow cannot assume `workflow_dispatch` is dispatchable without `main`.
+A normal push alone must never release Hoben secrets to unreviewed code.
+Fail closed `NOT RUN` if a secure autonomous trigger is not demonstrable.
+Verify `experimental` branch protection and BOTH environment policies
+independently at run time; a public `protected=true` response is not proof
+of secrets/reviewer policy. Never modify Github Settings, credentials or
+branch rules from CODEX DEV.
 
-See [the concrete experimental procedure](docs/experimental-protocol-workflow.md).
-Code prepared, bootstrap installed, secret-free GitHub dry-run and real Hoben
-observation are separate milestones. DEV offline tests do not prove installation
-or device behavior. The main bootstrap retains independent CODEX REVIEW, normal
-checks and MANAGER's applicable live-risk decision; only the research PR uses
-MANAGER-only review. No automatic merge, Issue closure or unblocking follows.
+Offline tests/HA tests/Ruff/HACS/Hassfest stay deterministic and secret-free.
+Real device testing is a separate, bounded and authorized GitHub Actions
+stage: fixed `myhoben.fr:465` TLS, read-only protocols, no pairing/writes
+or stove controls, no token shared with the candidate, no secret in
+logs, no raw RX without recipient-authenticated CMS encryption. The existing
+H1/H2 budget remains **at most six sessions each**, **90 seconds and 1 MiB
+RX per session**, with ciphertext-only archives for up to seven days. A
+successful network workflow does not prove unknown packet boundaries.
+
+Document only real supported protocol observations in `protocol.md` as
+CONFIRMÉ/OBSERVÉ/À VALIDER, ideally with sanitized fixtures and regression
+tests; create deduplicated Issues for reproducible failures/unknowns. See
+[experimental workflow](docs/experimental-protocol-workflow.md) and
+[Issue #54](https://github.com/Guillaume0385/ha-hoben-community/issues/54).
+
+**Current installed state is distinct from this target policy:** PR #55
+provided the H1/H2 research scripts on `experimental`. The two-lane
+trigger/workflows still need a CODEX DEV PR, MANAGER review, merge, an
+actual secret-free dry-run and verification of the GitHub environments.
+No live Hoben run is inferred by writing this roadmap.
 
 ### MANAGER-gated authenticated candidate validation
 
@@ -1305,8 +1314,9 @@ step, no `state:validate`, and no authenticated pre-merge live gate are
 required merely to merge a research PR. MANAGER checks the exact HEAD, targeted
 tests, protocol-read-only scope, and secret/logging safety. Experimental live
 runs remain separately authorized and controlled; they are never triggered just
-by merging code. The final `experimental` → `main` PR receives full CODEX
-REVIEW, MANAGER approval, CI and conditional live acceptance. See
+by merging code. **Only after an explicit user request** may a final `experimental` → `main`
+PR be prepared. Such a future PR receives full CODEX REVIEW, MANAGER
+approval, CI and conditional live acceptance. See
 [experimental branch policy](docs/experimental-protocol-workflow.md).
 
 The canonical state machine is:

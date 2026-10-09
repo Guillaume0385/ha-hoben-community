@@ -1,5 +1,20 @@
 # Campagne exploratoire H1/H2 de #48 — GitHub Actions uniquement
 
+> **Portée historique mise à jour (décision propriétaire du 9 octobre 2026).**
+> Les sections ci-dessous décrivent les sondes H1/H2 et l'ancien mécanisme
+> `main` / `workflow_dispatch`. Elles **ne sont plus la procédure de
+> déclenchement du cycle expérimental actuel**. Les tests H1/H2 sont destinés
+> exclusivement à la voie `hoben-experimental` sur `experimental`, isolée du
+> plugin HA ; la voie séparée `hoben-live` doit valider le **vrai comportement
+> du client Home Assistant**. MANAGER peut déclencher ces essais après chaque
+> merge revu sans demander d'accord conversationnel, sous réserve des contrôles
+> et approbations effectivement imposés par GitHub. **Aucune PR vers `main`**
+> avant demande explicite du propriétaire. Les anciens plafonds, interdictions
+> d'écriture et exigences de chiffrement décrits ci-dessous restent applicables.
+> Voir [le workflow expérimental actuel](experimental-protocol-workflow.md)
+> et [l'Issue #54](https://github.com/Guillaume0385/ha-hoben-community/issues/54).
+
+
 Cette procédure prépare l'observation demandée par le propriétaire le
 2026-10-07. **Aucune session réelle H1/H2 n'a encore été exécutée.** Les tests
 pytest sont synthétiques, sans serveur ni identifiant réel. Le routeur de

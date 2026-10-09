@@ -567,25 +567,54 @@ for fixed experimental budgets, stops, replay and the separate trusted-installat
 prerequisite. CODEX DEV prepares and tests these tools; MANAGER runs and interprets
 the real observations. Task 1's router and Tasks 2–6 await the evidence decision.
 
-### Post-merge experimental channel — Issue #54
+### Autonomous experimental validation — Issue #54 (owner decision 2026-10-09)
 
-Issue #54 authorizes preparation of the fixed H1/H2 tooling from #49/#52 on
-`experimental`, with direct MANAGER review, and a separate trusted-main bootstrap
-with independent CODEX REVIEW and normal main validation. `issues:labeled`
-deploys from main: require a dedicated main-only `hoben-experimental` environment,
-prevent-self-review and an actually verified independent User approval. Owner
-alone configures settings/secrets. No candidate workflow decides admission.
+The current development and observation loop runs **only on `experimental`**.
+A GitHub PR **targeting `main` may be prepared only after a NEW, explicit
+request from the owner**. MANAGER must not autonomously open, prepare, or merge
+a promotion PR to `main`. The main delivery review/gates remain in force if
+and only if the owner requests a release; they are not prerequisites to research
+on `experimental`.
 
-Extend only the bounded private-RX exception above, with the same read-only
-budgets, pinned public recipient, pre-TLS CMS, private cleanup, numeric/categorical
-report and seven-day ciphertext retention. Trusted main must remove every runner/
-GitHub token before candidate execution, bind current main and experimental HEAD
-to MANAGER's exact review, require a real secret-free GitHub dry-run and recheck
-after environment approval. Immutable per-SHA/scenario/phase reservations prevent
-replay. Missing evidence means NOT RUN. No scheduled DEV live run, production
-boundary inference, automatic retry or unblocking of #48/#51. See [the concrete
-procedure](docs/experimental-protocol-workflow.md).
+Two **independent read-only** GitHub Actions lanes may be run against reviewed,
+merged `experimental` commits after MANAGER's SHA-specific authorization:
 
+- **`hoben-live`** (environment `hoben-live`): exercise the **actual integration
+  Home Assistant client/protocol/session/refresh/reconnection lifecycle** at the
+  tested commit and report what actually works, without synthetic protocol
+  shortcuts, new control paths, or invented persistent-session behavior.
+- **`hoben-experimental`** (environment `hoben-experimental`): fixed H1/H2
+  network observations/captures/analysis, with ciphertext-only raw RX export
+  and sanitized reports. **Never import or expose this instrumentation through
+  the Home Assistant runtime**.
+
+MANAGER may review, merge and test **multiple small PRs sequentially into
+`experimental`**, without obtaining further conversational approval from the
+owner. The loop is CODEX DEV → MANAGER (diff, tests, security, automatic merge,
+authorized live experiments, result analysis, next Issue) → CODEX DEV. Notify the
+owner of completed experimental stages **without pausing the loop**. A GitHub
+environment's actual required reviewer approval and other repository gates
+remain mandatory; neither this mandate nor a comment in GitHub can bypass them.
+If the workflow/signal/environment policy/credential proof is unavailable,
+report `NOT RUN` or `PENDING APPROVAL` instead of contacting Hoben. Never
+run live from a PR, from DEV or from routine pytest.
+
+The older main-based experimental bootstrap in closed PR #56 is **not
+installed** and must not be revived as a prerequisite; `issues:labeled` loads
+workflow definitions from the default branch, so DEV must demonstrate an
+actually usable experimental-branch trigger through MANAGER's GitHub operations.
+A routine `push` on `experimental` alone must not expose secrets to unreviewed
+code. Verify branch protection **and the separate live environment policies**
+at runtime; `experimental.protected=true` does not prove the settings, secrets,
+or reviewer approval. The owner manages settings; agents do not weaken them.
+
+Preserve fixed read-only MyHOBEN destination and TLS verification, the H1/H2
+budgets, pre-TLS CMS recipient validation, ciphertext-only artifacts, separate
+tokens/secrets, anonymous reports and seven-day retention. An experiment cannot
+establish an unknown OpenedClient boundary by assumption, cannot issue commands
+to the stove, and cannot serve as a main `live-hoben-authenticated` approval.
+Record observations in `protocol.md` only after real corroborated evidence.
+See [experimental workflow](docs/experimental-protocol-workflow.md).
 ---
 
 ## Version and feature discipline
@@ -629,7 +658,9 @@ targeting `experimental`**, use a lighter, MANAGER-only review:
    `experimental`**. They resume for the final PR with base `main`.
 
 Do not relax `main` review, production quality, or conditional live-gate
-requirements. Do not run a real Hoben experiment simply because a PR was
+requirements.
+Only the owner may request preparation of the final PR targeting `main`; the
+MANAGER must not initiate promotion as part of the experimental cycle. Do not run a real Hoben experiment simply because a PR was
 merged: the secret-bearing run still requires separately reviewed exact code,
 manual authorization and appropriate environment access controls. Follow
 [experimental workflow](docs/experimental-protocol-workflow.md).
