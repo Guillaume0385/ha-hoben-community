@@ -344,6 +344,103 @@ lorsqu'elle est effectivement attestée par l'API runner pour
 réellement configurée reste obligatoire. Le diagnostic ne consulte ni
 environnements ni secrets.
 
+## Phase 3 — `hoben-live` expérimental, client Home Assistant réel
+
+La phase H1/H2 a terminé sur le commit fusionné
+`5a904855ba1c3d74353301cf0c7605a168e04453` :
+[run #37974967946](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37974967946),
+jobs `dry-run/admission/collect/result` réussis, **hypothèses de frontière
+inconclusives**. Aucun changement de `protocol.md` n'en découle. La voie
+`hoben-live` est indépendante et ne réutilise pas les sondes H1/H2.
+
+### Contrat exécuté au SHA fusionné
+
+Le workflow `.github/workflows/hoben-live-experimental.yml` n'est
+déclenché que par le `push` du merge MANAGER sur la branche exacte
+`experimental`. Son premier job est un dry-run secretless. L'admission
+utilise `.github/scripts/experimental-live-gate.cjs` et demande une
+preuve séparée, non interchangeable avec l'approbation H1/H2 :
+
+- PR du même dépôt, base `experimental`, corps contenant `Refs #54`,
+  HEAD et arbre du merge identiques ;
+- Issue #54 ouverte avec un seul label admissible (`state:review` avant
+  fusion), revue MANAGER et threads résolus ;
+- un run `Validate` `pull_request` tentative 1 sur le HEAD exact,
+  quatre jobs `tests/ha-tests/hacs/hassfest` réussis ;
+- **commentaire réel MANAGER immuable**, pré-fusion, débutant exactement
+  par le marqueur `<!-- hoben-live-approval:v1 -->`, suivi d'un objet
+  JSON contenant **strictement** `schema=1`, `scenario="ha-parity"`,
+  `candidate_sha` (HEAD de PR) et `ci_run_id` (ID du run Validate
+  validé). CODEX DEV ne crée ni ne poste cette décision ;
+- politique effective de l'environnement GitHub **`hoben-live`**
+  strictement sur la branche `experimental` ; APIs inaccessibles,
+  politique/HEAD/approval non vérifiables = **NOT RUN**. L'absence de
+  `required_reviewers` est tolérée pour ce mainteneur unique seulement
+  si effectivement confirmée par GitHub. Une règle de reviewers active
+  doit être respectée et prouvée, sans auto-approbation.
+
+Avant tout secret, une réservation atomique
+`hoben-live-ha-parity-<SHA_MERGE>` lie run, décision, HEAD, scénario
+et empreinte de la politique d'environnement. Aucune reprise d'un run
+annulé/échoué n'est autorisée pour ce SHA/scénario ; un nouveau HEAD
+revu et une décision MANAGER distincte sont nécessaires. Les deux
+workflows utilisent le même mutex `hoben-read-only-observation`.
+L'environnement `hoben-live` reste distinct de `hoben-experimental`.
+
+Le job de collecte attend l'environnement et recontrôle l'ensemble
+des preuves et l'éventuelle approbation GitHub **avant** l'unique step
+recevant les identifiants. Ce step lance un sous-processus à variables
+allowlistées, sans token GitHub/Actions/OIDC ni fichiers de commandes
+Actions, sans stdout/stderr du client. Il utilise au SHA exact
+**`custom_components.hoben.client.HobenClient`** deux fois de suite
+via `async_refresh()`, le même décodeur
+`decode_v4_snapshot()` que le `HobenDataUpdateCoordinator`, puis
+`async_close()`. Le même objet client conserve en mémoire le DeviceGuid
+attribué. `max_attempts=1` empêche le retry implicite ; timeout
+d'ensemble 150 s, deux connexions TLS vérifiées, deux lectures
+Modbus 04 V4 de 20 registres. Aucun pairing, fonction 06/16/22,
+écriture, commande poêle ou destination variable.
+
+**Portée réelle :** le runtime actuel réalise des rafraîchissements
+`one-shot` ; la campagne vérifie deux rafraîchissements successifs,
+décodage, conservation de l'identité et fermeture, **pas**
+l'ordonnanceur/timer complet HA. Les fonctions session persistante,
+Ping/Pong, `DataUpdated` et reprise automatique après panne ne sont
+**ni implémentées ni déclarées validées**. Le rapport conserve
+`session_mode=one-shot`, ces limites marquées
+`unsupported`/`not_tested`, et uniquement états, booléens et
+compteurs bornés. Aucun registre, température, GUID, trace ou exception
+libre ne peut apparaître dans l'artefact. Le validateur Node bloque
+tout champ additionnel ou résultat de succès partiel ; export du seul
+`live-ha-parity-report-<SHA>-<run_id>` (7 jours).
+Le job `result`, sans secret, ne publie le statut
+`hoben-live-ha-parity=success` que si le job collecte et son
+rapport validé réussissent ensemble. Le succès **ne prouve pas**
+les fonctions absentes.
+
+### Handoff MANAGER
+
+1. CODEX DEV livre la PR `Refs #54` vers `experimental`, HEAD
+   final et quatre jobs CI passants, puis `state:review`.
+2. MANAGER inspecte diff, code exécuté, environnement isolé, HEAD,
+   CI, provenance et limitations ; publie **avant merge** son
+   commentaire authentique `hoben-live-approval:v1` sur la PR avec
+   le SHA exact et le run CI réel.
+3. MANAGER fusionne vers `experimental` uniquement. Constater le
+   nouveau run `push`, tentative 1, son SHA et l'ID/URL, puis
+   `dry-run`, `admission`, `collect`, `result`, statut associé et
+   rapport expurgé. Une admission refusée, un export absent ou une
+   expérience incomplète signifie **NOT RUN/FAILURE**, jamais un
+   succès simulé ni une relance.
+4. MANAGER consigne séparément les constats et ouvre si nécessaire
+   des Issues de session/reconnexion ; `protocol.md` reste fondé
+   exclusivement sur les faits établis, jamais sur le dry-run.
+
+L'API du connecteur ne prouve pas les détails de Settings ni les
+secrets `hoben-live`. La lecture réelle de la politique n'est
+établie que par le runner après fusion ; aucun paramètre ni secret
+n'est modifié par DEV.
+
 ## Gouvernance des secrets et protections
 
 Le propriétaire déclare avoir effectué les réglages GitHub. L'API disponible a confirmé `experimental.protected=true`, **sans permettre de consulter les règles détaillées de protection, les environnements, leurs approbations ni leurs secrets**. Cette limite n'est pas une preuve de leur absence ou de leur conformité.
