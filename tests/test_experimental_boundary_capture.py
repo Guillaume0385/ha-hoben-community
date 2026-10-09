@@ -99,7 +99,22 @@ def runner(tmp_path, monkeypatch):
     }
     for key, value in environment.items():
         monkeypatch.setenv(key, value)
-    for key in ("GITHUB_TOKEN", "GH_TOKEN", "HOBEN_USER_GUID", "HOBEN_DEVICE_GUID"):
+    # Model the launcher's isolated child, even when pytest itself runs inside
+    # Actions. Refusal tests below reintroduce each forbidden variable explicitly.
+    for key in (
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_RESULTS_URL",
+        "ACTIONS_CACHE_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "GITHUB_ENV",
+        "GITHUB_OUTPUT",
+        "GITHUB_STEP_SUMMARY",
+        "HOBEN_USER_GUID",
+        "HOBEN_DEVICE_GUID",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(entry, "ROOT", candidate)
     monkeypatch.setattr(entry, "utcnow", lambda: datetime(2026, 10, 9, tzinfo=UTC))
