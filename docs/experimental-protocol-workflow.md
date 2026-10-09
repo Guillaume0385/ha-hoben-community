@@ -133,6 +133,56 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
    absent ne devient jamais success. Une annulation forcée peut empêcher la
    publication : la conclusion originale GitHub reste la preuve de cancellation.
 
+### Audit des permissions et preuve après fusion (corrections MANAGER PR #59)
+
+**Contrat documenté GitHub (API REST 2026-03-10) :** les lectures
+`repos.getEnvironment` (GET /repos/{owner}/{repo}/environments/{environment_name}),
+`repos.listDeploymentBranchPolicies` et `repos.getDeploymentBranchPolicy`
+demandent **Actions: read** sur le dépôt pour un jeton fin ; elles ne demandent
+pas Administration:write. Les jobs `admission` et `collect` déclarent déjà
+`actions: read`. Source :
+[environments](https://docs.github.com/en/rest/deployments/environments),
+[branch policies](https://docs.github.com/en/rest/deployments/branch-policies).
+Ce contrat public **ne démontre ni leur accessibilité effective par le
+GITHUB_TOKEN d'un runner, ni la configuration des environnements**. Aucun PAT
+administrateur ni nouvelle permission n'est demandé.
+
+Le code lit ces trois endpoints avant la création de la réservation dans le job
+`admission`. Une réponse 401/403/404, une API absente, un corps incomplet, une
+politique de branche non strictement `experimental`, une absence de reviewers
+User indépendants ou `prevent_self_review != true` donnent un refus
+`environment_unverified`, rendu **NOT RUN** sans message d'exception brut.
+Au job `collect`, après l'éventuelle attente d'approbation GitHub, une seconde
+lecture identique et l'historique d'approbation doivent réussir **avant le step
+qui reçoit les identifiants**. Un refus ne réserve aucun nouveau SHA/scénario
+et n'appelle pas la collecte.
+
+**Preuves différentes, ne pas les confondre :**
+
+- **Hors ligne / PR Validate :** mocks HTTP 401/403/404, politique/branche,
+  absence de décision MANAGER, SHA erroné, approbation manquante et non-réservation.
+  Ces tests prouvent le refus du code, pas un droit API réel.
+- **Installé sur `experimental` seulement après revue et fusion :** retrouver
+  le run `Hoben experimental (MANAGER)` de type `push`, tentative 1, SHA
+  fusionné, vérifier la réussite du job `dry-run` *du même run* (sans secret),
+  puis consulter le résultat du job `admission`. Un run Validate sur la PR ne
+  peut **jamais** le remplacer.
+- **Runner réel :** `admission` est la preuve de lecture effective des politiques.
+  Si 403, refus ou données invérifiables : **NOT RUN**, pas de réservation et
+  aucune tentative de réexécuter avec un jeton plus puissant. Si admis, le job
+  `collect` attend la politique GitHub et recontrôle réellement l'approbation.
+  `PENDING APPROVAL` n'est pas un succès de collecte. Vérifier le bon environnement
+  dans la page GitHub du run avant toute approbation.
+
+Le commentaire `hoben-experimental-approval:v1` est une **décision réelle du
+MANAGER, déposée sans édition avant fusion**, jamais un texte produit par DEV
+ou par un test. S'il manque, est altéré ou lie un ancien HEAD, le refus intervient
+avant lecture de l'environnement. Le MANAGER doit vérifier les settings effectifs
+sur l'interface GitHub lorsqu'ils restent invérifiables via sa connexion ; une
+capture d'écran ou un commentaire de confirmation seul ne remplace pas
+l'attestation du runner. **À ce stade : le workflow modifié existe seulement
+dans la PR #59 ; préflight de ce workflow sur GitHub et H1/H2 : NOT RUN.**
+
 Le succès du workflow signifie seulement collecte bornée terminée ; tous les
 rapports conservent `boundary_proven=false`. Les arrêts anticipés produisent un
 rapport failure lorsqu'il peut être scellé. Une panne de chiffrement ne possède
