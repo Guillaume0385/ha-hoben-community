@@ -21,8 +21,12 @@ def synthetic():
     ]
     events = [
         {"kind": "tx_attempt", "category": "open_client", "started": 3.0},
-        {"kind": "tx_complete", "category": "open_client", "started": 3.0,
-         "ended": 3.001},
+        {
+            "kind": "tx_complete",
+            "category": "open_client",
+            "started": 3.0,
+            "ended": 3.001,
+        },
         {"kind": "rx", "status": "received", **reads[0].metadata()},
         {"kind": "rx", "status": "received", **reads[1].metadata()},
         {"kind": "rx", "status": "eof", **reads[2].metadata()},
@@ -38,7 +42,10 @@ def valid():
     reads[1] = RxRead(1, 48, 4096, 3, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
     t = metadata_timeline(
-        events, reads, rx_bytes=51, opening_offset=0,
+        events,
+        reads,
+        rx_bytes=51,
+        opening_offset=0,
         h2={"covered_bytes": 0, "unattributed_bytes": 3},
     )
     return t
@@ -67,14 +74,36 @@ def test_hypothetical_ping_and_fragmentation_have_no_protocol_proof():
     reads, events = synthetic()
     reads[1] = RxRead(1, 48, 4096, 3, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
-    events.insert(4, {"kind": "candidate_frame", "category": "ping_h2",
-                      "offset": 48, "length": 1, "received_at": 3.5})
-    events.insert(5, {"kind": "candidate_frame", "category": "notification_h2",
-                      "offset": 49, "length": 2, "received_at": 3.5})
-    t = metadata_timeline(events, reads, rx_bytes=51, opening_offset=0,
-                          h2={"covered_bytes": 3, "unattributed_bytes": 0})
+    events.insert(
+        4,
+        {
+            "kind": "candidate_frame",
+            "category": "ping_h2",
+            "offset": 48,
+            "length": 1,
+            "received_at": 3.5,
+        },
+    )
+    events.insert(
+        5,
+        {
+            "kind": "candidate_frame",
+            "category": "notification_h2",
+            "offset": 49,
+            "length": 2,
+            "received_at": 3.5,
+        },
+    )
+    t = metadata_timeline(
+        events,
+        reads,
+        rx_bytes=51,
+        opening_offset=0,
+        h2={"covered_bytes": 3, "unattributed_bytes": 0},
+    )
     assert [f["confidence"] for f in t["h2_candidates"]] == [
-        "h2_hypothesis_only", "h2_hypothesis_only"
+        "h2_hypothesis_only",
+        "h2_hypothesis_only",
     ]
     assert t["fragmented_candidates"] == 0
     assert t["concatenated_reads"] == 1
@@ -82,22 +111,25 @@ def test_hypothetical_ping_and_fragmentation_have_no_protocol_proof():
     assert safe_timeline(t, rx_bytes=51, read_calls=3) == t
 
 
-@pytest.mark.parametrize("corruption", [
-    lambda t: t.update(private_payload="SYNTHETIC_PRIVATE_RX"),
-    lambda t: t["reads"][0].update(device_guid="SYNTHETIC_PRIVATE_ID"),
-    lambda t: t["reads"][0].update(received=49),
-    lambda t: t["reads"][0].update(requested=True),
-    lambda t: t["reads"][0].update(duration_ms=999),
-    lambda t: t["reads"][0].update(started_ms=float("nan")),
-    lambda t: t["reads"][1].update(offset=40),
-    lambda t: t["reads"][1].update(gap_previous_ms=999),
-    lambda t: t["tx"][0].update(category="SYNTHETIC_PRIVATE_PACKET"),
-    lambda t: t["tx"][0].update(ended_ms=None),
-    lambda t: t["unattributed"][0].update(basis="RAW_HEX"),
-    lambda t: t["unattributed"][0].update(length=8000),
-    lambda t: t["close"].update(data="SYNTHETIC_PRIVATE_PACKET"),
-    lambda t: t.update(fragmented_candidates=1),
-])
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        lambda t: t.update(private_payload="SYNTHETIC_PRIVATE_RX"),
+        lambda t: t["reads"][0].update(device_guid="SYNTHETIC_PRIVATE_ID"),
+        lambda t: t["reads"][0].update(received=49),
+        lambda t: t["reads"][0].update(requested=True),
+        lambda t: t["reads"][0].update(duration_ms=999),
+        lambda t: t["reads"][0].update(started_ms=float("nan")),
+        lambda t: t["reads"][1].update(offset=40),
+        lambda t: t["reads"][1].update(gap_previous_ms=999),
+        lambda t: t["tx"][0].update(category="SYNTHETIC_PRIVATE_PACKET"),
+        lambda t: t["tx"][0].update(ended_ms=None),
+        lambda t: t["unattributed"][0].update(basis="RAW_HEX"),
+        lambda t: t["unattributed"][0].update(length=8000),
+        lambda t: t["close"].update(data="SYNTHETIC_PRIVATE_PACKET"),
+        lambda t: t.update(fragmented_candidates=1),
+    ],
+)
 def test_public_timeline_refuses_raw_corruption_and_false_metadata(corruption):
     timeline = copy.deepcopy(valid())
     corruption(timeline)
@@ -108,8 +140,13 @@ def test_public_timeline_refuses_raw_corruption_and_false_metadata(corruption):
 def test_measurement_builder_refuses_inconsistent_read_without_export():
     reads, events = synthetic()
     with pytest.raises(TimelineInvalid, match="invalid_timeline"):
-        metadata_timeline(events, reads, rx_bytes=51, opening_offset=0,
-                          h2={"covered_bytes": 0, "unattributed_bytes": 3})
+        metadata_timeline(
+            events,
+            reads,
+            rx_bytes=51,
+            opening_offset=0,
+            h2={"covered_bytes": 0, "unattributed_bytes": 3},
+        )
 
 
 def test_connect_failure_has_zero_reads_and_no_fictitious_tx():
@@ -131,20 +168,32 @@ def test_public_projection_includes_only_timing_fields_when_present(monkeypatch)
     monkeypatch.setenv("EXPERIMENTAL_APPROVED_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     s = {
-        "mode": "H1", "pause_seconds": 0, "repetition": 1,
-        "boundary_proven": False, "partial": True,
-        "prefix_complete": True, "rx_bytes": 51, "read_calls": 3,
-        "pongs_before_open": 0, "pongs_under_h2": 0,
-        "v4_requests": 0, "correlated_responses": 0,
-        "exception_responses": 0, "stop": "peer_eof",
-        "emission_stop": None, "opening_context": {
-            "eligible": True, "status": "accepted_v4_prefix",
-        }, "h1": {"status": "inconclusive"}, "h2": {"status": "inconclusive"},
+        "mode": "H1",
+        "pause_seconds": 0,
+        "repetition": 1,
+        "boundary_proven": False,
+        "partial": True,
+        "prefix_complete": True,
+        "rx_bytes": 51,
+        "read_calls": 3,
+        "pongs_before_open": 0,
+        "pongs_under_h2": 0,
+        "v4_requests": 0,
+        "correlated_responses": 0,
+        "exception_responses": 0,
+        "stop": "peer_eof",
+        "emission_stop": None,
+        "opening_context": {
+            "eligible": True,
+            "status": "accepted_v4_prefix",
+        },
+        "h1": {"status": "inconclusive"},
+        "h2": {"status": "inconclusive"},
         "comparison": "insufficient_data",
-        "timing_observations": valid(), "private": "SYNTHETIC_PRIVATE_ID",
+        "timing_observations": valid(),
+        "private": "SYNTHETIC_PRIVATE_ID",
     }
-    report = safe_report({"boundary_proven": False, "sessions": [s]},
-                         interrupted=True)
+    report = safe_report({"boundary_proven": False, "sessions": [s]}, interrupted=True)
     assert report["result"] == "failure"
     assert report["sessions"][0]["timing_observations"] == valid()
     assert "SYNTHETIC_PRIVATE" not in json.dumps(report)
