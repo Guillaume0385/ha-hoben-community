@@ -1,4 +1,5 @@
 """Synthetic H1/H2 timelines: read() != frame, raw data never public."""
+
 from __future__ import annotations
 
 import copy
@@ -34,7 +35,7 @@ def synthetic():
 def valid():
     reads, events = synthetic()
     # A distinct reader call cannot start before its predecessor finishes.
-    reads[1] = RxRead(1, 48, 4096, 3.2, 3.5, 3.2)
+    reads[1] = RxRead(1, 48, 4096, 3, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
     t = metadata_timeline(
         events, reads, rx_bytes=51, opening_offset=0,
