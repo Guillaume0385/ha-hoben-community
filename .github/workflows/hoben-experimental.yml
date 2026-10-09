@@ -59,9 +59,12 @@ jobs:
           script: |
             const gate = require('./.github/scripts/experimental-lab-gate.cjs');
             try {
-              await gate.verify({github, context});
+              const decision = await gate.verify({github, context});
               core.setOutput('approved', 'true');
-              await core.summary.addRaw('PENDING APPROVAL: reserved h1h2 on this experimental SHA. GitHub environment approval remains mandatory.').write();
+              const summary = decision.status === 'PENDING APPROVAL'
+                ? 'PENDING APPROVAL: reserved h1h2; required GitHub reviewer approval still applies.'
+                : 'READY FOR ENVIRONMENT: reserved h1h2; no required reviewers configured.';
+              await core.summary.addRaw(summary).write();
             } catch (error) {
               // Fixed enum only: never forward raw exception text, stack, API data or headers.
               const category = gate.refusalCategory(error);
@@ -95,7 +98,7 @@ jobs:
         with:
           python-version: '3.12'
       - id: recheck
-        name: Recheck exact SHA, claim, policy and actual independent approval
+        name: Recheck exact SHA, claim, policy and required approval if configured
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |

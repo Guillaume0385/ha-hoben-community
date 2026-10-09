@@ -1126,12 +1126,26 @@ provided the H1/H2 research scripts on `experimental`; PR #58 installed the
 secretless push preflight. Its real run `37903694784` on merge SHA
 `4eb8bb90252dae41ca3e83a58e751d36f57c8fd1` passed both dry-run jobs.
 It proves no secret policy, capture or Hoben behavior.
-The next authorized #54 increment prepares `hoben-experimental.yml` only:
-secretless preflight → MANAGER decision/CI/policy admission and atomic claim →
-independent GitHub approval/recheck → isolated H1/H2 collection → verified
-encrypted export/public report → separate result status. It requires MANAGER
-review and merge before installation; actual environment access/approval and a
-real run remain unverified. The actual-HA `hoben-live` lane follows separately.
+The laboratory workflow `hoben-experimental.yml` was installed by PR #59.
+PR #60 then exposed the actual GitHub refusal category: the installed push
+run #37936003393 completed secretless preflight but refused admission with
+`environment_reviewers`, before any Hoben secret or network contact.
+
+**Owner decision 2026-10-09, Issue #54:** the repository has a single
+maintainer and no second GitHub account suitable for environment approval.
+Match the existing `hoben-live` environment model: an environment policy
+restricted to exactly the protected `experimental` branch may have **zero
+configured required reviewer rules**. If GitHub actually configures a required
+reviewer, keep that approval mandatory and verify the independent reviewer
+before contacting Hoben; malformed or unprovable policies still fail closed.
+The explicit MANAGER decision bound to the candidate PR HEAD and successful
+CI, merge-tree check, fresh secretless preflight, policy checks, one-use
+atomic reservation and post-admission recheck remain mandatory. No agent may
+change GitHub Settings. This removes independent human approval in the
+no-reviewer configuration and must not be described as equivalent assurance.
+After offline tests and MANAGER review, only a **new** reviewed merge SHA may
+start one new H1/H2 observation; never rerun the failed SHA. The actual-HA
+`hoben-live` experimental lane follows separately.
 No protocol fact or main-release acceptance is inferred from these stages.
 
 ### MANAGER-gated authenticated candidate validation

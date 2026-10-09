@@ -39,8 +39,7 @@ function setup() {
   const reviewer = {login: "independent-synthetic-reviewer", id: 999, type: "User"};
   const environment = {id: 789, name: "hoben-experimental",
     deployment_branch_policy: {protected_branches: false, custom_branch_policies: true},
-    protection_rules: [{id: 100, type: "required_reviewers", prevent_self_review: true,
-      reviewers: [{type: "User", reviewer}]}]};
+    protection_rules: []};
   const branch = {id: 12, node_id: "SYNTHETIC_POLICY", name: "experimental", type: "branch"};
   const history = [{state: "approved", user: {...reviewer}, environments: [{id: 789, name: "hoben-experimental"}]}];
   const refs = new Map(), tags = new Map();
@@ -87,12 +86,33 @@ test("secretless assembly exercises real CMS before any secret-bearing job", asy
   assert.equal(a.writes, 0);
 });
 
-test("MANAGER decision + all four CI jobs + environment, then independent approval", async () => {
+function requireIndependentReviewer(a) {
+  const reviewer = {login: "independent-synthetic-reviewer", id: 999, type: "User"};
+  a.environment.protection_rules = [{
+    id: 100, type: "required_reviewers", prevent_self_review: true,
+    reviewers: [{type: "User", reviewer}],
+  }];
+}
+
+test("single maintainer: reviewed SHA, CI and branch policy require no GitHub reviewer", async () => {
   const a = setup();
-  assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
+  assert.equal((await gate.verify(a)).status, "READY FOR ENVIRONMENT");
   assert.equal(a.writes, 1);
+  a.github.request = async () => { throw Error("unexpected approvals API read"); };
   assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
   assert.equal(a.writes, 1); // Recheck never writes on the secret runner.
+});
+
+test("configured required reviewer cannot be bypassed without real GitHub approval", async () => {
+  const a = setup(); requireIndependentReviewer(a);
+  assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
+  a.history.splice(0);
+  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history.push({state: "approved",
+    user: {login: "independent-synthetic-reviewer", id: 999, type: "User"},
+    environments: [{id: a.environment.id, name: a.environment.name}]});
+  assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+  assert.equal(a.writes, 1);
 });
 
 const refused = {
@@ -139,10 +159,14 @@ const refused = {
   "unrestricted environment": a => { a.environment.deployment_branch_policy = null; },
   "wildcard branch": a => { a.branch.name = "*"; },
   "tag policy": a => { a.branch.type = "tag"; },
-  "no required reviewers": a => { a.environment.protection_rules = []; },
-  "self review allowed": a => { a.environment.protection_rules[0].prevent_self_review = false; },
-  "only MANAGER reviewer": a => { a.environment.protection_rules[0].reviewers[0].reviewer = {...user}; },
-  "team membership unproven": a => { a.environment.protection_rules[0].reviewers[0].type = "Team"; },
+  "self review allowed": a => { requireIndependentReviewer(a);
+    a.environment.protection_rules[0].prevent_self_review = false; },
+  "only MANAGER reviewer": a => { requireIndependentReviewer(a);
+    a.environment.protection_rules[0].reviewers[0].reviewer = {...user}; },
+  "team membership unproven": a => { requireIndependentReviewer(a);
+    a.environment.protection_rules[0].reviewers[0].type = "Team"; },
+  "duplicate reviewer rules": a => { requireIndependentReviewer(a);
+    a.environment.protection_rules.push({...a.environment.protection_rules[0]}); },
   "environment API unavailable": a => { a.github.rest.repos.getEnvironment = async () => {throw Error("403");}; },
   "unreviewed merge tree": a => { a.github.rest.git.getCommit = async p =>
     ({data: {sha: p.commit_sha, tree: {sha: p.commit_sha}}}); },
@@ -159,7 +183,7 @@ for (const [name, modify] of Object.entries(refused)) {
 
 for (const fault of ["missing", "rejected", "wrong-user", "self", "wrong-environment", "policy-changed", "decision-changed", "SHA-changed"]) {
   test("refuse after environment waiting: " + fault, async () => {
-    const a = setup(); await gate.verify(a);
+    const a = setup(); requireIndependentReviewer(a); await gate.verify(a);
     if (fault === "missing") a.history.splice(0);
     if (fault === "rejected") a.history[0].state = "rejected";
     if (fault === "wrong-user") a.history[0].user.id = 2;
@@ -209,13 +233,14 @@ for (const [endpoint, prepare] of [
   }
 }
 
-test("policy reads returning missing data, missing reviewer or wrong branch fail before claim", async () => {
+test("policy reads returning missing data, invalid reviewer rule or wrong branch fail before claim", async () => {
   for (const mutate of [
     a => { a.github.rest.repos.getEnvironment = async () => ({data: null}); },
     a => { a.github.rest.repos.listDeploymentBranchPolicies = async () => ({data: null}); },
     a => { a.github.rest.repos.listDeploymentBranchPolicies = async () => ({data: []}); },
     a => { a.branch.name = "main"; },
-    a => { a.environment.protection_rules[0].reviewers = []; },
+    a => { requireIndependentReviewer(a);
+      a.environment.protection_rules[0].reviewers = []; },
   ]) {
     const a = setup(); mutate(a);
     await assert.rejects(gate.verify(a));
@@ -282,14 +307,14 @@ test("every environment refusal uses a stable, non-sensitive public category and
     ["branch protection disabled", "environment_branch", a => {
       a.environment.deployment_branch_policy.custom_branch_policies = false;
     }],
-    ["missing reviewers", "environment_reviewers", a => {
-      a.environment.protection_rules[0].reviewers = [];
+    ["malformed reviewer rule", "environment_reviewers", a => {
+      requireIndependentReviewer(a); a.environment.protection_rules[0].reviewers = [];
     }],
     ["self review permitted", "environment_reviewers", a => {
-      a.environment.protection_rules[0].prevent_self_review = false;
+      requireIndependentReviewer(a); a.environment.protection_rules[0].prevent_self_review = false;
     }],
     ["team not verified", "environment_reviewers", a => {
-      a.environment.protection_rules[0].reviewers[0].type = "Team";
+      requireIndependentReviewer(a); a.environment.protection_rules[0].reviewers[0].type = "Team";
     }],
   ];
   for (const [title, category, mutate] of cases) {
@@ -328,7 +353,7 @@ test("decision, merge, CI failures are categorized before any reservation", asyn
 });
 
 test("approval failure after reservation is categorized without repeating admission", async () => {
-  const a = setup(); await gate.verify(a);
+  const a = setup(); requireIndependentReviewer(a); await gate.verify(a);
   a.history[0].state = "rejected";
   await assert.rejects(gate.verify({...a, recheck: true}), error => {
     assert.equal(gate.refusalCategory(error), "approval");
