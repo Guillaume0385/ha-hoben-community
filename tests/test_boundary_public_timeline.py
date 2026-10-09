@@ -65,8 +65,7 @@ def test_exact_read_and_eof_timing_and_unknown_three_byte_suffix():
 
 def test_hypothetical_ping_and_fragmentation_have_no_protocol_proof():
     reads, events = synthetic()
-    reads[1] = RxRead(1, 48, 4096, 3, 3.0, 3.5, 3.2)
-    reads[1] = RxRead(1, 48, 4096, 3.2, 3.5, 3.2)
+    reads[1] = RxRead(1, 48, 4096, 3, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
     events.insert(4, {"kind": "candidate_frame", "category": "ping_h2",
                       "offset": 48, "length": 1, "received_at": 3.5})
