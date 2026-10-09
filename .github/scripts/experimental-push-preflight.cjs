@@ -5,6 +5,7 @@ const REPOSITORY = "Guillaume0385/ha-hoben-community";
 const MANAGER = "Guillaume0385";
 const BRANCH = "experimental";
 const WORKFLOW = REPOSITORY + "/.github/workflows/experimental-manager-preflight.yml@refs/heads/experimental";
+const LAB_WORKFLOW = REPOSITORY + "/.github/workflows/hoben-experimental.yml@refs/heads/experimental";
 const SCENARIOS = Object.freeze(["hoben-live", "hoben-experimental"]);
 const SHA = /^[a-f0-9]{40}$/;
 
@@ -16,16 +17,17 @@ function isSha(value) {
   return typeof value === "string" && SHA.test(value);
 }
 
-async function verify({ github, context, scenario, env = process.env }) {
+async function verify({ github, context, scenario, env = process.env, workflow = WORKFLOW }) {
   const p = context.payload || {};
-  if (!SCENARIOS.includes(scenario) ||
+  if (![WORKFLOW, LAB_WORKFLOW].includes(workflow) ||
+      !SCENARIOS.includes(scenario) ||
       context.eventName !== "push" ||
       context.ref !== "refs/heads/" + BRANCH ||
       context.actor !== MANAGER ||
       env.GITHUB_ACTOR !== MANAGER ||
       env.GITHUB_TRIGGERING_ACTOR !== MANAGER ||
       env.GITHUB_RUN_ATTEMPT !== "1" ||
-      env.GITHUB_WORKFLOW_REF !== WORKFLOW ||
+      env.GITHUB_WORKFLOW_REF !== workflow ||
       env.GITHUB_REPOSITORY !== REPOSITORY ||
       env.GITHUB_REF !== context.ref ||
       env.GITHUB_SHA !== context.sha ||
@@ -77,4 +79,4 @@ async function verify({ github, context, scenario, env = process.env }) {
   return Object.freeze({ scenario, sha: context.sha, pr: number, status: "dry-run-only" });
 }
 
-module.exports = { verify, REPOSITORY, WORKFLOW, SCENARIOS };
+module.exports = { verify, REPOSITORY, WORKFLOW, LAB_WORKFLOW, SCENARIOS };

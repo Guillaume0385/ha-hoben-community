@@ -97,3 +97,13 @@ test("GitHub API errors never yield success", async () => {
   args.github.rest.pulls.get = async () => { throw new Error("403"); };
   await assert.rejects(verify(args), /403/);
 });
+
+test("the separate laboratory may reuse the merge preflight only at its fixed experimental workflow", async () => {
+  const {LAB_WORKFLOW} = require("../../.github/scripts/experimental-push-preflight.cjs");
+  const args = setup();
+  args.workflow = LAB_WORKFLOW;
+  args.env.GITHUB_WORKFLOW_REF = LAB_WORKFLOW;
+  assert.equal((await verify(args)).status, "dry-run-only");
+  args.workflow = args.env.GITHUB_WORKFLOW_REF = "arbitrary.yml@refs/heads/main";
+  await assert.rejects(verify(args), /NOT RUN/);
+});

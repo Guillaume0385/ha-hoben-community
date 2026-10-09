@@ -23,7 +23,7 @@ POLICY = {
     "tracking_issue_id": 5768789242,
     "environment": "hoben-experimental",
     "recipient_sha256": RECIPIENT_SHA256,
-    "candidate_sha": "b" * 40,
+    "candidate_sha": "a" * 40,
 }
 MAIN = "a" * 40
 USER = "SYNTHETIC-PRIVATE-IDENTITY"
@@ -69,24 +69,22 @@ def runner(tmp_path, monkeypatch):
     )
     shutil.copy(SOURCE / "tests/fixtures/hoben-experimental-recipient.pem", config)
     event = {
-        "action": "labeled",
-        "label": {"name": "manager-hoben-experimental-dry-run"},
+        "ref": "refs/heads/experimental",
+        "before": "f" * 40,
+        "after": MAIN,
+        "created": False,
+        "deleted": False,
+        "forced": False,
         "sender": {"login": "Guillaume0385", "id": 18246624, "type": "User"},
         "repository": {"full_name": entry.REPOSITORY, "id": 1401398724},
-        "issue": {
-            "number": 54,
-            "id": POLICY["tracking_issue_id"],
-            "state": "open",
-            "updated_at": "2026-10-09T00:00:00Z",
-        },
     }
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(event))
     environment = {
         "GITHUB_ACTIONS": "true",
         "GITHUB_REPOSITORY": entry.REPOSITORY,
-        "GITHUB_REF": "refs/heads/main",
-        "GITHUB_EVENT_NAME": "issues",
+        "GITHUB_REF": "refs/heads/experimental",
+        "GITHUB_EVENT_NAME": "push",
         "GITHUB_ACTOR": "Guillaume0385",
         "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
         "GITHUB_RUN_ATTEMPT": "1",
@@ -101,7 +99,22 @@ def runner(tmp_path, monkeypatch):
     }
     for key, value in environment.items():
         monkeypatch.setenv(key, value)
-    for key in ("GITHUB_TOKEN", "GH_TOKEN", "HOBEN_USER_GUID", "HOBEN_DEVICE_GUID"):
+    # Model the launcher's isolated child, even when pytest itself runs inside
+    # Actions. Refusal tests below reintroduce each forbidden variable explicitly.
+    for key in (
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_RESULTS_URL",
+        "ACTIONS_CACHE_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "GITHUB_ENV",
+        "GITHUB_OUTPUT",
+        "GITHUB_STEP_SUMMARY",
+        "HOBEN_USER_GUID",
+        "HOBEN_DEVICE_GUID",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(entry, "ROOT", candidate)
     monkeypatch.setattr(entry, "utcnow", lambda: datetime(2026, 10, 9, tzinfo=UTC))
@@ -127,8 +140,6 @@ def runner(tmp_path, monkeypatch):
 
 
 def live(runner, monkeypatch):
-    runner.event["label"]["name"] = "manager-hoben-experimental-live"
-    runner.event_path.write_text(json.dumps(runner.event))
     monkeypatch.setenv("EXPERIMENTAL_PHASE", "live")
     monkeypatch.setenv("HOBEN_USER_GUID", USER)
     monkeypatch.setenv("HOBEN_DEVICE_GUID", "0" * 32)
@@ -216,7 +227,7 @@ def test_early_campaign_stop_exports_failure_and_nonzero_exit(
     assert_private_cleanup(runner)
 
 
-def test_real_main_public_certificate_pin_and_cipher_algorithm():
+def test_reviewed_experimental_public_certificate_pin_and_cipher_algorithm():
     der = entry.command(
         "/usr/bin/openssl",
         "x509",
@@ -241,7 +252,7 @@ def test_installed_channel_dry_run_simulates_crypto_without_candidate_or_secret(
     assert os.environ["HOBEN_USER_GUID"] == USER
     report = json.loads((runner.exports / "report.json").read_text())
     assert report["result"] == "dry_run_pass" and report["executed_sessions"] == 0
-    assert report["boundary_proven"] is False and report["main_sha"] == MAIN
+    assert report["boundary_proven"] is False and report["experimental_sha"] == MAIN
     structure = entry.command(
         "/usr/bin/openssl",
         "cms",
@@ -283,6 +294,17 @@ def test_cancellation_seals_partial_rx_and_fixed_failure_report(runner, monkeypa
     assert_private_cleanup(runner)
 
 
+def test_absent_secret_refuses_before_any_campaign_call(runner, monkeypatch):
+    live(runner, monkeypatch)
+    _, calls = fake_collector(monkeypatch, runner)
+    monkeypatch.delenv("HOBEN_USER_GUID")
+    assert entry.run("live") == 1
+    assert calls == []
+    assert not (runner.exports / "captures.cms").exists()
+    assert not (runner.exports / "report.json").exists()
+    assert_private_cleanup(runner)
+
+
 def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
     runner, monkeypatch
 ):
@@ -314,6 +336,11 @@ def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
         ("ACTIONS_RUNTIME_TOKEN", "SYNTHETIC-TOKEN"),
         ("ACTIONS_RESULTS_URL", "https://synthetic.invalid"),
         ("ACTIONS_CACHE_URL", "https://synthetic.invalid"),
+        ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "SYNTHETIC-TOKEN"),
+        ("ACTIONS_ID_TOKEN_REQUEST_URL", "https://synthetic.invalid"),
+        ("GITHUB_ENV", "/synthetic/output"),
+        ("GITHUB_OUTPUT", "/synthetic/output"),
+        ("GITHUB_STEP_SUMMARY", "/synthetic/output"),
     ],
 )
 def test_wrong_context_or_inherited_token_refuses_before_exports(
@@ -430,25 +457,24 @@ def test_private_storage_rejects_symlink_export_or_storage_inside_checkouts(
 
 
 @pytest.mark.parametrize(
-    "change", ["issue", "issue-id", "sender", "action", "label", "closed", "pr"]
+    "change",
+    ["ref", "after", "before", "sender", "repo", "created", "deleted", "forced"],
 )
-def test_issue_event_forgery_never_imports_candidate(runner, monkeypatch, change):
+def test_push_event_forgery_never_imports_candidate(runner, monkeypatch, change):
     live(runner, monkeypatch)
     imports, calls = fake_collector(monkeypatch, runner)
-    if change == "issue":
-        runner.event["issue"]["number"] = 55
-    elif change == "issue-id":
-        runner.event["issue"]["id"] = 123
-    elif change == "sender":
+    if change == "sender":
         runner.event["sender"]["id"] = 123
-    elif change == "action":
-        runner.event["action"] = "edited"
-    elif change == "label":
-        runner.event["label"]["name"] = "manager-live-hoben"
-    elif change == "closed":
-        runner.event["issue"]["state"] = "closed"
+    elif change == "repo":
+        runner.event["repository"]["id"] = 123
+    elif change == "ref":
+        runner.event["ref"] = "refs/heads/main"
+    elif change == "after":
+        runner.event["after"] = "c" * 40
+    elif change == "before":
+        runner.event["before"] = MAIN
     else:
-        runner.event["issue"]["pull_request"] = {}
+        runner.event[change] = True
     runner.event_path.write_text(json.dumps(runner.event))
     assert entry.run("live") == 1 and not imports and not calls
     assert not runner.exports.exists()
