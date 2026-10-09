@@ -73,8 +73,6 @@ function readReport(file, context) {
 
 function prepare({context,core}) {
   try {
-  } catch (_) { core.setFailed('No plaintext artifact may be published.'); }
-  try {
     const source = path.join(process.env.RUNNER_TEMP,'hoben-experimental-exports/report.json');
     const {report} = readReport(source,context);
     const destination = path.join(process.env.RUNNER_TEMP,'hoben-experimental-public');
