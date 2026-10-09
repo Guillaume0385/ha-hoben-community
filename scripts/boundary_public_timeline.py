@@ -47,7 +47,10 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
     require(source["basis"] == "client_monotonic_relative")
     require(type(source["reads"]) is list and len(source["reads"]) == read_calls <= 260)
     require(type(source["tx"]) is list and len(source["tx"]) <= 100)
-    require(type(source["h2_candidates"]) is list and len(source["h2_candidates"]) <= 256)
+    require(
+        type(source["h2_candidates"]) is list
+        and len(source["h2_candidates"]) <= 256
+    )
     require(type(source["unattributed"]) is list and len(source["unattributed"]) <= 1)
 
     reads = []
@@ -110,15 +113,23 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
             if r["offset"] < start + length and r["offset"] + r["received"] > start
         ]
         require(bool(intersections))
-        require(f["first_read"] == intersections[0] and f["last_read"] == intersections[-1])
+        require(
+            f["first_read"] == intersections[0]
+            and f["last_read"] == intersections[-1]
+        )
         completed_ms = integer(f["completed_ms"], MAX_MS)
         past = [v for v in completed if v <= completed_ms]
         require(f["since_last_tx_ms"] ==
                 (None if not past else completed_ms - max(past)))
         interval = nullable(f["ping_interval_ms"])
-        require(interval ==
-                (completed_ms - last_ping if last_ping is not None and label == "ping_h2"
-                 else None))
+        require(
+            interval
+            == (
+                completed_ms - last_ping
+                if last_ping is not None and label == "ping_h2"
+                else None
+            )
+        )
         if label == "ping_h2":
             last_ping = completed_ms
         candidates.append({**f, "kind": label, "confidence": "h2_hypothesis_only"})
