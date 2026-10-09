@@ -129,21 +129,35 @@ async function reviewsAndCI(github, pr, decision) {
   }), "ci_unverified");
 }
 
+// GitHub documents Actions:read for these three read-only endpoints, not
+// Administration. The actual run token must still prove access: 401/403/404,
+// omitted fields and unknown API responses all deny admission before any claim.
+async function readEnvironmentEvidence(operation) {
+  try {
+    return await operation();
+  } catch (_) {
+    // Never surface raw API exceptions (which may contain headers or URLs).
+    throw new Error("environment_unverified");
+  }
+}
+
 async function environmentPolicy(github) {
-  const { data: environment } = await github.rest.repos.getEnvironment({ ...API,
-    environment_name: policy.environment });
-  need(environment.name === policy.environment && positive(environment.id) &&
+  const { data: environment } = await readEnvironmentEvidence(() =>
+    github.rest.repos.getEnvironment({ ...API, environment_name: policy.environment }));
+  need(environment && environment.name === policy.environment && positive(environment.id) &&
     environment.deployment_branch_policy?.protected_branches === false &&
     environment.deployment_branch_policy.custom_branch_policies === true, "environment_unverified");
-  const branches = await github.paginate(github.rest.repos.listDeploymentBranchPolicies,
-    { ...API, environment_name: policy.environment, per_page: 100 });
-  need(branches.length === 1 && branches[0].name === "experimental" &&
+  const branches = await readEnvironmentEvidence(() =>
+    github.paginate(github.rest.repos.listDeploymentBranchPolicies,
+      { ...API, environment_name: policy.environment, per_page: 100 }));
+  need(Array.isArray(branches) && branches.length === 1 && branches[0]?.name === "experimental" &&
     positive(branches[0].id) && typeof branches[0].node_id === "string" && branches[0].node_id.length > 0,
   "environment_unverified");
   let branch = branches[0];
   if (!Object.hasOwn(branch, "type")) {
-    const { data: detail } = await github.rest.repos.getDeploymentBranchPolicy({ ...API,
-      environment_name: policy.environment, branch_policy_id: branch.id });
+    const { data: detail } = await readEnvironmentEvidence(() =>
+      github.rest.repos.getDeploymentBranchPolicy({ ...API,
+        environment_name: policy.environment, branch_policy_id: branch.id }));
     need(detail.id === branch.id && detail.node_id === branch.node_id && detail.name === branch.name,
       "environment_unverified");
     branch = detail;
