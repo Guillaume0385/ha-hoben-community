@@ -3,6 +3,7 @@
 This tests the existing one-shot client/decoder path, not an invented persistent
 session or HA scheduler. Only the MANAGER-gated Actions job may supply credentials.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -89,8 +90,12 @@ async def observe(
     """
     report = empty_report()
     client = client_factory(
-        user_guid=user_guid, device_guid=device_guid, max_attempts=1,
-        retry_delay=0, handshake_timeout=30, read_timeout=30,
+        user_guid=user_guid,
+        device_guid=device_guid,
+        max_attempts=1,
+        retry_delay=0,
+        handshake_timeout=30,
+        read_timeout=30,
     )
     try:
         async with asyncio.timeout(BUDGET_SECONDS):
