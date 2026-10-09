@@ -89,6 +89,7 @@ async def observe(user_guid: str, device_guid: str | None,
     )
     try:
         async with asyncio.timeout(BUDGET_SECONDS):
+            first_identity = None
             for index in range(2):
                 if index == 1 and not client.has_assigned_device_guid:
                     raise RuntimeError("unassigned")
@@ -99,8 +100,13 @@ async def observe(user_guid: str, device_guid: str | None,
                 report["refreshes_completed"] = index + 1
                 report["decoded_refreshes"] = index + 1
                 report["device_identity_assigned"] = client.has_assigned_device_guid
-                if index == 1:
-                    report["device_identity_reused"] = client.has_assigned_device_guid
+                if index == 0:
+                    first_identity = client.device_guid_for_persistence
+                else:
+                    report["device_identity_reused"] = (
+                        client.has_assigned_device_guid
+                        and client.device_guid_for_persistence == first_identity
+                    )
             report["status"] = "success"
             report["error"] = "none"
     except TimeoutError:
