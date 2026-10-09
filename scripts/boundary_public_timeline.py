@@ -5,8 +5,6 @@ bounded numeric/categorical checks; no RX bytes, identities or free text.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 MAX_MS = 180_000
 MAX_BYTES = 1024 * 1024
 FRAME = {"ping_h2", "response_h2", "notification_h2"}
