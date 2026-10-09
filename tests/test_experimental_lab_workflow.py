@@ -104,8 +104,10 @@ def test_admission_summary_uses_only_fixed_categorical_refusal():
     assert "JSON.stringify(error)" not in script
     assert "core.info(error)" not in script
     # Refusal must not set approved=true in the catch path.
-    assert "core.setOutput('approved', 'true')" not in script.split("catch (error)", 1)[1]
-    assert "needs.admission.outputs.approved == 'true'" in workflow["jobs"]["collect"]["if"]
+    refused = script.split("catch (error)", 1)[1]
+    assert "core.setOutput('approved', 'true')" not in refused
+    collect_condition = workflow["jobs"]["collect"]["if"]
+    assert "needs.admission.outputs.approved == 'true'" in collect_condition
 
 
 def test_actual_subprocess_cannot_inherit_tokens_or_output_commands(
