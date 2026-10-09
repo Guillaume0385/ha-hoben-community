@@ -1,8 +1,8 @@
 """Offline contract for the experimental-only, secretless push preflight."""
 
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import yaml
 
@@ -21,7 +21,8 @@ def test_preflight_is_push_only_without_any_secret_or_live_job():
     assert config["permissions"] == {}
     job = config["jobs"]["dry-run"]
     assert job["strategy"]["matrix"]["scenario"] == [
-        "hoben-live", "hoben-experimental"
+        "hoben-live",
+        "hoben-experimental",
     ]
     assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
     assert config["concurrency"]["cancel-in-progress"] is False
@@ -29,9 +30,17 @@ def test_preflight_is_push_only_without_any_secret_or_live_job():
     assert "github.actor == 'Guillaume0385'" in job["if"]
     assert "github.sha" in text
     for forbidden in (
-        "secrets.", "environment:", "HOBEN_USER_GUID", "HOBEN_DEVICE_GUID",
-        "upload-artifact", "curl ", "probe_hoben_", "run_experimental_boundary",
-        "workflow_dispatch", "pull_request_target", "issues:",
+        "secrets.",
+        "environment:",
+        "HOBEN_USER_GUID",
+        "HOBEN_DEVICE_GUID",
+        "upload-artifact",
+        "curl ",
+        "probe_hoben_",
+        "run_experimental_boundary",
+        "workflow_dispatch",
+        "pull_request_target",
+        "issues:",
     ):
         assert forbidden not in text
     assert GATE_PATH.is_file()
