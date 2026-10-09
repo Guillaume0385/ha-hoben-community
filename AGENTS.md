@@ -621,8 +621,16 @@ decision on the exact PR HEAD, CI run and pinned public CMS recipient before
 merge. Admission follows a successful secretless preflight, verifies the actual
 `hoben-experimental` policy, then atomically reserves a non-release tag for the
 merged SHA/scenario on a runner with no Hoben secret. The read-only collection
-runner rechecks that reservation, policy and actual independent GitHub approval
-before its sole secret step. Never delete/reuse a reservation to rerun a failure.
+runner rechecks that reservation and policy before its sole secret step.
+For the owner's single-maintainer workflow (decision 2026-10-09, Issue #54),
+an environment with no configured required reviewer is permitted, as with the
+existing `hoben-live` environment model. Any actual GitHub-required approval
+remains binding and must be proven; never bypass a configured reviewer rule.
+The protected `experimental` branch, an exactly scoped deployment policy,
+immutable pre-merge MANAGER decision/CI, and per-SHA reservation remain mandatory.
+This choice removes independent human approval when no reviewers are configured;
+it does NOT weaken existing controls on identities, secrets or stove commands.
+Never delete/reuse a reservation to rerun a failure.
 The `hoben-read-only-observation` concurrency group must also be used by future
 experimental live lanes. Do not run historical main probes concurrently.
 Only bounded, validated CMS bytes sealed again by the reviewed export code and
