@@ -372,12 +372,32 @@ preuve séparée, non interchangeable avec l'approbation H1/H2 :
   JSON contenant **strictement** `schema=1`, `scenario="ha-parity"`,
   `candidate_sha` (HEAD de PR) et `ci_run_id` (ID du run Validate
   validé). CODEX DEV ne crée ni ne poste cette décision ;
-- politique effective de l'environnement GitHub **`hoben-live`**
-  strictement sur la branche `experimental` ; APIs inaccessibles,
-  politique/HEAD/approval non vérifiables = **NOT RUN**. L'absence de
-  `required_reviewers` est tolérée pour ce mainteneur unique seulement
-  si effectivement confirmée par GitHub. Une règle de reviewers active
-  doit être respectée et prouvée, sans auto-approbation.
+- politique effective de l'environnement GitHub **`hoben-live`** :
+  **deux modes fermés seulement** sont admis. (a) Politique personnalisée
+  `protected_branches=false` et `custom_branch_policies=true`, avec
+  exactement **la branche `experimental`**, de type `branch`, sans
+  wildcard ni tag ; ou (b) politique GitHub « branches protégées » avec
+  `protected_branches=true` et `custom_branch_policies=false`, à la
+  condition supplémentaire de relire réellement `experimental` par
+  l'API et de vérifier **`protected=true` et SHA HEAD du merge testé
+  strictement égal au SHA du run**. La vérification est refaite pendant
+  l'admission **et** pendant le recheck avant secrets. La preuve de branche,
+  le mode et la politique de reviewers entrent dans l'empreinte du claim ;
+  changer de mode entre les deux contrôles fait refuser le recheck.
+  Politique mixte, non protégée, branche déplacée, réponse partielle,
+  accès API refusé ou politique inconnue = **NOT RUN**, sans collecte ;
+- l'absence de `required_reviewers` reste tolérée pour le modèle
+  mono-mainteneur uniquement si elle est effectivement attestée par
+  GitHub. Toute règle réelle de reviewers doit être appliquée et son
+  approbation indépendante prouvée, sans contournement ni auto-approbation.
+
+**Constat du 9 octobre 2026 :** le run live #37985718299 de la PR
+#64 a validé son préflight, puis refusé l'admission avec la catégorie
+`environment_branch` ; `collect/result` étaient ignorés. Cette
+correction ajoute la prise en charge explicite des branches protégées,
+mais ne prouve **pas** que la configuration GitHub est conforme : seul
+un nouveau run du runner sur un nouveau SHA revu peut l'établir.
+L'ancien SHA/run ne doit jamais être réexécuté.
 
 Avant tout secret, une réservation atomique
 `hoben-live-ha-parity-<SHA_MERGE>` lie run, décision, HEAD, scénario
