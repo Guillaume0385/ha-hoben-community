@@ -189,6 +189,53 @@ test("REST branch type missing requires positive detail proof; absence in both r
   await assert.rejects(gate.verify(b), /environment_unverified/);
 });
 
+// All API failures are simulated offline. A green unit test is not evidence
+// that the real GITHUB_TOKEN can read environment settings on a runner.
+for (const [endpoint, prepare] of [
+  ["getEnvironment", a => "getEnvironment"],
+  ["listDeploymentBranchPolicies", a => "listDeploymentBranchPolicies"],
+  ["getDeploymentBranchPolicy", a => { delete a.branch.type; return "getDeploymentBranchPolicy"; }],
+]) {
+  for (const status of [401, 403, 404]) {
+    test(`policy API ${endpoint} HTTP ${status}: NOT RUN before claim or secrets`, async () => {
+      const a = setup(), method = prepare(a);
+      const failure = Object.assign(new Error("synthetic denied"), {status});
+      a.github.rest.repos[method] = async () => { throw failure; };
+      await assert.rejects(gate.verify(a), /environment_unverified/);
+      assert.equal(a.writes, 0);
+      assert.equal(a.refs.size, 0);
+      assert.equal(a.tags.size, 0);
+    });
+  }
+}
+
+test("policy reads returning missing data, missing reviewer or wrong branch fail before claim", async () => {
+  for (const mutate of [
+    a => { a.github.rest.repos.getEnvironment = async () => ({data: null}); },
+    a => { a.github.rest.repos.listDeploymentBranchPolicies = async () => ({data: null}); },
+    a => { a.github.rest.repos.listDeploymentBranchPolicies = async () => ({data: []}); },
+    a => { a.branch.name = "main"; },
+    a => { a.environment.protection_rules[0].reviewers = []; },
+  ]) {
+    const a = setup(); mutate(a);
+    await assert.rejects(gate.verify(a));
+    assert.equal(a.writes, 0);
+    assert.equal(a.refs.size, 0);
+  }
+});
+
+test("API refusal after environment approval blocks recheck and never starts another claim", async () => {
+  const a = setup();
+  await gate.verify(a);
+  assert.equal(a.writes, 1);
+  a.github.rest.repos.getEnvironment = async () => {
+    throw Object.assign(new Error("synthetic permission denied"), {status: 403});
+  };
+  await assert.rejects(gate.verify({...a, recheck: true}), /environment_unverified/);
+  assert.equal(a.writes, 1);
+  assert.equal(a.refs.size, 1);
+});
+
 test("CMS unavailable refuses dry-run and admission before reservations", async () => {
   const original = cms.preflight;
   cms.preflight = () => { throw Error("synthetic crypto failure"); };
