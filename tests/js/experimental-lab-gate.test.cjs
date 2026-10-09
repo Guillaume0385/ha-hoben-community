@@ -307,7 +307,7 @@ test("every environment refusal uses a stable, non-sensitive public category and
 
 test("decision, merge, CI failures are categorized before any reservation", async () => {
   for (const [category, mutate] of [
-    ["merge", a => { a.pr.base.ref = "main"; }],
+    ["merge", a => { a.pr.merged = false; }],
     ["decision", a => { a.comments = []; }],
     ["ci", a => { a.jobs[0].conclusion = "failure"; }],
   ]) {
