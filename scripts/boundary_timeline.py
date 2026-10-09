@@ -3,6 +3,7 @@
 Client read() completions are not wire frames. Candidate frame positions are
 explicitly H2 hypotheses; all byte values and stove data stay private.
 """
+
 from __future__ import annotations
 
 import math
@@ -56,7 +57,8 @@ def metadata_timeline(
     # A TLS connect refusal legitimately has no read or TX. Still record
     # its close attempt without inventing a network timestamp or frame.
     closing = [
-        entry["at"] for entry in events
+        entry["at"]
+        for entry in events
         if type(entry) is dict and entry.get("kind") == "close_attempt"
     ]
     insist(bool(beginnings) or bool(reads) or bool(closing))
@@ -107,25 +109,30 @@ def metadata_timeline(
         ended = milliseconds(record.ended, baseline)
         insist(ended >= started)
         completed_tx = [
-            t["ended_ms"] for t in tx
+            t["ended_ms"]
+            for t in tx
             if t["ended_ms"] is not None and t["ended_ms"] <= started
         ]
         previous_end = timeline_reads[-1]["ended_ms"] if timeline_reads else None
         insist(previous_end is None or started >= previous_end)
-        timeline_reads.append({
-            "index": index,
-            "offset": data_offset,
-            "requested": record.requested,
-            "received": record.returned,
-            "started_ms": started,
-            "ended_ms": ended,
-            "duration_ms": ended - started,
-            "gap_previous_ms": None if previous_end is None else started - previous_end,
-            "since_last_tx_ms": (
-                None if not completed_tx else started - max(completed_tx)
-            ),
-            "state": state,
-        })
+        timeline_reads.append(
+            {
+                "index": index,
+                "offset": data_offset,
+                "requested": record.requested,
+                "received": record.returned,
+                "started_ms": started,
+                "ended_ms": ended,
+                "duration_ms": ended - started,
+                "gap_previous_ms": None
+                if previous_end is None
+                else started - previous_end,
+                "since_last_tx_ms": (
+                    None if not completed_tx else started - max(completed_tx)
+                ),
+                "state": state,
+            }
+        )
         data_offset += record.returned
     insist(data_offset == rx_bytes)
 
@@ -136,36 +143,42 @@ def metadata_timeline(
             continue
         insist(len(frames) < MAX_FRAMES)
         category, offset, length = (
-            event.get("category"), event.get("offset"), event.get("length")
+            event.get("category"),
+            event.get("offset"),
+            event.get("length"),
         )
         insist(type(category) is str and category in FRAME_KINDS)
         insist(type(offset) is int and type(length) is int)
         insist(0 <= offset < rx_bytes and 1 <= length <= rx_bytes - offset)
         ended = milliseconds(event.get("received_at"), baseline)
         intersects = [
-            r["index"] for r in timeline_reads
-            if r["offset"] < offset + length
-            and r["offset"] + r["received"] > offset
+            r["index"]
+            for r in timeline_reads
+            if r["offset"] < offset + length and r["offset"] + r["received"] > offset
         ]
         insist(bool(intersects))
         prior_tx = [
-            t["ended_ms"] for t in tx
+            t["ended_ms"]
+            for t in tx
             if t["ended_ms"] is not None and t["ended_ms"] <= ended
         ]
-        frames.append({
-            "kind": category,
-            "confidence": "h2_hypothesis_only",
-            "offset": offset,
-            "length": length,
-            "completed_ms": ended,
-            "first_read": intersects[0],
-            "last_read": intersects[-1],
-            "since_last_tx_ms": None if not prior_tx else ended - max(prior_tx),
-            "ping_interval_ms": (
-                None if category != "ping_h2" or previous_ping is None
-                else ended - previous_ping
-            ),
-        })
+        frames.append(
+            {
+                "kind": category,
+                "confidence": "h2_hypothesis_only",
+                "offset": offset,
+                "length": length,
+                "completed_ms": ended,
+                "first_read": intersects[0],
+                "last_read": intersects[-1],
+                "since_last_tx_ms": None if not prior_tx else ended - max(prior_tx),
+                "ping_interval_ms": (
+                    None
+                    if category != "ping_h2" or previous_ping is None
+                    else ended - previous_ping
+                ),
+            }
+        )
         if category == "ping_h2":
             previous_ping = ended
 
@@ -178,9 +191,9 @@ def metadata_timeline(
         start = opening_offset + 48 + covered
         insist(0 <= start <= rx_bytes and remaining == rx_bytes - start)
         if remaining:
-            unknown.append({
-                "offset": start, "length": remaining, "basis": "h2_unproven_suffix"
-            })
+            unknown.append(
+                {"offset": start, "length": remaining, "basis": "h2_unproven_suffix"}
+            )
     elif rx_bytes:
         unknown.append({"offset": 0, "length": rx_bytes, "basis": "unclassified"})
 
@@ -207,14 +220,9 @@ def metadata_timeline(
             "ended_ms": close_end,
             "duration_ms": None if close_end is None else close_end - close_start,
         },
-        "fragmented_candidates": sum(
-            f["last_read"] > f["first_read"] for f in frames
-        ),
+        "fragmented_candidates": sum(f["last_read"] > f["first_read"] for f in frames),
         "concatenated_reads": sum(
-            sum(
-                f["first_read"] <= r["index"] <= f["last_read"]
-                for f in frames
-            ) >= 2
+            sum(f["first_read"] <= r["index"] <= f["last_read"] for f in frames) >= 2
             for r in timeline_reads
         ),
     }
