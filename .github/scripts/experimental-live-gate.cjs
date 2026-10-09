@@ -163,7 +163,7 @@ async function readEnvironmentEvidence(operation) {
   }
 }
 
-async function environmentPolicy(github) {
+async function environmentPolicy(github, context) {
   const { data: environment } = await readEnvironmentEvidence(() =>
     github.rest.repos.getEnvironment({ ...API, environment_name: policy.environment }));
   need(environment && typeof environment === "object" &&
@@ -172,30 +172,50 @@ async function environmentPolicy(github) {
     typeof environment.deployment_branch_policy.protected_branches === "boolean" &&
     typeof environment.deployment_branch_policy.custom_branch_policies === "boolean" &&
     Array.isArray(environment.protection_rules), "environment_response_incomplete");
-  need(environment.name === policy.environment &&
-    environment.deployment_branch_policy.protected_branches === false &&
-    environment.deployment_branch_policy.custom_branch_policies === true,
-  "environment_branch_invalid");
-  const branches = await readEnvironmentEvidence(() =>
-    github.paginate(github.rest.repos.listDeploymentBranchPolicies,
-      { ...API, environment_name: policy.environment, per_page: 100 }));
-  need(Array.isArray(branches), "environment_response_incomplete");
-  need(branches.length === 1 && branches[0]?.name === "experimental", "environment_branch_invalid");
-  need(positive(branches[0].id) && typeof branches[0].node_id === "string" &&
-    branches[0].node_id.length > 0, "environment_response_incomplete");
-  let branch = branches[0];
-  if (!Object.hasOwn(branch, "type")) {
-    const { data: detail } = await readEnvironmentEvidence(() =>
-      github.rest.repos.getDeploymentBranchPolicy({ ...API,
-        environment_name: policy.environment, branch_policy_id: branch.id }));
-    need(detail && typeof detail === "object" && positive(detail.id) &&
-      typeof detail.node_id === "string" && typeof detail.name === "string" &&
-      typeof detail.type === "string", "environment_response_incomplete");
-    need(detail.id === branch.id && detail.node_id === branch.node_id &&
-      detail.name === branch.name, "environment_branch_invalid");
-    branch = detail;
+  const settings = environment.deployment_branch_policy;
+  const customOnly = settings.protected_branches === false &&
+    settings.custom_branch_policies === true;
+  const protectedOnly = settings.protected_branches === true &&
+    settings.custom_branch_policies === false;
+  need(environment.name === policy.environment && (customOnly || protectedOnly),
+    "environment_branch_invalid");
+
+  let branch;
+  if (customOnly) {
+    // Preserve the existing exact-name custom policy; wildcard/tag still denied.
+    const branches = await readEnvironmentEvidence(() =>
+      github.paginate(github.rest.repos.listDeploymentBranchPolicies,
+        { ...API, environment_name: policy.environment, per_page: 100 }));
+    need(Array.isArray(branches), "environment_response_incomplete");
+    need(branches.length === 1 && branches[0]?.name === "experimental", "environment_branch_invalid");
+    need(positive(branches[0].id) && typeof branches[0].node_id === "string" &&
+      branches[0].node_id.length > 0, "environment_response_incomplete");
+    branch = branches[0];
+    if (!Object.hasOwn(branch, "type")) {
+      const { data: detail } = await readEnvironmentEvidence(() =>
+        github.rest.repos.getDeploymentBranchPolicy({ ...API,
+          environment_name: policy.environment, branch_policy_id: branch.id }));
+      need(detail && typeof detail === "object" && positive(detail.id) &&
+        typeof detail.node_id === "string" && typeof detail.name === "string" &&
+        typeof detail.type === "string", "environment_response_incomplete");
+      need(detail.id === branch.id && detail.node_id === branch.node_id &&
+        detail.name === branch.name, "environment_branch_invalid");
+      branch = detail;
+    }
+    need(branch.type === "branch", "environment_branch_invalid");
+  } else {
+    // Protected-branches mode: read fresh actual GitHub branch evidence in
+    // admission AND recheck; protected mode alone does not attest this SHA.
+    const { data: current } = await readEnvironmentEvidence(() =>
+      github.rest.repos.getBranch({ ...API, branch: "experimental" }));
+    need(current && typeof current.name === "string" &&
+      typeof current.protected === "boolean" &&
+      typeof current.commit?.sha === "string", "environment_response_incomplete");
+    need(current.name === "experimental" && current.protected === true &&
+      SHA.test(current.commit.sha) && current.commit.sha === context.sha,
+      "environment_branch_invalid");
+    branch = { name: current.name, protected: current.protected, sha: current.commit.sha };
   }
-  need(branch.type === "branch", "environment_branch_invalid");
   const rules = environment.protection_rules;
   need(rules.every(r => r && ["required_reviewers", "branch_policy", "wait_timer"].includes(r.type)),
     "environment_reviewers_invalid");
@@ -258,7 +278,7 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   "merged_tree_unreviewed");
   const decision = await managerDecision(github, pr);
   await reviewsAndCI(github, pr, decision);
-  const environment = await environmentPolicy(github);
+  const environment = await environmentPolicy(github, context);
   await noOtherObservation(github, context);
   const name = "hoben-live-ha-parity-" + context.sha;
   const claim = { schema: 1, scenario: "ha-parity", sha: context.sha, run_id: context.runId,
