@@ -1,0 +1,52 @@
+name: Experimental MANAGER preflight (secretless)
+
+# Push reads this YAML on experimental; no secret-bearing job here.
+on:
+  push:
+    branches: [experimental]
+
+permissions: {}
+
+concurrency:
+  group: experimental-manager-preflight-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/experimental' &&
+      github.actor == 'Guillaume0385' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [hoben-live, hoben-experimental]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify protected MANAGER merge of exact experimental SHA
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENT_SCENARIO: ${{ matrix.scenario }}
+        with:
+          script: |
+            const {verify} = require('./.github/scripts/experimental-push-preflight.cjs');
+            try {
+              const result = await verify({
+                github, context, scenario: process.env.EXPERIMENT_SCENARIO
+              });
+              core.info('DRY RUN ONLY: ' + result.scenario +
+                        '; merge PR #' + result.pr +
+                        '; SHA ' + result.sha + '; no Hoben access');
+            } catch (_) {
+              core.setFailed('NOT RUN: experimental dry-run gate refused. No secret or live test used.');
+            }
