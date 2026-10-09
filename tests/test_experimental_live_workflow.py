@@ -1,4 +1,5 @@
 """Offline security and behavioral parity for Issue #54 experimental HA live lane."""
+
 from __future__ import annotations
 
 import asyncio
@@ -85,8 +86,9 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
     )
     script = next(s for s in jobs["admission"]["steps"] if s.get("id") == "gate")
     assert "gate.refusalCategory(error)" in script["with"]["script"]
-    assert "core.setOutput('approved', 'true')" not in (
-        script["with"]["script"].split("catch (error)", 1)[1]
+    assert (
+        "core.setOutput('approved', 'true')"
+        not in (script["with"]["script"].split("catch (error)", 1)[1])
     )
     assert "workflow_dispatch" not in workflow.get("on", workflow.get(True))
 
@@ -107,9 +109,10 @@ def test_live_uses_real_home_assistant_client_without_lab_instrumentation():
     assert "async_associate" not in text
     assert "run_experimental_boundary" not in text
     assert "boundary_capture" not in text
-    assert "write_" not in text.split("async def observe", 1)[1].split(
-        "def write_report", 1
-    )[0]
+    assert (
+        "write_"
+        not in text.split("async def observe", 1)[1].split("def write_report", 1)[0]
+    )
     assert live.BUDGET_SECONDS == 150
 
 
