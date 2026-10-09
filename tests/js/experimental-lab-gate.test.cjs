@@ -378,3 +378,25 @@ test("a superseded decision on an earlier HEAD is history, never an approval of 
   const b = setup(); b.comments = [a.comments[0]];
   await assert.rejects(gate.verify(b), /manager_decision_unverified/);
 });
+
+test("issue #61 three missing premerge proofs are distinct refusals before any claim", async () => {
+  const absent = [
+    a => { a.pr.body = "No Issue reference"; },
+    a => { a.issues.labels = [{name: "state:blocked"}]; },
+    a => { a.comments = []; },
+  ];
+  for (const mutate of absent) {
+    const a = setup();
+    mutate(a);
+    await assert.rejects(gate.verify(a), error => {
+      assert.equal(gate.refusalCategory(error), "decision");
+      return true;
+    });
+    assert.equal(a.writes, 0);
+    assert.equal(a.refs.size, 0);
+  }
+  // Real MANAGER decision/CI is simulated here, not published by DEV.
+  const nominal = setup();
+  assert.equal((await gate.verify(nominal)).status, "READY FOR ENVIRONMENT");
+  assert.equal(nominal.writes, 1);
+});
