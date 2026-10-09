@@ -268,6 +268,82 @@ de le relancer : un nouveau SHA revu et fusionné est obligatoire. Les détails
 réels de configuration GitHub restent à confirmer via le prochain runner, et
 les tests de PR ne constituent **pas** une preuve de connexion MyHOBEN.
 
+## Handoff pré-fusion #54 — contrôle consultatif sans secret (PR suivant #61)
+
+Le run post-fusion de #61 (37963217918, SHA
+`70a8a3bb480f3cdee27b169935c0dcb4f2be9e69`) a terminé le
+`dry-run`, puis refusé `admission` avec `category=decision` :
+`collect/result=skipped`, campagne H1/H2 **NOT RUN**. Trois éléments
+étaient absents : rattachement littéral `Refs #54` dans la PR,
+Issue #54 non bloquée, décision MANAGER authentifiée **avant** fusion.
+Ce run et ce SHA sont consommés : ni relance ni approbation rétroactive.
+
+**Ordre opératoire obligatoire pour la prochaine PR vers `experimental` :**
+
+1. **CODEX DEV** ouvre une nouvelle PR dans le même dépôt, base exactement
+   `experimental`, avec la ligne littérale `Refs #54` dans le corps dès
+   la création. Ni `Closes #54` ni réouverture de #61/#56. Mettre au point
+   le HEAD final et attendre les quatre jobs `tests`, `ha-tests`,
+   `hacs`, `hassfest` **réussis sur ce HEAD**, dans un unique run
+   `Validate` de PR, tentative 1. Transmettre PR/HEAD/run/risques.
+2. **CODEX DEV** place seulement l'Issue #54 en `state:review`, ouverte,
+   avec exactement un label `state:*`. Aucun commentaire d'approbation
+   privilégié n'est rédigé ou déposé par DEV.
+3. **MANAGER uniquement** relit le diff, HEAD, reviewers/threads, les quatre
+   jobs, la preuve de provenance du run CI et l'Issue toujours
+   `state:review`. Vérifier séparément le certificat public CMS et
+   l'empreinte `recipient_sha256` du fichier
+   `.github/config/hoben-experimental.json`. Ne pas déduire la
+   configuration réelle de l'environnement de cette revue.
+4. **MANAGER uniquement**, *après CI et avant fusion*, dépose sur la PR
+   l'unique commentaire non édité `hoben-experimental-approval:v1`
+   selon le schéma strict indiqué dans la procédure de phase 2 ci-dessus,
+   avec `candidate_sha` du HEAD revu, `ci_run_id` réel et l'empreinte
+   exacte épinglée. Aucun exemple synthétique ni ancienne décision ne peut
+   servir de preuve ; le contrôle consultatif n'émet jamais cette décision.
+5. **MANAGER uniquement** fusionne vers `experimental` après cette
+   décision. Le nouveau run `push` doit être sur le **SHA de merge**
+   exact, tentative 1. Vérifier successivement `dry-run` secretless,
+   `admission`, puis `collect/result` uniquement si l'admission a
+   effectivement réussi. Relever ID, URL, job conclusions, catégorie
+   publique, statut et rapport anonymisé. Toute information absente,
+   refusée ou incohérente signifie **NOT RUN** ; aucune connexion Hoben
+   n'est revendiquée sur la seule base du dry-run.
+
+### Diagnostic facultatif, jamais un gate d'admission
+
+`.github/scripts/experimental-handoff-check.cjs` accepte **un fichier JSON
+local borné (128 Kio maximum)** contenant des *copies des métadonnées
+GitHub* `pr`, `issue`, `ci`, `jobs`, `comments` ; aucune identité
+Hoben, secret, capture RX, token ou valeur domestique. Exemple d'invocation :
+
+```sh
+node .github/scripts/experimental-handoff-check.cjs /chemin/prive/handoff.json
+```
+
+Le MANAGER récupère ces cinq jeux de métadonnées **en lecture seule** depuis
+GitHub (PR et ses commentaires, Issue #54 et ses labels, run `Validate`
+et ses jobs). Le diagnostic compare dépôt/base/HEAD, rattachement de l'Issue,
+`state:review`, association CI exacte à la PR et au HEAD, les quatre jobs et
+le commentaire authentifié/immuable. Sa sortie n'affiche **que** les codes
+`unlinked_pr`, `blocked_issue`, `issue_not_in_review`,
+`ci_incomplete`, `missing_manager_decision` ou
+`stale_or_invalid_manager_decision` (ou `ok` par dimension), sans
+reproduire les entrées. Il rend `NOT READY` avec code sortie 1 si une
+preuve manque. **Il est normal qu'une PR avant décision MANAGER reste
+`NOT READY` : ne pas faire échouer Validate pour cette raison.**
+
+Même `READY FOR MANAGER REVIEW` est **consultatif uniquement** : un fichier
+JSON local peut être incomplet ou synthétique, donc le statut ne confère ni
+permission, ni approbation, ni droit de fusion ou de collecte. Seul le
+gate réel `managerDecision()` / `reviewsAndCI()` /
+`environmentPolicy()`, après push MANAGER, lit la preuve GitHub et réserve
+le SHA/scénario. L'absence de `required_reviewers` n'est acceptable que
+lorsqu'elle est effectivement attestée par l'API runner pour
+`hoben-experimental`, branche strictement `experimental` ; toute règle
+réellement configurée reste obligatoire. Le diagnostic ne consulte ni
+environnements ni secrets.
+
 ## Gouvernance des secrets et protections
 
 Le propriétaire déclare avoir effectué les réglages GitHub. L'API disponible a confirmé `experimental.protected=true`, **sans permettre de consulter les règles détaillées de protection, les environnements, leurs approbations ni leurs secrets**. Cette limite n'est pas une preuve de leur absence ou de leur conformité.
