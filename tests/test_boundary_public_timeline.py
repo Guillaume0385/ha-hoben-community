@@ -15,11 +15,9 @@ from scripts.run_experimental_boundary import safe_report
 def synthetic():
     reads = [
         RxRead(0, 0, 4096, 48, 3.1, 3.2, None),
-        RxRead(1, 48, 4096, 3, 3.5, 3.2),
+        RxRead(1, 48, 4096, 3, 3.0, 3.5, 3.2),
         RxRead(2, 51, 4096, 0, 3.5, 3.6, 3.5),
     ]
-    # Keep reader starts monotonic here; one separate testcase tests tampering.
-    reads[1] = RxRead(1, 48, 4096, 3, 3.5, 3.2)
     events = [
         {"kind": "tx_attempt", "category": "open_client", "started": 3.0},
         {"kind": "tx_complete", "category": "open_client", "started": 3.0,
@@ -35,10 +33,7 @@ def synthetic():
 
 def valid():
     reads, events = synthetic()
-    reads[1] = RxRead(1, 48, 4096, 3, 3.5, 3.2)
-    events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
-    # The virtual clock can run while a read is pending, but a distinct read
-    # must begin no earlier than the last read completed.
+    # A distinct reader call cannot start before its predecessor finishes.
     reads[1] = RxRead(1, 48, 4096, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
     t = metadata_timeline(
@@ -69,7 +64,7 @@ def test_exact_read_and_eof_timing_and_unknown_three_byte_suffix():
 
 def test_hypothetical_ping_and_fragmentation_have_no_protocol_proof():
     reads, events = synthetic()
-    reads[1] = RxRead(1, 48, 4096, 3, 3.5, 3.2)
+    reads[1] = RxRead(1, 48, 4096, 3, 3.0, 3.5, 3.2)
     reads[1] = RxRead(1, 48, 4096, 3.2, 3.5, 3.2)
     events[3] = {"kind": "rx", "status": "received", **reads[1].metadata()}
     events.insert(4, {"kind": "candidate_frame", "category": "ping_h2",
