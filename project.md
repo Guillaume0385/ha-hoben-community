@@ -1122,10 +1122,17 @@ tests; create deduplicated Issues for reproducible failures/unknowns. See
 [Issue #54](https://github.com/Guillaume0385/ha-hoben-community/issues/54).
 
 **Current installed state is distinct from this target policy:** PR #55
-provided the H1/H2 research scripts on `experimental`. The two-lane
-trigger/workflows still need a CODEX DEV PR, MANAGER review, merge, an
-actual secret-free dry-run and verification of the GitHub environments.
-No live Hoben run is inferred by writing this roadmap.
+provided the H1/H2 research scripts on `experimental`; PR #58 installed the
+secretless push preflight. Its real run `37903694784` on merge SHA
+`4eb8bb90252dae41ca3e83a58e751d36f57c8fd1` passed both dry-run jobs.
+It proves no secret policy, capture or Hoben behavior.
+The next authorized #54 increment prepares `hoben-experimental.yml` only:
+secretless preflight → MANAGER decision/CI/policy admission and atomic claim →
+independent GitHub approval/recheck → isolated H1/H2 collection → verified
+encrypted export/public report → separate result status. It requires MANAGER
+review and merge before installation; actual environment access/approval and a
+real run remain unverified. The actual-HA `hoben-live` lane follows separately.
+No protocol fact or main-release acceptance is inferred from these stages.
 
 ### MANAGER-gated authenticated candidate validation
 

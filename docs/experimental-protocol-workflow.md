@@ -48,6 +48,105 @@ L'Issue [#54](https://github.com/Guillaume0385/ha-hoben-community/issues/54) dem
 
 Un workflow `issues:labeled` charge sa définition depuis la branche par défaut, pas depuis `experimental`. Un `workflow_dispatch` d'un nouveau workflow absent de `main` ne doit pas être considéré comme acquis. CODEX DEV doit sélectionner et **démontrer** un déclencheur adapté au périmètre sans fusion vers `main`. Un `push` autorisé sur `experimental` peut déclencher une étape **sans secret**, mais il ne vaut jamais à lui seul revue/autorisation de remettre les identifiants à du code nouvellement fusionné. L'absence de voie sûre ou d'outil de déclenchement se rapporte honnêtement par `NOT RUN` avec une Issue de prérequis, sans contourner GitHub.
 
+### Phase 1 constatée ; phase 2 préparée pour revue MANAGER
+
+La PR #58 a installé le préflight sans secret. Le run réel
+[37903694784](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37903694784),
+sur `4eb8bb90252dae41ca3e83a58e751d36f57c8fd1`, a réussi ses deux jobs
+`dry-run (hoben-live)` et `dry-run (hoben-experimental)`. Cela établit le
+déclencheur push après fusion MANAGER, aucune propriété réseau ou d'environnement.
+
+La phase 2 de #54 prépare **uniquement** `hoben-experimental.yml`, à installer
+après revue et fusion de sa PR vers `experimental`. Elle réutilise les
+collecteurs #55 ; aucun composant HA n'importe ces instruments.
+`hoben-live` reste une phase suivante, sans job réel dans cette livraison.
+
+Procédure MANAGER, sans dispatch ni modification de Settings :
+
+1. Examiner le diff complet, le HEAD exact, la confidentialité, le destinataire
+   CMS et les quatre jobs CI `tests`, `ha-tests`, `hacs`, `hassfest` du même HEAD.
+   Vérifier hors GitHub la possession de la clé privée correspondant au certificat
+   public épinglé. Ne fournir aucune clé privée au runner.
+2. Avant fusion, déposer **sur cette PR** un commentaire de décision au format
+   strict ci-dessous. Remplacer `<HEAD_PR_40_HEX>` et `0` par le HEAD examiné et
+   le véritable ID du run `Validate` réussi. Aucun texte additionnel, champ libre
+   ou commentaire édité. Ce commentaire est une autorisation MANAGER du code,
+   du scénario et de la preuve CI ; DEV ne le dépose jamais sur sa propre PR.
+
+   ```text
+   <!-- hoben-experimental-approval:v1 -->
+   {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0,"recipient_sha256":"f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246"}
+   ```
+
+3. Fusionner via la connexion MANAGER vers `experimental`. Aucun autre push ne
+   suffit. Le workflow du SHA fusionné exécute d'abord son propre `dry-run`
+   sans environnement, secret ou connexion Hoben, avec préflight CMS réel sur
+   données synthétiques. L'admission vérifie aussi la réussite effective de ce
+   job par l'API du run courant, pas seulement une sortie déclarée.
+4. L'admission vérifie à nouveau dépôt/acteur/sender/tentative/branche protégée,
+   PR fusionnée/base/HEAD, arbre fusionné identique au HEAD revu, décision
+   préalable et quatre jobs du run CI lié. Après corrections, une décision
+   portant sur l'ancien HEAD reste historique et ne vaut pas pour le nouveau.
+   Si GitHub a vidé `pull_requests` après fusion, la décision MANAGER authentifiée
+   lie explicitement run CI, PR et HEAD ; leurs métadonnées doivent toujours
+   correspondre. Une association contradictoire, une preuve manquante ou un
+   check échoué sous un run vert refuse. Elle vérifie ensuite la politique réelle
+   de `hoben-experimental` : exactement Branch `experimental`, required reviewer
+   User indépendant et `prevent_self_review=true`. API inaccessible, type de
+   politique absent de la liste **et** du détail, Team non vérifiable, branche
+   wildcard ou mauvais environnement donnent **NOT RUN**, avant secrets.
+5. Une réservation atomique, tag annoté non destiné aux releases
+   `hoben-experimental-h1h2-<SHA_FUSION>`, lie SHA/scénario/run/PR/décision et
+   empreinte de politique. Le job qui écrit ce tag ne reçoit aucun secret Hoben.
+   Une annulation ou un échec consomme aussi la réservation : jamais de suppression,
+   modification ni rerun pour la réutiliser. Le workflow conserve le mutex
+   `hoben-read-only-observation` pendant toute l'attente et la collecte ; jusqu'à
+   100 demandes peuvent attendre sans remplacement. Les futures voies live
+   devront partager ce groupe. Les probes historiques actives sont refusées ;
+   MANAGER ne doit pas en démarrer pendant cette campagne.
+6. **PENDING APPROVAL** décrit l'attente réelle du job `collect` attaché à
+   `hoben-experimental`. GitHub garde son approbation obligatoire. Après celle-ci,
+   le runner revalide HEAD, décision, CI, politique inchangée, réservation du
+   même run et historique d'approbation du reviewer User indépendant attendu.
+   Bypass administrateur, rejet, absence de preuve ou déplacement du HEAD :
+   **NOT RUN**, aucune collecte. Ce contrôle n'ajoute aucune permission GitHub.
+7. Seul le step `capture` reçoit `HOBEN_USER_GUID` et le DeviceGuid optionnel.
+   Un lanceur fixe transmet au processus Python une liste fermée de variables,
+   sans token GitHub/Actions/OIDC, fichiers de commandes Actions, dépendances
+   candidates ou sortie libre. Le client de laboratoire valide contexte/checkouts
+   et CMS avant TLS, puis appelle `campaign_with_signals(mode="both", seconds=90)`.
+   Aucune sonde alternative, destination ni budget libre n'est accepté.
+8. Même après un échec de collecte, le code d'export examine un fichier régulier
+   borné, DER strict, destinataire épinglé, AuthEnvelopedData AES-256-GCM et
+   RSA-OAEP/SHA256. Une clé publique ne peut authentifier le tag GCM candidat :
+   le validateur rechiffre **tous** les octets admis dans un nouveau CMS avant
+   l'upload. Ainsi aucun contenu clair caché dans un DER conforme ne sort en
+   clair. Seul ce nouveau fichier fixe, et un rapport aux clés/valeurs allowlistées
+   validé séparément, sont uploadés, avec rétention de sept jours.
+9. Rechercher le run **Hoben experimental (MANAGER)** par SHA fusionné,
+   événement push, branche, acteur et tentative 1. Conserver ID/URL, conclusions
+   des jobs, statut `hoben-experimental-h1h2` du même SHA et rapport correspondant.
+   Les artefacts sont `experimental-ciphertext-<SHA>-<run_id>` et
+   `experimental-report-<SHA>-<run_id>`. Le publisher séparé ne reçoit aucun secret
+   et ne considère comme réussi qu'un job de collecte réussi avec un rapport
+   de douze sessions `inconclusive`. Un rapport failure, export refusé ou artefact
+   absent ne devient jamais success. Une annulation forcée peut empêcher la
+   publication : la conclusion originale GitHub reste la preuve de cancellation.
+
+Le succès du workflow signifie seulement collecte bornée terminée ; tous les
+rapports conservent `boundary_proven=false`. Les arrêts anticipés produisent un
+rapport failure lorsqu'il peut être scellé. Une panne de chiffrement ne possède
+aucun fallback en clair. Le workflow phase 2 et ses tests sont préparés hors
+ligne ; leur installation, approbation et observation réelle seront constatées
+par MANAGER après fusion. Aucun run Hoben par DEV n'est revendiqué.
+
+Pour déchiffrer, hors GitHub dans un dossier privé 0700, authentifier d'abord
+le CMS exporté vers un CMS intermédiaire 0600, puis authentifier ce dernier vers
+le tar privé 0600, avec la même clé/certificat. **Deux déchiffrements réussis**
+sont indispensables avant extraction ; supprimer toute sortie partielle après
+un échec GCM. Ne joindre aucun résultat brut, clé, identité ou valeur domestique
+aux Issues, artefacts publics ou logs.
+
 ## Gouvernance des secrets et protections
 
 Le propriétaire déclare avoir effectué les réglages GitHub. L'API disponible a confirmé `experimental.protected=true`, **sans permettre de consulter les règles détaillées de protection, les environnements, leurs approbations ni leurs secrets**. Cette limite n'est pas une preuve de leur absence ou de leur conformité.

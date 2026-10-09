@@ -1,7 +1,7 @@
-"""Fixed experimental H1/H2 entry, admitted by the installed main gate.
+"""Fixed experimental H1/H2 entry, admitted by the reviewed experimental gate.
 
-Only the reviewed post-merge experimental SHA is launched. The trusted main
-launcher removes runner/GitHub tokens first; no candidate workflow grants secrets.
+Only the reviewed post-merge experimental SHA is launched. The fixed launcher
+removes runner/GitHub tokens first; GitHub independently gates the environment.
 CMS preflight precedes credential use and collection. Unknown boundaries remain
 hypotheses, and only a fixed projection leaves the private capture directory.
 """
@@ -26,12 +26,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "Guillaume0385/ha-hoben-community"
 WORKFLOW = (
-    f"{REPOSITORY}/.github/workflows/hoben-experimental-request.yml@refs/heads/main"
+    f"{REPOSITORY}/.github/workflows/hoben-experimental.yml@refs/heads/experimental"
 )
-LABELS = {
-    "dry-run": "manager-hoben-experimental-dry-run",
-    "live": "manager-hoben-experimental-live",
-}
 STOP = {
     "observation_budget",
     "peer_eof",
@@ -200,16 +196,16 @@ def seal(private: Path, exports: Path, recipient: Path) -> None:
 
 
 def context(phase: str) -> tuple[dict, Path]:
-    """Check immutable checkouts and original issues:labeled provenance locally.
+    """Check immutable experimental checkouts and original push provenance.
 
-    The trusted main gate additionally verifies GitHub decision, merge, HEAD,
+    The admission gate additionally verifies GitHub decision, merge, HEAD,
     environment and approval APIs; these local checks do not replace it.
     """
     expected = {
         "GITHUB_ACTIONS": "true",
         "GITHUB_REPOSITORY": REPOSITORY,
-        "GITHUB_REF": "refs/heads/main",
-        "GITHUB_EVENT_NAME": "issues",
+        "GITHUB_REF": "refs/heads/experimental",
+        "GITHUB_EVENT_NAME": "push",
         "GITHUB_ACTOR": "Guillaume0385",
         "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
         "GITHUB_RUN_ATTEMPT": "1",
@@ -217,13 +213,15 @@ def context(phase: str) -> tuple[dict, Path]:
         "EXPERIMENTAL_PHASE": phase,
     }
     require(all(os.environ.get(key) == value for key, value in expected.items()))
-    main = os.environ.get("GITHUB_SHA", "")
+    merged_sha = os.environ.get("GITHUB_SHA", "")
     candidate_sha = os.environ.get("EXPERIMENTAL_APPROVED_SHA", "")
     trusted = ROOT.parent / "trusted"
     require(
-        re.fullmatch(r"[0-9a-f]{40}", main) is not None
+        phase in ("dry-run", "live")
+        and re.fullmatch(r"[0-9a-f]{40}", merged_sha) is not None
         and re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is not None
-        and os.environ.get("GITHUB_WORKFLOW_SHA") == main
+        and candidate_sha == merged_sha
+        and os.environ.get("GITHUB_WORKFLOW_SHA") == merged_sha
         and re.fullmatch(r"[1-9][0-9]{0,19}", os.environ.get("GITHUB_RUN_ID", ""))
         is not None
         and ROOT.is_dir()
@@ -233,7 +231,7 @@ def context(phase: str) -> tuple[dict, Path]:
         and command("/usr/bin/git", "rev-parse", "HEAD", cwd=ROOT).decode().strip()
         == candidate_sha
         and command("/usr/bin/git", "rev-parse", "HEAD", cwd=trusted).decode().strip()
-        == main
+        == merged_sha
     )
     config = trusted / ".github/config/hoben-experimental.json"
     require(config.is_file() and not config.is_symlink())
@@ -247,19 +245,17 @@ def context(phase: str) -> tuple[dict, Path]:
         and re.fullmatch(r"[0-9a-f]{64}", policy["recipient_sha256"]) is not None
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    issue = event["issue"]
     require(
-        event["action"] == "labeled"
-        and event["label"]["name"] == LABELS[phase]
-        and event["sender"]["login"] == "Guillaume0385"
+        event["sender"]["login"] == "Guillaume0385"
         and event["sender"]["id"] == 18246624
         and event["sender"]["type"] == "User"
         and event["repository"]["full_name"] == REPOSITORY
         and event["repository"]["id"] == 1401398724
-        and issue["number"] == policy["tracking_issue"]
-        and issue["id"] == policy["tracking_issue_id"]
-        and issue["state"] == "open"
-        and "pull_request" not in issue
+        and event["ref"] == "refs/heads/experimental"
+        and event["after"] == merged_sha
+        and re.fullmatch(r"[0-9a-f]{40}", event["before"]) is not None
+        and event["before"] != merged_sha
+        and all(event[k] is False for k in ("created", "deleted", "forced"))
     )
     storage = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
     require(
@@ -356,7 +352,7 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
         "scenario": "h1h2",
         "phase": "live",
         "observation_seconds": 90,
-        "main_sha": os.environ["GITHUB_SHA"],
+        "experimental_sha": os.environ["GITHUB_SHA"],
         "candidate_sha": os.environ["EXPERIMENTAL_APPROVED_SHA"],
         "run_id": int(os.environ["GITHUB_RUN_ID"]),
         "boundary_proven": False,
@@ -370,7 +366,7 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
 
 
 def collect(private: Path) -> tuple[dict, bool]:
-    # Only after CMS preflight. The reviewed #49 collector keeps its original
+    # Only after CMS preflight. The reviewed #55 collector keeps its original
     # dispatch-only CLI; call its fixed library without forging that context.
     sys.path.insert(0, str(ROOT))
     probe = importlib.import_module("scripts.probe_opened_client_boundary")
@@ -411,6 +407,11 @@ def run(phase: str) -> int:
                     "ACTIONS_RUNTIME_TOKEN",
                     "ACTIONS_RESULTS_URL",
                     "ACTIONS_CACHE_URL",
+                    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+                    "ACTIONS_ID_TOKEN_REQUEST_URL",
+                    "GITHUB_ENV",
+                    "GITHUB_OUTPUT",
+                    "GITHUB_STEP_SUMMARY",
                 )
             )
         )
@@ -430,7 +431,7 @@ def run(phase: str) -> int:
                 "result": "dry_run_pass",
                 "reason": "no_hoben_connection",
                 "boundary_proven": False,
-                "main_sha": os.environ["GITHUB_SHA"],
+                "experimental_sha": os.environ["GITHUB_SHA"],
                 "candidate_sha": policy["candidate_sha"],
                 "run_id": int(os.environ["GITHUB_RUN_ID"]),
                 "executed_sessions": 0,

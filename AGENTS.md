@@ -615,6 +615,19 @@ establish an unknown OpenedClient boundary by assumption, cannot issue commands
 to the stove, and cannot serve as a main `live-hoben-authenticated` approval.
 Record observations in `protocol.md` only after real corroborated evidence.
 See [experimental workflow](docs/experimental-protocol-workflow.md).
+
+The #54 phase-2 laboratory workflow requires a separate, immutable MANAGER
+decision on the exact PR HEAD, CI run and pinned public CMS recipient before
+merge. Admission follows a successful secretless preflight, verifies the actual
+`hoben-experimental` policy, then atomically reserves a non-release tag for the
+merged SHA/scenario on a runner with no Hoben secret. The read-only collection
+runner rechecks that reservation, policy and actual independent GitHub approval
+before its sole secret step. Never delete/reuse a reservation to rerun a failure.
+The `hoben-read-only-observation` concurrency group must also be used by future
+experimental live lanes. Do not run historical main probes concurrently.
+Only bounded, validated CMS bytes sealed again by the reviewed export code and
+an allowlisted report may leave this lane; two authenticated private decryptions
+are required. This implementation does not install or approve `hoben-live`.
 ---
 
 ## Version and feature discipline

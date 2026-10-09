@@ -1,0 +1,232 @@
+"use strict";
+
+// No Hoben I/O here. Admission writes an atomic claim on a separate runner;
+// recheck has read-only permissions, after GitHub's environment approval.
+const crypto = require("node:crypto");
+const path = require("node:path");
+const push = require("./experimental-push-preflight.cjs");
+const cms = require("./experimental-ciphertext.cjs");
+const policy = require("../config/hoben-experimental.json");
+const API = { owner: "Guillaume0385", repo: "ha-hoben-community" };
+const MANAGER_ID = 18246624;
+const REPO_ID = 1401398724;
+const MARKER = "<!-- hoben-experimental-approval:v1 -->";
+const FILE = ".github/workflows/hoben-experimental.yml";
+const SHA = /^[a-f0-9]{40}$/;
+const positive = n => Number.isSafeInteger(n) && n > 0;
+const digest = v => crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex");
+const need = (fact, reason) => { if (!fact) throw new Error(reason); };
+const sameRepo = r => r?.full_name === push.REPOSITORY && r.id === REPO_ID;
+const certificate = path.join(__dirname, "../config/hoben-experimental-recipient.pem");
+
+function workflowPath(value, file, allowedRefs) {
+  if (typeof value !== "string") return false;
+  const [name, ...refs] = value.split("@");
+  return name === file && (refs.length === 0 || refs.length === 1 && allowedRefs.includes(refs[0]));
+}
+
+async function mergedPush(github, context, env) {
+  need(policy.schema === 1 && policy.scenario === "h1h2" &&
+    policy.environment === "hoben-experimental" && policy.tracking_issue === 54 &&
+    policy.tracking_issue_id === 5768789242 && /^[a-f0-9]{64}$/.test(policy.recipient_sha256),
+  "invalid_policy");
+  need(env.GITHUB_WORKFLOW_SHA === context.sha && positive(context.runId) &&
+    env.GITHUB_RUN_ID === String(context.runId) &&
+    context.payload.sender?.id === MANAGER_ID && context.payload.sender?.type === "User" &&
+    ["created", "deleted", "forced"].every(k => context.payload[k] === false),
+  "invalid_provenance");
+  return push.verify({ github, context, env, scenario: "hoben-experimental", workflow: push.LAB_WORKFLOW });
+}
+
+async function dryRun({ github, context, env = process.env }) {
+  const result = await mergedPush(github, context, env);
+  cms.preflight(certificate, policy.recipient_sha256);
+  return result; // Synthetic CMS only, no credentials, environment or Hoben.
+}
+
+async function successfulPreflight(github, context) {
+  const { data: run } = await github.rest.actions.getWorkflowRun({ ...API, run_id: context.runId });
+  need(run.id === context.runId && run.event === "push" && run.run_attempt === 1 &&
+    run.head_sha === context.sha && run.head_branch === "experimental" &&
+    run.actor?.login === "Guillaume0385" && run.actor.id === MANAGER_ID &&
+    sameRepo(run.repository) && sameRepo(run.head_repository) &&
+    workflowPath(run.path, FILE, ["refs/heads/experimental"]), "preflight_unverified");
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+    { ...API, run_id: context.runId, filter: "latest", per_page: 100 });
+  const dry = jobs.filter(j => j.name === "dry-run");
+  need(dry.length === 1 && dry[0].head_sha === context.sha &&
+    dry[0].status === "completed" && dry[0].conclusion === "success", "preflight_unverified");
+}
+
+async function managerDecision(github, pr) {
+  need(SHA.test(pr.head.sha) && typeof pr.head.ref === "string" &&
+    /(?:^|\s)(?:Refs|Closes) #54(?:\s|$)/.test(pr.body || ""), "issue_scope_unverified");
+  const { data: issue } = await github.rest.issues.get({ ...API, issue_number: 54 });
+  const states = (issue.labels || []).map(l => l.name).filter(n => n.startsWith("state:"));
+  need(issue.number === 54 && issue.id === policy.tracking_issue_id && issue.state === "open" &&
+    !issue.pull_request && states.length === 1 &&
+    ["state:ready", "state:in-progress", "state:review"].includes(states[0]), "issue_scope_unverified");
+  const comments = await github.paginate(github.rest.issues.listComments,
+    { ...API, issue_number: pr.number, per_page: 100 });
+  const choices = comments.filter(c => c.user?.login === "Guillaume0385" &&
+    c.user.id === MANAGER_ID && c.user.type === "User" && c.body?.startsWith(MARKER))
+    .map(comment => ({ comment, approval: JSON.parse(comment.body.slice(MARKER.length).trim()) }))
+    .filter(d => d.approval?.candidate_sha === pr.head.sha);
+  need(choices.length === 1, "manager_decision_unverified");
+  const { comment, approval } = choices[0];
+  need(Object.keys(approval).sort().join() ===
+    ["schema", "scenario", "candidate_sha", "ci_run_id", "recipient_sha256"].sort().join() &&
+    approval.schema === 1 && approval.scenario === "h1h2" && approval.candidate_sha === pr.head.sha &&
+    positive(approval.ci_run_id) && approval.recipient_sha256 === policy.recipient_sha256 &&
+    positive(comment.id) && comment.created_at === comment.updated_at &&
+    Number.isFinite(Date.parse(comment.created_at)) &&
+    Date.parse(comment.created_at) <= Date.parse(pr.merged_at), "manager_decision_unverified");
+  return { approval, comment };
+}
+
+async function reviewsAndCI(github, pr, decision) {
+  const reviews = await github.paginate(github.rest.pulls.listReviews,
+    { ...API, pull_number: pr.number, per_page: 100 });
+  const active = new Map();
+  for (const review of reviews) {
+    if (["APPROVED", "CHANGES_REQUESTED"].includes(review.state)) active.set(review.user.id, review.state);
+  }
+  need(![...active.values()].includes("CHANGES_REQUESTED"), "review_unverified");
+  let cursor = null;
+  const seen = new Set();
+  do {
+    const result = await github.graphql(
+      "query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{isResolved}pageInfo{hasNextPage endCursor}}}}}",
+      { owner: API.owner, name: API.repo, number: pr.number, cursor });
+    const threads = result.repository.pullRequest.reviewThreads;
+    need(Array.isArray(threads.nodes) && threads.nodes.every(t => t.isResolved === true), "review_unverified");
+    cursor = threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
+    need(!threads.pageInfo.hasNextPage || typeof cursor === "string" && cursor.length > 0 && !seen.has(cursor),
+      "review_unverified");
+    seen.add(cursor);
+  } while (cursor);
+  const { data: ci } = await github.rest.actions.getWorkflowRun({ ...API, run_id: decision.approval.ci_run_id });
+  need(ci.id === decision.approval.ci_run_id && ci.head_sha === pr.head.sha &&
+    ci.head_branch === pr.head.ref && ci.event === "pull_request" && ci.run_attempt === 1 &&
+    ci.status === "completed" && ci.conclusion === "success" &&
+    sameRepo(ci.repository) && sameRepo(ci.head_repository) &&
+    workflowPath(ci.path, ".github/workflows/validate.yml",
+      ["refs/pull/" + pr.number + "/merge", pr.head.ref, "refs/heads/" + pr.head.ref]) &&
+    Number.isFinite(Date.parse(ci.updated_at)) &&
+    Date.parse(ci.updated_at) <= Date.parse(decision.comment.created_at) &&
+    Array.isArray(ci.pull_requests), "ci_unverified");
+  // After merge GitHub may clear pull_requests. The authenticated, immutable
+  // MANAGER decision explicitly binds this CI run to this PR/HEAD; the SHA alone
+  // is never sufficient. Any remaining conflicting association still refuses.
+  need(ci.pull_requests.length <= 1 && ci.pull_requests.every(r =>
+    r.number === pr.number && r.head?.sha === pr.head.sha && r.base?.ref === "experimental"), "ci_unverified");
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+    { ...API, run_id: ci.id, filter: "latest", per_page: 100 });
+  need(jobs.length === 4 && ["tests", "ha-tests", "hacs", "hassfest"].every(name => {
+    const matches = jobs.filter(j => j.name === name);
+    return matches.length === 1 && matches[0].head_sha === pr.head.sha &&
+      matches[0].status === "completed" && matches[0].conclusion === "success";
+  }), "ci_unverified");
+}
+
+async function environmentPolicy(github) {
+  const { data: environment } = await github.rest.repos.getEnvironment({ ...API,
+    environment_name: policy.environment });
+  need(environment.name === policy.environment && positive(environment.id) &&
+    environment.deployment_branch_policy?.protected_branches === false &&
+    environment.deployment_branch_policy.custom_branch_policies === true, "environment_unverified");
+  const branches = await github.paginate(github.rest.repos.listDeploymentBranchPolicies,
+    { ...API, environment_name: policy.environment, per_page: 100 });
+  need(branches.length === 1 && branches[0].name === "experimental" &&
+    positive(branches[0].id) && typeof branches[0].node_id === "string" && branches[0].node_id.length > 0,
+  "environment_unverified");
+  let branch = branches[0];
+  if (!Object.hasOwn(branch, "type")) {
+    const { data: detail } = await github.rest.repos.getDeploymentBranchPolicy({ ...API,
+      environment_name: policy.environment, branch_policy_id: branch.id });
+    need(detail.id === branch.id && detail.node_id === branch.node_id && detail.name === branch.name,
+      "environment_unverified");
+    branch = detail;
+  }
+  need(branch.type === "branch", "environment_unverified");
+  const rules = environment.protection_rules;
+  need(Array.isArray(rules) && rules.every(r =>
+    ["required_reviewers", "branch_policy", "wait_timer"].includes(r.type)), "environment_unverified");
+  const required = rules.filter(r => r.type === "required_reviewers");
+  need(required.length === 1 && positive(required[0].id) && required[0].prevent_self_review === true &&
+    Array.isArray(required[0].reviewers) && required[0].reviewers.length > 0 &&
+    required[0].reviewers.every(r => r.type === "User" && r.reviewer?.type === "User" &&
+      positive(r.reviewer.id) && typeof r.reviewer.login === "string" && r.reviewer.login.length > 0),
+  "environment_unverified");
+  const reviewers = required[0].reviewers.map(r => ({ id: r.reviewer.id, login: r.reviewer.login }))
+    .sort((a, b) => a.id - b.id);
+  need(reviewers.some(r => r.id !== MANAGER_ID && r.login !== "Guillaume0385"), "environment_unverified");
+  return { id: environment.id, reviewers, digest: digest({ id: environment.id,
+    name: environment.name, deployment_branch_policy: environment.deployment_branch_policy,
+    protection_rules: environment.protection_rules, branch }) };
+}
+
+async function noOtherObservation(github, context) {
+  const historical = new Set(["live-validation.yml", "manager-live-hoben.yml", "opened-client-boundary.yml"]);
+  for (const status of ["in_progress", "waiting", "pending"]) {
+    const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
+      { ...API, status, per_page: 100 });
+    need(!runs.some(r => r.id !== context.runId && typeof r.path === "string" &&
+      historical.has(r.path.split("@")[0].split("/").pop())), "concurrent_observation");
+  }
+}
+
+async function actualApproval(github, context, environment) {
+  const { data: history } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
+    { ...API, run_id: context.runId });
+  need(Array.isArray(history), "approval_unverified");
+  const relevant = history.filter(h => h.environments?.some(e =>
+    e.id === environment.id && e.name === policy.environment));
+  need(relevant.length > 0 && relevant.every(h => h.state === "approved" &&
+    h.user?.type === "User" && h.user.id !== MANAGER_ID &&
+    environment.reviewers.some(r => r.id === h.user.id && r.login === h.user.login)), "approval_unverified");
+}
+
+async function verify({ github, context, env = process.env, recheck = false }) {
+  const merged = await mergedPush(github, context, env);
+  await successfulPreflight(github, context);
+  const { data: pr } = await github.rest.pulls.get({ ...API, pull_number: merged.pr });
+  need(pr.number === merged.pr && pr.merged === true && pr.state === "closed" &&
+    pr.merge_commit_sha === context.sha && pr.merged_by?.login === "Guillaume0385" &&
+    pr.merged_by.id === MANAGER_ID && pr.base?.ref === "experimental" &&
+    sameRepo(pr.base.repo) && sameRepo(pr.head.repo), "merge_changed");
+  const { data: candidate } = await github.rest.git.getCommit({ ...API, commit_sha: pr.head.sha });
+  const { data: mergedCommit } = await github.rest.git.getCommit({ ...API, commit_sha: context.sha });
+  need(candidate.sha === pr.head.sha && mergedCommit.sha === context.sha &&
+    SHA.test(candidate.tree?.sha) && candidate.tree.sha === mergedCommit.tree?.sha,
+  "merged_tree_unreviewed");
+  const decision = await managerDecision(github, pr);
+  await reviewsAndCI(github, pr, decision);
+  const environment = await environmentPolicy(github);
+  await noOtherObservation(github, context);
+  cms.preflight(certificate, policy.recipient_sha256);
+  const name = "hoben-experimental-h1h2-" + context.sha;
+  const claim = { schema: 1, scenario: "h1h2", sha: context.sha, run_id: context.runId,
+    pr: pr.number, candidate_sha: pr.head.sha, decision_id: decision.comment.id,
+    decision_digest: digest({ id: decision.comment.id, body: decision.comment.body,
+      created_at: decision.comment.created_at, updated_at: decision.comment.updated_at,
+      user: { id: decision.comment.user.id, login: decision.comment.user.login,
+        type: decision.comment.user.type } }), environment_digest: environment.digest };
+  if (recheck) {
+    const { data: reference } = await github.rest.git.getRef({ ...API, ref: "tags/" + name });
+    need(reference.ref === "refs/tags/" + name && reference.object?.type === "tag", "claim_unverified");
+    const { data: tag } = await github.rest.git.getTag({ ...API, tag_sha: reference.object.sha });
+    need(tag.tag === name && tag.object?.type === "commit" && tag.object.sha === context.sha &&
+      digest(JSON.parse(tag.message)) === digest(claim), "claim_unverified");
+    await actualApproval(github, context, environment);
+  } else {
+    // createRef is atomic. An existing reservation (including cancellation or
+    // failure) cannot be replaced or retried. No secret is present in this job.
+    const { data: tag } = await github.rest.git.createTag({ ...API, tag: name,
+      message: JSON.stringify(claim), object: context.sha, type: "commit" });
+    await github.rest.git.createRef({ ...API, ref: "refs/tags/" + name, sha: tag.sha });
+  }
+  return { sha: context.sha, pr: pr.number, scenario: "h1h2", status: recheck ? "approved" : "PENDING APPROVAL" };
+}
+
+module.exports = { dryRun, verify, WORKFLOW: push.LAB_WORKFLOW, MARKER, workflowPath };

@@ -305,20 +305,24 @@ sur la frontière. L’entrée `run_experimental_boundary.py` fixe le scénario 
 la projection publique ; elle appelle la bibliothèque de campagne, sans lancer
 le CLI historique `workflow_dispatch` ni contourner ses contrôles.
 
-Son petit bootstrap main indépendant propose `hoben-experimental-request.yml`,
-consommant une décision JSON MANAGER puis un label sur #54 via le connecteur.
-La référence de déploiement `issues:labeled` est main : son environnement dédié
-`hoben-experimental` est **Branch main uniquement**, avec approbation indépendante
-et prevent-self-review, sans modification de `hoben-live` ni des anciens gates.
-Le candidat est le HEAD expérimental fusionné/revu, pas celui du run main.
-Voir [l’opération précise](experimental-protocol-workflow.md) pour le dry-run,
-les labels réservés, les Settings du propriétaire, la réservation et la lecture
-corrélée du run/rapport une heure plus tard.
+Le bootstrap main abandonné #56 n'est plus utilisé. La phase 1 #58 a prouvé le
+déclencheur sans secret sur experimental (run `37903694784`). La phase 2 prépare
+`hoben-experimental.yml` : push après merge MANAGER, préflight sans secret,
+décision de PR liée au HEAD/CI, politique **Branch experimental uniquement**,
+réservation atomique SHA/scénario, puis approbation GitHub indépendante et
+recheck avant collecte. Ni label d'Issue, ni dispatch absent de main, ni push
+ordinaire ne libère un secret. Le SHA exécuté est celui de la fusion examinée.
+Voir [la procédure MANAGER](experimental-protocol-workflow.md) pour le commentaire
+strict préalable, les contrôles runner, NOT RUN/PENDING APPROVAL et la découverte
+corrélée du run/rapport. Aucun Setting n'est modifié par les agents.
 
 Les artefacts de cette voie sont `experimental-ciphertext-<SHA>-<run_id>` et
 `experimental-report-<SHA>-<run_id>`, rétention 7 jours ; le déchiffrement privé
-CMS décrit plus haut reste applicable. Le certificat public de #52 est épinglé
-sur main avant TLS ; aucun secret certificat ni clé privée n’est demandé à DEV.
+CMS décrit plus haut reste applicable **deux fois** : le validateur expérimental
+rechiffre le CMS candidat avant export. Authentifier les deux couches avec la
+clé privée hors GitHub avant extraction, supprimer toute sortie partielle après
+échec. Le certificat public de #52 est épinglé sur experimental avant TLS ;
+aucun secret certificat ni clé privée n’est demandé à DEV.
 Les budgets, stops et hypothèses restent ceux de cette campagne. Les workflows
 historiques conservent leur procédure ; aucune substitution de validation stable.
 
