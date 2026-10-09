@@ -88,6 +88,26 @@ def test_workflow_separates_admission_collection_and_publication():
     assert "issues" not in workflow.get("on", workflow.get(True))
 
 
+def test_admission_summary_uses_only_fixed_categorical_refusal():
+    """A real API failure may contain private headers or URLs: never print it."""
+    text = WORKFLOW.read_text()
+    workflow = yaml.safe_load(text)
+    steps = workflow["jobs"]["admission"]["steps"]
+    gate = next(step for step in steps if step.get("id") == "gate")
+    script = gate["with"]["script"]
+    assert "gate.refusalCategory(error)" in script
+    assert "category=" in script
+    assert "core.setFailed" in script and "core.summary.addRaw" in script
+    assert "core.setOutput('approved', 'true')" in script
+    assert "error.message" not in script
+    assert "error.stack" not in script
+    assert "JSON.stringify(error)" not in script
+    assert "core.info(error)" not in script
+    # Refusal must not set approved=true in the catch path.
+    assert "core.setOutput('approved', 'true')" not in script.split("catch (error)", 1)[1]
+    assert "needs.admission.outputs.approved == 'true'" in workflow["jobs"]["collect"]["if"]
+
+
 def test_actual_subprocess_cannot_inherit_tokens_or_output_commands(
     tmp_path, monkeypatch, capsys
 ):
