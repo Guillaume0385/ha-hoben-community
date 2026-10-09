@@ -10,7 +10,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: manager-live-hoben-${{ github.event.pull_request.number }}
+  # Share the live mutex with experimental and manual Hoben observations.
+  # Unrelated labels use a unique group and cannot evict a pending live run.
+  group: >-
+    ${{ github.event_name == 'pull_request_target' &&
+        github.event.action == 'labeled' &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == 'Guillaume0385/ha-hoben-community' &&
+        github.event.label.name == 'manager-live-hoben' &&
+        github.actor == 'Guillaume0385' &&
+        'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:

@@ -18,6 +18,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Every mode that can open a Hoben socket holds the same repository mutex.
+  group: >-
+    ${{ ((github.event_name == 'workflow_dispatch' &&
+         (inputs.mode == 'tls-only' ||
+          (github.ref == 'refs/heads/main' &&
+           (inputs.mode == 'session-open' || inputs.mode == 'read-v4-state')))) ||
+        (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+         (github.event.label.name == 'live-validation' ||
+          github.event.label.name == 'live-session-negative'))) &&
+        'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   live-validation:
     # Only the newly added label opts in; an existing label never authorizes a push.

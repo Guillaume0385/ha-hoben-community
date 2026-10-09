@@ -10,7 +10,14 @@ on:
 permissions: {}
 
 concurrency:
-  group: hoben-boundary-campaign
+  # Unrelated issue labels must not replace an authorized pending campaign.
+  # This is scheduling only; the trusted gate still verifies authorization.
+  group: >-
+    ${{ github.event_name == 'issues' && github.event.action == 'labeled' &&
+        github.event.issue.number == 54 && !github.event.issue.pull_request &&
+        (github.event.label.name == 'manager-hoben-experimental-dry-run' ||
+         github.event.label.name == 'manager-hoben-experimental-live') &&
+        'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -72,10 +79,20 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
             gate.dryReport(context);
+      - name: Validate public report before upload
+        id: public-report
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            gate.preparePublicReport({context, core});
       - uses: actions/upload-artifact@v7
+        if: steps.public-report.outputs.verified == 'true'
         with:
           name: experimental-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/hoben-experimental-exports/report.json
+          path: ${{ runner.temp }}/hoben-experimental-public/report.json
           retention-days: 7
           if-no-files-found: error
 
@@ -128,6 +145,16 @@ jobs:
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: |
           python -I trusted/scripts/launch_experimental_boundary.py >/dev/null 2>/dev/null
+      - name: Validate public report before upload
+        id: public-report
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            gate.preparePublicReport({context, core});
       - name: Authenticated ciphertext only
         if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
@@ -138,11 +165,11 @@ jobs:
           compression-level: 0
           if-no-files-found: error
       - name: Separate anonymized report
-        if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
+        if: ${{ always() && steps.public-report.outputs.verified == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: experimental-report-${{ needs.request.outputs.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/hoben-experimental-exports/report.json
+          path: ${{ runner.temp }}/hoben-experimental-public/report.json
           retention-days: 7
           if-no-files-found: error
 

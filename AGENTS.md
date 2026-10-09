@@ -583,6 +583,13 @@ This extends only the bounded private-RX exception above: fixed 6 H1 + 6 H2,
 90 seconds/1 MiB per session, read-only messages, verified public recipient and
 CMS before TLS, ciphertext and allowlisted metadata only, seven-day retention.
 The main launcher removes all GitHub/runner tokens before candidate execution.
+Trusted main validates the candidate report before any plaintext artifact
+upload; only its fixed verified projection may be exported. An inconclusive
+success requires all 12 executed sessions (6 H1 then 6 H2); early campaign stops
+remain failure. All Hoben network workflows share the repository-wide
+`hoben-boundary-campaign` concurrency group, including environment waits.
+Unrelated label events use run-specific groups so they cannot evict pending
+authorized observations. Active-run API inspection is only an additional guard.
 Require exact-current main/experimental SHA, traceable MANAGER review, successful
 real secret-free dry-run, immutable per-SHA/scenario/phase reservation and
 post-wait rechecks. Missing evidence means NOT RUN. No automatic retries, live

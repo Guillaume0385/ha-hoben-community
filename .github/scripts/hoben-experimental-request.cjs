@@ -335,8 +335,7 @@ function dryReport(context) {
     reason:'no_hoben_connection',executed_sessions:0}),{mode:0o600,flag:'wx'});
 }
 
-function publicReport(context, phase) {
-  const file = path.join(process.env.GITHUB_WORKSPACE, 'public-report/report.json');
+function validatedReport(context, phase, file) {
   const stat = fs.lstatSync(file);
   requireFact(stat.isFile() && !stat.isSymbolicLink() && stat.size <= 65536,
     'invalid_public_report');
@@ -353,12 +352,13 @@ function publicReport(context, phase) {
   if (phase === 'dry-run') {
     requireFact(r.result === 'dry_run_pass' && r.reason === 'no_hoben_connection' &&
       r.executed_sessions === 0, 'invalid_public_report');
-    return {result:r.result,
+    return {report:r,result:r.result,
       text:'Dry-run: trusted admission and CMS preflight passed; Hoben sessions: 0.'};
   }
   requireFact((['inconclusive','failure'].includes(r.result)) && r.reason === (r.result === 'inconclusive' ? 'hypotheses_unproven' : 'collection_interrupted') &&
     r.observation_seconds === 90 && r.planned_sessions === 12 &&
     Array.isArray(r.sessions) && r.sessions.length <= 12 &&
+    (r.result !== 'inconclusive' || r.sessions.length === 12) &&
     r.executed_sessions === r.sessions.length, 'invalid_public_report');
   const integer = (n, max) => Number.isInteger(n) && n >= 0 && n <= max;
   const stops = new Set(['observation_budget', 'peer_eof', 'pending_response_eof',
@@ -400,10 +400,33 @@ function publicReport(context, phase) {
   });
   requireFact(r.eligible_sessions === r.sessions.filter(s => s.opening_context.eligible).length,
     'invalid_public_report');
-  return {result:r.result,text:`Anonymized report: ${r.executed_sessions}/12 sessions; ` +
+  return {report:r,result:r.result,text:`Anonymized report: ${r.executed_sessions}/12 sessions; ` +
     `${r.eligible_sessions} eligible.\n\n` +
     '| Session | Mode | Stop | Opening context | H1 | H2 | Comparison | V4 sent/correlated |\n' +
     '| --- | --- | --- | --- | --- | --- | --- | --- |\n' + rows.join('\n')};
+}
+
+function publicReport(context, phase) {
+  return validatedReport(context,phase,
+    path.join(process.env.GITHUB_WORKSPACE,'public-report/report.json'));
+}
+
+function preparePublicReport({context,core}) {
+  try {
+    const phase = request(context);
+    requireFact(shaPattern.test(process.env.EXPERIMENTAL_APPROVED_SHA),'invalid_claim');
+    const source = path.join(process.env.RUNNER_TEMP,'hoben-experimental-exports/report.json');
+    // Candidate output is untrusted even when the collection job succeeds.
+    // Validate the entire document before creating the only plaintext upload.
+    const {report} = validatedReport(context,phase,source);
+    const directory = path.join(process.env.RUNNER_TEMP,'hoben-experimental-public');
+    fs.mkdirSync(directory,{mode:0o700});
+    fs.writeFileSync(path.join(directory,'report.json'),JSON.stringify(report),
+      {mode:0o600,flag:'wx'});
+    core.setOutput('verified','true');
+  } catch {
+    core.setFailed('Hoben experimental report refused before upload.');
+  }
 }
 
 const reasons = new Set(['unauthenticated_request','invalid_recipient',
@@ -495,4 +518,4 @@ async function discover({github,repo,phase,candidate}) {
     report_artifact_id:report && positive(report.id) ? report.id : null,
     report_name:name,boundary_proven:false};
 }
-module.exports = {verify,publish,dryReport,discover};
+module.exports = {verify,publish,dryReport,preparePublicReport,discover};

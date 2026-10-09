@@ -18,8 +18,9 @@ la porte, le lanceur et le certificat public proviennent du SHA de `main`.
 
 Seul le propriétaire configure et vérifie dans Settings :
 
-- `main` protégée et ses checks/reviews habituels ; aucune modification de
-  `hoben-live`, des workflows existants ou du statut `live-hoben-authenticated` ;
+- `main` protégée et ses checks/reviews habituels ; aucune modification des
+  permissions de `hoben-live` ou du statut `live-hoben-authenticated` ; les
+  workflows Hoben existants partagent seulement le verrou de concurrence ;
 - `hoben-experimental` avec **Selected branches and tags**, une seule règle
   `name=main`, `type=branch`, aucune règle pour `experimental`, wildcard ou tag ;
 - required reviewers **User nommés**, au moins un distinct de `Guillaume0385`,
@@ -108,8 +109,15 @@ le SHA candidat, le SHA gate, la phase, le scénario, la PR, le commentaire,
 l’événement label et le **run_id**. Elle n’est ni remplacée ni supprimée. Un
 échec ou une annulation après réservation consomme cette demande : aucun retry,
 re-run, cron ou nouveau passage horaire ne la rejoue. Toute nouvelle collecte
-requiert une nouvelle PR/HEAD examinée. Les runs partagent la sérialisation
-`hoben-boundary-campaign` avec les campagnes précédentes.
+requiert une nouvelle PR/HEAD examinée. Les runs reconnus partagent le verrou
+GitHub Actions `hoben-boundary-campaign` avec `opened-client-boundary.yml`,
+`manager-live-hoben.yml` et tous les modes réseau de `live-validation.yml`.
+Le verrou couvre aussi l'attente d'approbation : deux workflows différents ne
+peuvent pas lancer leur sonde simultanément. Le contrôle API des runs actifs
+reste une défense supplémentaire ; il ne remplace pas ce verrou atomique.
+Les labels sans rapport utilisent un groupe propre au run et ne peuvent pas
+remplacer une campagne autorisée en attente. Tout futur workflow Hoben doit
+utiliser le même verrou avant d'ouvrir une connexion.
 
 MANAGER retrouve la réservation avec `github_fetch`, puis lit son objet tag :
 
@@ -174,9 +182,21 @@ plaintext n’est publié. Seuls deux artefacts fixes, rétention **7 jours**, s
 - `experimental-report-<SHA experimental>-<run_id>` : `report.json`, projection
   numérique/catégorielle, aucun GUID, octet RX, valeur domestique ou texte libre.
 
+Le rapport produit par le candidat n'est jamais uploadé directement. Un module
+de `main`, sans secret Hoben, vérifie d'abord toutes ses clés, catégories,
+comptages, les deux SHA et le run_id, puis écrit un nouveau fichier fixe dans
+`hoben-experimental-public`. L'upload exige la réussite de cette validation.
+Un champ privé inattendu, un fichier absent ou un lien symbolique refuse
+l'artefact public avant publication ; le publisher le revalide ensuite sur son
+runner distinct. Le ciphertext n'a aucun fallback en clair.
+
 Déchiffrer uniquement hors GitHub selon la procédure de la campagne #48.
-Un résultat `inconclusive` / `hypotheses_unproven` décrit une observation terminée,
-pas une preuve de H1/H2. Classer les faits OBSERVÉ / CONFIRMÉ / À VALIDER après
+Un résultat `inconclusive` / `hypotheses_unproven` exige les **12 sessions
+exécutées, 6 H1 puis 6 H2**, sans établir une preuve de H1/H2. Un arrêt de
+campagne avant ces 12 sessions produit `failure` / `collection_interrupted`
+et un code de sortie non nul ; son rapport partiel reste exploitable sans
+accorder de statut success. Une collecte skipped est `NOT RUN`.
+Classer les faits OBSERVÉ / CONFIRMÉ / À VALIDER après
 analyse du MANAGER ; aucune modification automatique de `protocol.md`.
 
 ## Preuves DEV et prérequis restants

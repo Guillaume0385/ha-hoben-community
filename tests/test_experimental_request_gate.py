@@ -97,6 +97,8 @@ const gate=require(input.gate);
     github,context:input.context,core,recheck:!!op.recheck});
    else if(op.name==='publish')await gate.publish({github,context:input.context,core});
    else if(op.name==='dry')gate.dryReport(input.context);
+   else if(op.name==='prepare-public')gate.preparePublicReport({
+    context:input.context,core});
    else if(op.name==='discover')output.result=await gate.discover({github,
     repo:input.context.repo,phase:input.phase,candidate:input.candidate});
    else throw Error('UNEXPECTED_OPERATION');
@@ -329,7 +331,9 @@ def live(api):
     api["claims"][f"hoben-experimental-dry-run-h1h2-{SHA}"] = claim_tag()
 
 
-def execute(api, tmp_path, *, operations=None, env=None, report=None):
+def execute(
+    api, tmp_path, *, operations=None, env=None, report=None, candidate_report=None
+):
     node = shutil.which("node")
     assert node, "Node is required to test the actual GitHub gate"
     api = copy.deepcopy(api)
@@ -342,6 +346,10 @@ def execute(api, tmp_path, *, operations=None, env=None, report=None):
         public = work / "public-report"
         public.mkdir(exist_ok=True)
         (public / "report.json").write_text(json.dumps(report))
+    if candidate_report is not None:
+        source = work / "hoben-experimental-exports"
+        source.mkdir(exist_ok=True)
+        (source / "report.json").write_text(json.dumps(candidate_report))
     variables = {
         "PATH": os.environ["PATH"],
         "GITHUB_TRIGGERING_ACTOR": OWNER["login"],
@@ -830,11 +838,39 @@ def public_report(*, phase="live", result="inconclusive"):
         "executed_sessions": 0,
     }
     if phase == "live":
+        sessions = (
+            [
+                {
+                    "mode": "H1" if i < 6 else "H2",
+                    "pause_seconds": (0, 0.1, 1)[(i % 6) // 2],
+                    "repetition": i % 2 + 1,
+                    "partial": True,
+                    "prefix_complete": False,
+                    "rx_bytes": 0,
+                    "read_calls": 1,
+                    "pongs_before_open": 0,
+                    "pongs_under_h2": 0,
+                    "v4_requests": 0,
+                    "correlated_responses": 0,
+                    "exception_responses": 0,
+                    "stop": "peer_eof",
+                    "emission_stop": None,
+                    "opening_context": {"eligible": False, "status": "missing_opening"},
+                    "h1_status": "inconclusive",
+                    "h2_status": "inconclusive",
+                    "comparison": "insufficient_data",
+                }
+                for i in range(12)
+            ]
+            if result == "inconclusive"
+            else []
+        )
         report.update(
             observation_seconds=90,
             planned_sessions=12,
             eligible_sessions=0,
-            sessions=[],
+            executed_sessions=len(sessions),
+            sessions=sessions,
         )
     else:
         report.update(result="dry_run_pass", reason="no_hoben_connection")
@@ -887,31 +923,11 @@ def test_publication_never_trusts_extra_private_fields_or_impossible_counts(
     elif change == "free-text":
         report["reason"] = "SYNTHETIC_PRIVATE_TOKEN_PACKET"
     else:
-        report.update(
-            executed_sessions=1,
-            eligible_sessions=0,
-            sessions=[
-                {
-                    "mode": "H1",
-                    "pause_seconds": 0,
-                    "repetition": 1,
-                    "partial": False,
-                    "prefix_complete": False,
-                    "rx_bytes": 0,
-                    "read_calls": 0,
-                    "pongs_before_open": 0,
-                    "pongs_under_h2": int(change == "h1-pong"),
-                    "v4_requests": 0,
-                    "correlated_responses": 0,
-                    "exception_responses": int(change == "counts"),
-                    "stop": "peer_eof",
-                    "emission_stop": None,
-                    "opening_context": {"eligible": False, "status": "missing_opening"},
-                    "h1_status": "inconclusive",
-                    "h2_status": "inconclusive",
-                    "comparison": "insufficient_data",
-                }
-            ],
+        # Keep the complete campaign so rejection exercises the impossible
+        # counters themselves, independently of the short-campaign guard.
+        report["sessions"][0].update(
+            pongs_under_h2=int(change == "h1-pong"),
+            exception_responses=int(change == "counts"),
         )
     result = execute(
         api,
@@ -1003,10 +1019,7 @@ def test_workflow_has_no_automatic_live_trigger_and_separates_secret_and_write_j
     text = (ROOT / WORKFLOW).read_text()
     workflow = yaml.load(text, Loader=yaml.BaseLoader)
     assert workflow["on"] == {"issues": {"types": ["labeled"]}}
-    assert workflow["concurrency"] == {
-        "group": "hoben-boundary-campaign",
-        "cancel-in-progress": "false",
-    }
+    assert workflow["concurrency"]["cancel-in-progress"] == "false"
     jobs = workflow["jobs"]
     assert jobs["observations"]["environment"] == "hoben-experimental"
     assert set(jobs["observations"]["permissions"].values()) == {"read"}
