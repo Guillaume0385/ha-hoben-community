@@ -22,7 +22,6 @@ POLICY = {
     "tracking_issue": 54,
     "tracking_issue_id": 5768789242,
     "environment": "hoben-experimental",
-    "recipient_sha256": RECIPIENT_SHA256,
     "candidate_sha": "a" * 40,
 }
 MAIN = "a" * 40
@@ -150,7 +149,7 @@ def fake_collector(monkeypatch, runner, *, mode="complete", count=12):
 
     async def campaign(private, **kwargs):
         calls.append(kwargs)
-        assert (private / "recipient.pem").is_file()
+        assert not (private / "recipient.pem").exists()
         assert not list(private.glob("preflight*"))
         assert kwargs == {
             "mode": "both",
@@ -184,7 +183,7 @@ def fake_collector(monkeypatch, runner, *, mode="complete", count=12):
         imports.append(name)
         assert name == "scripts.probe_opened_client_boundary"
         private = next(runner.storage.glob("hoben-experimental-private-*"))
-        assert (private / "recipient.pem").is_file() and not list(
+        assert not (private / "recipient.pem").exists() and not list(
             private.glob("preflight*")
         )
         return SimpleNamespace(
@@ -201,10 +200,7 @@ def assert_private_cleanup(runner):
     assert not list(runner.storage.glob("hoben-experimental-private-*"))
     if runner.exports.is_dir():
         assert stat.S_IMODE(runner.exports.stat().st_mode) == 0o700
-        assert set(p.name for p in runner.exports.iterdir()) <= {
-            "captures.cms",
-            "report.json",
-        }
+        assert set(p.name for p in runner.exports.iterdir()) <= {"report.json"}
         for p in runner.exports.iterdir():
             assert stat.S_IMODE(p.stat().st_mode) == 0o600
             assert RAW not in p.read_bytes() and USER.encode() not in p.read_bytes()
@@ -223,7 +219,7 @@ def test_early_campaign_stop_exports_failure_and_nonzero_exit(
     assert report["reason"] == (
         "hypotheses_unproven" if count == 12 else "collection_interrupted"
     )
-    assert (runner.exports / "captures.cms").is_file()
+    assert not (runner.exports / "captures.cms").exists()
     assert_private_cleanup(runner)
 
 
@@ -236,7 +232,7 @@ def test_reviewed_experimental_public_certificate_pin_and_cipher_algorithm():
         "-outform",
         "DER",
     )
-    assert hashlib.sha256(der).hexdigest() == POLICY["recipient_sha256"]
+    assert hashlib.sha256(der).hexdigest() == RECIPIENT_SHA256
 
 
 def test_installed_channel_dry_run_simulates_crypto_without_candidate_or_secret(
@@ -253,18 +249,7 @@ def test_installed_channel_dry_run_simulates_crypto_without_candidate_or_secret(
     report = json.loads((runner.exports / "report.json").read_text())
     assert report["result"] == "dry_run_pass" and report["executed_sessions"] == 0
     assert report["boundary_proven"] is False and report["experimental_sha"] == MAIN
-    structure = entry.command(
-        "/usr/bin/openssl",
-        "cms",
-        "-cmsout",
-        "-print",
-        "-inform",
-        "DER",
-        "-in",
-        str(runner.exports / "captures.cms"),
-    )
-    assert b"authEnvelopedData" in structure and b"aes-256-gcm" in structure
-    assert b"rsaesOaep" in structure and b"sha256" in structure
+    assert not (runner.exports / "captures.cms").exists()
     assert not capsys.readouterr().out
     assert_private_cleanup(runner)
 
@@ -311,7 +296,7 @@ def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
     live(runner, monkeypatch)
     fake_collector(monkeypatch, runner, mode="bad-report")
     assert entry.run("live") == 1
-    assert (runner.exports / "captures.cms").is_file()
+    assert not (runner.exports / "captures.cms").exists()
     assert not (runner.exports / "report.json").exists()
     assert_private_cleanup(runner)
 
@@ -352,72 +337,45 @@ def test_wrong_context_or_inherited_token_refuses_before_exports(
     assert_private_cleanup(runner)
 
 
-@pytest.mark.parametrize(
-    "problem",
-    [
-        "missing",
-        "wrong-pin",
-        "private-key",
-        "symlink",
-        "expired",
-        "future",
-        "scenario",
-        "crypto-unavailable",
-    ],
-)
-def test_certificate_or_scenario_failure_precedes_candidate_import_and_secret_access(
-    runner, monkeypatch, problem
+def test_bad_policy_refuses_before_candidate_import_and_secret_access(
+    runner, monkeypatch
 ):
     live(runner, monkeypatch)
     imports, calls = fake_collector(monkeypatch, runner)
-    file = runner.trusted / ".github/config/hoben-experimental-recipient.pem"
-    if problem == "missing":
-        file.unlink()
-    elif problem == "private-key":
-        file.write_text("-----BEGIN PRIVATE KEY-----\nSYNTHETIC-PRIVATE\n")
-    elif problem == "symlink":
-        file.unlink()
-        file.symlink_to(SOURCE / "tests/fixtures/hoben-experimental-recipient.pem")
-    elif problem == "expired":
-        monkeypatch.setattr(
-            entry, "utcnow", lambda: datetime(2027, 10, 8, 7, tzinfo=UTC)
-        )
-    elif problem == "future":
-        monkeypatch.setattr(
-            entry, "utcnow", lambda: datetime(2026, 10, 8, 7, tzinfo=UTC)
-        )
-    elif problem == "crypto-unavailable":
-
-        def fail(*args):
-            raise ValueError("SYNTHETIC-PRIVATE")
-
-        monkeypatch.setattr(entry, "encrypt", fail)
-    else:
-        manifest = runner.trusted / ".github/config/hoben-experimental.json"
-        policy = {k: v for k, v in POLICY.items() if k != "candidate_sha"}
-        policy["recipient_sha256" if problem == "wrong-pin" else "scenario"] = (
-            "b" * 64 if problem == "wrong-pin" else "other"
-        )
-        manifest.write_text(json.dumps(policy))
+    manifest = runner.trusted / ".github/config/hoben-experimental.json"
+    policy = {k: v for k, v in POLICY.items() if k != "candidate_sha"}
+    policy["scenario"] = "unknown"
+    manifest.write_text(json.dumps(policy))
     assert entry.run("live") == 1
     assert not imports and not calls and os.environ["HOBEN_USER_GUID"] == USER
     assert_private_cleanup(runner)
 
 
-def test_encryption_failure_after_collection_never_falls_back_to_plaintext(
+def test_missing_certificate_and_unavailable_crypto_do_not_block_new_campaign(
     runner, monkeypatch
 ):
     live(runner, monkeypatch)
-    fake_collector(monkeypatch, runner)
-    original = entry.command
+    imports, calls = fake_collector(monkeypatch, runner)
+    (runner.trusted / ".github/config/hoben-experimental-recipient.pem").unlink()
 
-    def fail(*args, cwd=None):
-        if args[1] == "cms" and any(s.endswith("/captures.cms") for s in args):
-            raise ValueError("SYNTHETIC-PRIVATE")
-        return original(*args, cwd=cwd)
+    def forbid_encryption(*args, **kwargs):
+        raise AssertionError("No encryption or CMS CLI may run")
 
-    monkeypatch.setattr(entry, "command", fail)
-    assert entry.run("live") == 1 and not list(runner.exports.iterdir())
+    monkeypatch.setattr(entry, "encrypt", forbid_encryption)
+    monkeypatch.setattr(entry, "prepare_recipient", forbid_encryption)
+    monkeypatch.setattr(entry, "seal", forbid_encryption)
+    assert entry.run("live") == 0
+    assert len(imports) == len(calls) == 1
+    assert not (runner.exports / "captures.cms").exists()
+    assert_private_cleanup(runner)
+
+
+def test_bad_public_report_never_falls_back_to_private_capture(runner, monkeypatch):
+    live(runner, monkeypatch)
+    fake_collector(monkeypatch, runner, mode="bad-report")
+    assert entry.run("live") == 1
+    assert not (runner.exports / "report.json").exists()
+    assert not (runner.exports / "captures.cms").exists()
     assert_private_cleanup(runner)
 
 
