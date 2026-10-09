@@ -30,7 +30,7 @@ function fixture() {
   const jobs = ["tests", "ha-tests", "hacs", "hassfest"].map(name =>
     ({name, head_sha: sha, status: "completed", conclusion: "success"}));
   const decision = {schema: 1, scenario: "h1h2", candidate_sha: sha,
-    ci_run_id: 678, recipient_sha256: policy.recipient_sha256};
+    ci_run_id: 678};
   const comment = {id: 321, user: {...manager},
     created_at: "2026-10-09T17:01:00Z", updated_at: "2026-10-09T17:01:00Z",
     body: marker + "\n" + JSON.stringify(decision)};
@@ -74,7 +74,7 @@ const cases = [
     a.decision.ci_run_id++;
     a.comment.body = marker + "\n" + JSON.stringify(a.decision);
   }, "decision", "stale_or_invalid_manager_decision"],
-  ["wrong recipient in decision", a => {
+  ["unexpected legacy recipient in decision", a => {
     a.decision.recipient_sha256 = "0".repeat(64);
     a.comment.body = marker + "\n" + JSON.stringify(a.decision);
   }, "decision", "stale_or_invalid_manager_decision"],
