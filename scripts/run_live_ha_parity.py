@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,7 +30,7 @@ REQUIRED = {
     "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
     "GITHUB_RUN_ATTEMPT": "1",
 }
-SHA_RE = __import__("re").compile(r"[a-f0-9]{40}")
+SHA_RE = re.compile(r"[a-f0-9]{40}")
 
 
 def context_valid(env: dict[str, str]) -> bool:
@@ -73,9 +74,13 @@ def empty_report() -> dict[str, object]:
     }
 
 
-async def observe(user_guid: str, device_guid: str | None,
-                  *, client_factory=HobenClient,
-                  decoder=decode_v4_snapshot) -> dict[str, object]:
+async def observe(
+    user_guid: str,
+    device_guid: str | None,
+    *,
+    client_factory=HobenClient,
+    decoder=decode_v4_snapshot,
+) -> dict[str, object]:
     """Use HA's actual HobenClient.async_refresh and V4 decoder unchanged.
 
     Every async_refresh internally opens a separate verified TLS session and
@@ -94,7 +99,10 @@ async def observe(user_guid: str, device_guid: str | None,
                 if index == 1 and not client.has_assigned_device_guid:
                     raise RuntimeError("unassigned")
                 snapshot = await client.async_refresh()
-                if snapshot.profile is not StoveProfile.V4 or len(snapshot.registers) != 20:
+                if (
+                    snapshot.profile is not StoveProfile.V4
+                    or len(snapshot.registers) != 20
+                ):
                     raise RuntimeError("unsupported")
                 decoder(snapshot)  # HA coordinator calls this exact decoder.
                 report["refreshes_completed"] = index + 1
@@ -149,8 +157,9 @@ def main() -> int:
         report["error"] = "invalid_context"
     else:
         try:
-            report = asyncio.run(observe(env["HOBEN_USER_GUID"],
-                env.get("HOBEN_DEVICE_GUID") or None))
+            report = asyncio.run(
+                observe(env["HOBEN_USER_GUID"], env.get("HOBEN_DEVICE_GUID") or None)
+            )
         except BaseException:
             report["error"] = "client_failure"
     written = write_report(report, env.get("RUNNER_TEMP", ""))
