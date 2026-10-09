@@ -99,6 +99,8 @@ const gate=require(input.gate);
    else if(op.name==='dry')gate.dryReport(input.context);
    else if(op.name==='prepare-public')gate.preparePublicReport({
     context:input.context,core});
+   else if(op.name==='prepare-ciphertext')gate.prepareCiphertext({
+    context:input.context,core});
    else if(op.name==='discover')output.result=await gate.discover({github,
     repo:input.context.repo,phase:input.phase,candidate:input.candidate});
    else throw Error('UNEXPECTED_OPERATION');
@@ -163,6 +165,17 @@ def claim_tag(phase="dry-run", id=120):
         "environment_digest": None,
     }
     return {"object": {"type": "commit", "sha": MAIN}, "message": json.dumps(stamp)}
+
+
+def associated_pr():
+    # The REST associations use reduced repo objects, not necessarily full_name.
+    repo = {"id": 1401398724, "url": f"https://api.github.com/repos/{REPO}"}
+    return {
+        "number": 55,
+        "url": f"https://api.github.com/repos/{REPO}/pulls/55",
+        "head": {"sha": HEAD, "ref": "codex/issue-54", "repo": repo.copy()},
+        "base": {"ref": "experimental", "repo": repo.copy()},
+    }
 
 
 @pytest.fixture
@@ -231,7 +244,11 @@ def api():
             "merged_by": OWNER,
             "merged_at": "2026-10-08T23:00:00Z",
             "base": {"ref": "experimental", "repo": {"full_name": REPO}},
-            "head": {"sha": HEAD, "repo": {"full_name": REPO}},
+            "head": {
+                "sha": HEAD,
+                "ref": "codex/issue-54",
+                "repo": {"full_name": REPO},
+            },
         },
         "reviews": [],
         "threads": [
@@ -245,17 +262,23 @@ def api():
                 "conclusion": "success",
                 "app": {"slug": "github-actions"},
                 "details_url": f"https://github.com/{REPO}/actions/runs/98/job/99",
+                "pull_requests": [associated_pr()],
             }
         ],
         "runs": {
             "123": current,
             "120": run_record(120, completed=True),
             "98": {
+                "id": 98,
                 "path": ".github/workflows/validate.yml",
                 "event": "pull_request",
+                "head_branch": "codex/issue-54",
                 "head_sha": HEAD,
                 "status": "completed",
                 "conclusion": "success",
+                "repository": {"id": 1401398724, "full_name": REPO},
+                "head_repository": {"id": 1401398724, "full_name": REPO},
+                "pull_requests": [associated_pr()],
             },
         },
         "active": [],
@@ -787,14 +810,15 @@ def test_live_requires_real_successful_dry_run_for_same_sha_and_gate(
     assert not result["writes"]
 
 
-def test_concurrent_campaign_on_second_page_is_refused(api, tmp_path):
+@pytest.mark.parametrize("state", ["in_progress", "waiting"])
+def test_concurrent_campaign_on_second_page_is_refused(api, tmp_path, state):
     api["active"] = [
-        {"id": i, "status": "queued", "path": "unrelated"} for i in range(100)
+        {"id": i, "status": state, "path": "unrelated"} for i in range(100)
     ]
     api["active"].append(
         {
             "id": 1001,
-            "status": "queued",
+            "status": state,
             "path": ".github/workflows/opened-client-boundary.yml",
         }
     )

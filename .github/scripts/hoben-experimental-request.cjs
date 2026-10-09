@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const child = require('node:child_process');
+const ciphertext = require('./hoben-experimental-ciphertext.cjs');
 const policy = require('../config/hoben-experimental.json');
 const repository = 'Guillaume0385/ha-hoben-community';
 const manager = 'Guillaume0385';
@@ -19,6 +20,32 @@ const runUrl = id => 'https://github.com/' + repository + '/actions/runs/' + id;
 const claimName = (phase, sha) => 'hoben-experimental-' + phase + '-h1h2-' + sha;
 const statusName = phase => 'hoben-experimental/h1h2/' + phase;
 const owner = u => u?.login === manager && u.id === managerId && u.type === 'User';
+const mainRefs = ['main','refs/heads/main'];
+const apiRepository = 'https://api.github.com/repos/' + repository;
+// REST can return either a bare workflow filename or filename@ref. Validate
+// the ref independently: stripping an arbitrary suffix would hide a wrong run.
+function workflowPath(value) {
+  if (typeof value !== 'string') return {file:null,ref:null};
+  const at = value.indexOf('@');
+  return at < 0 ? {file:value,ref:null} :
+    {file:value.slice(0,at),ref:value.slice(at+1)};
+}
+function workflowMatches(run, file, refs) {
+  const p = workflowPath(run?.path);
+  return p.file === file && (p.ref === null || refs.includes(p.ref));
+}
+function sameRepository(repo) {
+  return repo?.id === 1401398724 &&
+    (repo.full_name === repository || repo.url === apiRepository) &&
+    (repo.full_name === undefined || repo.full_name === repository) &&
+    (repo.url === undefined || repo.url === apiRepository);
+}
+function associatedPR(record, pr) {
+  return record?.number === pr.number && record.url === apiRepository+'/pulls/'+pr.number &&
+    record.head?.sha === pr.head.sha && record.head.ref === pr.head.ref &&
+    record.base?.ref === 'experimental' &&
+    sameRepository(record.head.repo) && sameRepository(record.base.repo);
+}
 class Refusal extends Error {}
 const requireFact = (fact, reason) => { if (!fact) throw new Refusal(reason); };
 
@@ -208,14 +235,24 @@ async function reviewsAndCI(github, api, pr) {
     {...api,ref:pr.head.sha,filter:'latest',per_page:100});
   const check = checks.find(r=>r.name === 'tests');
   requireFact(check?.app?.slug === 'github-actions' && check.head_sha === pr.head.sha &&
-    check.status === 'completed' && check.conclusion === 'success','offline_ci_unverified');
-  const match = check.details_url.match(
+    check.status === 'completed' && check.conclusion === 'success' &&
+    Array.isArray(check.pull_requests) && check.pull_requests.some(r=>associatedPR(r,pr)),
+  'offline_ci_unverified');
+  const match = check.details_url?.match(
     /^https:\/\/github\.com\/Guillaume0385\/ha-hoben-community\/actions\/runs\/(\d+)\/job\/\d+$/);
   requireFact(match && positive(Number(match[1])),'offline_ci_unverified');
   const {data:ci} = await github.rest.actions.getWorkflowRun({...api,run_id:Number(match[1])});
-  requireFact(ci.path === '.github/workflows/validate.yml' && ci.event === 'pull_request' &&
+  requireFact(ci.id === Number(match[1]) &&
+    workflowMatches(ci,'.github/workflows/validate.yml',
+      ['refs/pull/'+pr.number+'/merge',pr.head.ref,'refs/heads/'+pr.head.ref]) &&
+    ci.event === 'pull_request' && ci.head_branch === pr.head.ref &&
     ci.head_sha === pr.head.sha && ci.status === 'completed' && ci.conclusion === 'success',
   'offline_ci_unverified');
+  // A shared HEAD (or shared check) is not evidence of the triggering PR/base.
+  // Empty or ambiguous REST associations cannot grant admission after a merge.
+  requireFact(sameRepository(ci.repository) && sameRepository(ci.head_repository) &&
+    Array.isArray(ci.pull_requests) && ci.pull_requests.length === 1 &&
+    associatedPR(ci.pull_requests[0],pr), 'offline_ci_unverified');
 }
 
 async function verify({github,context,core,recheck=false}) {
@@ -232,7 +269,7 @@ async function verify({github,context,core,recheck=false}) {
     requireFact(repo.full_name === repository && repo.id === 1401398724 &&
       repo.default_branch === 'main' && main.protected === true &&
       main.commit.sha === context.sha, 'stale_or_unprotected_main');
-    requireFact(run.id === context.runId && run.path === workflow && run.event === 'issues' &&
+    requireFact(run.id === context.runId && workflowMatches(run,workflow,mainRefs) && run.event === 'issues' &&
       run.head_branch === 'main' && run.head_sha === context.sha && run.run_attempt === 1 &&
       owner(run.actor) && owner(run.triggering_actor), 'unauthenticated_request');
     const states = issue.labels.filter(l=>l.name.startsWith('state:'));
@@ -257,13 +294,16 @@ async function verify({github,context,core,recheck=false}) {
     await reviewsAndCI(github,api,pr);
     let env = null;
     if (phase === 'live') env = await environmentPolicy(github,api);
-    for (const status of ['queued','in_progress','waiting','pending','requested']) {
+    // Workflow-level queue:max holds the global mutex before request admission
+    // through publication/environment waits. Pending contenders have not been
+    // admitted and must not cause the holder to refuse or fail its recheck.
+    for (const status of ['in_progress','waiting']) {
       const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
         {...api,status,per_page:100});
       requireFact(runs.length < 1000 && !runs.some(x=>x.id !== context.runId &&
         ['opened-client-boundary.yml','manager-live-hoben.yml','live-validation.yml',
           'hoben-boundary-request.yml','hoben-experimental-request.yml']
-          .some(f=>x.path === '.github/workflows/'+f)), 'concurrent_hoben_run');
+          .some(f=>workflowPath(x.path).file === '.github/workflows/'+f)), 'concurrent_hoben_run');
     }
     if (phase === 'live') {
       try {
@@ -275,7 +315,7 @@ async function verify({github,context,core,recheck=false}) {
           {...api,run_id:dry.run_id,per_page:100});
         const {data:status} = await github.rest.repos.getCombinedStatusForRef({...api,ref:r.experimental_sha});
         requireFact(dry.main_sha === context.sha && dry.pull_request === r.pull_request &&
-          completed.id === dry.run_id && completed.path === workflow &&
+          completed.id === dry.run_id && workflowMatches(completed,workflow,mainRefs) &&
           completed.event === 'issues' && completed.head_sha === context.sha &&
           completed.head_branch === 'main' &&
           completed.run_attempt === 1 && owner(completed.actor) && owner(completed.triggering_actor) &&
@@ -429,6 +469,21 @@ function preparePublicReport({context,core}) {
   }
 }
 
+function prepareCiphertext({context,core}) {
+  try {
+    requireFact(request(context) === 'live' &&
+      shaPattern.test(process.env.EXPERIMENTAL_APPROVED_SHA),'invalid_claim');
+    // Trusted main validates a snapshot of the final candidate file, including
+    // failure paths. Upload only its new trusted seal, never the candidate file.
+    ciphertext.prepare(process.env.RUNNER_TEMP,
+      path.join(__dirname,'../config/hoben-experimental-recipient.pem'),
+      policy.recipient_sha256);
+    core.setOutput('verified','true');
+  } catch {
+    core.setFailed('Hoben experimental ciphertext refused before upload.');
+  }
+}
+
 const reasons = new Set(['unauthenticated_request','invalid_recipient',
   'manager_decision_missing_or_changed','label_or_decision_not_fresh','invalid_claim',
   'environment_unverified','independent_environment_approval_unverified',
@@ -495,7 +550,7 @@ async function discover({github,repo,phase,candidate}) {
     ['dry-run','live'].includes(phase) && shaPattern.test(candidate),'invalid_claim');
   const stamp = await claim(github,repo,phase,candidate);
   const {data:run} = await github.rest.actions.getWorkflowRun({...repo,run_id:stamp.run_id});
-  requireFact(run.id === stamp.run_id && run.path === workflow && run.event === 'issues' &&
+  requireFact(run.id === stamp.run_id && workflowMatches(run,workflow,mainRefs) && run.event === 'issues' &&
     run.head_sha === stamp.main_sha && run.head_branch === 'main' && run.run_attempt === 1 &&
     owner(run.actor) && owner(run.triggering_actor),'invalid_claim');
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
@@ -506,16 +561,21 @@ async function discover({github,repo,phase,candidate}) {
   const report = artifacts.find(a=>a.name === name && a.expired === false);
   const {data:combined} = await github.rest.repos.getCombinedStatusForRef({...repo,ref:candidate});
   const status = combined.statuses.find(s=>s.context === statusName(phase));
-  requireFact(!status || status.target_url === runUrl(stamp.run_id),'invalid_claim');
+  requireFact(!status || status.target_url === runUrl(stamp.run_id) &&
+    ['pending','success','failure','error'].includes(status.state),'invalid_claim');
   const gate = jobs.find(j=>j.name === 'request');
   const collect = jobs.find(j=>j.name === 'observations');
   const notRun = phase === 'live' && run.status === 'completed' &&
     (gate?.conclusion !== 'success' || collect?.conclusion === 'skipped');
+  const completedState = run.conclusion === 'cancelled' ? 'cancelled' :
+    run.conclusion === 'success' && status?.state === 'success' ? 'success' : 'failure';
   return {scenario:'h1h2',phase,sha:candidate,main_sha:stamp.main_sha,
     run_id:stamp.run_id,url:runUrl(stamp.run_id),
-    state:notRun ? 'NOT RUN' : run.status === 'completed' ? run.conclusion :
+    // A publisher can successfully publish a failed report. A green workflow
+    // alone, or a missing/pending result status, never means a successful result.
+    state:notRun ? 'NOT RUN' : run.status === 'completed' ? completedState :
       ['queued','requested','pending','waiting'].includes(run.status) ? 'queued' : 'running',
     report_artifact_id:report && positive(report.id) ? report.id : null,
     report_name:name,boundary_proven:false};
 }
-module.exports = {verify,publish,dryReport,preparePublicReport,discover};
+module.exports = {verify,publish,dryReport,preparePublicReport,prepareCiphertext,discover};

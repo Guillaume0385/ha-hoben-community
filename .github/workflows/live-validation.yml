@@ -30,6 +30,7 @@ concurrency:
           github.event.label.name == 'live-session-negative'))) &&
         'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   live-validation:

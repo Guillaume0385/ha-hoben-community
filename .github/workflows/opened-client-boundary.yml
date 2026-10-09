@@ -31,6 +31,7 @@ permissions:
 concurrency:
   group: hoben-boundary-campaign
   cancel-in-progress: false
+  queue: max
 
 jobs:
   manager-dispatch:

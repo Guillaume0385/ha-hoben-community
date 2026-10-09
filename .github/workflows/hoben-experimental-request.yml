@@ -19,6 +19,9 @@ concurrency:
          github.event.label.name == 'manager-hoben-experimental-live') &&
         'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
   cancel-in-progress: false
+  # Keep up to 100 waiting runs; the default single slot replaces older waiters.
+  # Admission/reservation happens only after this global workflow lock is held.
+  queue: max
 
 jobs:
   request:
@@ -155,12 +158,22 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
             gate.preparePublicReport({context, core});
-      - name: Authenticated ciphertext only
+      - name: Validate final CMS before upload, including collection failures
+        id: ciphertext
         if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.collect.outcome != 'skipped' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ needs.request.outputs.sha }}
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/hoben-experimental-request.cjs');
+            gate.prepareCiphertext({context, core});
+      - name: Verified CMS ciphertext only
+        if: ${{ always() && steps.ciphertext.outputs.verified == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: experimental-ciphertext-${{ needs.request.outputs.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/hoben-experimental-exports/captures.cms
+          path: ${{ runner.temp }}/hoben-experimental-ciphertext/captures.cms
           retention-days: 7
           compression-level: 0
           if-no-files-found: error

@@ -22,6 +22,7 @@ concurrency:
         github.actor == 'Guillaume0385' &&
         'hoben-boundary-campaign' || format('hoben-unrelated-{0}', github.run_id) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   manager-approval:

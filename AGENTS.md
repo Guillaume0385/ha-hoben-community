@@ -584,12 +584,24 @@ This extends only the bounded private-RX exception above: fixed 6 H1 + 6 H2,
 CMS before TLS, ciphertext and allowlisted metadata only, seven-day retention.
 The main launcher removes all GitHub/runner tokens before candidate execution.
 Trusted main validates the candidate report before any plaintext artifact
-upload; only its fixed verified projection may be exported. An inconclusive
+upload; only its fixed verified projection may be exported. It also checks the
+final bounded CMS snapshot before uploading its trusted seal, including collection
+failures: strict AuthEnvelopedData, AES-256-GCM, RSA-OAEP/SHA-256 and the pinned
+recipient. Public verification cannot authenticate the candidate GCM tag without
+the private key: trusted main encrypts the whole snapshot again with the pinned
+public certificate before export. MANAGER authenticates both CMS envelopes on
+offline decryption. An inconclusive
 success requires all 12 executed sessions (6 H1 then 6 H2); early campaign stops
 remain failure. All Hoben network workflows share the repository-wide
 `hoben-boundary-campaign` concurrency group, including environment waits.
-Unrelated label events use run-specific groups so they cannot evict pending
-authorized observations. Active-run API inspection is only an additional guard.
+All four workflows use `queue: max`, never cancel in progress. GitHub retains
+up to 100 pending runs and cancels a new overflow run before admission; no
+accepted reservation is displaced. Unrelated label events use run-specific
+groups. Active-run API inspection is only an additional guard and ignores
+not-yet-admitted queued contenders. CI must positively identify the exact PR,
+experimental base and HEAD; same-SHA checks or absent/ambiguous PR associations
+cannot grant admission. Normalize REST workflow filenames and separately verify
+any ref suffix. A green workflow never overrides a failed result commit status.
 Require exact-current main/experimental SHA, traceable MANAGER review, successful
 real secret-free dry-run, immutable per-SHA/scenario/phase reservation and
 post-wait rechecks. Missing evidence means NOT RUN. No automatic retries, live
