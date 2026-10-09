@@ -4,6 +4,7 @@ The Actions job receives GitHub read-only access. The Hoben-bearing child gets
 only an explicit allowlist, no GITHUB_TOKEN, OIDC, Actions command files, or
 user-provided arguments. It never inherits stdout/stderr into public logs.
 """
+
 from __future__ import annotations
 
 import os
@@ -32,8 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def child_environment(env: dict[str, str]) -> dict[str, str]:
-    return {**{key: env[key] for key in ALLOWED if key in env},
-            "PATH": "/usr/bin:/bin"}
+    return {**{key: env[key] for key in ALLOWED if key in env}, "PATH": "/usr/bin:/bin"}
 
 
 def main() -> int:
