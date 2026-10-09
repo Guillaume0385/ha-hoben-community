@@ -153,7 +153,7 @@ const refused = {
   "CI missing HACS": a => { a.jobs.splice(2, 1); },
   "CI duplicate tests": a => { a.jobs[2].name = "tests"; },
   "CI job wrong SHA": a => { a.jobs[0].head_sha = sha; },
-  "environment swapped": a => { a.environment.name = "hoben-live"; },
+  "environment swapped": a => { a.environment.name = "hoben-experimental"; },
   "unrestricted environment": a => { a.environment.deployment_branch_policy = null; },
   "wildcard branch": a => { a.branch.name = "*"; },
   "tag policy": a => { a.branch.type = "tag"; },
@@ -186,7 +186,7 @@ for (const fault of ["missing", "rejected", "wrong-user", "self", "wrong-environ
     if (fault === "rejected") a.history[0].state = "rejected";
     if (fault === "wrong-user") a.history[0].user.id = 2;
     if (fault === "self") a.history[0].user = {...user};
-    if (fault === "wrong-environment") a.history[0].environments[0].name = "hoben-live";
+    if (fault === "wrong-environment") a.history[0].environments[0].name = "hoben-experimental";
     if (fault === "policy-changed") a.environment.protection_rules[0].id++;
     if (fault === "decision-changed") a.comment.id++;
     if (fault === "SHA-changed") a.github.rest.repos.getBranch = async () => ({data: {protected: true, commit: {sha: head}}});
