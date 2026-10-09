@@ -75,7 +75,7 @@ for (const kind of ["symlink", "directory", "fifo", "oversized"]) {
       if (kind === "symlink") fs.symlinkSync(path.join(temp, "private.json"), file);
       else if (kind === "directory") fs.mkdirSync(file);
       else if (kind === "fifo") require("node:child_process").execFileSync("mkfifo", [file]);
-      else fs.writeFileSync(file, "x".repeat(65537));
+      else fs.writeFileSync(file, "x".repeat(2097153));
       assert.throws(() => exportsGate.readReport(file, context));
     });
   });
