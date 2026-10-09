@@ -2,7 +2,6 @@
 const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const gate = require("../../.github/scripts/experimental-lab-gate.cjs");
-const cms = require("../../.github/scripts/experimental-ciphertext.cjs");
 const push = require("../../.github/scripts/experimental-push-preflight.cjs");
 const policy = require("../../.github/config/hoben-experimental.json");
 // These tests may exercise local OpenSSL, but never a network transport.
@@ -24,8 +23,7 @@ function setup() {
   const env = {GITHUB_ACTOR: user.login, GITHUB_TRIGGERING_ACTOR: user.login,
     GITHUB_RUN_ATTEMPT: "1", GITHUB_RUN_ID: "123", GITHUB_WORKFLOW_REF: gate.WORKFLOW,
     GITHUB_WORKFLOW_SHA: sha, GITHUB_REPOSITORY: push.REPOSITORY, GITHUB_REF: context.ref, GITHUB_SHA: sha};
-  const approval = {schema: 1, scenario: "h1h2", candidate_sha: head, ci_run_id: 456,
-    recipient_sha256: policy.recipient_sha256};
+  const approval = {schema: 1, scenario: "h1h2", candidate_sha: head, ci_run_id: 456};
   const comment = {id: 987, user: {...user}, created_at: "2026-10-09T08:05:00Z",
     updated_at: "2026-10-09T08:05:00Z", body: gate.MARKER + "\n" + JSON.stringify(approval)};
   const ci = {id: 456, head_sha: head, head_branch: pr.head.ref, event: "pull_request", run_attempt: 1,
@@ -80,7 +78,7 @@ function setup() {
   return world;
 }
 
-test("secretless assembly exercises real CMS before any secret-bearing job", async () => {
+test("secretless dry-run does not depend on local CMS keys or public certificates", async () => {
   const a = setup();
   assert.equal((await gate.dryRun(a)).status, "dry-run-only");
   assert.equal(a.writes, 0);
@@ -137,7 +135,7 @@ const refused = {
   "decision SHA": a => { a.approval.candidate_sha = sha; a.decision(); },
   "decision scenario": a => { a.approval.scenario = "hoben-live"; a.decision(); },
   "decision arbitrary key": a => { a.approval.script = "anything"; a.decision(); },
-  "decision recipient": a => { a.approval.recipient_sha256 = "0".repeat(64); a.decision(); },
+  "legacy recipient field": a => { a.approval.recipient_sha256 = "0".repeat(64); a.decision(); },
   "no Issue link": a => { a.pr.body = "No authorization"; },
   "blocked Issue": a => { a.issues.labels = [{name: "state:blocked"}]; },
   "closed Issue": a => { a.issues.state = "closed"; },
@@ -362,13 +360,11 @@ test("approval failure after reservation is categorized without repeating admiss
   assert.equal(a.writes, 1);
 });
 
-test("CMS unavailable refuses dry-run and admission before reservations", async () => {
-  const original = cms.preflight;
-  cms.preflight = () => { throw Error("synthetic crypto failure"); };
-  try {
-    const a = setup(); await assert.rejects(gate.dryRun(a));
-    await assert.rejects(gate.verify(a)); assert.equal(a.writes, 0);
-  } finally { cms.preflight = original; }
+test("new report-only decision rejects any arbitrary certificate or secret parameter", async () => {
+  const a = setup();
+  a.approval.recipient_sha256 = "0".repeat(64); a.decision();
+  await assert.rejects(gate.verify(a), /manager_decision_unverified/);
+  assert.equal(a.writes, 0);
 });
 
 test("a superseded decision on an earlier HEAD is history, never an approval of the new HEAD", async () => {
