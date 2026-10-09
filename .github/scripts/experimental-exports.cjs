@@ -3,11 +3,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const cms = require('./experimental-ciphertext.cjs');
+const timeline = require('./experimental-timeline.cjs');
 const policy = require('../config/hoben-experimental.json');
 const requireFact = fact => { if (!fact) throw Error('invalid_public_report'); };
 function readReport(file, context) {
   const phase = 'live';
-  const r = JSON.parse(cms.snapshot(file,65536).toString('utf8'));
+  const r = JSON.parse(cms.snapshot(file,2097152).toString('utf8'));
   requireFact(r.schema === 1 && r.scenario === 'h1h2' && r.phase === phase &&
     r.experimental_sha === context.sha && r.candidate_sha === context.sha &&
     r.run_id === context.runId && r.boundary_proven === false, 'invalid_public_report');
@@ -38,7 +39,7 @@ function readReport(file, context) {
     requireFact(exact(s, ['mode','pause_seconds','repetition','partial','prefix_complete',
       'rx_bytes','read_calls','pongs_before_open','pongs_under_h2','v4_requests',
       'correlated_responses','exception_responses','stop','emission_stop','opening_context',
-      'h1_status','h2_status','comparison']) &&
+      'h1_status','h2_status','comparison'].concat(s.timing_observations === undefined ? [] : ['timing_observations'])) &&
       exact(s.opening_context,['eligible','status']) &&
       typeof s.prefix_complete === 'boolean' &&
       [null,'terminal_close_h2','invalid_mbap_h2','unsupported_type_h2','invalid_correlation'].includes(s.emission_stop) &&
@@ -57,6 +58,9 @@ function readReport(file, context) {
       comparisons.has(s.comparison) && integer(s.rx_bytes, 1048576) &&
       integer(s.v4_requests, s.mode === 'H1' ? 0 : 2) &&
       integer(s.correlated_responses, s.v4_requests), 'invalid_public_report');
+    if (s.timing_observations !== undefined) {
+      timeline.validate(s.timing_observations, s.rx_bytes, s.read_calls);
+    }
     return `| ${index + 1} | ${s.mode} | ${s.stop} | ${s.opening_context.status} | ` +
       `${s.h1_status} | ${s.h2_status} | ${s.comparison} | ${s.v4_requests}/${s.correlated_responses} |`;
   });
