@@ -117,6 +117,20 @@ def test_measurement_builder_refuses_inconsistent_read_without_export():
                           h2={"covered_bytes": 0, "unattributed_bytes": 3})
 
 
+def test_connect_failure_has_zero_reads_and_no_fictitious_tx():
+    journal = [
+        {"kind": "close_attempt", "at": 10.0},
+        {"kind": "close_complete", "at": 10.2},
+    ]
+    timeline = metadata_timeline(
+        journal, [], rx_bytes=0, opening_offset=None, h2={"status": "inconclusive"}
+    )
+    assert timeline["reads"] == []
+    assert timeline["tx"] == []
+    assert timeline["close"]["state"] == "closed"
+    assert safe_timeline(timeline, rx_bytes=0, read_calls=0) == timeline
+
+
 def test_public_projection_includes_only_timing_fields_when_present(monkeypatch):
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("EXPERIMENTAL_APPROVED_SHA", "a" * 40)
