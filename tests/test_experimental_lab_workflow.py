@@ -169,7 +169,7 @@ def test_research_instrumentation_is_not_imported_into_the_runtime():
         )
 
 
-@pytest.mark.parametrize("suite", ["experimental-lab-gate", "experimental-exports"])
+@pytest.mark.parametrize("suite", ["experimental-lab-gate", "experimental-exports", "experimental-handoff-check"])
 def test_node_security_regressions(suite):
     assert shutil.which("node"), "Node.js is required for the GitHub gates"
     result = subprocess.run(
