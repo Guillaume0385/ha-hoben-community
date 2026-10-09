@@ -34,7 +34,7 @@ jobs:
             const gate = require('./.github/scripts/experimental-lab-gate.cjs');
             try {
               await gate.dryRun({github, context});
-              core.info('DRY RUN ONLY: h1h2; CMS preflight; no secret or Hoben connection.');
+              core.info('DRY RUN ONLY: h1h2 report-only; no secret or Hoben connection.');
             } catch (_) { core.setFailed('NOT RUN: secretless preflight refused.'); }
 
   admission:
@@ -116,21 +116,12 @@ jobs:
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: python trusted/scripts/launch_experimental_boundary.py
       - id: exports
-        name: Validate public projection and seal the final CMS before upload
+        name: Validate strictly anonymized report before upload
         if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
             require('./trusted/.github/scripts/experimental-exports.cjs').prepare({context, core});
-      - name: Export only the newly sealed ciphertext
-        if: ${{ always() && steps.exports.outputs.ciphertext == 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: experimental-ciphertext-${{ github.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/hoben-experimental-ciphertext/captures.cms
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
       - name: Export only the validated public report
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
