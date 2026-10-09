@@ -56,10 +56,16 @@ sur `4eb8bb90252dae41ca3e83a58e751d36f57c8fd1`, a réussi ses deux jobs
 `dry-run (hoben-live)` et `dry-run (hoben-experimental)`. Cela établit le
 déclencheur push après fusion MANAGER, aucune propriété réseau ou d'environnement.
 
-La phase 2 de #54 prépare **uniquement** `hoben-experimental.yml`, à installer
-après revue et fusion de sa PR vers `experimental`. Elle réutilise les
-collecteurs #55 ; aucun composant HA n'importe ces instruments.
-`hoben-live` reste une phase suivante, sans job réel dans cette livraison.
+La phase 2 de #54 a installé **uniquement** `hoben-experimental.yml` via
+la PR #59 fusionnée dans `experimental` au SHA
+`1b776a5028610083d74a11d2836bbcd5beac375d`. Le vrai run
+[37923236744](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37923236744)
+a confirmé `dry-run=success` et `admission=failure` avant toute réservation :
+`collect` et `result` étaient `skipped`, H1/H2 **NOT RUN**. La cause précise
+n'est pas observable dans cet ancien run (exception volontairement masquée).
+Cette preuve ne valide ni l'accès aux environnements ni la connexion au serveur.
+Le workflow utilise toujours les collecteurs #55 hors runtime HA ; la voie
+`hoben-live` reste différée.
 
 Procédure MANAGER, sans dispatch ni modification de Settings :
 
@@ -157,6 +163,38 @@ lecture identique et l'historique d'approbation doivent réussir **avant le step
 qui reçoit les identifiants**. Un refus ne réserve aucun nouveau SHA/scénario
 et n'appelle pas la collecte.
 
+### Catégories publiques d'admission (correction après le run #37923236744)
+
+Le step `admission` écrit maintenant **uniquement** `NOT RUN` et la catégorie
+fixe retournée par `refusalCategory()` dans le summary et l'échec GitHub.
+L'allowlist est `provenance`, `preflight`, `merge`, `decision`, `ci`,
+`environment_api`, `environment_response`, `environment_branch`,
+`environment_reviewers`, `claim`, `approval`, `other`. Toute exception
+inconnue produit `other` ; **jamais** de texte libre, stack, URL, header,
+payload ou nom de reviewer.
+
+Pour l'environnement, distinguer strictement :
+
+| Catégorie | Interprétation autorisée |
+| --- | --- |
+| `environment_api` | API GitHub inaccessible/refusée (y compris 401/403/404, problème de transport) : sous-cause exacte indéterminée |
+| `environment_response` | Réponse API absente ou structure/champ obligatoire incomplet |
+| `environment_branch` | Identité ou politique de branche incohérente : doit être strictement `experimental`, sans wildcard ou tag |
+| `environment_reviewers` | Règle des reviewers, identité User ou protection contre l'auto-approbation non conforme |
+
+Les autres catégories localisent la famille du refus sans révéler les entrées
+API : `merge` (PR/SHA/arbre), `decision` (Issue, commentaire MANAGER, review),
+`ci` (preuves CI), `claim` (concurrence/réservation), `provenance` et
+`preflight` (déclencheur et test préliminaire). `other` est un refus fermé,
+pas un motif d'autoriser un nouveau run. Les codes de motif restent stables et
+sont testés avec des erreurs synthétiques contenant de fausses données privées.
+
+**La catégorie est un diagnostic, pas une autorisation.** Le MANAGER étudie
+le nouveau run `push` d'un **nouveau SHA fusionné** pour voir la catégorie
+effective ; l'ancien SHA/run ne peut être relancé. Il décide ensuite si la cause
+nécessite une correction logicielle ou une intervention du propriétaire sur la
+configuration GitHub. Aucun accès Hoben n'est effectué par DEV.
+
 **Preuves différentes, ne pas les confondre :**
 
 - **Hors ligne / PR Validate :** mocks HTTP 401/403/404, politique/branche,
@@ -180,8 +218,9 @@ ou par un test. S'il manque, est altéré ou lie un ancien HEAD, le refus interv
 avant lecture de l'environnement. Le MANAGER doit vérifier les settings effectifs
 sur l'interface GitHub lorsqu'ils restent invérifiables via sa connexion ; une
 capture d'écran ou un commentaire de confirmation seul ne remplace pas
-l'attestation du runner. **À ce stade : le workflow modifié existe seulement
-dans la PR #59 ; préflight de ce workflow sur GitHub et H1/H2 : NOT RUN.**
+l'attestation du runner. **Constat du 9 octobre : le `dry-run` de #59 est démontré par GitHub, mais
+l'admission échoue sans connaître la sous-cause ; H1/H2 restent NOT RUN.
+La catégorisation ajoutée ici attend un nouveau SHA fusionné et un run distinct.**
 
 Le succès du workflow signifie seulement collecte bornée terminée ; tous les
 rapports conservent `boundary_proven=false`. Les arrêts anticipés produisent un

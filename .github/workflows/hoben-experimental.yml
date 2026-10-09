@@ -62,9 +62,11 @@ jobs:
               await gate.verify({github, context});
               core.setOutput('approved', 'true');
               await core.summary.addRaw('PENDING APPROVAL: reserved h1h2 on this experimental SHA. GitHub environment approval remains mandatory.').write();
-            } catch (_) {
-              core.setFailed('NOT RUN: merge/decision/CI/environment/claim prerequisite unavailable.');
-              await core.summary.addRaw('NOT RUN: admission refused before Hoben secrets.').write();
+            } catch (error) {
+              // Fixed enum only: never forward raw exception text, stack, API data or headers.
+              const category = gate.refusalCategory(error);
+              core.setFailed('NOT RUN: admission refused; category=' + category);
+              await core.summary.addRaw('NOT RUN: admission refused before Hoben secrets; category=' + category + '.').write();
             }
 
   collect:
