@@ -32,6 +32,7 @@ from custom_components.hoben.transport import (
     TransportError,
 )
 from scripts.boundary_analysis import H2Framer, RxRead, analyze_capture, distribution
+from scripts.boundary_timeline import metadata_timeline
 
 READ_CAPACITY = 4096
 RX_LIMIT = 1024 * 1024
@@ -505,38 +506,49 @@ async def collect_session(
         if read_task is not None:
             read_task.cancel()
             await asyncio.gather(read_task, return_exceptions=True)
+        capture.event({"kind": "close_attempt", "at": clock()})
         try:
             await transport.close()
+            capture.event({"kind": "close_complete", "at": clock()})
         except TransportError:
-            capture.event({"kind": "close_error"})
+            capture.event({"kind": "close_error", "at": clock()})
         finally:
-            analysis = analyze_capture(
-                bytes(capture.data),
-                capture.reads,
-                outcome.opening_offset,
-                prefix_accepted=outcome.prefix_complete,
-            )
-            outcome.report = {
-                "mode": mode,
-                "pause_seconds": pause,
-                "repetition": repetition,
-                "stop": outcome.stop,
-                "partial": outcome.stop != "observation_budget"
-                or not outcome.prefix_complete,
-                "rx_bytes": len(capture.data),
-                "read_calls": len(capture.reads),
-                "opening_offset": outcome.opening_offset,
-                "prefix_complete": outcome.prefix_complete,
-                "v4_requests": outcome.requests,
-                "correlated_responses": outcome.valid_responses,
-                "exception_responses": outcome.exception_responses,
-                "pongs_before_open": outcome.pongs_before_open,
-                "pongs_under_h2": outcome.pongs_under_h2,
-                "emission_stop": outcome.emission_stop,
-                "boundary_proven": False,
-                **analysis,
-            }
             try:
+                analysis = analyze_capture(
+                    bytes(capture.data),
+                    capture.reads,
+                    outcome.opening_offset,
+                    prefix_accepted=outcome.prefix_complete,
+                )
+                outcome.report = {
+                    "mode": mode,
+                    "pause_seconds": pause,
+                    "repetition": repetition,
+                    "stop": outcome.stop,
+                    "partial": outcome.stop != "observation_budget"
+                    or not outcome.prefix_complete,
+                    "rx_bytes": len(capture.data),
+                    "read_calls": len(capture.reads),
+                    "opening_offset": outcome.opening_offset,
+                    "prefix_complete": outcome.prefix_complete,
+                    "v4_requests": outcome.requests,
+                    "correlated_responses": outcome.valid_responses,
+                    "exception_responses": outcome.exception_responses,
+                    "pongs_before_open": outcome.pongs_before_open,
+                    "pongs_under_h2": outcome.pongs_under_h2,
+                    "emission_stop": outcome.emission_stop,
+                    "boundary_proven": False,
+                    **analysis,
+                    "timing_observations": metadata_timeline(
+                        capture.events,
+                        capture.reads,
+                        rx_bytes=len(capture.data),
+                        opening_offset=outcome.opening_offset
+                        if analysis["opening_context"]["eligible"]
+                        else None,
+                        h2=analysis["h2"],
+                    ),
+                }
                 private_json(capture.directory / "analysis.json", outcome.report)
                 if outcome.assigned_identity is not None:
                     private_json(

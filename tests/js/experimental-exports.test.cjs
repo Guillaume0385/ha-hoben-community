@@ -102,3 +102,53 @@ test("export boundary validates ciphertext even after a failed collection; repor
       if (before === undefined) delete process.env.RUNNER_TEMP; else process.env.RUNNER_TEMP = before; }
   });
 });
+
+function timeline() {
+  return {
+    basis: "client_monotonic_relative",
+    reads: [
+      {index: 0, offset: 0, requested: 4096, received: 50,
+        started_ms: 100, ended_ms: 200, duration_ms: 100,
+        gap_previous_ms: null, since_last_tx_ms: 99, state: "received"},
+      {index: 1, offset: 50, requested: 4096, received: 50,
+        started_ms: 300, ended_ms: 400, duration_ms: 100,
+        gap_previous_ms: 100, since_last_tx_ms: 299, state: "received"},
+    ],
+    tx: [{category: "open_client", started_ms: 0, ended_ms: 1, duration_ms: 1}],
+    h2_candidates: [],
+    unattributed: [{offset: 48, length: 52, basis: "h2_unproven_suffix"}],
+    close: {state: "closed", started_ms: 500, ended_ms: 520, duration_ms: 20},
+    fragmented_candidates: 0,
+    concatenated_reads: 0,
+  };
+}
+test("strict public timeline is permitted only as bounded timing and unknown offsets", () => {
+  const r = report(); r.sessions[0].timing_observations = timeline();
+  withReport(r, file => {
+    const value = exportsGate.readReport(file, context);
+    assert.deepEqual(value.report.sessions[0].timing_observations, timeline());
+    assert.equal(value.report.boundary_proven, false);
+  });
+});
+
+for (const [title, modify] of Object.entries({
+  "private ID": t => {t.device_guid = "SYNTHETIC_PRIVATE_ID";},
+  "raw values": t => {t.reads[0].payload = [83, 69, 67];},
+  "free text kind": t => {t.tx[0].category = "SYNTHETIC_PRIVATE";},
+  "bad offset": t => {t.reads[1].offset = 49;},
+  "oversized duration": t => {t.reads[0].duration_ms = 180001;},
+  "missing read": t => {t.reads.pop();},
+  "too many bytes": t => {t.reads[0].received = 4097;},
+  "unknown data": t => {t.unattributed[0].bytes = "SYNTHETIC_PRIVATE_RX";},
+  "invented frame": t => {t.h2_candidates.push({offset: 50});},
+  "misleading fragment claim": t => {t.fragmented_candidates = 1;},
+  "changed close": t => {t.close.duration_ms = 1234;},
+  "malformed number": t => {t.reads[0].started_ms = NaN;},
+})) {
+  test("reject suspect public timeline: " + title, () => {
+    const r = report(); r.sessions[0].timing_observations = timeline();
+    modify(r.sessions[0].timing_observations);
+    withReport(r, file => assert.throws(
+      () => exportsGate.readReport(file, context), /invalid_public_timeline/));
+  });
+}

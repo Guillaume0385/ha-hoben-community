@@ -344,6 +344,53 @@ lorsqu'elle est effectivement attestée par l'API runner pour
 réellement configurée reste obligatoire. Le diagnostic ne consulte ni
 environnements ni secrets.
 
+## Phase H1/H2 — chronologies expurgées, première livraison (Issue #54)
+
+Le module privé `scripts/boundary_timeline.py` dérive du journal de chaque
+session une suite strictement quantitative et bornée. Il ne déduit **pas**
+l'existence d'une frontière protocolaire à partir d'un appel TLS `read()`.
+La projection Python `scripts/boundary_public_timeline.py` et le validateur
+**indépendant** `.github/scripts/experimental-timeline.cjs` rejettent les
+clés supplémentaires (en particulier identifiants, payloads et chaînes
+libres), les nombres non finis, les comptes/offsets incohérents, les
+chronologies truquées et les dépassements de bornes.
+
+Chaque rapport de session effectivement enregistré peut ainsi contenir
+`timing_observations` avec des valeurs en **millisecondes relatives à
+l'émission OpenClient** : pour chaque `read()`, index, temps de début/fin,
+durée, taille demandée/reçue, offset cumulatif, pause entre lectures,
+délai depuis dernier TX achevé et catégorie `received/eof/cancelled_read/read_error`.
+Les TX sont des catégories allowlistées `open_client`, `pong_before_open`,
+`read_v4_h2`, `pong_h2` avec temps et durée mesurés si l'émission
+a effectivement abouti. La fermeture est suivie par catégories/temps
+de début et de fin, sans exporter les exceptions. Les candidats
+`ping_h2/response_h2/notification_h2` sont rapportés par offset,
+longueur, instant et nombre de lectures entre lesquelles ils sont
+répartis : leur confiance reste **`h2_hypothesis_only`**.
+Les octets non attribués sont des **offsets/longueurs seulement**,
+y compris le suffixe H1 apparent après les 48 premiers octets ;
+jamais leurs valeurs. Les compteurs de fragmentation et de
+concaténation sont dérivés des recouvrements, pas d'une supposition
+sur les frontières. Les données initiales H1/H2 51/150/209 octets sont
+des observations à **comparer**, non un modèle universel.
+
+Une limite locale interdit plus de 260 lectures, 100 émissions,
+256 annotations, 1 Mio RX ou 180 secondes de chronologie par session.
+Tout dépassement empêche la publication du rapport : **échec fermé**.
+Le rapport complet est plafonné à 2 Mio et n'accepte aucun champ RX brut.
+Les fixtures anciennes sans cette extension restent lisibles pour tests
+de rétrocompatibilité ; les nouvelles sessions du collecteur produisent
+cette extension, y compris en cas d'EOF ou de terminaison partielle.
+
+**Portée de cette petite PR :** enrichissement anonymisé des observations
+H1/H2, tests hors ligne et double filtrage. Le collecteur existant continue
+temporairement à ne sortir ses captures privées que **chiffrées** sous CMS ;
+les clés anciennes indisponibles ne sont pas demandées ni reconstruites.
+Le retrait complet de cette dépendance et les campagnes répétables sur
+le même SHA sont des modifications distinctes à faire approuver par
+MANAGER, avec nouveau gate et nouvelle CI. Un fichier brut ne doit
+jamais devenir un artefact par simple suppression du chiffrement.
+
 ## Phase 3 — `hoben-live` expérimental, client Home Assistant réel
 
 La phase H1/H2 a terminé sur le commit fusionné
