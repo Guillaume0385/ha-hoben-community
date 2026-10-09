@@ -47,7 +47,7 @@ function setup() {
       number: 54, id: 5768789242, state: "open", labels: [{name: "state:review"}]}, writes: 0};
   world.github = {rest: {
     repos: {
-      getBranch: async () => ({data: {protected: true, commit: {sha}}}),
+      getBranch: async () => ({data: {name: "experimental", protected: true, commit: {sha}}}),
       listPullRequestsAssociatedWithCommit: async () => ({data: world.associated}),
       getEnvironment: async () => ({data: environment}),
       listDeploymentBranchPolicies: async () => ({data: [branch]}),
@@ -388,4 +388,114 @@ test("issue #61 three missing premerge proofs are distinct refusals before any c
   const nominal = setup();
   assert.equal((await gate.verify(nominal)).status, "READY FOR ENVIRONMENT");
   assert.equal(nominal.writes, 1);
+});
+
+function useProtectedBranches(a) {
+  a.environment.deployment_branch_policy = {
+    protected_branches: true, custom_branch_policies: false,
+  };
+  // GitHub custom deployment branch endpoints are NOT expected in this mode.
+  a.github.rest.repos.listDeploymentBranchPolicies = async () => {
+    throw Error("unexpected custom policy read");
+  };
+}
+
+test("protected-only hoben-live environment: exact protected HEAD and reviewed decision pass", async () => {
+  const a = setup(); useProtectedBranches(a);
+  assert.equal((await gate.verify(a)).status, "READY FOR ENVIRONMENT");
+  assert.equal(a.writes, 1);
+  assert.equal(a.refs.size, 1);
+  assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+  assert.equal(a.writes, 1);
+});
+
+test("protected-only environment retains GitHub required reviewer proof", async () => {
+  const a = setup(); useProtectedBranches(a); requireIndependentReviewer(a);
+  assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
+  a.history.splice(0);
+  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
+  assert.equal(a.writes, 1);
+  a.history.push({state: "approved",
+    user: {login: "independent-synthetic-reviewer", id: 999, type: "User"},
+    environments: [{id: a.environment.id, name: a.environment.name}]});
+  assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+});
+
+const protectedRefusals = {
+  "mixed true true": a => { a.environment.deployment_branch_policy.custom_branch_policies = true; },
+  "unrestricted false false": a => {
+    a.environment.deployment_branch_policy.protected_branches = false; },
+  "branch protection false": a => { a.github.rest.repos.getBranch =
+    async () => ({data: {name: "experimental", protected: false, commit: {sha}}}); },
+  "missing proof name": a => { a.github.rest.repos.getBranch =
+    async () => ({data: {protected: true, commit: {sha}}}); },
+  "missing proof HEAD": a => { a.github.rest.repos.getBranch =
+    async () => ({data: {name: "experimental", protected: true, commit: {}}}); },
+  "wrong name": a => { a.github.rest.repos.getBranch =
+    async () => ({data: {name: "main", protected: true, commit: {sha}}}); },
+  "moved SHA": a => { a.github.rest.repos.getBranch =
+    async () => ({data: {name: "experimental", protected: true, commit: {sha: head}}}); },
+  "missing environment policy": a => { a.environment.deployment_branch_policy = null; },
+  "unknown branch setting": a => { a.environment.deployment_branch_policy.protected_branches = null; },
+};
+for (const [title, mutate] of Object.entries(protectedRefusals)) {
+  test("protected-mode fail closed before claim: " + title, async () => {
+    const a = setup(); useProtectedBranches(a); mutate(a);
+    await assert.rejects(gate.verify(a));
+    assert.equal(a.writes, 0, title);
+    assert.equal(a.refs.size, 0, title);
+  });
+}
+
+// The existing secretless preflight reads the branch first. These synthetic
+// errors begin only on the INDEPENDENT policy proof read.
+for (const status of [401, 403, 404]) {
+  test("protected HEAD API refusal HTTP " + status + " blocks claim", async () => {
+    const a = setup(); useProtectedBranches(a);
+    let checks = 0;
+    a.github.rest.repos.getBranch = async () => {
+      if (++checks === 1) return {data: {
+        name: "experimental", protected: true, commit: {sha}}};
+      throw Object.assign(new Error("SYNTHETIC_SECRET_PRIVATE"), {status});
+    };
+    await assert.rejects(gate.verify(a), /environment_api_inaccessible/);
+    assert.equal(a.writes, 0);
+    assert.equal(a.refs.size, 0);
+  });
+}
+
+for (const [title, mutate] of Object.entries({
+  "protection disabled": a => {
+    a.github.rest.repos.getBranch = async () => ({data: {
+      name: "experimental", protected: false, commit: {sha}}}); },
+  "HEAD changed": a => {
+    a.github.rest.repos.getBranch = async () => ({data: {
+      name: "experimental", protected: true, commit: {sha: head}}}); },
+  "policy switched to custom": a => {
+    a.environment.deployment_branch_policy = {
+      protected_branches: false, custom_branch_policies: true}; },
+  "unknown response": a => { a.github.rest.repos.getEnvironment = async () =>
+    ({data: {...a.environment, deployment_branch_policy: {}}}); },
+  "API rejected": a => { a.github.rest.repos.getEnvironment = async () => {
+    throw Object.assign(new Error("SYNTHETIC_PRIVATE_HTTP"), {status: 403}); }; },
+})) {
+  test("protected-mode recheck refuses after reservation: " + title, async () => {
+    const a = setup(); useProtectedBranches(a);
+    await gate.verify(a);
+    assert.equal(a.writes, 1);
+    mutate(a);
+    await assert.rejects(gate.verify({...a, recheck: true}));
+    assert.equal(a.writes, 1);
+    assert.equal(a.refs.size, 1);
+  });
+}
+
+test("protected mode checks branch independently of earlier merge verification", async () => {
+  const a = setup(); useProtectedBranches(a);
+  let calls = 0;
+  a.github.rest.repos.getBranch = async () => ({data: {
+    name: "experimental", protected: ++calls === 1, commit: {sha}}});
+  await assert.rejects(gate.verify(a), /environment_branch_invalid/);
+  assert.equal(calls, 2);
+  assert.equal(a.writes, 0);
 });
