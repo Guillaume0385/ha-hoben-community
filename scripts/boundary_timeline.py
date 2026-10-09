@@ -121,7 +121,9 @@ def metadata_timeline(
             "ended_ms": ended,
             "duration_ms": ended - started,
             "gap_previous_ms": None if previous_end is None else started - previous_end,
-            "since_last_tx_ms": None if not completed_tx else started - max(completed_tx),
+            "since_last_tx_ms": (
+                None if not completed_tx else started - max(completed_tx)
+            ),
             "state": state,
         })
         data_offset += record.returned
