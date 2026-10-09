@@ -1739,3 +1739,15 @@ TLS ne constitue pas en soi une frontière de message.
 
 Ce relevé ne dévoile aucun identifiant, registre, octet RX ou donnée domestique.
 Il ne modifie pas les sections de protocole CONFIRMÉ / À VALIDER.
+
+
+<!-- exp-run-37996087304 -->
+### 2026-10-09, 23:53 Europe/Paris — non-exécution H1/H2 #37996087304
+
+- **OBSERVÉ (GitHub uniquement) :** [Hoben experimental (MANAGER) #37996087304](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37996087304), événement `push` sur `experimental`, SHA `b2a614bf8618929848c3b9c27dc27a1c2069da62`, tentative 1, `completed/failure`.
+- **OBSERVÉ (jobs) :** `dry-run=success` ; `admission=failure` avec catégorie publique `decision` ; `collect=skipped` et `result=skipped`. La fusion de la PR documentaire #68 n'avait **aucune décision pré-fusion H1/H2** ; le refus est cohérent avec cette absence, sans que le run apporte de preuve de protocole.
+- **CONFIRMÉ (périmètre mesuré) :** **NOT RUN** : aucune collecte H1/H2 n'a été démarrée par ce workflow ; **0 session exécutée par ce run** car le job `collect` est ignoré. Pas de chronologie RX, ni de rapport d'observation à exploiter. Aucune publication de capture attendue ou autorisée.
+- **À VALIDER :** les campagnes futures devront être liées à une PR de code expérimental revue, à une décision MANAGER authentifiée et à un nouveau SHA autorisé. Éviter que les seules fusions documentaires créent des faux départs via `push`, sans supprimer les contrôles de sécurité ; tests hors ligne et PR distincte requis.
+- **INCONNU / sans conclusion :** ce run ne permet de confirmer ni d'infirmer aucune frontière H1/H2, timing de lecture TLS, EOF, fragment, concaténation, Ping, réponse V4 ou DataUpdated. Aucune donnée ni hypothèse de protocole nouvelle.
+
+Ce journal décrit uniquement le refus avant collecte et ne contient ni identifiant, ni octet réseau, ni donnée du poêle.
