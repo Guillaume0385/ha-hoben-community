@@ -204,18 +204,24 @@ async function environmentPolicy(github) {
   need(rules.every(r => r && ["required_reviewers", "branch_policy", "wait_timer"].includes(r.type)),
     "environment_reviewers_invalid");
   const required = rules.filter(r => r.type === "required_reviewers");
-  need(required.length === 1, "environment_reviewers_invalid");
-  need(positive(required[0].id) && Array.isArray(required[0].reviewers),
-    "environment_response_incomplete");
-  need(required[0].prevent_self_review === true && required[0].reviewers.length > 0 &&
-    required[0].reviewers.every(r => r.type === "User" && r.reviewer?.type === "User" &&
-      positive(r.reviewer.id) && typeof r.reviewer.login === "string" &&
-      r.reviewer.login.length > 0), "environment_reviewers_invalid");
-  const reviewers = required[0].reviewers.map(r => ({ id: r.reviewer.id, login: r.reviewer.login }))
-    .sort((a, b) => a.id - b.id);
-  need(reviewers.some(r => r.id !== MANAGER_ID && r.login !== "Guillaume0385"),
-    "environment_reviewers_invalid");
-  return { id: environment.id, reviewers, digest: digest({ id: environment.id,
+  // A sole maintainer can use an environment without mandatory reviewers.
+  // If GitHub actually configures them, never bypass the rule.
+  need(required.length <= 1, "environment_reviewers_invalid");
+  let reviewers = [];
+  if (required.length === 1) {
+    need(positive(required[0].id) && Array.isArray(required[0].reviewers),
+      "environment_response_incomplete");
+    need(required[0].prevent_self_review === true && required[0].reviewers.length > 0 &&
+      required[0].reviewers.every(r => r.type === "User" && r.reviewer?.type === "User" &&
+        positive(r.reviewer.id) && typeof r.reviewer.login === "string" &&
+        r.reviewer.login.length > 0), "environment_reviewers_invalid");
+    reviewers = required[0].reviewers.map(r => ({ id: r.reviewer.id, login: r.reviewer.login }))
+      .sort((a, b) => a.id - b.id);
+    need(reviewers.some(r => r.id !== MANAGER_ID && r.login !== "Guillaume0385"),
+      "environment_reviewers_invalid");
+  }
+  return { id: environment.id, reviewers, approvalRequired: required.length === 1,
+    digest: digest({ id: environment.id,
     name: environment.name, deployment_branch_policy: environment.deployment_branch_policy,
     protection_rules: environment.protection_rules, branch }) };
 }
@@ -272,7 +278,7 @@ async function verify({ github, context, env = process.env, recheck = false }) {
     const { data: tag } = await github.rest.git.getTag({ ...API, tag_sha: reference.object.sha });
     need(tag.tag === name && tag.object?.type === "commit" && tag.object.sha === context.sha &&
       digest(JSON.parse(tag.message)) === digest(claim), "claim_unverified");
-    await actualApproval(github, context, environment);
+    if (environment.approvalRequired) await actualApproval(github, context, environment);
   } else {
     // createRef is atomic. An existing reservation (including cancellation or
     // failure) cannot be replaced or retried. No secret is present in this job.
@@ -280,7 +286,8 @@ async function verify({ github, context, env = process.env, recheck = false }) {
       message: JSON.stringify(claim), object: context.sha, type: "commit" });
     await github.rest.git.createRef({ ...API, ref: "refs/tags/" + name, sha: tag.sha });
   }
-  return { sha: context.sha, pr: pr.number, scenario: "h1h2", status: recheck ? "approved" : "PENDING APPROVAL" };
+  return { sha: context.sha, pr: pr.number, scenario: "h1h2",
+    status: recheck ? "approved" : environment.approvalRequired ? "PENDING APPROVAL" : "READY FOR ENVIRONMENT" };
 }
 
 module.exports = { dryRun, verify, refusalCategory, WORKFLOW: push.LAB_WORKFLOW, MARKER, workflowPath };
