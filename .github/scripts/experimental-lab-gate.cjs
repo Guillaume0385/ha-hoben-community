@@ -21,6 +21,7 @@ const need = (fact, reason) => { if (!fact) throw new Error(reason); };
 const PUBLIC_REFUSALS = Object.freeze({
   invalid_policy: "provenance",
   invalid_provenance: "provenance",
+  "NOT RUN: experimental merge/identity/HEAD gate not satisfied": "provenance",
   preflight_unverified: "preflight",
   merge_changed: "merge",
   merged_tree_unreviewed: "merge",
