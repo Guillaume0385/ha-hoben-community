@@ -116,7 +116,9 @@ def test_global_expiry_abandons_second_waiter_as_partial(tmp_path):
     assert world.now == 30.01
     assert bytes(capture.data) == OPENED_PREFIX + RESPONSE
     assert world.script == [(31.5, RESPONSE)]
-    assert journal[-1]["kind"] == "rx" and journal[-1]["status"] == "cancelled_read"
+    last_rx = [event for event in journal if event["kind"] == "rx"][-1]
+    assert last_rx["status"] == "cancelled_read"
+    assert journal[-1]["kind"] == "close_complete"
 
 
 @pytest.mark.parametrize("mode", ["H1", "H2"])
