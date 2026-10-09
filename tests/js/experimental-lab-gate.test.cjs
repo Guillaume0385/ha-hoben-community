@@ -239,6 +239,7 @@ test("API refusal after environment approval blocks recheck and never starts ano
 test("fixed public categories never expose arbitrary error messages or data", () => {
   const categories = {
     invalid_provenance: "provenance",
+    "NOT RUN: experimental merge/identity/HEAD gate not satisfied": "provenance",
     preflight_unverified: "preflight",
     merge_changed: "merge",
     manager_decision_unverified: "decision",
@@ -307,7 +308,13 @@ test("every environment refusal uses a stable, non-sensitive public category and
 
 test("decision, merge, CI failures are categorized before any reservation", async () => {
   for (const [category, mutate] of [
-    ["merge", a => { a.pr.merged = false; }],
+    ["merge", a => {
+      // First GitHub lookup passes provenance; changed PR on re-read must
+      // fail the independent merge gate before claims or secrets.
+      let calls = 0;
+      a.github.rest.pulls.get = async () =>
+        ({data: ++calls === 1 ? a.pr : {...a.pr, merged: false}});
+    }],
     ["decision", a => { a.comments = []; }],
     ["ci", a => { a.jobs[0].conclusion = "failure"; }],
   ]) {
