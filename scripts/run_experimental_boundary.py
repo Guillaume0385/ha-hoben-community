@@ -23,6 +23,8 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from scripts.boundary_public_timeline import safe_timeline
+
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "Guillaume0385/ha-hoben-community"
 WORKFLOW = (
@@ -345,6 +347,12 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
             ),
             comparison=category(s["comparison"], COMPARISON),
         )
+        if "timing_observations" in s:
+            item["timing_observations"] = safe_timeline(
+                s["timing_observations"],
+                rx_bytes=item["rx_bytes"],
+                read_calls=item["read_calls"],
+            )
         public.append(item)
     interrupted = interrupted or len(public) != 12
     return {
