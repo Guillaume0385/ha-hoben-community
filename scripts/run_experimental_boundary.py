@@ -2,8 +2,8 @@
 
 Only the reviewed post-merge experimental SHA is launched. The fixed launcher
 removes runner/GitHub tokens first; GitHub independently gates the environment.
-CMS preflight precedes credential use and collection. Unknown boundaries remain
-hypotheses, and only a fixed projection leaves the private capture directory.
+No CMS key or certificate is required for new runs. Unknown boundaries remain
+hypotheses; raw streams live only under RUNNER_TEMP and are always removed.
 """
 
 import argparse
@@ -244,7 +244,6 @@ def context(phase: str) -> tuple[dict, Path]:
         and policy["tracking_issue"] == 54
         and policy["tracking_issue_id"] == 5768789242
         and policy["environment"] == "hoben-experimental"
-        and re.fullmatch(r"[0-9a-f]{64}", policy["recipient_sha256"]) is not None
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     require(
@@ -428,7 +427,6 @@ def run(phase: str) -> int:
         )
         exports = storage / "hoben-experimental-exports"
         exports.mkdir(mode=0o700)
-        recipient = prepare_recipient(private, policy["recipient_sha256"])
         if phase == "dry-run":
             # No candidate import, identity read, DNS, transport or Hoben socket.
             private_json(private / "synthetic.json", {"purpose": "dry_run_no_hoben"})
@@ -454,11 +452,9 @@ def run(phase: str) -> int:
                 raw_report, interrupted = collect(private)
             # Preserve full reviewed annotations privately, never as public JSON.
             private_json(private / "request-report.json", raw_report)
-            seal(private, exports, recipient)
+            # Raw capture and internal journals never leave private storage.
             report = safe_report(raw_report, interrupted=interrupted)
             interrupted = report["result"] == "failure"
-        if phase == "dry-run":
-            seal(private, exports, recipient)
         private_json(exports / "report.json", report)
         return 1 if interrupted else 0
     except (Exception, KeyboardInterrupt, asyncio.CancelledError):
