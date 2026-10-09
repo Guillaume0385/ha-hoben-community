@@ -62,8 +62,8 @@ SHA256 obtenue et saisit ses 64 caractères hexadécimaux minuscules lors du
 dispatch. Ce hash concerne seulement le certificat public, jamais un identifiant
 ou une trame du poêle.
 
-Avant toute connexion, la sonde vérifie cette empreinte, la validité du
-certificat pendant au moins une heure, RSA ≥3072 et un chiffrement de préflight.
+Avant toute connexion, la sonde vérifie cette empreinte, `notBefore ≤ maintenant`
+et `notAfter ≥ maintenant + 1 h`, RSA ≥3072 et un chiffrement de préflight.
 La capture utilise des dossiers 0700 et fichiers 0600 dans `RUNNER_TEMP`, hors
 checkout. Les octets RX sont append-only dans `rx.bin` ; les journaux et
 annotations sont séparés. Un tar privé est chiffré en CMS AuthEnvelopedData
@@ -171,6 +171,11 @@ autre requête. Une exception Modbus corrélée est terminale et n'entraîne auc
 deuxième lecture. Un framing invalide arrête les émissions tout en conservant
 le RX jusqu'à fermeture/budget ; si un waiter était en vol, la session ferme.
 Une même livraison valide puis invalide ne produit aucun Pong de ce lot.
+La validation couvre aussi les PDU et toutes les corrélations du lot avant tout
+Pong ou comptage de réponse ; une réponse surnuméraire invalide le lot entier.
+Une lecture déjà terminée est traitée selon son horodatage de fin, même si le
+collecteur reprend après l'échéance. Une réception réellement tardive est
+conservée dans l'archive sans compter comme réponse acceptée ni permettre de TX.
 Si la fenêtre globale expire avec une requête FFFF en vol, l'arrêt est
 `response_timeout`, le résultat est partiel et le lecteur/transport ferment.
 Il compte comme erreur pour l'arrêt après deux erreurs consécutives ; une

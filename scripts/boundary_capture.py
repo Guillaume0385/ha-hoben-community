@@ -260,7 +260,10 @@ async def collect_session(
                 if opening_started is not None
                 else opening_deadline
             )
-            if now >= deadline:
+            # Persisted RX may have finished in time while this coroutine was
+            # waiting to be scheduled. Drain it before enforcing current time;
+            # its recorded completion time below decides budget admissibility.
+            if now >= deadline and not completed_read:
                 outcome.stop = (
                     "response_timeout"
                     if pending_since is not None
@@ -269,7 +272,7 @@ async def collect_session(
                     else "opening_timeout"
                 )
                 break
-            if len(capture.data) >= RX_LIMIT:
+            if len(capture.data) >= RX_LIMIT and not completed_read:
                 outcome.stop = "rx_limit"
                 break
             if (
@@ -309,17 +312,30 @@ async def collect_session(
             )
             if read_task is None:
                 read_task = asyncio.create_task(capture.read(transport, clock))
-            if not await waiter(read_task, wake - clock()):
+            if not read_task.done() and not await waiter(read_task, wake - clock()):
                 continue
-            data = read_task.result()
+            completed = read_task
             read_task = None
+            error = completed.exception()  # Drain exceptions even for late RX.
             received_at = capture.reads[-1].ended
+            if received_at > deadline:
+                outcome.stop = (
+                    "response_timeout"
+                    if pending_since is not None
+                    else "observation_budget"
+                    if opening_started is not None
+                    else "opening_timeout"
+                )
+                break
             if (
                 pending_since is not None
                 and received_at > pending_since + RESPONSE_BUDGET
             ):
                 outcome.stop = "response_timeout"
                 break
+            if error is not None:
+                raise error
+            data = completed.result()
             if outcome.opening_offset is None:
                 cursor = 0
                 while cursor < len(data) and data[cursor] == 0x0A:
@@ -402,63 +418,71 @@ async def collect_session(
                     outcome.stop = "unusable_pending_session"
                     break
                 continue
-            for event in events:
-                if event.category == "ping_h2":
-                    await send("pong_h2", b"\x0b")
-                    outcome.pongs_under_h2 += 1
-                elif event.category == "response_h2":
-                    try:
+            # Validate the whole delivery without emitting or committing a
+            # response first. Only one response can consume the existing FFFF
+            # waiter; a duplicate later in the same batch invalidates it all.
+            responses = []
+            candidate_pending = pending_since is not None
+            try:
+                for event in events:
+                    if event.category == "response_h2":
                         response = decode_read_response(event.adu)
-                        if pending_since is None or (
+                        if not candidate_pending or (
                             response.transaction_id,
                             response.unit_id,
                             response.function_code,
                         ) != (0xFFFF, 1, 4):
                             raise ValueError
-                        if isinstance(response, ModbusExceptionResponse):
-                            outcome.exception_responses += 1
-                            capture.event(
-                                {
-                                    "kind": "response_correlation",
-                                    "offset": event.offset,
-                                    "request_index": outcome.requests,
-                                    "received_at": received_at,
-                                    "result": "correlated_exception",
-                                }
-                            )
-                            outcome.stop = "modbus_exception"
-                            return outcome
-                        if len(response.registers) != 20:
+                        if (
+                            not isinstance(response, ModbusExceptionResponse)
+                            and len(response.registers) != 20
+                        ):
                             raise ValueError
-                    except (TypeError, ValueError):
-                        emissions = False
-                        outcome.emission_stop = "invalid_correlation"
-                        capture.event(
-                            {
-                                "kind": "response_correlation",
-                                "offset": event.offset,
-                                "request_index": outcome.requests,
-                                "received_at": received_at,
-                                "result": "invalid_correlation",
-                            }
-                        )
-                        if pending_since is not None:
-                            outcome.stop = "invalid_correlation"
-                            return outcome
-                        break
-                    pending_since = None
+                        candidate_pending = False
+                        responses.append((event, response))
+            except (TypeError, ValueError):
+                emissions = False
+                outcome.emission_stop = "invalid_correlation"
+                capture.event(
+                    {
+                        "kind": "response_correlation",
+                        "offset": event.offset,
+                        "request_index": outcome.requests,
+                        "received_at": received_at,
+                        "result": "invalid_correlation",
+                    }
+                )
+                if pending_since is not None:
+                    outcome.stop = "invalid_correlation"
+                    return outcome
+                continue
+            for event, response in responses:
+                pending_since = None
+                exception = isinstance(response, ModbusExceptionResponse)
+                if exception:
+                    outcome.exception_responses += 1
+                else:
                     outcome.valid_responses += 1
-                    capture.event(
-                        {
-                            "kind": "response_correlation",
-                            "offset": event.offset,
-                            "request_index": outcome.requests,
-                            "received_at": received_at,
-                            "result": "correlated_response",
-                        }
-                    )
-                    if first_response is None:
-                        first_response = received_at
+                capture.event(
+                    {
+                        "kind": "response_correlation",
+                        "offset": event.offset,
+                        "request_index": outcome.requests,
+                        "received_at": received_at,
+                        "result": "correlated_exception"
+                        if exception
+                        else "correlated_response",
+                    }
+                )
+                if exception:
+                    outcome.stop = "modbus_exception"
+                    return outcome
+                if first_response is None:
+                    first_response = received_at
+            for event in events:
+                if event.category == "ping_h2":
+                    await send("pong_h2", b"\x0b")
+                    outcome.pongs_under_h2 += 1
     except TransportEOF:
         outcome.stop = (
             "pending_response_eof" if pending_since is not None else "peer_eof"

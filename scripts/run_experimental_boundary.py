@@ -350,6 +350,7 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
             comparison=category(s["comparison"], COMPARISON),
         )
         public.append(item)
+    interrupted = interrupted or len(public) != 12
     return {
         "schema": 1,
         "scenario": "h1h2",
@@ -446,6 +447,7 @@ def run(phase: str) -> int:
             private_json(private / "request-report.json", raw_report)
             seal(private, exports, recipient)
             report = safe_report(raw_report, interrupted=interrupted)
+            interrupted = report["result"] == "failure"
         if phase == "dry-run":
             seal(private, exports, recipient)
         private_json(exports / "report.json", report)

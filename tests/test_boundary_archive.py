@@ -5,6 +5,7 @@ import io
 import json
 import subprocess
 import tarfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,69 @@ def test_bad_recipient_fails_before_capture(tmp_path, recipient, fingerprint):
         prepare_recipient(tmp_path, cert.read_text(), fingerprint)
     assert "PRIVATE" not in str(error.value)
     assert not (tmp_path / "encryption-preflight.cms").exists()
+
+
+@pytest.mark.parametrize("period", ["future", "expiring"])
+def test_real_recipient_dates_refuse_before_encryption_or_collection(
+    tmp_path, recipient, monkeypatch, period
+):
+    """Sign real certificates with explicit invalid validity periods offline."""
+    ca, key, _ = recipient
+    request = tmp_path / "request.pem"
+    cert = tmp_path / "invalid-dates.pem"
+    database = tmp_path / "index.txt"
+    serial = tmp_path / "serial"
+    database.write_text("")
+    serial.write_text("01\n")
+    config = tmp_path / "ca.cnf"
+    config.write_text(
+        "[ca]\ndefault_ca = synthetic\n[synthetic]\n"
+        f"database = {database}\nserial = {serial}\nnew_certs_dir = {tmp_path}\n"
+        f"certificate = {ca}\nprivate_key = {key}\n"
+        "default_md = sha256\npolicy = subject\n[subject]\ncommonName = supplied\n"
+    )
+    openssl(
+        "req",
+        "-new",
+        "-key",
+        key,
+        "-subj",
+        "/CN=SyntheticRecipientDates",
+        "-out",
+        request,
+    )
+    now = datetime.now(UTC)
+    start = now + timedelta(hours=2) if period == "future" else now - timedelta(days=1)
+    end = now + timedelta(days=2) if period == "future" else now + timedelta(minutes=30)
+    openssl(
+        "ca",
+        "-batch",
+        "-config",
+        config,
+        "-in",
+        request,
+        "-out",
+        cert,
+        "-startdate",
+        start.strftime("%y%m%d%H%M%SZ"),
+        "-enddate",
+        end.strftime("%y%m%d%H%M%SZ"),
+        "-notext",
+    )
+    fingerprint = hashlib.sha256(
+        openssl("x509", "-in", cert, "-outform", "DER").stdout
+    ).hexdigest()
+
+    def forbidden(*args):
+        pytest.fail("No CMS preflight or credential release before valid dates")
+
+    monkeypatch.setattr("scripts.boundary_archive.encrypt_file", forbidden)
+    preflight = tmp_path / "preflight"
+    preflight.mkdir()
+    with pytest.raises(ArchiveError):
+        prepare_recipient(preflight, cert.read_text(), fingerprint)
+    assert not (preflight / "encryption-preflight.cms").exists()
+    assert not (preflight / "recipient-public.pem").exists()
 
 
 def test_never_accept_private_key_or_symlink_capture(tmp_path, recipient):

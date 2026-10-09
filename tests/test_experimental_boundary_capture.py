@@ -134,7 +134,7 @@ def live(runner, monkeypatch):
     monkeypatch.setenv("HOBEN_DEVICE_GUID", "0" * 32)
 
 
-def fake_collector(monkeypatch, runner, *, mode="complete"):
+def fake_collector(monkeypatch, runner, *, mode="complete", count=12):
     imports, calls = [], []
 
     async def campaign(private, **kwargs):
@@ -151,7 +151,10 @@ def fake_collector(monkeypatch, runner, *, mode="complete"):
             "HOBEN_DEVICE_GUID"
         )
         entry.private_write(private / "rx.bin", RAW)
-        result = {"boundary_proven": False, "sessions": [session(i) for i in range(12)]}
+        result = {
+            "boundary_proven": False,
+            "sessions": [session(i) for i in range(count)],
+        }
         if mode == "bad-report":
             result["sessions"][0]["stop"] = USER
         if mode == "cancel":
@@ -194,6 +197,23 @@ def assert_private_cleanup(runner):
         for p in runner.exports.iterdir():
             assert stat.S_IMODE(p.stat().st_mode) == 0o600
             assert RAW not in p.read_bytes() and USER.encode() not in p.read_bytes()
+
+
+@pytest.mark.parametrize("count", [0, 1, 6, 11, 12])
+def test_early_campaign_stop_exports_failure_and_nonzero_exit(
+    runner, monkeypatch, count
+):
+    live(runner, monkeypatch)
+    fake_collector(monkeypatch, runner, count=count)
+    assert entry.run("live") == (0 if count == 12 else 1)
+    report = json.loads((runner.exports / "report.json").read_text())
+    assert report["executed_sessions"] == count
+    assert report["result"] == ("inconclusive" if count == 12 else "failure")
+    assert report["reason"] == (
+        "hypotheses_unproven" if count == 12 else "collection_interrupted"
+    )
+    assert (runner.exports / "captures.cms").is_file()
+    assert_private_cleanup(runner)
 
 
 def test_real_main_public_certificate_pin_and_cipher_algorithm():

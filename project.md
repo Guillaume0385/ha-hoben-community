@@ -1104,7 +1104,11 @@ Before collection, trusted main removes every runner/GitHub token and checks
 immutable checkouts. The candidate entry preflights the pinned public RSA
 recipient and AES-256-GCM CMS/RSA-OAEP SHA-256 before TLS. Private plaintext is
 removed; only ciphertext and a numeric/categorical report, independently
-revalidated by a secret-free main publisher, are exported for seven days.
+validated by trusted main before upload and revalidated by a secret-free main
+publisher, are exported for seven days. Inconclusive success requires all twelve
+executed sessions (six H1 then six H2); an early campaign stop remains failure.
+All installed Hoben network workflows must share the same concurrency mutex,
+including environment waits; unrelated labels must use run-specific groups.
 Experimental statuses/reports never satisfy `live-hoben-authenticated`.
 
 See [the concrete experimental procedure](docs/experimental-protocol-workflow.md).

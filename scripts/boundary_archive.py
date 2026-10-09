@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import tarfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from scripts.boundary_capture import private_json
@@ -49,7 +50,26 @@ def prepare_recipient(directory: Path, pem: str, expected_sha256: str) -> Path:
     der = _openssl("x509", "-in", str(path), "-outform", "DER")
     if hashlib.sha256(der).hexdigest() != expected_sha256:
         raise ArchiveError("Capture recipient fingerprint mismatch")
-    _openssl("x509", "-in", str(path), "-noout", "-checkend", "3600")
+    # -checkend alone checks expiry, not notBefore. A pinned public recipient
+    # must already be valid and remain valid for the whole bounded campaign.
+    try:
+        dates = dict(
+            line.split("=", 1)
+            for line in _openssl("x509", "-in", str(path), "-noout", "-dates")
+            .decode("ascii")
+            .splitlines()
+        )
+        if set(dates) != {"notBefore", "notAfter"}:
+            raise ValueError
+        start, end = (
+            datetime.strptime(dates[key], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+            for key in ("notBefore", "notAfter")
+        )
+    except (UnicodeDecodeError, ValueError):
+        raise ArchiveError("Invalid capture recipient validity") from None
+    now = datetime.now(UTC)
+    if start > now or end < now + timedelta(hours=1):
+        raise ArchiveError("Capture recipient is not valid for the next hour")
     public_key = _openssl("x509", "-in", str(path), "-pubkey", "-noout")
     # The key is public; only use the output internally and do not log it.
     key_path = directory / "recipient-public.pem"

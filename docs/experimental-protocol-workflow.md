@@ -214,7 +214,13 @@ Scénario fixe : 6 H1 + 6 H2 au maximum, 90 s et 1 Mio RX par session, pauses
 0/0,1/1 s répétées deux fois, arrêts anticipés et émission de lectures V4 04
 uniquement selon #49. Le suffixe RX est conservé avant parsing dans l’archive
 privée. H2/48 octets reste une hypothèse ; `inconclusive` ne confirme jamais la
-frontière. Après analyse privée, MANAGER distingue OBSERVÉ / CONFIRMÉ / À VALIDER
+frontière et exige les 12 sessions exécutées, 6 H1 puis 6 H2. Une campagne
+interrompue plus tôt produit `failure` / `collection_interrupted` et un code de
+sortie non nul, avec les seules données partielles validées dans le rapport.
+Le bootstrap de main doit contrôler et projeter ce rapport avant son upload,
+puis le revalider dans le publisher. Ses workflows Hoben partagent un verrou
+de concurrence commun ; les labels sans rapport ne doivent pas occuper ce verrou.
+Après analyse privée, MANAGER distingue OBSERVÉ / CONFIRMÉ / À VALIDER
 et propose séparément les modifications documentaires/protocolaires étayées.
 
 **État de livraison DEV : code préparé et simulations offline. Dry-run GitHub
