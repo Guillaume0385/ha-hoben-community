@@ -3,6 +3,7 @@
 Never serialize a private journal directly. All values here are copied through
 bounded numeric/categorical checks; no RX bytes, identities or free text.
 """
+
 from __future__ import annotations
 
 MAX_MS = 180_000
@@ -38,26 +39,45 @@ def kind(value: object, permitted: set[str]) -> str:
 
 def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
     """Validate shape, limits and byte accounting; return only audited fields."""
-    source = keys(value, {
-        "basis", "reads", "tx", "h2_candidates", "unattributed", "close",
-        "fragmented_candidates", "concatenated_reads",
-    })
+    source = keys(
+        value,
+        {
+            "basis",
+            "reads",
+            "tx",
+            "h2_candidates",
+            "unattributed",
+            "close",
+            "fragmented_candidates",
+            "concatenated_reads",
+        },
+    )
     require(source["basis"] == "client_monotonic_relative")
     require(type(source["reads"]) is list and len(source["reads"]) == read_calls <= 260)
     require(type(source["tx"]) is list and len(source["tx"]) <= 100)
     require(
-        type(source["h2_candidates"]) is list
-        and len(source["h2_candidates"]) <= 256
+        type(source["h2_candidates"]) is list and len(source["h2_candidates"]) <= 256
     )
     require(type(source["unattributed"]) is list and len(source["unattributed"]) <= 1)
 
     reads = []
     offset, previous_end = 0, None
     for index, raw in enumerate(source["reads"]):
-        r = keys(raw, {
-            "index", "offset", "requested", "received", "started_ms", "ended_ms",
-            "duration_ms", "gap_previous_ms", "since_last_tx_ms", "state",
-        })
+        r = keys(
+            raw,
+            {
+                "index",
+                "offset",
+                "requested",
+                "received",
+                "started_ms",
+                "ended_ms",
+                "duration_ms",
+                "gap_previous_ms",
+                "since_last_tx_ms",
+                "state",
+            },
+        )
         start, end = integer(r["started_ms"], MAX_MS), integer(r["ended_ms"], MAX_MS)
         received = integer(r["received"], 4096)
         require(
@@ -67,8 +87,8 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
             and received <= r["requested"]
             and end >= start
             and integer(r["duration_ms"], MAX_MS) == end - start
-            and nullable(r["gap_previous_ms"]) ==
-            (None if previous_end is None else start - previous_end)
+            and nullable(r["gap_previous_ms"])
+            == (None if previous_end is None else start - previous_end)
             and (previous_end is None or start >= previous_end)
             and (kind(r["state"], RX) == "received") == (received > 0)
         )
@@ -91,34 +111,45 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
     for read in reads:
         past = [v for v in completed if v <= read["started_ms"]]
         require(
-            read["since_last_tx_ms"] ==
-            (None if not past else read["started_ms"] - max(past))
+            read["since_last_tx_ms"]
+            == (None if not past else read["started_ms"] - max(past))
         )
 
     candidates = []
     last_ping = None
     for raw in source["h2_candidates"]:
-        f = keys(raw, {
-            "kind", "confidence", "offset", "length", "completed_ms",
-            "first_read", "last_read", "since_last_tx_ms", "ping_interval_ms",
-        })
+        f = keys(
+            raw,
+            {
+                "kind",
+                "confidence",
+                "offset",
+                "length",
+                "completed_ms",
+                "first_read",
+                "last_read",
+                "since_last_tx_ms",
+                "ping_interval_ms",
+            },
+        )
         label = kind(f["kind"], FRAME)
         require(f["confidence"] == "h2_hypothesis_only")
         start, length = integer(f["offset"]), integer(f["length"])
         require(0 < length <= rx_bytes and start + length <= rx_bytes)
         intersections = [
-            r["index"] for r in reads
+            r["index"]
+            for r in reads
             if r["offset"] < start + length and r["offset"] + r["received"] > start
         ]
         require(bool(intersections))
         require(
-            f["first_read"] == intersections[0]
-            and f["last_read"] == intersections[-1]
+            f["first_read"] == intersections[0] and f["last_read"] == intersections[-1]
         )
         completed_ms = integer(f["completed_ms"], MAX_MS)
         past = [v for v in completed if v <= completed_ms]
-        require(f["since_last_tx_ms"] ==
-                (None if not past else completed_ms - max(past)))
+        require(
+            f["since_last_tx_ms"] == (None if not past else completed_ms - max(past))
+        )
         interval = nullable(f["ping_interval_ms"])
         require(
             interval
@@ -140,12 +171,19 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
         require(kind(u["basis"], {"h2_unproven_suffix", "unclassified"}))
         unknown.append(dict(u))
 
-    close = keys(source["close"], {
-        "state", "started_ms", "ended_ms", "duration_ms",
-    })
+    close = keys(
+        source["close"],
+        {
+            "state",
+            "started_ms",
+            "ended_ms",
+            "duration_ms",
+        },
+    )
     state = kind(close["state"], {"not_recorded", "attempted", "closed", "error"})
     start, end, duration = (
-        nullable(close["started_ms"]), nullable(close["ended_ms"]),
+        nullable(close["started_ms"]),
+        nullable(close["ended_ms"]),
         nullable(close["duration_ms"]),
     )
     require((state == "not_recorded") == (start is None))
@@ -163,8 +201,11 @@ def safe_timeline(value: object, *, rx_bytes: int, read_calls: int) -> dict:
     )
     return {
         "basis": "client_monotonic_relative",
-        "reads": reads, "tx": tx, "h2_candidates": candidates,
-        "unattributed": unknown, "close": dict(close),
+        "reads": reads,
+        "tx": tx,
+        "h2_candidates": candidates,
+        "unattributed": unknown,
+        "close": dict(close),
         "fragmented_candidates": fragmented,
         "concatenated_reads": concatenated,
     }
