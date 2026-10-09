@@ -186,7 +186,7 @@ test("REST branch type missing requires positive detail proof; absence in both r
   await gate.verify(a);
   const b = setup(); delete b.branch.type;
   b.github.rest.repos.getDeploymentBranchPolicy = async () => ({data: b.branch});
-  await assert.rejects(gate.verify(b), /environment_unverified/);
+  await assert.rejects(gate.verify(b), /environment_response_incomplete/);
 });
 
 // All API failures are simulated offline. A green unit test is not evidence
@@ -201,7 +201,7 @@ for (const [endpoint, prepare] of [
       const a = setup(), method = prepare(a);
       const failure = Object.assign(new Error("synthetic denied"), {status});
       a.github.rest.repos[method] = async () => { throw failure; };
-      await assert.rejects(gate.verify(a), /environment_unverified/);
+      await assert.rejects(gate.verify(a), /environment_api_inaccessible/);
       assert.equal(a.writes, 0);
       assert.equal(a.refs.size, 0);
       assert.equal(a.tags.size, 0);
@@ -231,9 +231,103 @@ test("API refusal after environment approval blocks recheck and never starts ano
   a.github.rest.repos.getEnvironment = async () => {
     throw Object.assign(new Error("synthetic permission denied"), {status: 403});
   };
-  await assert.rejects(gate.verify({...a, recheck: true}), /environment_unverified/);
+  await assert.rejects(gate.verify({...a, recheck: true}), /environment_api_inaccessible/);
   assert.equal(a.writes, 1);
   assert.equal(a.refs.size, 1);
+});
+
+test("fixed public categories never expose arbitrary error messages or data", () => {
+  const categories = {
+    invalid_provenance: "provenance",
+    preflight_unverified: "preflight",
+    merge_changed: "merge",
+    manager_decision_unverified: "decision",
+    review_unverified: "decision",
+    ci_unverified: "ci",
+    environment_api_inaccessible: "environment_api",
+    environment_response_incomplete: "environment_response",
+    environment_branch_invalid: "environment_branch",
+    environment_reviewers_invalid: "environment_reviewers",
+    claim_unverified: "claim",
+    approval_unverified: "approval",
+  };
+  for (const [input, expected] of Object.entries(categories)) {
+    assert.equal(gate.refusalCategory(new Error(input)), expected);
+    assert.match(expected, /^[a-z_]+$/);
+  }
+  for (const dangerous of [
+    "API 403: https://private.invalid/path?token=SYNTHETIC_SECRET",
+    "environment_api_inaccessible; RX=SYNTHETIC_PRIVATE_PACKET",
+    "HOBEN_USER_GUID=SYNTHETIC_PRIVATE_VALUE",
+    "manager_decision_unverified\\nAuthorization: SYNTHETIC_SECRET",
+    null, undefined, {}, {message: "environment_api_inaccessible"},
+  ]) {
+    const source = typeof dangerous === "string" ? new Error(dangerous) : dangerous;
+    assert.equal(gate.refusalCategory(source), "other");
+  }
+});
+
+test("every environment refusal uses a stable, non-sensitive public category and no claim", async () => {
+  const cases = [
+    ["api denied", "environment_api", a => {
+      a.github.rest.repos.getEnvironment = async () => {
+        throw Object.assign(new Error("SYNTHETIC_PRIVATE_HEADER"), {status: 403});
+      };
+    }],
+    ["environment missing", "environment_response", a => {
+      a.github.rest.repos.getEnvironment = async () => ({data: null});
+    }],
+    ["branch wildcard", "environment_branch", a => { a.branch.name = "*"; }],
+    ["branch protection disabled", "environment_branch", a => {
+      a.environment.deployment_branch_policy.custom_branch_policies = false;
+    }],
+    ["missing reviewers", "environment_reviewers", a => {
+      a.environment.protection_rules[0].reviewers = [];
+    }],
+    ["self review permitted", "environment_reviewers", a => {
+      a.environment.protection_rules[0].prevent_self_review = false;
+    }],
+    ["team not verified", "environment_reviewers", a => {
+      a.environment.protection_rules[0].reviewers[0].type = "Team";
+    }],
+  ];
+  for (const [title, category, mutate] of cases) {
+    const a = setup(); mutate(a);
+    await assert.rejects(gate.verify(a), error => {
+      assert.equal(gate.refusalCategory(error), category, title);
+      assert.match(error.message, /^environment_[a-z_]+$/);
+      assert.ok(!error.message.includes("SYNTHETIC_PRIVATE"));
+      return true;
+    });
+    assert.equal(a.writes, 0, title);
+    assert.equal(a.refs.size, 0, title);
+    assert.equal(a.tags.size, 0, title);
+  }
+});
+
+test("decision, merge, CI failures are categorized before any reservation", async () => {
+  for (const [category, mutate] of [
+    ["merge", a => { a.pr.base.ref = "main"; }],
+    ["decision", a => { a.comments = []; }],
+    ["ci", a => { a.jobs[0].conclusion = "failure"; }],
+  ]) {
+    const a = setup(); mutate(a);
+    await assert.rejects(gate.verify(a), error => {
+      assert.equal(gate.refusalCategory(error), category);
+      return true;
+    });
+    assert.equal(a.writes, 0);
+  }
+});
+
+test("approval failure after reservation is categorized without repeating admission", async () => {
+  const a = setup(); await gate.verify(a);
+  a.history[0].state = "rejected";
+  await assert.rejects(gate.verify({...a, recheck: true}), error => {
+    assert.equal(gate.refusalCategory(error), "approval");
+    return true;
+  });
+  assert.equal(a.writes, 1);
 });
 
 test("CMS unavailable refuses dry-run and admission before reservations", async () => {
