@@ -53,8 +53,16 @@ def metadata_timeline(
         for entry in events
         if type(entry) is dict and entry.get("kind") == "tx_attempt"
     ]
-    insist(bool(beginnings) or bool(reads))
-    baseline = beginnings[0] if beginnings else reads[0].started
+    # A TLS connect refusal legitimately has no read or TX. Still record
+    # its close attempt without inventing a network timestamp or frame.
+    closing = [
+        entry["at"] for entry in events
+        if type(entry) is dict and entry.get("kind") == "close_attempt"
+    ]
+    insist(bool(beginnings) or bool(reads) or bool(closing))
+    baseline = (
+        beginnings[0] if beginnings else reads[0].started if reads else closing[0]
+    )
     insist(type(baseline) in (int, float) and math.isfinite(baseline))
     rx_events = [e for e in events if e.get("kind") == "rx"]
     insist(len(rx_events) == len(reads))
