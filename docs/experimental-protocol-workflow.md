@@ -70,9 +70,9 @@ Le workflow utilise toujours les collecteurs #55 hors runtime HA ; la voie
 Procédure MANAGER, sans dispatch ni modification de Settings :
 
 1. Examiner le diff complet, le HEAD exact, la confidentialité, le destinataire
-   CMS et les quatre jobs CI `tests`, `ha-tests`, `hacs`, `hassfest` du même HEAD.
-   Vérifier hors GitHub la possession de la clé privée correspondant au certificat
-   public épinglé. Ne fournir aucune clé privée au runner.
+   le rapport anonymisé et les quatre jobs CI `tests`, `ha-tests`,
+   `hacs`, `hassfest` du même HEAD. Le schéma CMS ci-dessous est historique ;
+   voir le contrat actuel sans clé en tête de la phase H1/H2.
 2. Avant fusion, déposer **sur cette PR** un commentaire de décision au format
    strict ci-dessous. Remplacer `<HEAD_PR_40_HEX>` et `0` par le HEAD examiné et
    le véritable ID du run `Validate` réussi. Aucun texte additionnel, champ libre
@@ -81,13 +81,12 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
 
    ```text
    <!-- hoben-experimental-approval:v1 -->
-   {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0,"recipient_sha256":"f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246"}
+   {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0}
    ```
 
 3. Fusionner via la connexion MANAGER vers `experimental`. Aucun autre push ne
    suffit. Le workflow du SHA fusionné exécute d'abord son propre `dry-run`
-   sans environnement, secret ou connexion Hoben, avec préflight CMS réel sur
-   données synthétiques. L'admission vérifie aussi la réussite effective de ce
+   sans environnement, secret, certificat ou connexion Hoben. L'admission vérifie aussi la réussite effective de ce
    job par l'API du run courant, pas seulement une sortie déclarée.
 4. L'admission vérifie à nouveau dépôt/acteur/sender/tentative/branche protégée,
    PR fusionnée/base/HEAD, arbre fusionné identique au HEAD revu, décision
@@ -127,7 +126,7 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
    Un lanceur fixe transmet au processus Python une liste fermée de variables,
    sans token GitHub/Actions/OIDC, fichiers de commandes Actions, dépendances
    candidates ou sortie libre. Le client de laboratoire valide contexte/checkouts
-   et CMS avant TLS, puis appelle `campaign_with_signals(mode="both", seconds=90)`.
+   puis appelle `campaign_with_signals(mode="both", seconds=90)` sans CMS.
    Aucune sonde alternative, destination ni budget libre n'est accepté.
 8. Même après un échec de collecte, le code d'export examine un fichier régulier
    borné, DER strict, destinataire épinglé, AuthEnvelopedData AES-256-GCM et
@@ -343,6 +342,45 @@ lorsqu'elle est effectivement attestée par l'API runner pour
 `hoben-experimental`, branche strictement `experimental` ; toute règle
 réellement configurée reste obligatoire. Le diagnostic ne consulte ni
 environnements ni secrets.
+
+## Phase H1/H2 — nouveaux essais sans clé CMS (Issue #54)
+
+**Contrat actuel pour les nouveaux HEAD, à compter de cette PR :** les captures
+brutes peuvent être utilisées temporairement dans un dossier privé 0700 du runner
+(ouvertures de fichiers 0600) pour dériver des mesures, mais **ne sont jamais
+publiées**, ni en clair ni en CMS. Le répertoire temporaire est supprimé dans
+un bloc `finally`, aussi en cas de rapport refusé. L'artefact GitHub autorisé
+se limite à `experimental-report-<SHA>-<run_id>` contenant
+`report.json` : valeurs numériques bornées, catégories fixes, candidat H2
+explicitement hypothétique et `boundary_proven=false`.
+Deux validateurs indépendants Python/JavaScript doivent accepter le rapport ;
+l'absence d'une preuve de sécurité entraîne **NOT RUN**, sans repli brut.
+
+Il n'existe **plus aucune dépendance opérationnelle** à un certificat, une
+empreinte `recipient_sha256` ou une clé privée CMS pour une nouvelle campagne.
+L'approbation MANAGER sur une nouvelle PR doit être authentique, immuable,
+postérieure aux quatre CI et antérieure à la fusion, au schéma exact :
+
+```text
+<!-- hoben-experimental-approval:v1 -->
+{"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0}
+```
+
+Le déclencheur reste un **nouveau push de fusion MANAGER sur
+`experimental`**, pas `workflow_dispatch` inventé, ni un rerun
+d'Actions. Le SHA validé est réservé une seule fois pour ce scénario par
+tag atomique ; l'usage plusieurs fois d'un même SHA **n'est pas encore
+autorisé** sans une future implémentation de campagnes distinctes et
+d'autorisation indépendante. Les policies réelles d'environnement et
+approbations GitHub restent obligatoires.
+
+**Historique à ne pas réexécuter :** les paragraphes datés des phases
+précédentes décrivant le pin CMS, la remise d'une clé privée, le
+`captures.cms` et le commentaire à cinq champs concernent **exclusivement
+les anciennes exécutions**. Ils ne sont plus des instructions applicables aux
+nouveaux runs ni une autorisation de publier du RX brut. Les anciens artefacts
+chiffrés ne sont pas déchiffrables sans la clé correspondante et ne sont
+ni relancés ni convertis.
 
 ## Phase H1/H2 — chronologies expurgées, première livraison (Issue #54)
 
