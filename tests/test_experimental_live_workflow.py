@@ -211,7 +211,9 @@ def test_child_process_drops_github_tokens_and_action_command_files(monkeypatch)
     assert child["PATH"] == "/usr/bin:/bin"
 
 
-@pytest.mark.parametrize("suite", ["experimental-live-gate", "experimental-live-report"])
+@pytest.mark.parametrize(
+    "suite", ["experimental-live-gate", "experimental-live-report"]
+)
 def test_node_live_offline_security_regressions(suite):
     assert shutil.which("node"), "Node required to test the Actions security gates"
     result = subprocess.run(
