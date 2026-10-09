@@ -209,6 +209,16 @@ def test_h1_preserves_delayed_suffix_and_never_sends_after_open(tmp_path, pause)
     assert event["ended"] - event["started"] == pause
     assert result.report["h1"]["status"] == "compatible"
     assert result.report["h2"]["status"] == "contradicted"
+    timing = result.report["timing_observations"]
+    assert timing["basis"] == "client_monotonic_relative"
+    assert [r["received"] for r in timing["reads"]] == [
+        r.returned for r in capture.reads
+    ]
+    assert sum(r["received"] for r in timing["reads"]) == len(capture.data)
+    assert any(r["state"] == "eof" for r in timing["reads"])
+    assert timing["tx"][0]["category"] == "open_client"
+    assert timing["close"]["state"] == "closed"
+    assert all(f["confidence"] == "h2_hypothesis_only" for f in timing["h2_candidates"])
     assert result.stop == "peer_eof" and result.report["partial"]
 
 
