@@ -1,0 +1,179 @@
+name: Hoben live HA parity (MANAGER)
+
+# Experimental-only, MANAGER reviewed + immutable decision before merge.
+# A push alone cannot grant credentials to the tested candidate.
+on:
+  push:
+    branches: [experimental]
+
+permissions: {}
+
+concurrency:
+  group: hoben-read-only-observation
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  dry-run:
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
+      github.actor == 'Guillaume0385' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./.github/scripts/experimental-live-gate.cjs');
+            try {
+              await gate.dryRun({github, context});
+              core.info('DRY RUN ONLY: HA parity; reviewed merge shape, no secrets or Hoben connection.');
+            } catch (_) {
+              core.setFailed('NOT RUN: secretless live preflight refused.');
+            }
+
+  admission:
+    needs: dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: read
+      actions: read
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: gate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./.github/scripts/experimental-live-gate.cjs');
+            try {
+              const result = await gate.verify({github, context});
+              core.setOutput('approved', 'true');
+              await core.summary.addRaw(result.status === 'PENDING APPROVAL'
+                ? 'PENDING APPROVAL: real GitHub environment reviewers required.'
+                : 'READY FOR ENVIRONMENT: claim reserved; no required reviewers configured.').write();
+            } catch (error) {
+              const category = gate.refusalCategory(error);
+              core.setFailed('NOT RUN: live admission refused; category=' + category);
+              await core.summary.addRaw('NOT RUN: refused before live secrets; category='
+                + category + '.').write();
+            }
+
+  collect:
+    needs: admission
+    if: needs.admission.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: hoben-live
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - id: recheck
+        name: Recheck merged SHA, claim, CI, real environment and required approval
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/experimental-live-gate.cjs');
+            try {
+              await gate.verify({github, context, recheck: true});
+              core.setOutput('approved', 'true');
+            } catch (_) {
+              core.setFailed('NOT RUN: live approval or admission evidence changed.');
+            }
+      - id: capture
+        name: Two bounded read-only refreshes through actual HA HobenClient
+        if: steps.recheck.outputs.approved == 'true'
+        env:
+          LIVE_APPROVED_SHA: ${{ github.sha }}
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: python trusted/scripts/launch_live_ha_parity.py
+      - id: exports
+        name: Validate allowlisted report before export
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core});
+      - name: Export sanitized report only
+        if: ${{ always() && steps.exports.outputs.report == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/hoben-live-public/report.json
+          if-no-files-found: error
+          retention-days: 7
+
+  result:
+    needs: [admission, collect]
+    if: ${{ always() && needs.admission.outputs.approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        id: download
+        continue-on-error: true
+        with:
+          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}
+          path: public-report
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          COLLECTION_RESULT: ${{ needs.collect.result }}
+        with:
+          script: |
+            let success = false;
+            try {
+              const report = require('./.github/scripts/experimental-live-report.cjs')
+                .readReport('public-report/report.json');
+              success = process.env.COLLECTION_RESULT === 'success' && report.status === 'success';
+            } catch (_) {}
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: context.sha, context: 'hoben-live-ha-parity',
+              state: success ? 'success' : 'failure',
+              target_url: 'https://github.com/Guillaume0385/ha-hoben-community/actions/runs/'
+                + context.runId,
+              description: success ? 'Two one-shot HA refreshes validated' :
+                'NOT RUN or HA parity refresh/report failed'
+            });
+            await core.summary.addRaw(success
+              ? 'Read-only one-shot HA parity completed; persistent session NOT TESTED.'
+              : 'NOT RUN or HA parity failed; inspect sanitized report.').write();
+            if (!success) core.setFailed('HA parity observation failed or was incomplete.');
