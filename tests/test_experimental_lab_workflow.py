@@ -32,6 +32,11 @@ def test_workflow_separates_admission_collection_and_publication():
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
+    # REST environment and deployment branch policy reads require Actions:read.
+    # This is a static permission contract, not proof the runner API responded.
+    assert jobs["admission"]["permissions"]["actions"] == "read"
+    assert jobs["collect"]["permissions"]["actions"] == "read"
+    assert "environment" not in jobs["admission"]
     assert "needs.admission.outputs.approved == 'true'" in jobs["collect"]["if"]
     assert "environment" not in jobs["dry-run"]
     for name, job in jobs.items():
