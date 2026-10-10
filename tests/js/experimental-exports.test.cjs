@@ -3,7 +3,6 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const exportsGate = require("../../.github/scripts/experimental-exports.cjs");
-const cms = require("../../.github/scripts/experimental-ciphertext.cjs");
 const context = {sha: "a".repeat(40), runId: 123};
 
 function report() {
@@ -76,33 +75,59 @@ for (const kind of ["symlink", "directory", "fifo", "oversized"]) {
       if (kind === "symlink") fs.symlinkSync(path.join(temp, "private.json"), file);
       else if (kind === "directory") fs.mkdirSync(file);
       else if (kind === "fifo") require("node:child_process").execFileSync("mkfifo", [file]);
-      else fs.writeFileSync(file, "x".repeat(65537));
+      else fs.writeFileSync(file, "x".repeat(2097153));
       assert.throws(() => exportsGate.readReport(file, context));
     });
   });
 }
 
-test("export boundary validates ciphertext even after a failed collection; reports independently refuse", () => {
+test("report-only export never attempts CMS and rejects unsafe projection", () => {
   withReport(report(), (file, temp) => {
-    const dir = path.join(temp, "hoben-experimental-exports"); fs.mkdirSync(dir);
+    const dir = path.join(temp, "hoben-experimental-exports");
+    fs.mkdirSync(dir);
     const invalid = report(); invalid.private = "SYNTHETIC_PRIVATE";
     fs.writeFileSync(path.join(dir, "report.json"), JSON.stringify(invalid));
-    const before = process.env.RUNNER_TEMP, original = cms.prepare;
+    const before = process.env.RUNNER_TEMP;
     process.env.RUNNER_TEMP = temp;
     const outputs = {}, failures = [];
     const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
-    let calls = 0;
-    cms.prepare = () => {calls++;}; // Real crypto/roundtrip covered by pytest.
     try {
       exportsGate.prepare({context, core});
-      assert.equal(calls, 1); assert.equal(outputs.ciphertext, "true");
-      assert.equal(outputs.report, undefined); assert.equal(failures.length, 1);
+      assert.equal(outputs.report, undefined);
+      assert.equal(outputs.ciphertext, undefined);
+      assert.equal(failures.length, 1);
       assert.ok(!fs.existsSync(path.join(temp, "hoben-experimental-public")));
-    } finally { cms.prepare = original;
-      if (before === undefined) delete process.env.RUNNER_TEMP; else process.env.RUNNER_TEMP = before; }
+    } finally {
+      if (before === undefined) delete process.env.RUNNER_TEMP;
+      else process.env.RUNNER_TEMP = before;
+    }
   });
 });
 
+test("safe report publishes exactly report.json and never ciphertext", () => {
+  withReport(report(), (file, temp) => {
+    const dir = path.join(temp, "hoben-experimental-exports");
+    fs.mkdirSync(dir);
+    fs.copyFileSync(file, path.join(dir, "report.json"));
+    const before = process.env.RUNNER_TEMP; process.env.RUNNER_TEMP = temp;
+    const outputs = {}, failures = [];
+    const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
+    try {
+      exportsGate.prepare({context, core});
+      assert.deepEqual(outputs, {report: "true"});
+      assert.equal(failures.length, 0);
+      assert.deepEqual(fs.readdirSync(path.join(temp, "hoben-experimental-public")),
+        ["report.json"]);
+      assert.ok(!fs.existsSync(path.join(dir, "captures.cms")));
+    } finally {
+      if (before === undefined) delete process.env.RUNNER_TEMP;
+      else process.env.RUNNER_TEMP = before;
+    }
+  });
+});
+
+// Keep the independent Node export-boundary regressions when the CMS lane changes.
+// These fixtures contain only synthetic counts/timings, never network bytes.
 function timeline() {
   return {
     basis: "client_monotonic_relative",
@@ -122,12 +147,59 @@ function timeline() {
     concatenated_reads: 0,
   };
 }
+
+function prepareReport(file, temp) {
+  const dir = path.join(temp, "hoben-experimental-exports");
+  fs.mkdirSync(dir);
+  fs.copyFileSync(file, path.join(dir, "report.json"));
+  const before = process.env.RUNNER_TEMP;
+  process.env.RUNNER_TEMP = temp;
+  const outputs = {}, failures = [];
+  const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
+  try {
+    exportsGate.prepare({context, core});
+    return {outputs, failures, destination: path.join(temp, "hoben-experimental-public")};
+  } finally {
+    if (before === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = before;
+  }
+}
+
 test("strict public timeline is permitted only as bounded timing and unknown offsets", () => {
   const r = report(); r.sessions[0].timing_observations = timeline();
-  withReport(r, file => {
+  withReport(r, (file, temp) => {
     const value = exportsGate.readReport(file, context);
     assert.deepEqual(value.report.sessions[0].timing_observations, timeline());
     assert.equal(value.report.boundary_proven, false);
+    const {outputs, failures, destination} = prepareReport(file, temp);
+    assert.deepEqual(outputs, {report: "true"});
+    assert.deepEqual(failures, []);
+    assert.deepEqual(fs.readdirSync(destination), ["report.json"]);
+    const published = JSON.parse(fs.readFileSync(path.join(destination, "report.json")));
+    assert.deepEqual(published, value.report);
+  });
+});
+
+test("zero-byte EOF read remains in the public timeline of a partial campaign", () => {
+  const r = report();
+  r.sessions = [r.sessions[0]];
+  Object.assign(r, {executed_sessions: 1, eligible_sessions: 1,
+    result: "failure", reason: "collection_interrupted"});
+  const s = r.sessions[0];
+  Object.assign(s, {partial: true, stop: "peer_eof", read_calls: 3,
+    timing_observations: timeline()});
+  s.timing_observations.reads.push({index: 2, offset: 100, requested: 4096, received: 0,
+    started_ms: 450, ended_ms: 480, duration_ms: 30,
+    gap_previous_ms: 50, since_last_tx_ms: 449, state: "eof"});
+  withReport(r, (file, temp) => {
+    const value = exportsGate.readReport(file, context);
+    assert.equal(value.result, "failure");
+    assert.deepEqual(value.report.sessions[0].timing_observations, s.timing_observations);
+    const {outputs, failures, destination} = prepareReport(file, temp);
+    assert.deepEqual(outputs, {report: "true"});
+    assert.deepEqual(failures, []);
+    assert.equal(exportsGate.readReport(path.join(destination, "report.json"), context).result,
+      "failure");
   });
 });
 
@@ -148,7 +220,12 @@ for (const [title, modify] of Object.entries({
   test("reject suspect public timeline: " + title, () => {
     const r = report(); r.sessions[0].timing_observations = timeline();
     modify(r.sessions[0].timing_observations);
-    withReport(r, file => assert.throws(
-      () => exportsGate.readReport(file, context), /invalid_public_timeline/));
+    withReport(r, (file, temp) => {
+      assert.throws(() => exportsGate.readReport(file, context), /invalid_public_timeline/);
+      const {outputs, failures, destination} = prepareReport(file, temp);
+      assert.deepEqual(outputs, {});
+      assert.deepEqual(failures, ["Public report refused before upload."]);
+      assert.ok(!fs.existsSync(destination));
+    });
   });
 }

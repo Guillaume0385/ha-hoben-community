@@ -3,9 +3,7 @@
 // No Hoben I/O here. Admission writes an atomic claim on a separate runner;
 // recheck has read-only permissions, after GitHub's environment approval.
 const crypto = require("node:crypto");
-const path = require("node:path");
 const push = require("./experimental-push-preflight.cjs");
-const cms = require("./experimental-ciphertext.cjs");
 const policy = require("../config/hoben-experimental.json");
 const API = { owner: "Guillaume0385", repo: "ha-hoben-community" };
 const MANAGER_ID = 18246624;
@@ -43,7 +41,6 @@ function refusalCategory(error) {
     ? PUBLIC_REFUSALS[reason] : "other";
 }
 const sameRepo = r => r?.full_name === push.REPOSITORY && r.id === REPO_ID;
-const certificate = path.join(__dirname, "../config/hoben-experimental-recipient.pem");
 
 function workflowPath(value, file, allowedRefs) {
   if (typeof value !== "string") return false;
@@ -54,7 +51,7 @@ function workflowPath(value, file, allowedRefs) {
 async function mergedPush(github, context, env) {
   need(policy.schema === 1 && policy.scenario === "h1h2" &&
     policy.environment === "hoben-experimental" && policy.tracking_issue === 54 &&
-    policy.tracking_issue_id === 5768789242 && /^[a-f0-9]{64}$/.test(policy.recipient_sha256),
+    policy.tracking_issue_id === 5768789242,
   "invalid_policy");
   need(env.GITHUB_WORKFLOW_SHA === context.sha && positive(context.runId) &&
     env.GITHUB_RUN_ID === String(context.runId) &&
@@ -66,8 +63,7 @@ async function mergedPush(github, context, env) {
 
 async function dryRun({ github, context, env = process.env }) {
   const result = await mergedPush(github, context, env);
-  cms.preflight(certificate, policy.recipient_sha256);
-  return result; // Synthetic CMS only, no credentials, environment or Hoben.
+  return result; // Secret-free: no identity, certificate, transport or network I/O.
 }
 
 async function successfulPreflight(github, context) {
@@ -101,9 +97,9 @@ async function managerDecision(github, pr) {
   need(choices.length === 1, "manager_decision_unverified");
   const { comment, approval } = choices[0];
   need(Object.keys(approval).sort().join() ===
-    ["schema", "scenario", "candidate_sha", "ci_run_id", "recipient_sha256"].sort().join() &&
+    ["schema", "scenario", "candidate_sha", "ci_run_id"].sort().join() &&
     approval.schema === 1 && approval.scenario === "h1h2" && approval.candidate_sha === pr.head.sha &&
-    positive(approval.ci_run_id) && approval.recipient_sha256 === policy.recipient_sha256 &&
+    positive(approval.ci_run_id) &&
     positive(comment.id) && comment.created_at === comment.updated_at &&
     Number.isFinite(Date.parse(comment.created_at)) &&
     Date.parse(comment.created_at) <= Date.parse(pr.merged_at), "manager_decision_unverified");
@@ -264,7 +260,6 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   await reviewsAndCI(github, pr, decision);
   const environment = await environmentPolicy(github);
   await noOtherObservation(github, context);
-  cms.preflight(certificate, policy.recipient_sha256);
   const name = "hoben-experimental-h1h2-" + context.sha;
   const claim = { schema: 1, scenario: "h1h2", sha: context.sha, run_id: context.runId,
     pr: pr.number, candidate_sha: pr.head.sha, decision_id: decision.comment.id,

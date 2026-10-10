@@ -72,7 +72,7 @@ function evaluate({ pr, issue, ci, jobs, comments } = {}) {
   catch (_) { return result(checks); }
   if (!approval || Array.isArray(approval) || typeof approval !== "object") return result(checks);
   if (Object.keys(approval).sort().join() !==
-      ["schema", "scenario", "candidate_sha", "ci_run_id", "recipient_sha256"].sort().join()) {
+      ["schema", "scenario", "candidate_sha", "ci_run_id"].sort().join()) {
     return result(checks);
   }
   if (comment.user?.login === "Guillaume0385" &&
@@ -80,8 +80,7 @@ function evaluate({ pr, issue, ci, jobs, comments } = {}) {
       positive(comment.id) && comment.created_at === comment.updated_at &&
       date(comment.created_at) && Date.parse(comment.created_at) >= Date.parse(ci.updated_at) &&
       approval.schema === 1 && approval.scenario === "h1h2" &&
-      approval.candidate_sha === pr.head.sha && approval.ci_run_id === ci.id &&
-      approval.recipient_sha256 === policy.recipient_sha256) checks.decision = "ok";
+      approval.candidate_sha === pr.head.sha && approval.ci_run_id === ci.id) checks.decision = "ok";
   return result(checks);
 }
 

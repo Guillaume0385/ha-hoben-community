@@ -2,12 +2,18 @@
 
 > Décision du propriétaire, 9 octobre 2026 — **aucune PR vers `main` sans demande explicite de l'utilisateur**. Cette page définit le workflow souhaité et l'exécution autorisée sur `experimental`. Elle ne prouve ni la présence des secrets/environnements, ni la disponibilité actuelle de tous les workflows GitHub. Ne jamais confondre code de test préparé, workflow installé, dry-run et test Hoben réel.
 
+> **Contrat préparé par la PR #67, applicable seulement après revue et fusion :**
+> les nouveaux essais H1/H2 exportent exclusivement le rapport anonymisé validé.
+> Aucune capture RX ne sort du runner. Les mentions d'artefacts CMS ci-dessous
+> décrivent les anciennes exécutions, pas un prérequis de clé pour ce chemin.
+> Une CI verte ne démontre ni son installation ni une collecte réelle.
+
 ## Deux voies distinctes sur `experimental`
 
 | Voie | Environnement GitHub | Objectif | Intégration Home Assistant |
 | --- | --- | --- | --- |
 | **`hoben-live`** | `hoben-live` | Valider sur le serveur réel Hoben l'authentification, la connexion TLS, l'attribution/conservation DeviceGuid, la gestion de session, les lectures V4, disponibilité/reconnexion et cycle de vie **avec les mêmes composants et le même comportement que le plugin Home Assistant au commit testé** | Réutiliser autant que possible le client, les modèles et les chemins réellement utilisés par HA ; constater les écarts sans inventer de succès |
-| **`hoben-experimental`** | `hoben-experimental` | Sonder et enregistrer le comportement réseau, confronter H1/H2, observer les trames et données inconnues, avec captures privées chiffrées et rapport anonymisé | **Jamais intégré au runtime HA** : les collecteurs, hypothèses de framing et instruments de capture restent dans les scripts/fixtures de laboratoire |
+| **`hoben-experimental`** | `hoben-experimental` | Confronter H1/H2 et rapporter des chronologies anonymisées ; nouveaux essais de #67 sans export de capture, artefacts CMS historiques distincts | **Jamais intégré au runtime HA** : les collecteurs, hypothèses de framing et instruments de capture restent dans les scripts/fixtures de laboratoire |
 
 Les deux voies sont des expériences en lecture seule, exécutées depuis GitHub Actions, sur un SHA **fusionné et revu** de `experimental`. Elles ne modifient pas le poêle : aucune commande de marche/arrêt, changement de consigne, ventilation, écriture Modbus (06/16/22), association ou accès installateur. La destination de production est le serveur TLS déjà documenté dans `protocol.md`, avec validation du certificat.
 
@@ -48,7 +54,7 @@ L'Issue [#54](https://github.com/Guillaume0385/ha-hoben-community/issues/54) dem
 
 Un workflow `issues:labeled` charge sa définition depuis la branche par défaut, pas depuis `experimental`. Un `workflow_dispatch` d'un nouveau workflow absent de `main` ne doit pas être considéré comme acquis. CODEX DEV doit sélectionner et **démontrer** un déclencheur adapté au périmètre sans fusion vers `main`. Un `push` autorisé sur `experimental` peut déclencher une étape **sans secret**, mais il ne vaut jamais à lui seul revue/autorisation de remettre les identifiants à du code nouvellement fusionné. L'absence de voie sûre ou d'outil de déclenchement se rapporte honnêtement par `NOT RUN` avec une Issue de prérequis, sans contourner GitHub.
 
-### Phase 1 constatée ; phase 2 préparée pour revue MANAGER
+### Phases 1 et 2 — preuves historiques
 
 La PR #58 a installé le préflight sans secret. Le run réel
 [37903694784](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37903694784),
@@ -64,15 +70,15 @@ a confirmé `dry-run=success` et `admission=failure` avant toute réservation :
 `collect` et `result` étaient `skipped`, H1/H2 **NOT RUN**. La cause précise
 n'est pas observable dans cet ancien run (exception volontairement masquée).
 Cette preuve ne valide ni l'accès aux environnements ni la connexion au serveur.
-Le workflow utilise toujours les collecteurs #55 hors runtime HA ; la voie
-`hoben-live` reste différée.
+Cette installation utilisait les collecteurs #55 hors runtime HA et des exports
+CMS ; la voie `hoben-live` était alors différée. La phase 3 est décrite plus bas.
 
-Procédure MANAGER, sans dispatch ni modification de Settings :
+### Procédure MANAGER H1/H2 préparée par #67 — rapport uniquement
 
-1. Examiner le diff complet, le HEAD exact, la confidentialité, le destinataire
-   CMS et les quatre jobs CI `tests`, `ha-tests`, `hacs`, `hassfest` du même HEAD.
-   Vérifier hors GitHub la possession de la clé privée correspondant au certificat
-   public épinglé. Ne fournir aucune clé privée au runner.
+1. Examiner le diff complet, le HEAD exact, la confidentialité du rapport
+   anonymisé, ses validations indépendantes Python/Node et les quatre jobs CI
+   `tests`, `ha-tests`, `hacs`, `hassfest` du même HEAD. Vérifier l'absence
+   d'export RX ; aucun certificat ou pin CMS et aucune clé privée ne sont requis.
 2. Avant fusion, déposer **sur cette PR** un commentaire de décision au format
    strict ci-dessous. Remplacer `<HEAD_PR_40_HEX>` et `0` par le HEAD examiné et
    le véritable ID du run `Validate` réussi. Aucun texte additionnel, champ libre
@@ -81,14 +87,14 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
 
    ```text
    <!-- hoben-experimental-approval:v1 -->
-   {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0,"recipient_sha256":"f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab3246"}
+   {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0}
    ```
 
 3. Fusionner via la connexion MANAGER vers `experimental`. Aucun autre push ne
    suffit. Le workflow du SHA fusionné exécute d'abord son propre `dry-run`
-   sans environnement, secret ou connexion Hoben, avec préflight CMS réel sur
-   données synthétiques. L'admission vérifie aussi la réussite effective de ce
-   job par l'API du run courant, pas seulement une sortie déclarée.
+   sans environnement, secret, certificat CMS ou connexion Hoben. L'admission
+   vérifie aussi la réussite effective de ce job par l'API du run courant,
+   pas seulement une sortie déclarée.
 4. L'admission vérifie à nouveau dépôt/acteur/sender/tentative/branche protégée,
    PR fusionnée/base/HEAD, arbre fusionné identique au HEAD revu, décision
    préalable et quatre jobs du run CI lié. Après corrections, une décision
@@ -127,20 +133,20 @@ Procédure MANAGER, sans dispatch ni modification de Settings :
    Un lanceur fixe transmet au processus Python une liste fermée de variables,
    sans token GitHub/Actions/OIDC, fichiers de commandes Actions, dépendances
    candidates ou sortie libre. Le client de laboratoire valide contexte/checkouts
-   et CMS avant TLS, puis appelle `campaign_with_signals(mode="both", seconds=90)`.
+   puis appelle `campaign_with_signals(mode="both", seconds=90)` sans CMS.
    Aucune sonde alternative, destination ni budget libre n'est accepté.
-8. Même après un échec de collecte, le code d'export examine un fichier régulier
-   borné, DER strict, destinataire épinglé, AuthEnvelopedData AES-256-GCM et
-   RSA-OAEP/SHA256. Une clé publique ne peut authentifier le tag GCM candidat :
-   le validateur rechiffre **tous** les octets admis dans un nouveau CMS avant
-   l'upload. Ainsi aucun contenu clair caché dans un DER conforme ne sort en
-   clair. Seul ce nouveau fichier fixe, et un rapport aux clés/valeurs allowlistées
-   validé séparément, sont uploadés, avec rétention de sept jours.
+8. Même après un échec de collecte, l'export Node examine uniquement
+   `report.json` : fichier régulier sans symlink, borné à 2 Mio, schéma
+   strict à clés/valeurs allowlistées et chronologies validées indépendamment
+   du producteur Python. Un rapport invalide n'émet aucune sortie d'upload
+   et ne crée aucun fichier public. Seul le JSON validé est copié vers
+   le répertoire public fixe, avec rétention de sept jours. Aucun RX,
+   archive privée ou fichier `captures.cms` n'est exporté.
 9. Rechercher le run **Hoben experimental (MANAGER)** par SHA fusionné,
    événement push, branche, acteur et tentative 1. Conserver ID/URL, conclusions
    des jobs, statut `hoben-experimental-h1h2` du même SHA et rapport correspondant.
-   Les artefacts sont `experimental-ciphertext-<SHA>-<run_id>` et
-   `experimental-report-<SHA>-<run_id>`. Le publisher séparé ne reçoit aucun secret
+   L'unique artefact est `experimental-report-<SHA>-<run_id>/report.json`.
+   Le publisher séparé ne reçoit aucun secret
    et ne considère comme réussi qu'un job de collecte réussi avec un rapport
    de douze sessions `inconclusive`. Un rapport failure, export refusé ou artefact
    absent ne devient jamais success. Une annulation forcée peut empêcher la
@@ -235,17 +241,21 @@ La catégorisation ajoutée ici attend un nouveau SHA fusionné et un run distin
 
 Le succès du workflow signifie seulement collecte bornée terminée ; tous les
 rapports conservent `boundary_proven=false`. Les arrêts anticipés produisent un
-rapport failure lorsqu'il peut être scellé. Une panne de chiffrement ne possède
-aucun fallback en clair. Le workflow phase 2 et ses tests sont préparés hors
-ligne ; leur installation, approbation et observation réelle seront constatées
-par MANAGER après fusion. Aucun run Hoben par DEV n'est revendiqué.
+rapport failure uniquement si sa projection et sa validation réussissent.
+Une projection refusée ou absente n'a aucun repli vers les fichiers privés.
+L'installation du chemin de #67 et les observations réelles restent à constater
+par MANAGER après revue et fusion. Aucun run Hoben par DEV n'est revendiqué.
 
-Pour déchiffrer, hors GitHub dans un dossier privé 0700, authentifier d'abord
-le CMS exporté vers un CMS intermédiaire 0600, puis authentifier ce dernier vers
-le tar privé 0600, avec la même clé/certificat. **Deux déchiffrements réussis**
-sont indispensables avant extraction ; supprimer toute sortie partielle après
-un échec GCM. Ne joindre aucun résultat brut, clé, identité ou valeur domestique
-aux Issues, artefacts publics ou logs.
+### Historique CMS — hors procédure des nouveaux essais
+
+Les anciens exports utilisaient AES-256-GCM et RSA-OAEP/SHA256 avec destinataire
+public épinglé, préflight avant TLS et scellement final dans un second CMS.
+Ils nécessitaient deux déchiffrements privés authentifiés avant extraction.
+La clé historique est indisponible : aucune récupération de clé, tentative de
+déchiffrement ou conversion de ces captures n'est prévue par #67. Aucun résultat
+brut, clé, identité ou valeur domestique ne peut être joint aux Issues,
+artefacts publics ou logs. Ce mécanisme historique n'est pas appelé par les
+nouveaux essais, qui n'exportent aucune capture.
 
 
 ### Décision mono-mainteneur et preuve du prochain SHA (9 octobre 2026)
@@ -291,15 +301,16 @@ Ce run et ce SHA sont consommés : ni relance ni approbation rétroactive.
    privilégié n'est rédigé ou déposé par DEV.
 3. **MANAGER uniquement** relit le diff, HEAD, reviewers/threads, les quatre
    jobs, la preuve de provenance du run CI et l'Issue toujours
-   `state:review`. Vérifier séparément le certificat public CMS et
-   l'empreinte `recipient_sha256` du fichier
-   `.github/config/hoben-experimental.json`. Ne pas déduire la
+   `state:review`. Pour le chemin de #67, vérifier le rapport public,
+   les deux validations et l'absence d'upload privé ; aucun pin CMS n'entre
+   dans la décision. Ne pas déduire la
    configuration réelle de l'environnement de cette revue.
 4. **MANAGER uniquement**, *après CI et avant fusion*, dépose sur la PR
    l'unique commentaire non édité `hoben-experimental-approval:v1`
-   selon le schéma strict indiqué dans la procédure de phase 2 ci-dessus,
-   avec `candidate_sha` du HEAD revu, `ci_run_id` réel et l'empreinte
-   exacte épinglée. Aucun exemple synthétique ni ancienne décision ne peut
+   selon le schéma strict à quatre champs de #67 indiqué ci-dessus,
+   avec `candidate_sha` du HEAD revu et `ci_run_id` réel.
+   Les anciennes décisions à cinq champs avec `recipient_sha256` sont refusées.
+   Aucun exemple synthétique ni ancienne décision ne peut
    servir de preuve ; le contrôle consultatif n'émet jamais cette décision.
 5. **MANAGER uniquement** fusionne vers `experimental` après cette
    décision. Le nouveau run `push` doit être sur le **SHA de merge**
@@ -344,6 +355,45 @@ lorsqu'elle est effectivement attestée par l'API runner pour
 réellement configurée reste obligatoire. Le diagnostic ne consulte ni
 environnements ni secrets.
 
+## Phase H1/H2 — nouveaux essais sans clé CMS (Issue #54)
+
+**Contrat de #67 pour les nouveaux HEAD après revue et fusion :** les captures
+brutes peuvent être utilisées temporairement dans un dossier privé 0700 du runner
+(ouvertures de fichiers 0600) pour dériver des mesures, mais **ne sont jamais
+publiées**, ni en clair ni en CMS. Le répertoire temporaire est supprimé dans
+un bloc `finally`, aussi en cas de rapport refusé. L'artefact GitHub autorisé
+se limite à `experimental-report-<SHA>-<run_id>` contenant
+`report.json` : valeurs numériques bornées, catégories fixes, candidat H2
+explicitement hypothétique et `boundary_proven=false`.
+Deux validateurs indépendants Python/JavaScript doivent accepter le rapport ;
+l'absence d'une preuve de sécurité entraîne **NOT RUN**, sans repli brut.
+
+Ce chemin **sans export de capture** ne dépend d'aucun certificat CMS,
+empreinte `recipient_sha256` ou clé privée ; TLS reste vérifié normalement.
+L'approbation MANAGER sur une nouvelle PR doit être authentique, immuable,
+postérieure aux quatre CI et antérieure à la fusion, au schéma exact :
+
+```text
+<!-- hoben-experimental-approval:v1 -->
+{"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0}
+```
+
+Le déclencheur reste un **nouveau push de fusion MANAGER sur
+`experimental`**, pas `workflow_dispatch` inventé, ni un rerun
+d'Actions. Le SHA validé est réservé une seule fois pour ce scénario par
+tag atomique ; l'usage plusieurs fois d'un même SHA **n'est pas encore
+autorisé** sans une future implémentation de campagnes distinctes et
+d'autorisation indépendante. Les policies réelles d'environnement et
+approbations GitHub restent obligatoires.
+
+**Historique à ne pas réexécuter :** les paragraphes datés des phases
+précédentes décrivant le pin CMS, la possession hors GitHub d'une clé privée, le
+`captures.cms` et le commentaire à cinq champs concernent **exclusivement
+les anciennes exécutions**. Ils ne sont plus des instructions applicables aux
+nouveaux runs ni une autorisation de publier du RX brut. Les anciens artefacts
+chiffrés ne sont pas déchiffrables sans la clé correspondante et ne sont
+ni relancés ni convertis.
+
 ## Phase H1/H2 — chronologies expurgées, première livraison (Issue #54)
 
 Le module privé `scripts/boundary_timeline.py` dérive du journal de chaque
@@ -382,14 +432,13 @@ Les fixtures anciennes sans cette extension restent lisibles pour tests
 de rétrocompatibilité ; les nouvelles sessions du collecteur produisent
 cette extension, y compris en cas d'EOF ou de terminaison partielle.
 
-**Portée de cette petite PR :** enrichissement anonymisé des observations
-H1/H2, tests hors ligne et double filtrage. Le collecteur existant continue
-temporairement à ne sortir ses captures privées que **chiffrées** sous CMS ;
-les clés anciennes indisponibles ne sont pas demandées ni reconstruites.
-Le retrait complet de cette dépendance et les campagnes répétables sur
-le même SHA sont des modifications distinctes à faire approuver par
-MANAGER, avec nouveau gate et nouvelle CI. Un fichier brut ne doit
-jamais devenir un artefact par simple suppression du chiffrement.
+**Historique de la première livraison (#66) :** elle ajoutait les observations
+anonymisées et le double filtrage tout en conservant le seul export chiffré
+des captures. #67 prépare désormais un export limité au rapport validé,
+sans capture et sans dépendance CMS, après sa propre revue et CI. Les clés
+anciennes indisponibles ne sont pas demandées ni reconstruites. Les campagnes
+répétables sur le même SHA restent une modification distincte. Un fichier
+brut ne devient jamais un artefact par suppression du chiffrement.
 
 ## Phase 3 — `hoben-live` expérimental, client Home Assistant réel
 
@@ -513,19 +562,29 @@ n'est modifié par DEV.
 Le propriétaire déclare avoir effectué les réglages GitHub. L'API disponible a confirmé `experimental.protected=true`, **sans permettre de consulter les règles détaillées de protection, les environnements, leurs approbations ni leurs secrets**. Cette limite n'est pas une preuve de leur absence ou de leur conformité.
 
 Avant un test réel, vérifier **effectivement** sur GitHub et dans le gate du workflow :
+
 - la branche `experimental` protégée, le code et le HEAD revus et les checks ciblés réussis ;
 - les environnements distincts `hoben-live` et `hoben-experimental`, leurs politiques d'accès à `experimental`, leur approbation GitHub lorsqu'elle est configurée, et la provenance du job qui demande le secret ;
 - l'injection des seuls `HOBEN_USER_GUID` et `HOBEN_DEVICE_GUID` nécessaires, dans l'étape minimale, sans faire hériter au code candidat d'un token GitHub doté de droits d'écriture ;
 - le caractère lecture seule, le TLS vérifié, les budgets bornés et l'interdiction d'une destination/script/mode libre ;
-- pour `hoben-experimental`, la possession hors GitHub de la **clé privée** du certificat public contrôlé, préflight CMS avant TLS, RX uniquement chiffré avec AES-256-GCM et RSA-OAEP/SHA256, rapports allowlistés sans donnée domestique, et rétention maximale de sept jours.
+- pour le chemin `hoben-experimental` de #67, le rapport aux clés/valeurs
+  allowlistées sans donnée domestique, sa double validation Python/Node,
+  l'absence d'export des fichiers privés et la rétention maximale de sept jours.
+  Les prérequis CMS appartiennent uniquement aux anciennes voies chiffrées.
 
-Aucun secret n'est écrit dans les Issues/PR, fichiers de config, logs, summaries ou captures en clair. Les données brutes restent chiffrées avant toute sortie du runner. Si le gate ne peut vérifier la politique/approbation ou si le certificat est invalide : **`NOT RUN` / `PENDING APPROVAL`**, notification, aucune connexion Hoben.
+Aucun secret n'est écrit dans les Issues/PR, fichiers de config, logs ou summaries.
+Le chemin de #67 ne fait sortir aucune donnée RX brute du runner. Les captures
+historiques restent chiffrées ; aucune nouvelle sortie de capture n'est autorisée
+par cette PR. Une voie exportant des captures doit conserver le préflight CMS
+et leur chiffrement avant export. Politique ou approbation invérifiable :
+**`NOT RUN` / `PENDING APPROVAL`**, notification, aucune connexion Hoben.
+Rapport refusé : échec fermé, aucun upload ni repli brut.
 
 ## Contrat des essais et exploitation
 
 **`hoben-live` :** exercer par le vrai client du plugin, lorsque disponible, les opérations de connexion/TLS, ouverture et identification, session, lecture et refresh V4, Ping/Pong/DataUpdated seulement là où réellement implémentés et documentés, perte de connexion/reprise et unload. Conserver les observations expurgées. Les fonctionnalités non implémentées ou non confirmées donnent lieu à `unsupported` / `inconclusive` ou à une Issue ciblée, jamais à des assertions fictives.
 
-**`hoben-experimental` :** conserver la campagne H1/H2 déjà documentée (#48/#49/#55), plafonds actuels **6 H1 + 6 H2**, **90 s et 1 Mio RX par session**, arrêt anticipé sans replay implicite. Les silences, préfixes et tailles observés ne prouvent pas à eux seuls la frontière OpenedClient. Les captures conservent les octets inconnus uniquement sous chiffrement, avec analyse locale privée et résumé public expurgé.
+**`hoben-experimental` :** conserver la campagne H1/H2 déjà documentée (#48/#49/#55), plafonds actuels **6 H1 + 6 H2**, **90 s et 1 Mio RX par session**, arrêt anticipé sans replay implicite. Les silences, préfixes et tailles observés ne prouvent pas à eux seuls la frontière OpenedClient. Le chemin de #67 utilise les fichiers RX temporairement dans le dossier privé, les détruit dans `finally` et publie uniquement les offsets, longueurs, temps et catégories validés du rapport ; jamais les octets inconnus ni une archive de capture.
 
 Chaque run doit être corrélé à son **SHA, scénario, acteur autorisé, état réel, identifiant/URL GitHub, résultats et limites**, et exécuté au plus une fois sans nouvelle décision et nouveau SHA/scénario. Pas de test réel dans pytest, CI PR, DEV, cron ou automatisme de merge dépourvu d'une décision MANAGER contrôlée. Un dry-run secretless permet d'établir le chemin de déclenchement **sans** interpréter un succès synthétique comme preuve réseau.
 

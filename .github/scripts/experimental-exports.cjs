@@ -2,13 +2,12 @@
 // Run only from the reviewed export boundary, never from the collector.
 const fs = require('node:fs');
 const path = require('node:path');
-const cms = require('./experimental-ciphertext.cjs');
+const fsSafe = require('./experimental-report-file.cjs');
 const timeline = require('./experimental-timeline.cjs');
-const policy = require('../config/hoben-experimental.json');
 const requireFact = fact => { if (!fact) throw Error('invalid_public_report'); };
 function readReport(file, context) {
   const phase = 'live';
-  const r = JSON.parse(cms.snapshot(file,2097152).toString('utf8'));
+  const r = JSON.parse(fsSafe.snapshot(file,2097152).toString('utf8'));
   requireFact(r.schema === 1 && r.scenario === 'h1h2' && r.phase === phase &&
     r.experimental_sha === context.sha && r.candidate_sha === context.sha &&
     r.run_id === context.runId && r.boundary_proven === false, 'invalid_public_report');
@@ -73,11 +72,6 @@ function readReport(file, context) {
 }
 
 function prepare({context,core}) {
-  try {
-    cms.prepare(process.env.RUNNER_TEMP,
-      path.join(__dirname,'../config/hoben-experimental-recipient.pem'),policy.recipient_sha256);
-    core.setOutput('ciphertext','true');
-  } catch (_) { core.setFailed('Ciphertext refused before upload.'); }
   try {
     const source = path.join(process.env.RUNNER_TEMP,'hoben-experimental-exports/report.json');
     const {report} = readReport(source,context);

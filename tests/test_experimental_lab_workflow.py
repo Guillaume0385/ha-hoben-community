@@ -74,15 +74,17 @@ def test_workflow_separates_admission_collection_and_publication():
     uploads = [
         s for s in jobs["collect"]["steps"] if "upload-artifact@" in s.get("uses", "")
     ]
-    assert len(uploads) == 2
+    assert len(uploads) == 1
     for upload in uploads:
         assert upload["with"]["retention-days"] <= 7
         assert "always()" in upload["if"] and "steps.exports.outputs." in upload["if"]
-        assert upload["with"]["path"] in {
-            "${{ runner.temp }}/hoben-experimental-ciphertext/captures.cms",
-            "${{ runner.temp }}/hoben-experimental-public/report.json",
-        }
+        assert upload["with"]["path"] == (
+            "${{ runner.temp }}/hoben-experimental-public/report.json"
+        )
         assert "*" not in upload["with"]["path"]
+    assert "captures.cms" not in text
+    assert "hoben-experimental-ciphertext" not in text
+    assert "recipient" not in text.lower()
     assert "candidate/scripts/probe" not in text
     assert "workflow_dispatch" not in workflow.get("on", workflow.get(True))
     assert "issues" not in workflow.get("on", workflow.get(True))
