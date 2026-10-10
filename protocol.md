@@ -1739,3 +1739,46 @@ TLS ne constitue pas en soi une frontière de message.
 
 Ce relevé ne dévoile aucun identifiant, registre, octet RX ou donnée domestique.
 Il ne modifie pas les sections de protocole CONFIRMÉ / À VALIDER.
+
+
+<!-- exp-run-38029711686 -->
+### 2026-10-10, 08:06 Europe/Paris — campagne #38029711686
+
+- **Identité observée :** workflow
+  [Hoben experimental (MANAGER) #38029711686](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38029711686),
+  événement `push` sur `experimental`, SHA exact
+  `b9fa072ea061598e4855fface00133e9ec6eb921`,
+  tentative initiale, conclusion GitHub `failure`.
+- **OBSERVÉ (orchestration GitHub) :** `dry-run=success`,
+  `admission=success`, `collect=failure`, `result=failure`.
+  Dans `collect`, le recontrôle du SHA, du claim, de la policy et de
+  l'approbation MANAGER a réussi. Le lancement de
+  `run_experimental_boundary.py` s'est terminé avec le code 1 en moins
+  d'une seconde, sans diagnostic de phase public. Le validateur a ensuite
+  refusé le rapport public ; l'upload a été ignoré et aucun artefact n'existe.
+- **OBSERVÉ (portée mesurée) :** zéro session H1/H2 attestée. Aucun rapport,
+  aucune chronologie par lecture TLS, aucune taille demandée/reçue, aucun
+  offset, aucun temps depuis TX et aucun EOF n'est disponible. L'exécution
+  très brève ne prouve pas qu'une connexion réseau ou TLS ait commencé.
+- **OBSERVÉ (régression du blocage) :** l'échec silencieux immédiat se
+  reproduit après suppression de la dépendance CMS dans la voie rapport
+  anonymisé. Cette campagne montre donc que cette suppression n'a pas
+  résolu le blocage ; elle ne démontre pas que CMS en était la cause.
+- **CONFIRMÉ pour cette campagne :** les gates GitHub ont accepté le SHA
+  autorisé, mais aucune observation protocolaire H1 ou H2 n'a été produite.
+  Le succès des gates ne confirme aucun fait de protocole.
+- **INCONNU :** phase interne et cause racine exactes, démarrage éventuel
+  de DNS/TCP/TLS, nombre de tentatives internes, réception réseau,
+  fragmentation, concaténation, frontières, Ping/Pong, EOF et résultats H1/H2.
+- **À VALIDER :** ajouter des marqueurs de phase à valeurs catégorielles fixes
+  et testées hors ligne (contexte, identité normalisée, DNS/TLS, ouverture,
+  collecte, projection, nettoyage), sans texte d'exception, secret, GUID,
+  octet RX ni donnée domestique ; relancer uniquement après fusion d'un
+  nouveau SHA revu et autorisé.
+- **Limite de suivi :** la PR documentaire associée ne doit pas être fusionnée
+  avant la suppression fiable des déclenchements H1/H2 sur les changements
+  exclusivement documentaires suivie dans l'Issue #70, afin d'éviter une
+  chaîne de campagnes sans mesure.
+
+Ce relevé ne publie aucun identifiant privé, registre, secret, octet RX ou
+donnée domestique et ne modifie aucune conclusion protocolaire existante.
