@@ -17,9 +17,7 @@ jobs:
   dry-run:
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
-      github.actor == 'Guillaume0385' &&
-      github.triggering_actor == 'Guillaume0385' &&
-      github.run_attempt >= 1 && github.run_attempt <= 50
+      github.actor == 'Guillaume0385' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -128,7 +126,7 @@ jobs:
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/hoben-experimental-public/report.json
           if-no-files-found: error
           retention-days: 7
@@ -151,7 +149,7 @@ jobs:
         id: download
         continue-on-error: true
         with:
-          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}
           path: public-report
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
