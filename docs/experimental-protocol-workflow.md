@@ -8,6 +8,58 @@
 > décrivent les anciennes exécutions, pas un prérequis de clé pour ce chemin.
 > Une CI verte ne démontre ni son installation ni une collecte réelle.
 
+## Phase de preuve — déclenchement sans nouveau commit (10 octobre 2026, #54)
+
+La **première petite PR** du nouveau chantier #54 met en place une
+**preuve de disponibilité du déclencheur**, sans aucune collecte Hoben.
+La connexion MANAGER expose la création GitHub d'une branche
+(`create_branch(repository_full_name, sha, branch_name)`). Le choix testé
+est un ref `refs/heads/hoben-campaign-proof/<id-hex-de-16-à-32>`
+créé **une seule fois** au SHA exact du HEAD courant de `experimental`.
+Aucun commit, merge supplémentaire, modification de `main`, tag ni
+`workflow_dispatch` n'est nécessaire. Les documents GitHub précisent que
+les workflows `push` peuvent être définis hors branche par défaut,
+mais **le fait que `create_branch` émette le `push` attendu dans ce dépôt
+doit encore être attesté par un run GitHub authentique**. Un test Node
+synthétique ne prouve pas l'émission du webhook.
+
+Après la revue et la fusion **MANAGER** de la PR de preuve sur
+`experimental` seulement, MANAGER peut :
+
+1. Lire par GitHub API `experimental.protected=true` et son SHA exact,
+   puis créer via sa **connexion** une nouvelle branche
+   `hoben-campaign-proof/<id-hex>` avec `sha=<HEAD_EXPERIMENTAL>`.
+   L'identifiant est arbitraire, **sans secret** et non réutilisé.
+   Cette création n'est pas une autorisation de campagne réelle.
+2. Vérifier dans Actions le run **Experimental campaign trigger proof
+   (secretless)**, événement `push`, `refs/heads/hoben-campaign-proof/<id>`,
+   run attempt 1, SHA égal au HEAD protégé, job `proof=success` et
+   code de succès `SECRETLESS_TRIGGER_OBSERVED`. Le gate vérifie
+   indépendamment les branches, provenance du MANAGER et événement
+   `created=true`, `before=000…`, `forced=false`.
+3. En l'absence d'un **véritable run** correspondant, ou en cas de
+   refus d'API, de branche déplacée, d'utilisateur inattendu ou de
+   preuve incomplète, classer `NOT RUN` pour le déclencheur et pour les
+   campagnes. Aucun rerun d'un ancien SHA/scénario.
+
+Ce workflow ne possède **ni environnement GitHub, ni secret Hoben, ni
+droit d'écriture, ni étape de collecte, ni publication d'artefact**.
+Même son succès **n'accorde jamais l'autorisation** de déclencher
+`hoben-live` ou H1/H2. La phase suivante (distincte et soumise à nouvelle
+revue MANAGER) devra intégrer les décisions **uniques par
+`(SHA, scénario, campagne_id)`** aux DEUX gates, preuves de PR et CI,
+approbations environnement réelles à l'admission/recheck, sérialisation
+`hoben-read-only-observation` et rapports anonymisés isolés.
+**Aucune répétition réelle n'est possible par cette PR seule.**
+
+La décision propriétaire du 10 octobre 2026 permet désormais de choisir
+une PR quelconque du dépôt ciblant `experimental` (code, tests,
+documentation, workflow), **avec ou sans `Refs #54`**, pour un futur
+scénario choisi explicitement par MANAGER. Les anciennes exigences de lien
+`Refs #54` dans les gates H1/H2 et live doivent être levées dans une PR
+ultérieure avec tests de refus (fork, CI, reviewer, PR/HEAD, environnement).
+Cette PR de preuve ne touche aucune gate dotée d'un accès Hoben.
+
 ## Deux voies distinctes sur `experimental`
 
 | Voie | Environnement GitHub | Objectif | Intégration Home Assistant |
