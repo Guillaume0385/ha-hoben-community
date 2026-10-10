@@ -23,8 +23,6 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from scripts.boundary_public_timeline import safe_timeline
-
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "Guillaume0385/ha-hoben-community"
 WORKFLOW = (
@@ -71,6 +69,45 @@ COMPARISON = {
     "h2_compatible_h1_inconclusive",
     "insufficient_data",
 }
+PHASE_EXIT_CODES = {
+    "context": 10,
+    "identity": 11,
+    "dns_tls": 12,
+    "open": 13,
+    "collect": 14,
+    "projection": 15,
+    "cleanup": 16,
+}
+
+
+class PhaseDiagnostic:
+    """Remember only fixed phases, never exceptions or private input.
+
+    The first observed failure survives partial-report projection and cleanup.
+    A successful overall run still returns zero. The isolated CLI uses a fixed
+    nonzero exit code to pass the phase to the parent, with no child output.
+    """
+
+    def __init__(self) -> None:
+        self.current = "context"
+        self.failure: str | None = None
+        self.cleanup_failed = False
+
+    def __call__(self, phase: str, failed: bool = False) -> None:
+        require(type(phase) is str and phase in PHASE_EXIT_CODES)
+        require(type(failed) is bool)
+        self.current = phase
+        if failed and phase == "cleanup":
+            self.cleanup_failed = True
+        if failed and self.failure is None:
+            self.failure = phase
+
+
+class SafeParser(argparse.ArgumentParser):
+    """Refuse malformed arguments without echoing their potentially private text."""
+
+    def error(self, message: str) -> None:
+        raise ValueError("Invalid experimental arguments")
 
 
 def require(fact: bool) -> None:
@@ -279,6 +316,11 @@ def category(value, allowed):
 
 def safe_report(report: dict, *, interrupted: bool) -> dict:
     """Project only fixed numeric/categorical fields; never publish free text."""
+    # The CLI is launched with python -I: repository imports are possible only
+    # after context() accepted the checkout and collect() installed its path.
+    # In particular, dry-run must not import a repository module at startup.
+    from scripts.boundary_public_timeline import safe_timeline
+
     sessions = report["sessions"]
     require(
         report["boundary_proven"] is False
@@ -372,14 +414,21 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
     }
 
 
-def collect(private: Path) -> tuple[dict, bool]:
-    # Only after CMS preflight. The reviewed #55 collector keeps its original
-    # dispatch-only CLI; call its fixed library without forging that context.
+def collect(
+    private: Path, *, diagnostic: PhaseDiagnostic | None = None
+) -> tuple[dict, bool]:
+    # Only after local context/token checks and the workflow's admission/recheck.
+    # The reviewed #55 collector retains its dispatch-only CLI; call the fixed
+    # library without forging that context or exporting any raw capture.
+    diagnostic = diagnostic or PhaseDiagnostic()
+    diagnostic("context")
     sys.path.insert(0, str(ROOT))
     probe = importlib.import_module("scripts.probe_opened_client_boundary")
+    diagnostic("identity")
     user = probe.normalize_user_guid(os.environ.pop("HOBEN_USER_GUID"))
     device = os.environ.pop("HOBEN_DEVICE_GUID", "") or probe.INITIAL_DEVICE_GUID
     require(len(device) == 32 and device.isascii())
+    diagnostic("collect")
     try:
         return asyncio.run(
             probe.campaign_with_signals(
@@ -388,11 +437,14 @@ def collect(private: Path) -> tuple[dict, bool]:
                 seconds=90,
                 user_guid=user,
                 device_guid=device,
+                diagnostic=diagnostic,
             )
         ), False
     except (KeyboardInterrupt, asyncio.CancelledError, Exception):
-        # The collector saves partial analysis in finally before propagating
-        # cancellation. Private journals/bytes are still sealed whenever possible.
+        diagnostic(diagnostic.current, True)
+        # Preserve the failure phase while reading the saved partial analysis.
+        # Its public projection is independently validated; raw files stay private.
+        diagnostic("projection")
         sessions = [
             json.loads(p.read_text())
             for p in sorted(private.glob("session-*/analysis.json"))
@@ -400,8 +452,10 @@ def collect(private: Path) -> tuple[dict, bool]:
         return {"boundary_proven": False, "sessions": sessions}, True
 
 
-def run(phase: str) -> int:
+def run(phase: str, *, diagnostic: PhaseDiagnostic | None = None) -> int:
+    diagnostic = diagnostic or PhaseDiagnostic()
     private = None
+    result = 1
     try:
         policy, storage = context(phase)
         # The collector needs no GitHub token. Never inherit one from an action.
@@ -449,28 +503,45 @@ def run(phase: str) -> int:
                 contextlib.redirect_stdout(quiet),
                 contextlib.redirect_stderr(quiet),
             ):
-                raw_report, interrupted = collect(private)
+                raw_report, interrupted = collect(private, diagnostic=diagnostic)
+            diagnostic("projection")
             # Preserve full reviewed annotations privately, never as public JSON.
             private_json(private / "request-report.json", raw_report)
             # Raw capture and internal journals never leave private storage.
             report = safe_report(raw_report, interrupted=interrupted)
             interrupted = report["result"] == "failure"
+        diagnostic("projection")
         private_json(exports / "report.json", report)
-        return 1 if interrupted else 0
+        result = 1 if interrupted or diagnostic.cleanup_failed else 0
+        if interrupted:
+            diagnostic("collect", True)
     except (Exception, KeyboardInterrupt, asyncio.CancelledError):
-        # A failed projection or encryption never leaves an anonymous-looking
-        # arbitrary JSON or a plaintext fallback in the export directory.
-        return 1
+        diagnostic(diagnostic.current, True)
+        # No arbitrary JSON or plaintext fallback on a refused projection.
     finally:
         if private is not None:
-            shutil.rmtree(private)
+            diagnostic("cleanup")
+            try:
+                shutil.rmtree(private)
+            except (Exception, KeyboardInterrupt):
+                diagnostic("cleanup", True)
+                result = 1
+    return result
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+def main(argv: list[str] | None = None) -> int:
+    parser = SafeParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("phase", choices=("dry-run", "live"))
-    args = parser.parse_args()
-    return run(args.phase)
+    diagnostic = PhaseDiagnostic()
+    try:
+        args = parser.parse_args(argv)
+        result = run(args.phase, diagnostic=diagnostic)
+    except (Exception, KeyboardInterrupt, asyncio.CancelledError):
+        diagnostic(diagnostic.current, True)
+        result = 1
+    return (
+        0 if result == 0 else PHASE_EXIT_CODES[diagnostic.failure or diagnostic.current]
+    )
 
 
 if __name__ == "__main__":

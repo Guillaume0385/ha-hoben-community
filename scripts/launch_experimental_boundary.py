@@ -29,6 +29,17 @@ ALLOWED = (
     "HOBEN_DEVICE_GUID",
 )
 ROOT = Path(__file__).resolve().parents[1]
+# Independent parent allowlist: no arbitrary stdout/stderr, file or exception
+# from the child is interpreted as a public diagnostic.
+CHILD_PHASES = {
+    10: "context",
+    11: "identity",
+    12: "dns_tls",
+    13: "open",
+    14: "collect",
+    15: "projection",
+    16: "cleanup",
+}
 
 
 def collector_environment(source: dict[str, str]) -> dict[str, str]:
@@ -41,6 +52,9 @@ def collector_environment(source: dict[str, str]) -> dict[str, str]:
 
 
 def main() -> int:
+    succeeded = False
+    phase = None
+    cleanup_failed = False
     try:
         candidate = ROOT.parent / "candidate"
         result = subprocess.run(
@@ -58,17 +72,33 @@ def main() -> int:
             check=False,
             timeout=30 * 60,
         )
-        return 0 if result.returncode == 0 else 1
+        succeeded = result.returncode == 0
+        phase = CHILD_PHASES.get(result.returncode)
     except (Exception, KeyboardInterrupt):
-        return 1
+        pass
     finally:
         # A subprocess timeout can kill it before its own cleanup. No plaintext
         # artifact is exported; remove its fixed private staging when possible.
-        storage = os.environ.get("RUNNER_TEMP")
-        if storage:
-            for private in Path(storage).glob("hoben-experimental-private-*"):
-                if private.is_dir() and not private.is_symlink():
-                    shutil.rmtree(private, ignore_errors=True)
+        try:
+            storage = os.environ.get("RUNNER_TEMP")
+            if storage:
+                for private in Path(storage).glob("hoben-experimental-private-*"):
+                    if private.is_dir() and not private.is_symlink():
+                        shutil.rmtree(private)
+        except (Exception, KeyboardInterrupt):
+            cleanup_failed = True
+    if cleanup_failed:
+        print("H1/H2 failed; phase=cleanup; phase_source=parent.")
+        return 1
+    if not succeeded:
+        if phase is None:
+            # Missing module, signal or timeout does not prove where collection
+            # stopped or whether a connection occurred. Do not invent a phase.
+            print("H1/H2 failed; phase=context; phase_source=unavailable.")
+        else:
+            print(f"H1/H2 failed; phase={phase}; phase_source=child_exit.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

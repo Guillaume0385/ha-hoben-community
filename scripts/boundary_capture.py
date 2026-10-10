@@ -170,6 +170,7 @@ async def collect_session(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable] = asyncio.sleep,
     waiter: Callable = wait_read,
+    diagnostic: Callable[[str, bool], None] | None = None,
 ) -> SessionOutcome:
     """One connection, no retry; H1 is passive from the first opening byte.
 
@@ -178,9 +179,17 @@ async def collect_session(
     batch's Ping candidates cause a Pong. An abandoned FFFF waiter terminates
     this session, so it can never satisfy a subsequent request.
     """
+
+    def mark(phase: str, failed: bool = False) -> None:
+        if diagnostic is not None:
+            diagnostic(phase, failed)
+
+    mark("context")
     if mode not in ("H1", "H2") or pause not in PAUSES or not 30 <= seconds <= 90:
         raise ValueError("Invalid experimental parameters")
     outcome = SessionOutcome(mode, pause, repetition)
+    stage = "dns_tls"
+    mark(stage)
     transport = transport_factory(connect_timeout=5, read_timeout=120, write_timeout=5)
     read_task = None
     prefix = bytearray()
@@ -232,6 +241,8 @@ async def collect_session(
 
     try:
         await transport.connect()
+        stage = "open"
+        mark(stage)
         await send(
             "open_client",
             encode_open_client(
@@ -390,6 +401,8 @@ async def collect_session(
                     break
                 outcome.assigned_identity = opened.device_guid
                 outcome.prefix_complete = True
+                stage = "collect"
+                mark(stage)
                 capture.event(
                     {
                         "kind": "opening_accepted",
@@ -485,6 +498,8 @@ async def collect_session(
                     await send("pong_h2", b"\x0b")
                     outcome.pongs_under_h2 += 1
     except TransportEOF:
+        if not outcome.prefix_complete or pending_since is not None:
+            mark(stage, True)
         outcome.stop = (
             "pending_response_eof" if pending_since is not None else "peer_eof"
         )
@@ -497,12 +512,23 @@ async def collect_session(
             else "opening_timeout"
         )
     except asyncio.CancelledError:
+        mark(stage, True)
         outcome.stop = "cancelled"
         raise
     except Exception:
+        mark(stage, True)
         # No arbitrary exception, payload or traceback enters public output.
         outcome.stop = "transport_or_capture_error"
     finally:
+        # Classify explicit opening/refusal/timeout stops too, without changing
+        # the campaign's existing stop/retry policy or inferring packet bounds.
+        if (
+            not outcome.prefix_complete
+            or outcome.stop not in ("observation_budget", "peer_eof")
+            or outcome.emission_stop not in (None, "terminal_close_h2")
+        ):
+            mark(stage, True)
+        mark("cleanup")
         if read_task is not None:
             read_task.cancel()
             await asyncio.gather(read_task, return_exceptions=True)
@@ -511,9 +537,14 @@ async def collect_session(
             await transport.close()
             capture.event({"kind": "close_complete", "at": clock()})
         except TransportError:
+            mark("cleanup", True)
             capture.event({"kind": "close_error", "at": clock()})
+        except (Exception, asyncio.CancelledError):
+            mark("cleanup", True)
+            raise
         finally:
             try:
+                mark("projection")
                 analysis = analyze_capture(
                     bytes(capture.data),
                     capture.reads,
@@ -555,7 +586,11 @@ async def collect_session(
                         capture.directory / "assigned-identity.json",
                         {"device_guid": outcome.assigned_identity},
                     )
+            except (Exception, asyncio.CancelledError):
+                mark("projection", True)
+                raise
             finally:
+                mark("cleanup")
                 capture.close()
     return outcome
 
@@ -569,8 +604,11 @@ async def run_campaign(
     seconds: float = 90,
     session_runner: Callable = collect_session,
     sleep: Callable = asyncio.sleep,
+    diagnostic: Callable[[str, bool], None] | None = None,
 ) -> dict:
     """Six sequential sessions per selected model; no reconnect or retry loop."""
+    if diagnostic is not None:
+        diagnostic("context", False)
     if mode not in ("H1", "H2", "both") or not 30 <= seconds <= 90:
         raise ValueError("Invalid campaign parameters")
     sessions = []
@@ -581,6 +619,8 @@ async def run_campaign(
     for selected in modes:
         for pause in PAUSES:
             for repetition in (1, 2):
+                if diagnostic is not None:
+                    diagnostic("collect", False)
                 if sessions:
                     await sleep(SESSION_SPACING)
                 capture = PrivateCapture(directory / f"session-{len(sessions) + 1:02d}")
@@ -592,6 +632,7 @@ async def run_campaign(
                     pause=pause,
                     repetition=repetition,
                     seconds=seconds,
+                    **({"diagnostic": diagnostic} if diagnostic is not None else {}),
                 )
                 sessions.append(outcome.report)
                 if outcome.assigned_identity is not None:
@@ -616,6 +657,8 @@ async def run_campaign(
                 break
         if stop_campaign:
             break
+    if diagnostic is not None:
+        diagnostic("projection", False)
     eligible = [s for s in sessions if s["opening_context"]["eligible"]]
     gaps = [
         t["h1"]["completion_gaps_seconds"]["median"]
