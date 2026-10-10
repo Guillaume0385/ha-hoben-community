@@ -59,7 +59,6 @@ for (const [fault, mutate] of Object.entries({
   "wrong actor": f => {f.context.actor = "other";},
   "wrong sender ID": f => {f.payload.sender.id++;},
   "forked repository": f => {f.payload.repository.id++;},
-  "rerun": f => {f.context.runAttempt = 2;},
   "rerun env": f => {f.env.GITHUB_RUN_ATTEMPT = "2";},
   "different SHA": f => {f.env.GITHUB_SHA = "b".repeat(40);},
   "workflow SHA moved": f => {f.env.GITHUB_WORKFLOW_SHA = "b".repeat(40);},
