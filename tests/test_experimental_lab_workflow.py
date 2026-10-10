@@ -69,6 +69,7 @@ def test_workflow_separates_admission_collection_and_publication():
         "HOBEN_USER_GUID",
         "HOBEN_DEVICE_GUID",
         "EXPERIMENTAL_APPROVED_SHA",
+        "EXPERIMENTAL_APPROVED_PR",
     }
     assert step["run"] == "python trusted/scripts/launch_experimental_boundary.py"
     uploads = [
@@ -86,6 +87,9 @@ def test_workflow_separates_admission_collection_and_publication():
     assert "hoben-experimental-ciphertext" not in text
     assert "recipient" not in text.lower()
     assert "candidate/scripts/probe" not in text
+    assert "-a${{ github.run_attempt }}" in WORKFLOW.read_text()
+    assert "github.triggering_actor" in jobs["dry-run"]["if"]
+    assert "pr" in jobs["admission"]["outputs"]
     assert "workflow_dispatch" not in workflow.get("on", workflow.get(True))
     assert "issues" not in workflow.get("on", workflow.get(True))
 
