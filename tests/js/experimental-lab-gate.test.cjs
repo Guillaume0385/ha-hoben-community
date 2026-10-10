@@ -441,6 +441,11 @@ function nativeRerun(a, number, includeApproval = true) {
 for (const attempt of [2, 3]) {
   test("native full rerun " + attempt + " admits new decision, reserves exactly once", async () => {
     const a = nativeRerun(setup(), attempt);
+    const proof = {number: attempt, beganAt: Date.parse("2026-10-09T08:12:00Z")};
+    assert.equal(require("../../.github/scripts/experimental-native-rerun.cjs")
+      .authorizeDecision({comments: a.comments, marker: gate.MARKER_V2,
+        scenario: "h1h2", candidateSha: head, ciId: 456, pr: a.pr,
+        mergeSha: sha, runId: a.context.runId, proof}).approval.run_attempt, attempt);
     assert.equal((await gate.verify(a)).status, "READY FOR ENVIRONMENT");
     assert.equal(a.writes, 1);
     assert.match([...a.refs.keys()][0], new RegExp("-run123-attempt" + attempt + "$"));
