@@ -4,11 +4,13 @@
 // recheck has read-only permissions, after GitHub's environment approval.
 const crypto = require("node:crypto");
 const push = require("./experimental-push-preflight.cjs");
+const rerun = require("./experimental-native-rerun.cjs");
 const policy = require("../config/hoben-experimental.json");
 const API = { owner: "Guillaume0385", repo: "ha-hoben-community" };
 const MANAGER_ID = 18246624;
 const REPO_ID = 1401398724;
 const MARKER = "<!-- hoben-experimental-approval:v1 -->";
+const MARKER_V2 = "<!-- hoben-experimental-approval:v2 -->";
 const FILE = ".github/workflows/hoben-experimental.yml";
 const SHA = /^[a-f0-9]{40}$/;
 const positive = n => Number.isSafeInteger(n) && n > 0;
@@ -33,6 +35,9 @@ const PUBLIC_REFUSALS = Object.freeze({
   concurrent_observation: "claim",
   claim_unverified: "claim",
   approval_unverified: "approval",
+  attempt_unverified: "provenance",
+  partial_rerun: "preflight",
+  decision_unverified: "decision",
 });
 function refusalCategory(error) {
   const reason = error instanceof Error ? error.message : null;
@@ -64,42 +69,70 @@ async function dryRun({ github, context, env = process.env }) {
   return result; // Secret-free: no identity, certificate, transport or network I/O.
 }
 
-async function successfulPreflight(github, context) {
-  const { data: run } = await github.rest.actions.getWorkflowRun({ ...API, run_id: context.runId });
-  need(run.id === context.runId && run.event === "push" && run.run_attempt === 1 &&
-    run.head_sha === context.sha && run.head_branch === "experimental" &&
-    run.actor?.login === "Guillaume0385" && run.actor.id === MANAGER_ID &&
-    sameRepo(run.repository) && sameRepo(run.head_repository) &&
-    workflowPath(run.path, FILE, ["refs/heads/experimental"]), "preflight_unverified");
+async function successfulPreflight(github, context, env, recheck) {
+  const attempt = Number(env.GITHUB_RUN_ATTEMPT);
+  if (attempt === 1) {
+    const { data: run } = await github.rest.actions.getWorkflowRun({ ...API, run_id: context.runId });
+    need(run.id === context.runId && run.event === "push" && run.run_attempt === 1 &&
+      run.head_sha === context.sha && run.head_branch === "experimental" &&
+      run.actor?.login === "Guillaume0385" && run.actor.id === MANAGER_ID &&
+      sameRepo(run.repository) && sameRepo(run.head_repository) &&
+      workflowPath(run.path, FILE, ["refs/heads/experimental"]), "preflight_unverified");
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+      { ...API, run_id: context.runId, filter: "latest", per_page: 100 });
+    const dry = jobs.filter(j => j.name === "dry-run");
+    need(dry.length === 1 && dry[0].head_sha === context.sha &&
+      dry[0].status === "completed" && dry[0].conclusion === "success", "preflight_unverified");
+    return {number: 1};
+  }
+  need(Number.isSafeInteger(attempt) && attempt >= 2 && attempt <= 50,
+    "attempt_unverified");
+  const {data: run} = await github.rest.actions.getWorkflowRun({...API, run_id: context.runId});
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
-    { ...API, run_id: context.runId, filter: "latest", per_page: 100 });
-  const dry = jobs.filter(j => j.name === "dry-run");
-  need(dry.length === 1 && dry[0].head_sha === context.sha &&
-    dry[0].status === "completed" && dry[0].conclusion === "success", "preflight_unverified");
+    {...API, run_id: context.runId, filter: "latest", per_page: 100});
+  const previousJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
+    {...API, run_id: context.runId, attempt_number: attempt - 1, per_page: 100});
+  return rerun.authorizeAttempt({
+    context, env, run, jobs, previousJobs, workflow: push.LAB_WORKFLOW,
+    phase: recheck ? "recheck" : "admission"
+  });
 }
 
-async function managerDecision(github, pr) {
-  // Eligibility is based on the reviewed PR, not a global Issue #54 label.
-  // A PR of any scope is eligible only with exact authenticated MANAGER approval.
+async function managerDecision(github, pr, context, proof) {
   need(SHA.test(pr.head?.sha) && positive(pr.number) &&
     typeof pr.head.ref === "string" && pr.head.ref.length > 0,
   "manager_decision_unverified");
   const comments = await github.paginate(github.rest.issues.listComments,
     { ...API, issue_number: pr.number, per_page: 100 });
+  // Keep original pre-merge v1 binding for PR/HEAD/CI, even on repeats.
+  // Reject a malformed/duplicate original decision, not only the new v2.
   const choices = comments.filter(c => c.user?.login === "Guillaume0385" &&
     c.user.id === MANAGER_ID && c.user.type === "User" && c.body?.startsWith(MARKER))
-    .map(comment => ({ comment, approval: JSON.parse(comment.body.slice(MARKER.length).trim()) }))
-    .filter(d => d.approval?.candidate_sha === pr.head.sha);
+    .map(comment => {
+      let approval = null;
+      try { approval = JSON.parse(comment.body.slice(MARKER.length).trim()); }
+      catch (_) {}
+      return {comment, approval};
+    }).filter(d => d.approval?.candidate_sha === pr.head.sha);
   need(choices.length === 1, "manager_decision_unverified");
   const { comment, approval } = choices[0];
-  need(Object.keys(approval).sort().join() ===
+  need(approval && !Array.isArray(approval) && Object.keys(approval).sort().join() ===
     ["schema", "scenario", "candidate_sha", "ci_run_id"].sort().join() &&
-    approval.schema === 1 && approval.scenario === "h1h2" && approval.candidate_sha === pr.head.sha &&
-    positive(approval.ci_run_id) &&
+    approval.schema === 1 && approval.scenario === "h1h2" &&
+    approval.candidate_sha === pr.head.sha && positive(approval.ci_run_id) &&
     positive(comment.id) && comment.created_at === comment.updated_at &&
     Number.isFinite(Date.parse(comment.created_at)) &&
-    Date.parse(comment.created_at) <= Date.parse(pr.merged_at), "manager_decision_unverified");
-  return { approval, comment };
+    Date.parse(comment.created_at) <= Date.parse(pr.merged_at),
+  "manager_decision_unverified");
+  if (proof.number === 1) return {approval, comment};
+  try {
+    const current = rerun.authorizeDecision({
+      comments, marker: MARKER_V2, scenario: "h1h2",
+      candidateSha: pr.head.sha, ciId: approval.ci_run_id,
+      pr, mergeSha: context.sha, runId: context.runId, proof
+    });
+    return current;
+  } catch (_) { throw Error("manager_decision_unverified"); }
 }
 
 async function reviewsAndCI(github, pr, decision) {
@@ -228,7 +261,7 @@ async function noOtherObservation(github, context) {
   }
 }
 
-async function actualApproval(github, context, environment) {
+async function actualApproval(github, context, environment, proof) {
   const { data: history } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
     { ...API, run_id: context.runId });
   need(Array.isArray(history), "approval_unverified");
@@ -236,12 +269,14 @@ async function actualApproval(github, context, environment) {
     e.id === environment.id && e.name === policy.environment));
   need(relevant.length > 0 && relevant.every(h => h.state === "approved" &&
     h.user?.type === "User" && h.user.id !== MANAGER_ID &&
+    (proof.number === 1 || (Number.isFinite(Date.parse(h.created_at)) &&
+      Date.parse(h.created_at) >= proof.beganAt)) &&
     environment.reviewers.some(r => r.id === h.user.id && r.login === h.user.login)), "approval_unverified");
 }
 
 async function verify({ github, context, env = process.env, recheck = false }) {
   const merged = await mergedPush(github, context, env);
-  await successfulPreflight(github, context);
+  const proof = await successfulPreflight(github, context, env, recheck);
   const { data: pr } = await github.rest.pulls.get({ ...API, pull_number: merged.pr });
   need(pr.number === merged.pr && pr.merged === true && pr.state === "closed" &&
     pr.merge_commit_sha === context.sha && pr.merged_by?.login === "Guillaume0385" &&
@@ -252,12 +287,15 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   need(candidate.sha === pr.head.sha && mergedCommit.sha === context.sha &&
     SHA.test(candidate.tree?.sha) && candidate.tree.sha === mergedCommit.tree?.sha,
   "merged_tree_unreviewed");
-  const decision = await managerDecision(github, pr);
+  const decision = await managerDecision(github, pr, context, proof);
   await reviewsAndCI(github, pr, decision);
   const environment = await environmentPolicy(github);
   await noOtherObservation(github, context);
-  const name = "hoben-experimental-h1h2-" + context.sha;
-  const claim = { schema: 1, scenario: "h1h2", sha: context.sha, run_id: context.runId,
+  const name = proof.number === 1 ? "hoben-experimental-h1h2-" + context.sha :
+    rerun.claimName("h1h2", context.sha, context.runId, proof.number);
+  const claim = { schema: proof.number === 1 ? 1 : 2, scenario: "h1h2",
+    sha: context.sha, run_id: context.runId,
+    ...(proof.number > 1 ? {run_attempt: proof.number} : {}),
     pr: pr.number, candidate_sha: pr.head.sha, decision_id: decision.comment.id,
     decision_digest: digest({ id: decision.comment.id, body: decision.comment.body,
       created_at: decision.comment.created_at, updated_at: decision.comment.updated_at,
@@ -269,7 +307,7 @@ async function verify({ github, context, env = process.env, recheck = false }) {
     const { data: tag } = await github.rest.git.getTag({ ...API, tag_sha: reference.object.sha });
     need(tag.tag === name && tag.object?.type === "commit" && tag.object.sha === context.sha &&
       digest(JSON.parse(tag.message)) === digest(claim), "claim_unverified");
-    if (environment.approvalRequired) await actualApproval(github, context, environment);
+    if (environment.approvalRequired) await actualApproval(github, context, environment, proof);
   } else {
     // createRef is atomic. An existing reservation (including cancellation or
     // failure) cannot be replaced or retried. No secret is present in this job.
@@ -281,4 +319,5 @@ async function verify({ github, context, env = process.env, recheck = false }) {
     status: recheck ? "approved" : environment.approvalRequired ? "PENDING APPROVAL" : "READY FOR ENVIRONMENT" };
 }
 
-module.exports = { dryRun, verify, refusalCategory, WORKFLOW: push.LAB_WORKFLOW, MARKER, workflowPath };
+module.exports = { dryRun, verify, refusalCategory,
+  WORKFLOW: push.LAB_WORKFLOW, MARKER, MARKER_V2, workflowPath };
