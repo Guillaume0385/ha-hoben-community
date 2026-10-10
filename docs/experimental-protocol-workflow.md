@@ -246,6 +246,51 @@ Une projection refusée ou absente n'a aucun repli vers les fichiers privés.
 L'installation du chemin de #67 et les observations réelles restent à constater
 par MANAGER après revue et fusion. Aucun run Hoben par DEV n'est revendiqué.
 
+### Diagnostic expurgé du lancement H1/H2 — suite de #54
+
+Le lanceur conserve `python -I`, l'environnement à variables allowlistées et
+`stdout/stderr` de l'enfant vers `/dev/null`. Il ne lit aucun message d'exception,
+fichier de diagnostic, sortie RX ou texte libre de l'enfant. En cas d'échec,
+il traduit uniquement un code de sortie fermé en une ligne fixe :
+`H1/H2 failed; phase=<phase>; phase_source=child_exit.`
+
+| Code enfant | Phase | Portée du diagnostic |
+| --- | --- | --- |
+| 10 | `context` | Arguments, provenance/checkouts, variables interdites, stockage ou chargement du module de laboratoire |
+| 11 | `identity` | Identité absente ou invalide, avant appel de campagne ; DeviceGuid absent/vide utilise les 32 zéros déjà implémentés |
+| 12 | `dns_tls` | Construction/connexion du transport TLS vérifié ; sous-cause DNS/TLS non publiée |
+| 13 | `open` | Émission OpenClient et réception du préfixe accepté, rejet ou timeout d'ouverture |
+| 14 | `collect` | Réception/lectures post-ouverture, interruption ou campagne incomplète |
+| 15 | `projection` | Analyse/chronologie, projection allowlistée ou écriture du seul rapport |
+| 16 | `cleanup` | Fermeture/nettoyage ; cet échec ne peut produire une réussite de collecte |
+
+La première phase d'échec observée reste mémorisée pendant la projection du
+rapport partiel et le nettoyage. Un problème récupéré ne transforme pas à lui
+seul une campagne complète en échec ; un nettoyage défaillant refuse le succès.
+Ces catégories décrivent l'exécution du code, jamais une frontière de message
+confirmée, un résultat de protocole ou une autorisation de collecte.
+
+Un code inconnu, signal, timeout du sous-processus ou impossibilité de lancement
+produit `phase=context; phase_source=unavailable`. Cette ligne signifie
+**phase enfant inconnue**, sans preuve sur l'existence ou le nombre de connexions.
+Un échec du nettoyage supplémentaire par le parent produit seulement
+`phase=cleanup; phase_source=parent`. Le lanceur sort avec 1 dans tous ces cas,
+même si l'enfant avait renvoyé 0. Aucune trace, identité, valeur domestique ou
+capture n'est ajoutée au rapport ou aux logs ; les validateurs Python/Node,
+l'unique upload de `report.json` et tous les gates restent applicables.
+
+**Régression reproduite hors ligne :** l'ancien import de
+`scripts.boundary_public_timeline` au démarrage échouait avec `python -I` avant
+les contrôles de contexte. Il est déplacé dans la projection, après validation
+du checkout et installation explicite de son chemin par `collect()`. Le vrai
+CLI isolé est testé avec deux checkouts Git locaux et un contexte push synthétique,
+sans secret ni réseau ; le vrai lanceur doit aussi transmettre les refus de
+contexte et d'identité sans reprendre les sorties privées.
+Cette reproduction ne prouve pas la cause interne des anciens runs silencieux
+#37993325566 ou #38029711686. Leur phase exacte reste inconnue. MANAGER vérifie
+le correctif après revue, CI et fusion d'un nouveau SHA vers `experimental` ;
+aucune relance d'un run/SHA consommé ni expérience Hoben n'est effectuée par DEV.
+
 ### Historique CMS — hors procédure des nouveaux essais
 
 Les anciens exports utilisaient AES-256-GCM et RSA-OAEP/SHA256 avec destinataire

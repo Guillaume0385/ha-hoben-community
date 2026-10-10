@@ -148,6 +148,7 @@ def fake_collector(monkeypatch, runner, *, mode="complete", count=12):
     imports, calls = [], []
 
     async def campaign(private, **kwargs):
+        assert isinstance(kwargs.pop("diagnostic"), entry.PhaseDiagnostic)
         calls.append(kwargs)
         assert not (private / "recipient.pem").exists()
         assert not list(private.glob("preflight*"))
@@ -288,6 +289,84 @@ def test_absent_secret_refuses_before_any_campaign_call(runner, monkeypatch):
     assert not (runner.exports / "captures.cms").exists()
     assert not (runner.exports / "report.json").exists()
     assert_private_cleanup(runner)
+
+
+@pytest.mark.parametrize("device", [None, "", "0" * 32])
+def test_absent_or_initial_device_identity_uses_the_existing_zero_identity(
+    runner, monkeypatch, device
+):
+    live(runner, monkeypatch)
+    if device is None:
+        monkeypatch.delenv("HOBEN_DEVICE_GUID")
+    else:
+        monkeypatch.setenv("HOBEN_DEVICE_GUID", device)
+    _, calls = fake_collector(monkeypatch, runner)
+    assert entry.main(["live"]) == 0
+    assert len(calls) == 1 and calls[0]["device_guid"] == "0" * 32
+    assert_private_cleanup(runner)
+
+
+@pytest.mark.parametrize("device", ["short", "é" * 32])
+def test_invalid_device_identity_has_a_fixed_phase_and_no_campaign(
+    runner, monkeypatch, capsys, device
+):
+    live(runner, monkeypatch)
+    monkeypatch.setenv("HOBEN_DEVICE_GUID", device)
+    _, calls = fake_collector(monkeypatch, runner)
+    assert entry.main(["live"]) == 11
+    assert calls == []
+    assert capsys.readouterr() == ("", "")
+    assert_private_cleanup(runner)
+
+
+@pytest.mark.parametrize("failure", ["context", "module", "identity", "projection"])
+def test_entry_phase_survives_private_exceptions_and_cleanup(
+    runner, monkeypatch, capsys, failure
+):
+    live(runner, monkeypatch)
+    imports, calls = fake_collector(monkeypatch, runner)
+
+    def refused(*args, **kwargs):
+        raise RuntimeError(USER + RAW.decode())
+
+    if failure == "context":
+        monkeypatch.setattr(entry, "context", refused)
+    elif failure == "module":
+        monkeypatch.setattr(entry.importlib, "import_module", refused)
+    elif failure == "identity":
+        monkeypatch.delenv("HOBEN_USER_GUID")
+    else:
+        monkeypatch.setattr(entry, "safe_report", refused)
+    assert (
+        entry.main(["live"])
+        == {
+            "context": 10,
+            "module": 10,
+            "identity": 11,
+            "projection": 15,
+        }[failure]
+    )
+    assert capsys.readouterr() == ("", "")
+    assert len(calls) == (1 if failure == "projection" else 0)
+    assert len(imports) == (1 if failure in ("identity", "projection") else 0)
+    assert not (runner.exports / "report.json").exists()
+    assert_private_cleanup(runner)
+
+
+def test_entry_cleanup_failure_is_nonzero_without_exception_output(
+    runner, monkeypatch, capsys
+):
+    live(runner, monkeypatch)
+    fake_collector(monkeypatch, runner)
+
+    def refused(path):
+        raise RuntimeError(USER + RAW.decode())
+
+    monkeypatch.setattr(entry.shutil, "rmtree", refused)
+    assert entry.main(["live"]) == 16
+    assert capsys.readouterr() == ("", "")
+    # The parent's fixed-prefix cleanup is a second attempt, never a raw upload.
+    assert len(list(runner.storage.glob("hoben-experimental-private-*"))) == 1
 
 
 def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
