@@ -284,6 +284,7 @@ def context(phase: str) -> tuple[dict, Path]:
         policy["schema"] == 1
         and policy["scenario"] == "h1h2"
         and policy["environment"] == "hoben-experimental"
+        and re.fullmatch(r"[1-9][0-9]{0,8}", os.environ.get("EXPERIMENTAL_APPROVED_PR", "")) is not None
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     require(
@@ -407,6 +408,8 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
         "experimental_sha": os.environ["GITHUB_SHA"],
         "candidate_sha": os.environ["EXPERIMENTAL_APPROVED_SHA"],
         "run_id": int(os.environ["GITHUB_RUN_ID"]),
+        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
         "boundary_proven": False,
         "result": "failure" if interrupted else "inconclusive",
         "reason": "collection_interrupted" if interrupted else "hypotheses_unproven",
@@ -497,6 +500,8 @@ def run(phase: str, *, diagnostic: PhaseDiagnostic | None = None) -> int:
                 "experimental_sha": os.environ["GITHUB_SHA"],
                 "candidate_sha": policy["candidate_sha"],
                 "run_id": int(os.environ["GITHUB_RUN_ID"]),
+        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
                 "executed_sessions": 0,
             }
             interrupted = False
