@@ -960,3 +960,28 @@ A feature is complete only when:
 - failure/disconnection paths are handled;
 - HACS/Home Assistant validation still passes;
 - code is documented well enough for an external contributor to maintain it.
+
+### Issue #54 — 2026-10-10, repeatable campaigns and PR scope
+
+The owner/MANAGER updated the experimental policy on 10 October 2026. CODEX
+DEV must work through authorized Issues, with PRs targeting `experimental`
+exclusively; **never** create a development PR targeting `main` without a
+new explicit owner request. New authorized Hoben campaigns must be separate
+by immutable `(SHA, scenario, campaign_id)` and require MANAGER's own
+authenticated, exact-PR, exact-CI decision and any required GitHub environment
+approval. A previous campaign, mere push, PR mention, green CI, review,
+or rerun is not a new decision. The intended eventual eligible PR is any
+same-repository PR targeting `experimental`, not just `Refs #54`,
+including documentation-only PRs when specifically approved; no gate
+relaxation is authorized without corresponding offline refusal coverage.
+
+Until a **real** event is demonstrated, the secretless
+`experimental-campaign-trigger-proof.yml` is merely a trigger candidate.
+It checks MANAGER-created `hoben-campaign-proof/<16-32 lowercase hex>`
+branches pointing to unchanged protected `experimental` HEAD, never
+launches Hoben, exports an artifact, accesses an environment or a secret,
+or grants campaign approval. MANAGER alone may perform the proof creation
+after merge/review. Failure or absence of the expected push is `NOT RUN`.
+Future secret-bearing workflow integration requires separately approved
+development, CI, MANAGER review, and operational gate evidence.
+
