@@ -128,9 +128,16 @@ jobs:
         name: Validate allowlisted report before export
         if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          APPROVED_PR: ${{ steps.recheck.outputs.pr }}
         with:
           script: |
-            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core, context});
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core, context: proof});
       - name: Export sanitized report only
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
@@ -168,8 +175,13 @@ jobs:
           script: |
             let success = false;
             try {
+              const proof = {
+                sha: context.sha, runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+                prNumber: Number(process.env.APPROVED_PR)
+              };
               const report = require('./.github/scripts/experimental-live-report.cjs')
-                .readReport('public-report/report.json', context);
+                .readReport('public-report/report.json', proof);
               success = process.env.COLLECTION_RESULT === 'success' && report.status === 'success';
             } catch (_) {}
             const publicPR = Number(process.env.APPROVED_PR);
