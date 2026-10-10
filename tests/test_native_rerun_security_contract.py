@@ -1,7 +1,7 @@
-"""Fail-closed regression contract while #54 native rerun gates are unimplemented.
+"""Offline fail-closed regression contract for #54 native rerun integration.
 
-This deliberately DOES NOT simulate manager approval or enable live access.
-It prevents an accidental secret-bearing change from being reported as ready.
+Synthetic fixtures do not grant a real MANAGER decision or environment review.
+A green CI never proves that GitHub rerun API evidence is available in production.
 """
 
 import shutil
