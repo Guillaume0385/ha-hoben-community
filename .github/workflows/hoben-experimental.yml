@@ -160,6 +160,7 @@ jobs:
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           COLLECTION_RESULT: ${{ needs.collect.result }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
         with:
           script: |
             const exports = require('./.github/scripts/experimental-exports.cjs');
@@ -175,4 +176,17 @@ jobs:
               description: success ? 'Bounded collection completed; hypotheses unproven' : 'NOT RUN or collection/export failed'
             });
             await core.summary.addRaw(success ? 'Collection completed; boundary remains unproven.' : 'NOT RUN or collection/export failed; inspect the original run.').write();
+            const pr = Number(process.env.APPROVED_PR);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            if (!Number.isSafeInteger(pr) || pr <= 0 ||
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
+              core.setFailed('NOT RUN: missing public attempt correlation.');
+            } else {
+              await core.summary.addRaw(
+                'Public correlation: scenario=h1h2; run_id=' + context.runId +
+                '; run_attempt=' + attempt + '; pr=' + pr +
+                '; sha=' + context.sha + '; status=' + (success ? 'completed' : 'NOT RUN') + '.'
+              ).write();
+            }
+
             if (!success) core.setFailed('Experimental collection did not complete safely.');
