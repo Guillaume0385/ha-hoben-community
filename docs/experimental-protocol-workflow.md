@@ -85,11 +85,25 @@ Le runner réel doit retourner `run_attempt`, les jobs courants avec
 et le `triggering_actor` authentifié ; en l'absence d'un champ, l'admission
 échoue fermée. Une répétition après échec antérieur du dry-run ne peut pas
 être distinguée sûrement d'un « Re-run failed jobs » et est donc refusée,
-y compris si le propriétaire voulait faire une relance complète. De même,
-une politique de reviewers réelle nécessite une approbation **fraîche**
-dotée d'un `created_at` au moins égal au démarrage du dry-run courant.
-Sans cette preuve fournie par l'API, `NOT RUN`.
-Un succès CI ne vaut ni une telle approbation ni un test Hoben réel.
+y compris si le propriétaire voulait faire une relance complète. De même, lorsqu'une politique GitHub impose un reviewer, le
+recheck exige une preuve d'approbation **fraîche et propre à la tentative**.
+**Blocage P0 constaté lors de la revue MANAGER :** l'exemple public de
+`GET /actions/runs/{run_id}/approvals` n'expose pas de `created_at` à
+la racine de la décision ; le `created_at` des objets `environments[]`
+date l'environnement et **ne peut pas servir** d'horodatage de revue.
+Les tests de schéma réel vérifient donc `NOT RUN` quand aucune preuve de
+fraîcheur exploitable n'est fournie. En présence de reviewers requis,
+la compatibilité d'un rerun N>1 n'est **pas validée opérationnellement** ;
+ne pas prétendre qu'une date d'environnement, un commentaire ou un ancien
+approval suffit. L'absence de preuve attestée par l'API bloque tout accès
+aux secrets. Un succès CI ne vaut ni cette preuve ni un test Hoben réel.
+
+Les JSON publics des deux scénarios portent `scenario`, `merge_sha`,
+`pr_number`, `run_id`, `run_attempt`. Ils sont revérifiés contre le
+SHA/run fournis par Actions et le numéro de PR issu du recheck MANAGER avant
+upload, puis une deuxième fois dans le job résultat. Une substitution d'une
+autre tentative ou PR est rejetée, sans publier de GUID, registres, octets RX
+ou données domestiques.
 
 **Limite de livraison :** ne jamais fusionner PR #75 sans l'accord
 supplémentaire explicite du propriétaire. Aucun test live n'est exécuté
