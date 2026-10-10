@@ -163,6 +163,7 @@ jobs:
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           COLLECTION_RESULT: ${{ needs.collect.result }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
         with:
           script: |
             let success = false;
@@ -182,4 +183,17 @@ jobs:
             await core.summary.addRaw(success
               ? 'Read-only one-shot HA parity completed; persistent session NOT TESTED.'
               : 'NOT RUN or HA parity failed; inspect sanitized report.').write();
+            const pr = Number(process.env.APPROVED_PR);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            if (!Number.isSafeInteger(pr) || pr <= 0 ||
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
+              core.setFailed('NOT RUN: missing public attempt correlation.');
+            } else {
+              await core.summary.addRaw(
+                'Public correlation: scenario=ha-parity; run_id=' + context.runId +
+                '; run_attempt=' + attempt + '; pr=' + pr +
+                '; sha=' + context.sha + '; status=' + (success ? 'completed' : 'NOT RUN') + '.'
+              ).write();
+            }
+
             if (!success) core.setFailed('HA parity observation failed or was incomplete.');
