@@ -19,8 +19,6 @@ RECIPIENT_SHA256 = "f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab
 POLICY = {
     "schema": 1,
     "scenario": "h1h2",
-    "tracking_issue": 54,
-    "tracking_issue_id": 5768789242,
     "environment": "hoben-experimental",
     "candidate_sha": "a" * 40,
 }
