@@ -1698,3 +1698,44 @@ l'Osmose de référence (§8). Les valeurs privées n'ont pas été publiées ; 
 champs partiels et situations non observées restent inconnus. Cette validation,
 comme la réutilisation observée du DeviceGuid, ne prouve pas un support universel
 de tous les modèles Hoben. Une première association avec code reste à valider.
+
+---
+
+## Journal de vérification H1/H2 sur `experimental` (sans inférence protocolaire)
+
+Cette section conserve des preuves **d'exécution et d'absence de mesure**, non des
+trames ni des conclusions déduites du seul état d'une Action. Les confirmations
+statiques ou dynamiques documentées ailleurs restent distinctes. Une lecture
+TLS ne constitue pas en soi une frontière de message.
+
+<!-- exp-run-37993325566 -->
+### 2026-10-09, 23:25 Europe/Paris — campagne #37993325566
+
+- **Identité observée :** workflow
+  [Hoben experimental (MANAGER) #37993325566](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37993325566),
+  événement `push` sur `experimental`, SHA exact
+  `05420f38c8b115646a91a8718a00d387066bc4b6`,
+  tentative initiale, conclusion GitHub `failure`.
+- **OBSERVÉ (orchestration GitHub) :** `dry-run=success`,
+  `admission=success`, `collect=failure`, `result=failure`.
+  Dans `collect`, la vérification SHA/claim/policy a réussi ; le processus
+  `launch_experimental_boundary.py` s'est terminé avec le code 1 sans
+  diagnostic de phase public. La validation des exports a refusé le
+  ciphertext **et** le rapport public. Aucun artefact de ce run n'a été
+  publié (contrôle de la liste des artefacts).
+- **OBSERVÉ (données disponibles) :** zéro session H1/H2 **attestée par
+  un rapport public**. Le nombre de sessions effectivement exécutées ou
+  ouvertes sur le réseau est **INCONNU** : aucune chronologie par `read()`,
+  aucun offset ni résultat des modèles H1/H2 n'est disponible pour ce run.
+- **À VALIDER :** déterminer la phase et la cause de l'échec par un
+  diagnostic de catégories fixes, expurgé, testé hors ligne ; effectuer une
+  nouvelle campagne uniquement sur un **nouveau SHA fusionné et autorisé**
+  avec ses propres contrôles GitHub. Ne pas réexécuter ce run consommé.
+- **INCONNU :** cause racine (prérequis, lancement, collecte, projection,
+  scellement CMS historique ou autre), éventuelle connexion TLS, nombre
+  effectif de sessions, contenu RX, frontières d'`OpenedClient`, H1/H2,
+  Ping/Pong, lectures V4 et états de communication. Aucun résultat de protocole
+  nouveau n'est confirmé, contredit ou invalidé par cet échec.
+
+Ce relevé ne dévoile aucun identifiant, registre, octet RX ou donnée domestique.
+Il ne modifie pas les sections de protocole CONFIRMÉ / À VALIDER.
