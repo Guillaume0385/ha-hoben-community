@@ -47,7 +47,7 @@ for (const attempt of [1, 2, 3]) {
   }
 }
 
-for (const [name, mutation] of Object.entries({
+for (let [name, mutation] of Object.entries({
   "wrong SHA": a => {a.env.GITHUB_SHA = candidateSha;},
   "wrong run id": a => {a.run.id++;},
   "wrong run attempt": a => {a.run.run_attempt = 1;},
