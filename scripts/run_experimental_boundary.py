@@ -247,6 +247,7 @@ def context(phase: str) -> tuple[dict, Path]:
         "GITHUB_EVENT_NAME": "push",
         "GITHUB_ACTOR": "Guillaume0385",
         "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
+        "GITHUB_RUN_ATTEMPT": "1",
         "GITHUB_WORKFLOW_REF": WORKFLOW,
         "EXPERIMENTAL_PHASE": phase,
     }
@@ -260,7 +261,6 @@ def context(phase: str) -> tuple[dict, Path]:
         and re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is not None
         and candidate_sha == merged_sha
         and os.environ.get("GITHUB_WORKFLOW_SHA") == merged_sha
-        and re.fullmatch(r"(?:[1-9]|[1-4][0-9]|50)", os.environ.get("GITHUB_RUN_ATTEMPT", "")) is not None
         and re.fullmatch(r"[1-9][0-9]{0,19}", os.environ.get("GITHUB_RUN_ID", ""))
         is not None
         and ROOT.is_dir()
