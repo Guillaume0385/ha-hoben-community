@@ -10,6 +10,18 @@
 
 ## Campagnes répétées — décision propriétaire du 10 octobre 2026
 
+**État de la PR #75 après la revue du 10 octobre : NON LIVRÉ / NOT RUN.**
+Ce qui suit est le **contrat cible** imposé par le propriétaire, pas une
+description des gates installés. Les fichiers actuels
+`experimental-lab-gate.cjs`, `experimental-live-gate.cjs` et les workflows
+secrets restent inchangés ; à ce stade ils refusent toujours les
+`run_attempt > 1`, exigent encore `Refs #54` et ne savent pas réserver
+plusieurs tentatives. Le déclencheur temporaire rejeté a été retiré.
+**Aucun clic « Re-run all jobs » ne doit être considéré comme autorisation
+d'accès Hoben avant fusion d'un correctif complet, revu et testé.**
+La PR #75 est explicitement interdite de fusion sans nouvel accord
+du propriétaire.
+
 Le propriétaire a **rejeté la création de branches temporaires**. La méthode
 actuelle est exclusivement **GitHub Actions → ouvrir un run existant de
 `Hoben experimental (MANAGER)` ou `Hoben live HA parity (MANAGER)` →
@@ -33,7 +45,7 @@ démarrage de la nouvelle tentative. Les deux scénarios ont des marqueurs et
 décisions séparés. Un `Re-run all jobs` n'est que le déclencheur physique :
 sans décision v2 préalable et sans toutes les gates, **NOT RUN**.
 
-Les admissions et rechecks vérifient la provenance du push initial,
+Les admissions et rechecks devront vérifier la provenance du push initial,
 l'identité distincte `triggering_actor`, HEAD encore exact sur branche
 `experimental` protégée, PR fusionnée par MANAGER et arbre testé, les 4 jobs
 CI `tests/ha-tests/hacs/hassfest`, la politique d'environnement GitHub,
@@ -49,7 +61,7 @@ Aucun RX brut, GUID, secret ni donnée domestique n'est publiable.
 **Éligibilité de toute PR `experimental` :** la PR d'origine peut porter
 sur du code, des tests, de la documentation, des workflows ou un protocole,
 avec ou sans `Refs #54`. Cela ne vaut jamais autorisation de secret.
-Les gates n'exigent plus de lien bloquant avec l'état de l'Issue #54 ;
+Les gates ne devront plus exiger de lien bloquant avec l'état de l'Issue #54 ;
 ils exigent à la place les preuves exactes de **la PR choisie**, revue
 MANAGER et CI. Une PR documentaire ne déclenche aucun Hoben réel sans
 décision propre au scénario.
