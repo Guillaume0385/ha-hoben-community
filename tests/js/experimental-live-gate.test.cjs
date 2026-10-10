@@ -582,6 +582,12 @@ for (const attempt of [2, 3]) {
 test("native rerun requires a NEW actual independent environment approval", async () => {
   const a = nativeRerun(setup(), 2);
   requireIndependentReviewer(a);
+  assert.equal(require("../../.github/scripts/experimental-native-rerun.cjs")
+    .authorizeDecision({comments: a.comments, marker: gate.MARKER_V2,
+      scenario: "ha-parity", candidateSha: head, ciId: 456, pr: a.pr,
+      mergeSha: sha, runId: a.context.runId,
+      proof: {number: 2, beganAt: Date.parse("2026-10-09T08:12:00Z")}})
+    .approval.run_attempt, 2);
   assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
   await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
   a.history[0].created_at = "2026-10-09T08:11:59Z";
