@@ -1723,3 +1723,28 @@ Where a real capture is needed for testing, sanitize identifiers before committi
 # Definition of project success
 
 The project is successful when a user can install it through HACS, configure a Hoben stove from the Home Assistant UI, obtain stable telemetry and safe controls, and provide useful sanitized diagnostics when something fails — while another community developer can understand the protocol and contribute without relying on private reverse-engineering artifacts.
+
+### October 10, 2026 — Phase 1 of repeatable experimental campaigns
+
+Owner/MANAGER's new requirement for Issue #54 supersedes the former global
+Issue #54 linkage requirement for **future** experimental tests. Once the
+real implementation is reviewed, a MANAGER may select a same-repo PR targeting
+`experimental`, regardless of content or presence of `Refs #54`, with
+individual `hoben-live` and/or H1/H2 authorization. Each campaign must have
+a unique irreversible `(SHA, scenario, campaign_id)` decision, verified
+review and all four CI jobs, protected branch/exact tree, real environment
+policy, and independent reviewer approval when required. Reports remain
+read-only, quantitative/anonymized and uniquely correlated per run.
+No PR or mere merge automatically authorizes secret release.
+
+The first short phase is deliberately **not** a Hoben campaign. It adds a
+secretless GitHub Actions `push` trigger probe on branch namespace
+`hoben-campaign-proof/**`. MANAGER can create one new branch from the
+same protected `experimental` SHA using the available GitHub branch-create
+connector. Its actual event delivery is unproven until a MANAGER-observed
+GitHub run on the merged workflow. The probe cannot collect or export Hoben
+data; it does not authorize tag/branch replays, new live tests, or changes
+to GitHub Settings. The two real scenario gates, universal PR eligibility,
+campaign reservation, and reviewed report correlation remain **subsequent
+independent development phases**. Until then, repeat campaigns are `NOT RUN`.
+
