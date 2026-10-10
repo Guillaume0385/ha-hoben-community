@@ -2,6 +2,7 @@
 
 This must never be mistaken for an authorized Hoben campaign.
 """
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -35,11 +36,22 @@ def test_campaign_proof_is_push_ref_only_and_has_no_secrets():
     assert "protected === true" in gate_text
     assert "payload.created === true" in gate_text
     for forbidden in (
-        "secrets.", "HOBEN_USER_GUID", "HOBEN_DEVICE_GUID",
-        "hoben-live:", "hoben-experimental:", "upload-artifact",
-        "workflow_dispatch", "repository_dispatch", "pull_request_target",
-        "issues:", "schedule:", "id-token: write", "contents: write",
-        "createRef(", "createTag(", "run_experimental_boundary.py",
+        "secrets.",
+        "HOBEN_USER_GUID",
+        "HOBEN_DEVICE_GUID",
+        "hoben-live:",
+        "hoben-experimental:",
+        "upload-artifact",
+        "workflow_dispatch",
+        "repository_dispatch",
+        "pull_request_target",
+        "issues:",
+        "schedule:",
+        "id-token: write",
+        "contents: write",
+        "createRef(",
+        "createTag(",
+        "run_experimental_boundary.py",
     ):
         assert forbidden not in text
     for forbidden in ("secrets.", "createRef(", "createTag(", "HOBEN_USER_GUID"):
@@ -50,6 +62,10 @@ def test_campaign_branch_trigger_offline_node_refusals():
     assert shutil.which("node")
     result = subprocess.run(
         ["node", "--test", "tests/js/experimental-campaign-trigger-proof.test.cjs"],
-        cwd=ROOT, capture_output=True, text=True, timeout=30, check=False,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stdout[-2500:] + result.stderr[-2500:]
