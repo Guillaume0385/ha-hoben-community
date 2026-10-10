@@ -175,7 +175,9 @@ test("a prior environment approval cannot authorize a later attempt", () => {
   assert.equal(verify(), false);
   delete history[0].created_at;
   assert.equal(verify(), false);
-  history[0].created_at = "2026-10-10T12:00:01Z";
+  history.push({...history[0], created_at: "2026-10-10T12:00:01Z"});
+  assert.equal(verify(), true); // Previous attempt's approval cannot veto fresh approval.
+  history.shift();
   assert.equal(verify(), true);
   history[0].state = "rejected";
   assert.equal(verify(), false);
