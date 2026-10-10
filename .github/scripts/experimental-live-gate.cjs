@@ -23,7 +23,6 @@ const PUBLIC_REFUSALS = Object.freeze({
   preflight_unverified: "preflight",
   merge_changed: "merge",
   merged_tree_unreviewed: "merge",
-  issue_scope_unverified: "decision",
   manager_decision_unverified: "decision",
   review_unverified: "decision",
   ci_unverified: "ci",
