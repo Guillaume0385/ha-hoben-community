@@ -1,8 +1,9 @@
 "use strict";
 
-// Pure, secret-free prerequisite for native GitHub Actions "Re-run all jobs".
-// Not wired into either Hoben gate yet: attempt >1 MUST stay NOT RUN until
-// full independent security tests and MANAGER review are completed.
+// Shared secret-free proof for native GitHub Actions "Re-run all jobs".
+// Both observation gates call this during admission/recheck. This module
+// never accesses Hoben, secrets or GitHub write APIs, and never authorizes
+// a campaign without the separate reviewed PR/CI/environment/claim checks.
 const manager = Object.freeze({login: "Guillaume0385", id: 18246624, type: "User"});
 const repository = "Guillaume0385/ha-hoben-community";
 const shaPattern = /^[0-9a-f]{40}$/;
