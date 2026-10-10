@@ -39,10 +39,12 @@ def context_valid(env: dict[str, str]) -> bool:
     return (
         all(env.get(key) == value for key, value in REQUIRED.items())
         and SHA_RE.fullmatch(sha) is not None
-        and re.fullmatch(
-            r"(?:[1-9]|[1-4][0-9]|50)", env.get("GITHUB_RUN_ATTEMPT", "")
+        and bool(
+            re.fullmatch(
+                r"(?:[1-9]|[1-4][0-9]|50)",
+                env.get("GITHUB_RUN_ATTEMPT", ""),
+            )
         )
-        is not None
         and env.get("LIVE_APPROVED_SHA") == sha
         and env.get("GITHUB_WORKFLOW_REF")
         == (
