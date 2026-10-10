@@ -157,3 +157,47 @@ test("distinct irreversible claim keys per attempt and scenario", () => {
   assert.equal(claims.size, 6);
   assert.throws(() => contract.claimName("other", sha, 123, 2), /claim_unverified/);
 });
+
+
+test("a prior environment approval cannot authorize a later attempt", () => {
+  const environment = {id: 789, reviewers: [{
+    id: 999, login: "independent-synthetic-reviewer"
+  }]};
+  const history = [{
+    state: "approved",
+    user: {id: 999, login: "independent-synthetic-reviewer", type: "User"},
+    environments: [{id: 789, name: "hoben-experimental"}],
+    created_at: "2026-10-10T11:59:00Z"
+  }];
+  const proof = {number: 2, beganAt: Date.parse("2026-10-10T12:00:00Z")};
+  const verify = () => contract.freshEnvironmentApproval(
+    history, environment, proof, "hoben-experimental");
+  assert.equal(verify(), false);
+  delete history[0].created_at;
+  assert.equal(verify(), false);
+  history[0].created_at = "2026-10-10T12:00:01Z";
+  assert.equal(verify(), true);
+  history[0].state = "rejected";
+  assert.equal(verify(), false);
+  history[0].state = "approved";
+  history[0].user.id = 18246624;
+  assert.equal(verify(), false);
+  history[0].user.id = 999;
+  history.push({...history[0], user: {id: 888, login: "other", type: "User"}});
+  assert.equal(verify(), false);
+});
+
+test("legacy first attempt keeps existing environment reviewer validation", () => {
+  const environment = {id: 789, reviewers: [{
+    id: 999, login: "independent-synthetic-reviewer"
+  }]};
+  const history = [{
+    state: "approved",
+    user: {id: 999, login: "independent-synthetic-reviewer", type: "User"},
+    environments: [{id: 789, name: "hoben-live"}]
+  }];
+  assert.equal(contract.freshEnvironmentApproval(history, environment,
+    {number: 1}, "hoben-live"), true);
+  assert.equal(contract.freshEnvironmentApproval(history, environment,
+    {number: 2, beganAt: Date.parse("2026-10-10T12:00:00Z")}, "hoben-live"), false);
+});
