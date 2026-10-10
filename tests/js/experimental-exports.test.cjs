@@ -3,7 +3,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const exportsGate = require("../../.github/scripts/experimental-exports.cjs");
-const context = {sha: "a".repeat(40), runId: 123};
+const context = {sha: "a".repeat(40), runId: 123, runAttempt: 1, prNumber: 62};
 
 function report() {
   const sessions = Array.from({length: 12}, (_, i) => ({
@@ -16,7 +16,7 @@ function report() {
     h1_status: "compatible", h2_status: "compatible", comparison: "compatible_with_both",
   }));
   return {schema: 1, scenario: "h1h2", phase: "live", experimental_sha: context.sha, candidate_sha: context.sha,
-    run_id: 123, boundary_proven: false, result: "inconclusive", reason: "hypotheses_unproven",
+    run_id: 123, run_attempt: 1, pr_number: 62, boundary_proven: false, result: "inconclusive", reason: "hypotheses_unproven",
     executed_sessions: 12, planned_sessions: 12, eligible_sessions: 12, observation_seconds: 90, sessions};
 }
 
@@ -44,6 +44,10 @@ for (const [name, modify] of Object.entries({
   "synthetic success": r => { r.phase = "dry-run"; },
   "wrong SHA": r => { r.experimental_sha = "b".repeat(40); },
   "wrong run": r => { r.run_id++; },
+  "wrong attempt": r => { r.run_attempt++; },
+  "wrong PR": r => { r.pr_number++; },
+  "bad PR type": r => { r.pr_number = "62"; },
+  "stolen approval metadata": r => { r.approval = "SYNTHETIC_PRIVATE"; },
   "false boundary": r => { r.boundary_proven = true; },
   "too many sessions": r => { r.sessions.push(r.sessions[0]); r.executed_sessions++; },
   "short success": r => { r.sessions.pop(); r.executed_sessions--; r.eligible_sessions--; },
