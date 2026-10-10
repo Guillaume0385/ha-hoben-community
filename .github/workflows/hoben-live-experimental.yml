@@ -17,7 +17,9 @@ jobs:
   dry-run:
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
-      github.actor == 'Guillaume0385' && github.run_attempt == 1
+      github.actor == 'Guillaume0385' &&
+      github.triggering_actor == 'Guillaume0385' &&
+      github.run_attempt >= 1 && github.run_attempt <= 50
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -50,6 +52,7 @@ jobs:
       actions: read
     outputs:
       approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,6 +66,7 @@ jobs:
             try {
               const result = await gate.verify({github, context});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(result.pr));
               await core.summary.addRaw(result.status === 'PENDING APPROVAL'
                 ? 'PENDING APPROVAL: real GitHub environment reviewers required.'
                 : 'READY FOR ENVIRONMENT: claim reserved; no required reviewers configured.').write();
@@ -105,8 +109,9 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/experimental-live-gate.cjs');
             try {
-              await gate.verify({github, context, recheck: true});
+              const authorized = await gate.verify({github, context, recheck: true});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(authorized.pr));
             } catch (_) {
               core.setFailed('NOT RUN: live approval or admission evidence changed.');
             }
@@ -115,6 +120,7 @@ jobs:
         if: steps.recheck.outputs.approved == 'true'
         env:
           LIVE_APPROVED_SHA: ${{ github.sha }}
+          LIVE_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
           HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: python trusted/scripts/launch_live_ha_parity.py
@@ -122,14 +128,21 @@ jobs:
         name: Validate allowlisted report before export
         if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          APPROVED_PR: ${{ steps.recheck.outputs.pr }}
         with:
           script: |
-            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core});
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core, context: proof});
       - name: Export sanitized report only
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}
+          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/hoben-live-public/report.json
           if-no-files-found: error
           retention-days: 7
@@ -152,19 +165,31 @@ jobs:
         id: download
         continue-on-error: true
         with:
-          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}
+          name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: public-report
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           COLLECTION_RESULT: ${{ needs.collect.result }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
         with:
           script: |
             let success = false;
             try {
+              const proof = {
+                sha: context.sha, runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+                prNumber: Number(process.env.APPROVED_PR)
+              };
               const report = require('./.github/scripts/experimental-live-report.cjs')
-                .readReport('public-report/report.json');
+                .readReport('public-report/report.json', proof);
               success = process.env.COLLECTION_RESULT === 'success' && report.status === 'success';
             } catch (_) {}
+            const publicPR = Number(process.env.APPROVED_PR);
+            const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            success = success &&
+              Number.isSafeInteger(publicPR) && publicPR > 0 &&
+              Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
+              publicAttempt <= 50;
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: context.sha, context: 'hoben-live-ha-parity',
               state: success ? 'success' : 'failure',
@@ -176,4 +201,19 @@ jobs:
             await core.summary.addRaw(success
               ? 'Read-only one-shot HA parity completed; persistent session NOT TESTED.'
               : 'NOT RUN or HA parity failed; inspect sanitized report.').write();
+            const pr = Number(process.env.APPROVED_PR);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            if (!Number.isSafeInteger(pr) || pr <= 0 ||
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
+              core.setFailed('NOT RUN: missing public attempt correlation.');
+            } else {
+              await core.summary.addRaw(
+                'Public correlation: scenario=ha-parity; run_id=' + context.runId +
+                '; run_attempt=' + attempt + '; pr=' + pr +
+                '; sha=' + context.sha + '; status=' +
+                (success ? 'completed' : 'failed_or_not_run') +
+                '; observed_at=' + new Date().toISOString() + '.'
+              ).write();
+            }
+
             if (!success) core.setFailed('HA parity observation failed or was incomplete.');

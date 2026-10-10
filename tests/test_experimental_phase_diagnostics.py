@@ -104,6 +104,7 @@ def checkouts(tmp_path):
         "GITHUB_RUN_ID": "123",
         "GITHUB_EVENT_PATH": str(event),
         "EXPERIMENTAL_APPROVED_SHA": sha,
+        "EXPERIMENTAL_APPROVED_PR": "62",
         "RUNNER_TEMP": str(storage),
         "EXPERIMENTAL_PHASE": "dry-run",
     }
@@ -206,7 +207,7 @@ def validate_simulated_export(checkouts, expected_result):
             "const gate = require("
             + json.dumps(str(ROOT / ".github/scripts/experimental-exports.cjs"))
             + "); process.env.RUNNER_TEMP = process.argv[1];"
-            "const context = {sha:process.argv[2],runId:123};"
+            "const context = {sha:process.argv[2],runId:123,runAttempt:1,prNumber:62};"
             "const outputs = {}, failures = [];"
             "const core = {setOutput:(k,v)=>outputs[k]=v,"
             "setFailed:v=>failures.push(v)};"

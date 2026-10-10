@@ -1723,3 +1723,28 @@ Where a real capture is needed for testing, sanitize identifiers before committi
 # Definition of project success
 
 The project is successful when a user can install it through HACS, configure a Hoben stove from the Home Assistant UI, obtain stable telemetry and safe controls, and provide useful sanitized diagnostics when something fails — while another community developer can understand the protocol and contribute without relying on private reverse-engineering artifacts.
+
+### October 10, 2026 — native full-run attempt contract
+
+The owner superseded the short-lived temporary-branch trigger approach for
+Issue #54. Both observation lanes remain on the protected `experimental`
+branch. A first MANAGER merge push can run attempt 1; independent campaigns
+on the **same run ID and SHA** must be explicitly approved and started with
+GitHub Actions **Re-run all jobs**. A re-run of failed jobs or one job is
+not authorization. Re-runs use the workflow/code of the original commit.
+
+Each attempt requires provenance of both the original MANAGER push and the
+real triggering actor, a separate immutable MANAGER decision for attempts
+greater than one, an exact candidate PR/CI/tree, environment and reviewer
+gates, a never-reused claim per `run_id/run_attempt/scenario/SHA`, the
+shared observation concurrency lock, and report artifacts uniquely named by
+attempt. The MANAGER may select either scenario for any same-repository PR
+merged into `experimental`—code, tests, documentation, or workflow—whether
+or not `Refs #54` appears in the PR. Eligibility alone grants no secrets.
+
+The current GitHub connector offers job rerun and failed-job rerun, but not
+the full-run rerun action. The owner accepts starting **Re-run all jobs**
+manually in the Actions UI. DEV never calls these partial-run tools and never
+starts live observations. The new PR #75 must not be merged without the
+owner's additional explicit permission; completion of offline CI does not
+waive that restriction.

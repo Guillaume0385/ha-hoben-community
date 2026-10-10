@@ -1,11 +1,10 @@
 "use strict";
 
-// Advisory-only, offline pre-merge handoff inspection for Issue #54.
+// Advisory-only, offline pre-merge handoff inspection for any experimental PR.
 // This code has NO GitHub API client, token, network, environment or write path.
 // The secretless check does not authorize admission: experimental-lab-gate.cjs
 // verifies the real GitHub evidence again AFTER the reviewed MANAGER merge.
 const fs = require("node:fs");
-const policy = require("../config/hoben-experimental.json");
 
 const SHA = /^[a-f0-9]{40}$/;
 const REPO = "Guillaume0385/ha-hoben-community";
@@ -22,26 +21,15 @@ const result = checks => ({
   advisory_only: true,
 });
 
-function evaluate({ pr, issue, ci, jobs, comments } = {}) {
-  const checks = { pr: "pr_unverified", link: "unlinked_pr",
-    issue: "issue_unverified", ci: "ci_incomplete", decision: "missing_manager_decision" };
+function evaluate({ pr, ci, jobs, comments } = {}) {
+  const checks = { pr: "pr_unverified", ci: "ci_incomplete",
+    decision: "missing_manager_decision" };
   if (!pr || !positive(pr.number) || pr.state !== "open" ||
       pr.merged !== false || pr.draft !== false ||
       pr.base?.ref !== "experimental" || !sameRepo(pr.base.repo) ||
       !sameRepo(pr.head?.repo) || !SHA.test(pr.head.sha) ||
       typeof pr.head.ref !== "string") return result(checks);
   checks.pr = "ok";
-  if (!/(?:^|\s)Refs #54(?:\s|$)/.test(pr.body || "")) return result(checks);
-  checks.link = "ok";
-
-  const states = (issue?.labels || []).map(l => l.name).filter(n => n?.startsWith("state:"));
-  if (issue?.number === 54 && issue.id === policy.tracking_issue_id &&
-      issue.state === "open" && !issue.pull_request && states.length === 1) {
-    checks.issue = states[0] === "state:review" ? "ok" :
-      states[0] === "state:blocked" ? "blocked_issue" : "issue_not_in_review";
-  }
-  if (checks.issue !== "ok") return result(checks);
-
   const associations = ci?.pull_requests;
   const correctAssociation = Array.isArray(associations) && associations.length === 1 &&
     associations[0].number === pr.number &&

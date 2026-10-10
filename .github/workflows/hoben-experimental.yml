@@ -17,7 +17,9 @@ jobs:
   dry-run:
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
-      github.actor == 'Guillaume0385' && github.run_attempt == 1
+      github.actor == 'Guillaume0385' &&
+      github.triggering_actor == 'Guillaume0385' &&
+      github.run_attempt >= 1 && github.run_attempt <= 50
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -48,6 +50,7 @@ jobs:
       actions: read
     outputs:
       approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,6 +64,7 @@ jobs:
             try {
               const decision = await gate.verify({github, context});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(decision.pr));
               const summary = decision.status === 'PENDING APPROVAL'
                 ? 'PENDING APPROVAL: reserved h1h2; required GitHub reviewer approval still applies.'
                 : 'READY FOR ENVIRONMENT: reserved h1h2; no required reviewers configured.';
@@ -104,14 +108,16 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/experimental-lab-gate.cjs');
             try {
-              await gate.verify({github, context, recheck: true});
+              const authorized = await gate.verify({github, context, recheck: true});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(authorized.pr));
             } catch (_) { core.setFailed('NOT RUN: approval or admission proof changed.'); }
       - id: capture
         name: Bounded H1/H2 with no runner tokens in the collector process
         if: steps.recheck.outputs.approved == 'true'
         env:
           EXPERIMENTAL_APPROVED_SHA: ${{ github.sha }}
+          EXPERIMENTAL_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
           HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: python trusted/scripts/launch_experimental_boundary.py
@@ -119,14 +125,21 @@ jobs:
         name: Validate strictly anonymized report before upload
         if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          APPROVED_PR: ${{ steps.recheck.outputs.pr }}
         with:
           script: |
-            require('./trusted/.github/scripts/experimental-exports.cjs').prepare({context, core});
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./trusted/.github/scripts/experimental-exports.cjs').prepare({core, context: proof});
       - name: Export only the validated public report
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          name: experimental-report-${{ github.sha }}-${{ github.run_id }}
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/hoben-experimental-public/report.json
           if-no-files-found: error
           retention-days: 7
@@ -149,19 +162,31 @@ jobs:
         id: download
         continue-on-error: true
         with:
-          name: experimental-report-${{ github.sha }}-${{ github.run_id }}
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: public-report
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           COLLECTION_RESULT: ${{ needs.collect.result }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
         with:
           script: |
             const exports = require('./.github/scripts/experimental-exports.cjs');
             let success = false;
             try {
-              const report = exports.readReport('public-report/report.json', context);
+              const proof = {
+                sha: context.sha, runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+                prNumber: Number(process.env.APPROVED_PR)
+              };
+              const report = exports.readReport('public-report/report.json', proof);
               success = process.env.COLLECTION_RESULT === 'success' && report.result === 'inconclusive';
             } catch (_) {}
+            const publicPR = Number(process.env.APPROVED_PR);
+            const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            success = success &&
+              Number.isSafeInteger(publicPR) && publicPR > 0 &&
+              Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
+              publicAttempt <= 50;
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: context.sha, context: 'hoben-experimental-h1h2',
               state: success ? 'success' : 'failure',
@@ -169,4 +194,19 @@ jobs:
               description: success ? 'Bounded collection completed; hypotheses unproven' : 'NOT RUN or collection/export failed'
             });
             await core.summary.addRaw(success ? 'Collection completed; boundary remains unproven.' : 'NOT RUN or collection/export failed; inspect the original run.').write();
+            const pr = Number(process.env.APPROVED_PR);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            if (!Number.isSafeInteger(pr) || pr <= 0 ||
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
+              core.setFailed('NOT RUN: missing public attempt correlation.');
+            } else {
+              await core.summary.addRaw(
+                'Public correlation: scenario=h1h2; run_id=' + context.runId +
+                '; run_attempt=' + attempt + '; pr=' + pr +
+                '; sha=' + context.sha + '; status=' +
+                (success ? 'completed' : 'failed_or_not_run') +
+                '; observed_at=' + new Date().toISOString() + '.'
+              ).write();
+            }
+
             if (!success) core.setFailed('Experimental collection did not complete safely.');

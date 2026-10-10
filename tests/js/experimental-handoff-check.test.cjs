@@ -7,7 +7,6 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const handoff = require("../../.github/scripts/experimental-handoff-check.cjs");
-const policy = require("../../.github/config/hoben-experimental.json");
 
 const sha = "b".repeat(40);
 const repo = {full_name: "Guillaume0385/ha-hoben-community", id: 1401398724};
@@ -20,8 +19,6 @@ function fixture() {
   const pr = {number: 62, state: "open", merged: false, draft: false, body: "Refs #54",
     base: {ref: "experimental", repo: {...repo}},
     head: {ref: "codex/issue-54-handoff-premerge", sha, repo: {...repo}}};
-  const issue = {number: 54, id: policy.tracking_issue_id, state: "open",
-    labels: [{name: "state:review"}]};
   const ci = {id: 678, event: "pull_request", run_attempt: 1,
     head_sha: sha, head_branch: pr.head.ref, status: "completed", conclusion: "success",
     repository: {...repo}, head_repository: {...repo},
@@ -34,29 +31,24 @@ function fixture() {
   const comment = {id: 321, user: {...manager},
     created_at: "2026-10-09T17:01:00Z", updated_at: "2026-10-09T17:01:00Z",
     body: marker + "\n" + JSON.stringify(decision)};
-  return {pr, issue, ci, jobs, comments: [comment], decision, comment};
+  return {pr, ci, jobs, comments: [comment], decision, comment};
 }
 
 function inspect(f) {
-  return handoff.evaluate({pr: f.pr, issue: f.issue, ci: f.ci,
+  return handoff.evaluate({pr: f.pr, ci: f.ci,
     jobs: f.jobs, comments: f.comments});
 }
 
-test("complete handoff is advisory only, with exact PR, Issue, CI and MANAGER decision", () => {
+test("complete handoff is advisory only, with exact PR, CI and MANAGER decision", () => {
   const a = fixture();
   const report = inspect(a);
   assert.deepEqual(report, {verdict: "READY FOR MANAGER REVIEW", advisory_only: true,
-    checks: {pr: "ok", link: "ok", issue: "ok", ci: "ok", decision: "ok"}});
+    checks: {pr: "ok", ci: "ok", decision: "ok"}});
 });
 
 const cases = [
-  ["#61 lacked Refs #54", a => {a.pr.body = "Description without a reference";}, "link", "unlinked_pr"],
-  ["#61 Issue remained blocked", a => {a.issue.labels = [{name: "state:blocked"}];},
-    "issue", "blocked_issue"],
   ["#61 had no premerge MANAGER decision", a => {a.comments = [];},
     "decision", "missing_manager_decision"],
-  ["PR not yet in review", a => {a.issue.labels = [{name: "state:in-progress"}];},
-    "issue", "issue_not_in_review"],
   ["CI missing hassfest", a => {a.jobs.pop();}, "ci", "ci_incomplete"],
   ["CI success wrapper but failed job", a => {a.jobs[0].conclusion = "failure";},
     "ci", "ci_incomplete"],
@@ -101,6 +93,13 @@ for (const [name, mutate, key, expected] of cases) {
   });
 }
 
+
+test("documentation PR without Refs #54 remains eligible after MANAGER decision", () => {
+  const a = fixture();
+  a.pr.body = "Documentation only, unrelated to Issue 54";
+  assert.equal(inspect(a).verdict, "READY FOR MANAGER REVIEW");
+});
+
 test("decision legitimately missing before CI does not turn a PR validation into a false success", () => {
   const a = fixture();
   a.comments = [];
@@ -116,12 +115,13 @@ test("CLI only prints fixed categories; input never exposed, even on invalid inp
     const evidence = path.join(dir, "evidence.json");
     const a = fixture();
     a.pr.body = "SYNTHETIC_PRIVATE_VALUE";
+    a.comments = [];
     fs.writeFileSync(evidence, JSON.stringify(a));
     const output = spawnSync(process.execPath, [file, evidence],
       {encoding: "utf8", timeout: 4000});
     assert.equal(output.status, 1);
     assert.equal(output.stdout.includes("SYNTHETIC_PRIVATE_VALUE"), false);
-    assert.equal(JSON.parse(output.stdout).checks.link, "unlinked_pr");
+    assert.equal(JSON.parse(output.stdout).checks.decision, "missing_manager_decision");
     const invalid = spawnSync(process.execPath, [file, "nonexistent-unsafe-file"],
       {encoding: "utf8", timeout: 4000});
     assert.equal(invalid.status, 1);

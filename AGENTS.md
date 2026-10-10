@@ -960,3 +960,28 @@ A feature is complete only when:
 - failure/disconnection paths are handled;
 - HACS/Home Assistant validation still passes;
 - code is documented well enough for an external contributor to maintain it.
+
+### Issue #54 — 2026-10-10, native full Actions re-runs
+
+The current owner decision requires `Re-run all jobs` of an existing
+`experimental` Actions workflow to repeat H1/H2 and HA parity with the exact
+same reviewed SHA, not a new branch, tag-trigger or commit. The original
+`push` event and its MANAGER identity must still be verified. For a re-run,
+`github.triggering_actor` must independently prove MANAGER identity and the
+new attempt must have its **own** immutable PR decision, tied to
+`run_id + run_attempt + scenario + SHA`; the first attempt's pre-merge v1
+approval never authorizes future attempts. The runner must refuse when a
+complete rerun of all jobs cannot be demonstrated. Protected `experimental`,
+the original reviewed/merged PR and its exact tree, four CI jobs, environment
+policy, real reviewer approval when configured, atomic anti-replay reservation,
+read-only collection and fixed anonymized report remain mandatory.
+
+Any same-repository, MANAGER-reviewed PR targeting `experimental` can be
+selected for either scenario even without `Refs #54`. This makes the PR
+eligible, never automatically approved. CODEX DEV continues to take tasks only
+from authorized Issues with one state label, and sends `experimental` PRs
+directly to MANAGER review. No branch/PR targeting `main` without a fresh,
+explicit owner request. Re-runs execute the **original SHA's** workflows, so
+past historical SHA runs cannot inherit new code. The owner can initiate
+`Re-run all jobs` manually in GitHub Actions because the current connector
+lacks a whole-run rerun action; DEV must not launch live Hoben tests.

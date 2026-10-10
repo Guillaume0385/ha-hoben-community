@@ -5,10 +5,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const report = require("../../.github/scripts/experimental-live-report.cjs");
+const proof = {sha: "a".repeat(40), runId: 123, runAttempt: 1, prNumber: 62};
 
 function nominal() {
   return {
     schema: 1, scenario: "ha-parity", status: "success",
+    merge_sha: proof.sha, run_id: proof.runId,
+    run_attempt: proof.runAttempt, pr_number: proof.prNumber,
     refreshes_completed: 2, decoded_refreshes: 2,
     device_identity_assigned: true, device_identity_reused: true, closed: true,
     session_mode: "one-shot", ping_pong: "unsupported",
@@ -18,11 +21,17 @@ function nominal() {
 }
 
 test("exact public success report validates, two one-shot refreshes only", () => {
-  assert.deepEqual(report.validate(nominal()), nominal());
+  assert.deepEqual(report.validate(nominal(), proof), nominal());
 });
 
 for (const [name, mutate] of Object.entries({
   "extra household register": r => {r.registers = [2048, 2026];},
+  "wrong merged SHA": r => {r.merge_sha = "b".repeat(40);},
+  "wrong run": r => {r.run_id++;},
+  "wrong attempt": r => {r.run_attempt++;},
+  "wrong PR": r => {r.pr_number++;},
+  "string PR": r => {r.pr_number = "62";},
+  "extra private metadata": r => {r.private = "SYNTHETIC_PRIVATE";},
   "fake persistent socket": r => {r.session_mode = "persistent";},
   "fake Ping Pong": r => {r.ping_pong = "verified";},
   "fake DataUpdated": r => {r.data_updated = "verified";},
@@ -38,7 +47,7 @@ for (const [name, mutate] of Object.entries({
 })) {
   test("reject unexpected/sensitive report: " + name, () => {
     const model = nominal(); mutate(model);
-    assert.throws(() => report.validate(model), /invalid_report/);
+    assert.throws(() => report.validate(model, proof), /invalid_report/);
   });
 }
 
@@ -47,15 +56,23 @@ test("bounded regular report: reject symlinks, oversized files and raw objects",
   try {
     const file = path.join(dir, "report.json");
     fs.writeFileSync(file, JSON.stringify(nominal()));
-    assert.deepEqual(report.readReport(file), nominal());
+    assert.deepEqual(report.readReport(file, proof), nominal());
     const alias = path.join(dir, "alias.json");
     fs.symlinkSync(file, alias);
-    assert.throws(() => report.readReport(alias), /invalid_report/);
+    assert.throws(() => report.readReport(alias, proof), /invalid_report/);
     fs.writeFileSync(file, JSON.stringify({...nominal(), private: "SYNTHETIC_SECRET"}));
-    assert.throws(() => report.readReport(file), /invalid_report/);
+    assert.throws(() => report.readReport(file, proof), /invalid_report/);
     fs.writeFileSync(file, "A".repeat(4097));
-    assert.throws(() => report.readReport(file), /invalid_report/);
+    assert.throws(() => report.readReport(file, proof), /invalid_report/);
   } finally {
     fs.rmSync(dir, {recursive: true, force: true});
   }
+});
+
+
+test("report of earlier attempt cannot be reused for later attempt or PR", () => {
+  assert.throws(() => report.validate(nominal(), {...proof, runAttempt: 2}), /invalid_report/);
+  assert.throws(() => report.validate(nominal(), {...proof, prNumber: 63}), /invalid_report/);
+  assert.throws(() => report.validate(nominal(), {...proof, sha: "b".repeat(40)}), /invalid_report/);
+  assert.throws(() => report.validate(nominal(), undefined), /invalid_report/);
 });

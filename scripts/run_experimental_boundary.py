@@ -247,7 +247,6 @@ def context(phase: str) -> tuple[dict, Path]:
         "GITHUB_EVENT_NAME": "push",
         "GITHUB_ACTOR": "Guillaume0385",
         "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
-        "GITHUB_RUN_ATTEMPT": "1",
         "GITHUB_WORKFLOW_REF": WORKFLOW,
         "EXPERIMENTAL_PHASE": phase,
     }
@@ -261,6 +260,12 @@ def context(phase: str) -> tuple[dict, Path]:
         and re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is not None
         and candidate_sha == merged_sha
         and os.environ.get("GITHUB_WORKFLOW_SHA") == merged_sha
+        and bool(
+            re.fullmatch(
+                r"(?:[1-9]|[1-4][0-9]|50)",
+                os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+            )
+        )
         and re.fullmatch(r"[1-9][0-9]{0,19}", os.environ.get("GITHUB_RUN_ID", ""))
         is not None
         and ROOT.is_dir()
@@ -278,9 +283,13 @@ def context(phase: str) -> tuple[dict, Path]:
     require(
         policy["schema"] == 1
         and policy["scenario"] == "h1h2"
-        and policy["tracking_issue"] == 54
-        and policy["tracking_issue_id"] == 5768789242
         and policy["environment"] == "hoben-experimental"
+        and bool(
+            re.fullmatch(
+                r"[1-9][0-9]{0,8}",
+                os.environ.get("EXPERIMENTAL_APPROVED_PR", ""),
+            )
+        )
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     require(
@@ -402,8 +411,11 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
         "phase": "live",
         "observation_seconds": 90,
         "experimental_sha": os.environ["GITHUB_SHA"],
+        "merge_sha": os.environ["GITHUB_SHA"],
         "candidate_sha": os.environ["EXPERIMENTAL_APPROVED_SHA"],
         "run_id": int(os.environ["GITHUB_RUN_ID"]),
+        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
         "boundary_proven": False,
         "result": "failure" if interrupted else "inconclusive",
         "reason": "collection_interrupted" if interrupted else "hypotheses_unproven",
@@ -492,8 +504,11 @@ def run(phase: str, *, diagnostic: PhaseDiagnostic | None = None) -> int:
                 "reason": "no_hoben_connection",
                 "boundary_proven": False,
                 "experimental_sha": os.environ["GITHUB_SHA"],
+                "merge_sha": os.environ["GITHUB_SHA"],
                 "candidate_sha": policy["candidate_sha"],
                 "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
                 "executed_sessions": 0,
             }
             interrupted = False

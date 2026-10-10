@@ -9,10 +9,18 @@ function readReport(file, context) {
   const phase = 'live';
   const r = JSON.parse(fsSafe.snapshot(file,2097152).toString('utf8'));
   requireFact(r.schema === 1 && r.scenario === 'h1h2' && r.phase === phase &&
-    r.experimental_sha === context.sha && r.candidate_sha === context.sha &&
-    r.run_id === context.runId && r.boundary_proven === false, 'invalid_public_report');
+    r.experimental_sha === context.sha && r.merge_sha === context.sha &&
+    r.candidate_sha === context.sha &&
+    r.run_id === context.runId &&
+    Number.isSafeInteger(context.runAttempt) &&
+    context.runAttempt >= 1 && context.runAttempt <= 50 &&
+    Number.isSafeInteger(context.prNumber) && context.prNumber > 0 &&
+    r.run_attempt === context.runAttempt &&
+    r.pr_number === context.prNumber &&
+    r.boundary_proven === false, 'invalid_public_report');
   const exact = (o, keys) => o && Object.keys(o).sort().join() === keys.sort().join();
-  const common = ['schema','scenario','phase','experimental_sha','candidate_sha','run_id',
+  const common = ['schema','scenario','phase','experimental_sha','merge_sha','candidate_sha','run_id',
+    'run_attempt','pr_number',
     'boundary_proven','result','reason','executed_sessions'];
   requireFact(exact(r, common.concat(
     ['observation_seconds','planned_sessions','eligible_sessions','sessions'])),
