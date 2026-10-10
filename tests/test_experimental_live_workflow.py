@@ -69,6 +69,7 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
     assert secret["if"] == "steps.recheck.outputs.approved == 'true'"
     assert set(secret["env"]) == {
         "LIVE_APPROVED_SHA",
+        "LIVE_APPROVED_PR",
         "HOBEN_USER_GUID",
         "HOBEN_DEVICE_GUID",
     }
@@ -90,6 +91,9 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
         "core.setOutput('approved', 'true')"
         not in (script["with"]["script"].split("catch (error)", 1)[1])
     )
+    assert "-a${{ github.run_attempt }}" in WORKFLOW.read_text()
+    assert "github.triggering_actor" in jobs["dry-run"]["if"]
+    assert "pr" in jobs["admission"]["outputs"]
     assert "workflow_dispatch" not in workflow.get("on", workflow.get(True))
 
 
