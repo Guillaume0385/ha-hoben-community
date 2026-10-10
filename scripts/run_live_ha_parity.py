@@ -46,7 +46,12 @@ def context_valid(env: dict[str, str]) -> bool:
             )
         )
         and env.get("LIVE_APPROVED_SHA") == sha
-        and re.fullmatch(r"[1-9][0-9]{0,8}", env.get("LIVE_APPROVED_PR", "")) is not None
+        and bool(
+            re.fullmatch(
+                r"[1-9][0-9]{0,8}",
+                env.get("LIVE_APPROVED_PR", ""),
+            )
+        )
         and env.get("GITHUB_WORKFLOW_REF")
         == (
             "Guillaume0385/ha-hoben-community/"
