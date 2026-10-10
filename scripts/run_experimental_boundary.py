@@ -508,7 +508,7 @@ def run(phase: str, *, diagnostic: PhaseDiagnostic | None = None) -> int:
                 "candidate_sha": policy["candidate_sha"],
                 "run_id": int(os.environ["GITHUB_RUN_ID"]),
                 "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-                        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
+                "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
                 "executed_sessions": 0,
             }
             interrupted = False
