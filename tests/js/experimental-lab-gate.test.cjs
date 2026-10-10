@@ -30,14 +30,8 @@ function setup() {
     status: "completed", conclusion: "success", repository: {...repo}, head_repository: {...repo},
     path: ".github/workflows/validate.yml", updated_at: "2026-10-09T08:00:00Z", pull_requests: []};
   const run = {id: 123, head_sha: sha, head_branch: "experimental", event: "push", run_attempt: 1,
-    actor: {...user}, triggering_actor: {...user}, repository: {...repo}, head_repository: {...repo}, path: ".github/workflows/hoben-experimental.yml"};
-  const dry = {id: 111, run_id: 123, run_attempt: 1,
-    name: "dry-run", head_sha: sha, status: "completed",
-    conclusion: "success", started_at: "2026-10-09T08:12:00Z"};
-  const admission = {id: 112, run_id: 123, run_attempt: 1,
-    name: "admission", head_sha: sha, status: "in_progress"};
-  const collection = {id: 113, run_id: 123, run_attempt: 1,
-    name: "collect", head_sha: sha, status: "in_progress"};
+    actor: {...user}, repository: {...repo}, head_repository: {...repo}, path: ".github/workflows/hoben-experimental.yml"};
+  const dry = {name: "dry-run", head_sha: sha, status: "completed", conclusion: "success"};
   const jobs = ["tests", "ha-tests", "hacs", "hassfest"].map(name =>
     ({name, head_sha: head, status: "completed", conclusion: "success"}));
   const reviewer = {login: "independent-synthetic-reviewer", id: 999, type: "User"};
@@ -49,7 +43,7 @@ function setup() {
   const refs = new Map(), tags = new Map();
   let counter = 0;
   const world = {pr, context, env, approval, comment, ci, run, dry, jobs, environment, branch,
-    history, refs, tags, admission, collection, comments: [comment], reviews: [], threads: [], associated: [pr], issues: {
+    history, refs, tags, comments: [comment], reviews: [], threads: [], associated: [pr], issues: {
       number: 54, id: 5768789242, state: "open", labels: [{name: "state:review"}]}, writes: 0};
   world.github = {rest: {
     repos: {
@@ -63,10 +57,7 @@ function setup() {
     issues: {get: async () => ({data: world.issues}), listComments: async () => ({data: world.comments})},
     actions: {
       getWorkflowRun: async p => ({data: p.run_id === 123 ? run : ci}),
-      listJobsForWorkflowRun: async p => ({data: p.run_id === 123 ? [dry, admission, collection] : jobs}),
-      listJobsForWorkflowRunAttempt: async () => ({data: [{
-        ...dry, run_attempt: 1
-      }]}),
+      listJobsForWorkflowRun: async p => ({data: p.run_id === 123 ? [dry] : jobs}),
       listWorkflowRunsForRepo: async () => ({data: []}),
     },
     git: {
@@ -74,8 +65,7 @@ function setup() {
       createTag: async p => { const id = (++counter).toString(16).padStart(40, "0");
         tags.set(id, {...p, object: {sha: p.object, type: "commit"}}); return {data: {sha: id}}; },
       createRef: async p => { if (refs.has(p.ref)) throw Error("duplicate claim");
-        world.writes++; admission.status = "completed"; admission.conclusion = "success";
-        refs.set(p.ref, {ref: p.ref, object: {type: "tag", sha: p.sha}}); return {data: {}}; },
+        world.writes++; refs.set(p.ref, {ref: p.ref, object: {type: "tag", sha: p.sha}}); return {data: {}}; },
       getRef: async p => ({data: refs.get("refs/" + p.ref)}),
       getTag: async p => ({data: tags.get(p.tag_sha)}),
     },
@@ -146,6 +136,9 @@ const refused = {
   "decision scenario": a => { a.approval.scenario = "hoben-live"; a.decision(); },
   "decision arbitrary key": a => { a.approval.script = "anything"; a.decision(); },
   "legacy recipient field": a => { a.approval.recipient_sha256 = "0".repeat(64); a.decision(); },
+  "no Issue link": a => { a.pr.body = "No authorization"; },
+  "blocked Issue": a => { a.issues.labels = [{name: "state:blocked"}]; },
+  "closed Issue": a => { a.issues.state = "closed"; },
   "pending changes": a => { a.reviews = [{user: {id: 3}, state: "CHANGES_REQUESTED"}, {user: {id: 3}, state: "COMMENTED"}]; },
   "unresolved thread": a => { a.threads = [{isResolved: false}]; },
   "CI wrong SHA": a => { a.ci.head_sha = sha; },
@@ -382,17 +375,17 @@ test("a superseded decision on an earlier HEAD is history, never an approval of 
   await assert.rejects(gate.verify(b), /manager_decision_unverified/);
 });
 
-test("missing MANAGER decision, reviewed diff or exact CI refuses before any claim", async () => {
+test("issue #61 three missing premerge proofs are distinct refusals before any claim", async () => {
   const absent = [
+    a => { a.pr.body = "No Issue reference"; },
+    a => { a.issues.labels = [{name: "state:blocked"}]; },
     a => { a.comments = []; },
-    a => { a.threads = [{isResolved: false}]; },
-    a => { a.jobs[0].conclusion = "failure"; },
   ];
   for (const mutate of absent) {
     const a = setup();
     mutate(a);
     await assert.rejects(gate.verify(a), error => {
-      assert.ok(["decision", "ci"].includes(gate.refusalCategory(error)));
+      assert.equal(gate.refusalCategory(error), "decision");
       return true;
     });
     assert.equal(a.writes, 0);
