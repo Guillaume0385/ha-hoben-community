@@ -291,6 +291,47 @@ Cette reproduction ne prouve pas la cause interne des anciens runs silencieux
 le correctif après revue, CI et fusion d'un nouveau SHA vers `experimental` ;
 aucune relance d'un run/SHA consommé ni expérience Hoben n'est effectuée par DEV.
 
+### Exécution H1/H2 sur serveur simulé — demande expresse du propriétaire
+
+À la demande expresse de l'utilisateur, les régressions hors ligne exécutent
+désormais **la campagne complète de six H1 puis six H2** sur un serveur simulé
+en mémoire, avec `HOBEN_USER_GUID` fabriqué de **32 zéros** et DeviceGuid initial
+nul. Le simulateur attribue ensuite une identité synthétique non nulle et vérifie
+sa réutilisation. Il accepte uniquement OpenClient, Pong et les deux lectures
+V4 fixes par session H2 ; H1 reste passif après l'ouverture. Les fixtures
+préexistantes fournissent préfixes, Ping, notifications et réponses fragmentées
+ou coalescées. Elles ne constituent pas une preuve de frontière protocolaire.
+
+Exécution reproductible sans secret ni connexion Hoben :
+
+```sh
+python -m pytest -q tests/test_experimental_phase_diagnostics.py
+```
+
+Le bootstrap **réservé aux tests** `tests/experimental_simulated_server.py`
+charge le véritable point d'entrée sous `python -I`, avant d'ajouter le dépôt
+au chemin d'import. Après les contrôles locaux de contexte/checkouts, seuls les
+points d'injection existants du transport et de l'horloge sont remplacés : le
+wrapper de signaux, la campagne, le collecteur, les parseurs, les chronologies
+et la projection restent réellement exécutés. Un garde réseau dans l'enfant
+interdit résolution DNS et connexion socket ; les 90 secondes et pauses sont
+virtuelles. Le lanceur conserve son isolation et sa transmission catégorielle,
+vérifiées avec cet enfant simulé, sans nouveau mode dans les scripts de production.
+
+Ces tests cherchent les erreurs Python d'import et d'exécution sur tout le
+parcours. Ils injectent aussi des erreurs de syntaxe/import, expression,
+ouverture, réception, analyse et fermeture pour vérifier les codes fixes,
+l'absence de traceback/texte privé, l'arrêt anticipé et le nettoyage. Le rapport
+produit passe ensuite la validation et l'export Node indépendants ; aucun RX
+ni identifiant ne sort de son répertoire temporaire. Les rapports restent locaux
+à pytest, explicitement synthétiques, et ne sont pas publiés comme résultats live.
+
+La PR #72 étant déjà fusionnée vers `experimental`, ce complément est livré
+dans une petite PR de suivi de #54. Il ne remplace pas les campagnes réelles
+réservées au MANAGER et ne modifie ni leurs gates/environnements/secrets,
+ni le runtime HA, ni les faits de `protocol.md`. Le succès de la simulation
+prouve l'exécution du chemin Python testé, pas la réussite sur le serveur Hoben.
+
 ### Historique CMS — hors procédure des nouveaux essais
 
 Les anciens exports utilisaient AES-256-GCM et RSA-OAEP/SHA256 avec destinataire

@@ -175,6 +175,205 @@ def test_real_isolated_invalid_argument_cannot_echo_private_text(checkouts):
     assert result.stdout == result.stderr == b""
 
 
+def simulated_command(checkouts, scenario):
+    return [
+        sys.executable,
+        "-I",
+        str(ROOT / "tests/experimental_simulated_server.py"),
+        str(checkouts.candidate),
+        scenario,
+    ]
+
+
+def zero_environment(checkouts):
+    return launcher.collector_environment(
+        {
+            **checkouts.environment,
+            "HOBEN_USER_GUID": "0" * 32,
+            "HOBEN_DEVICE_GUID": "0" * 32,
+        }
+    )
+
+
+def validate_simulated_export(checkouts, expected_result):
+    """Exercise the actual independent Node report validator and export step."""
+    node = shutil.which("node")
+    assert node, "Node.js is required for the independent export boundary"
+    result = subprocess.run(
+        [
+            node,
+            "-e",
+            "const gate = require("
+            + json.dumps(str(ROOT / ".github/scripts/experimental-exports.cjs"))
+            + "); process.env.RUNNER_TEMP = process.argv[1];"
+            "const context = {sha:process.argv[2],runId:123};"
+            "const outputs = {}, failures = [];"
+            "const core = {setOutput:(k,v)=>outputs[k]=v,"
+            "setFailed:v=>failures.push(v)};"
+            "const {result} = gate.readReport(process.argv[1] + "
+            "'/hoben-experimental-exports/report.json',context);"
+            "gate.prepare({context,core});"
+            "console.log(JSON.stringify({result,outputs,failures}));",
+            str(checkouts.storage),
+            checkouts.environment["GITHUB_SHA"],
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "result": expected_result,
+        "outputs": {"report": "true"},
+        "failures": [],
+    }
+    source = checkouts.storage / "hoben-experimental-exports/report.json"
+    public = checkouts.storage / "hoben-experimental-public/report.json"
+    assert json.loads(source.read_text()) == json.loads(public.read_text())
+    assert public.stat().st_mode & 0o777 == 0o600
+    assert public.parent.stat().st_mode & 0o777 == 0o700
+    assert list(public.parent.iterdir()) == [public]
+    for forbidden in (
+        "0" * 32,
+        OPENED_PREFIX[14:46].decode(),
+        PRIVATE,
+        "SYNTHETIC-PRIVATE-PYTHON-EXPRESSION",
+    ):
+        assert forbidden not in public.read_text()
+    assert not list(checkouts.storage.glob("hoben-experimental-private-*"))
+    assert not list(checkouts.storage.rglob("rx.bin"))
+    assert not list(checkouts.storage.rglob("captures.cms"))
+    return json.loads(public.read_text())
+
+
+@pytest.mark.parametrize("scenario", ["coalesced", "fragmented"])
+def test_isolated_full_h1_h2_zero_secret_simulated_server(checkouts, scenario):
+    result = subprocess.run(
+        simulated_command(checkouts, scenario),
+        env=zero_environment(checkouts),
+        cwd=checkouts.candidate,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == result.stderr == b""
+    report = validate_simulated_export(checkouts, "inconclusive")
+    assert report["boundary_proven"] is False
+    assert report["executed_sessions"] == report["eligible_sessions"] == 12
+    proof = json.loads((checkouts.storage / "simulation-proof.json").read_text())
+    assert proof["network_attempts"] == 0
+    assert proof["spacing_seconds"] == [15] * 11
+    assert len(proof["sessions"]) == 12
+    for index, (session, server) in enumerate(
+        zip(report["sessions"], proof["sessions"])
+    ):
+        mode = "H1" if index < 6 else "H2"
+        assert session["mode"] == server["mode"] == mode
+        assert server["open_clients"] == server["maximum_readers"] == 1
+        assert server["initial_zero_device"] is (index == 0)
+        assert server["closed"] is True
+        assert session["stop"] == "observation_budget"
+        assert session["partial"] is False
+        assert (
+            session["v4_requests"]
+            == server["v4_requests"]
+            == (0 if mode == "H1" else 2)
+        )
+        assert session["correlated_responses"] == (0 if mode == "H1" else 2)
+        timeline = session["timing_observations"]
+        assert timeline["close"]["state"] == "closed"
+        tx = [event["category"] for event in timeline["tx"]]
+        assert tx.count("open_client") == 1
+        if mode == "H1":
+            assert "read_v4_h2" not in tx and "pong_h2" not in tx
+        else:
+            assert tx.count("read_v4_h2") == 2 and tx.count("pong_h2") >= 1
+            assert {f["kind"] for f in timeline["h2_candidates"]} == {
+                "ping_h2",
+                "response_h2",
+                "notification_h2",
+            }
+            assert timeline["concatenated_reads"] >= 1
+            if scenario == "fragmented":
+                assert timeline["fragmented_candidates"] >= 2
+
+
+@pytest.mark.parametrize(
+    "scenario,code,report_sessions",
+    [
+        ("import_error", 10, None),
+        ("dns_tls_error", 12, 2),
+        ("open_error", 13, 2),
+        ("invalid_response", 14, 8),
+        ("expression_error", 14, 8),
+        ("projection_error", 15, 6),
+        ("cleanup_error", 16, 1),
+    ],
+)
+def test_isolated_simulation_python_errors_fail_without_traceback(
+    checkouts, scenario, code, report_sessions
+):
+    result = subprocess.run(
+        simulated_command(checkouts, scenario),
+        env=zero_environment(checkouts),
+        cwd=checkouts.candidate,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == code
+    assert result.stdout == result.stderr == b""
+    assert not list(checkouts.storage.glob("hoben-experimental-private-*"))
+    if report_sessions is None:
+        assert not list(checkouts.storage.rglob("report.json"))
+    else:
+        report = validate_simulated_export(checkouts, "failure")
+        assert report["executed_sessions"] == report_sessions
+
+
+@pytest.mark.parametrize("scenario", ["fragmented", "expression_error"])
+def test_launcher_propagates_actual_isolated_simulation_result(
+    checkouts, monkeypatch, capsys, scenario
+):
+    actual_run = subprocess.run
+    child_results = []
+
+    def simulated_child(command, **kwargs):
+        assert command == [
+            sys.executable,
+            "-I",
+            str(checkouts.candidate / "scripts/run_experimental_boundary.py"),
+            "live",
+        ]
+        assert (
+            kwargs["stdin"]
+            == kwargs["stdout"]
+            == kwargs["stderr"]
+            == subprocess.DEVNULL
+        )
+        assert kwargs["env"] == zero_environment(checkouts)
+        # Test-only subprocess bootstrap: install a simulated transport before
+        # executing the real entry, not a replacement campaign or fixed report.
+        result = actual_run(simulated_command(checkouts, scenario), **kwargs)
+        child_results.append(result.returncode)
+        return result
+
+    monkeypatch.setattr(launcher, "ROOT", checkouts.trusted)
+    monkeypatch.setattr(launcher.os, "environ", zero_environment(checkouts))
+    monkeypatch.setattr(launcher.subprocess, "run", simulated_child)
+    assert launcher.main() == (0 if scenario == "fragmented" else 1)
+    assert child_results == ([0] if scenario == "fragmented" else [14])
+    assert capsys.readouterr() == (
+        ""
+        if scenario == "fragmented"
+        else "H1/H2 failed; phase=collect; phase_source=child_exit.\n",
+        "",
+    )
+    assert not list(checkouts.storage.glob("hoben-experimental-private-*"))
+
+
 @pytest.mark.parametrize(
     "code,phase",
     [
