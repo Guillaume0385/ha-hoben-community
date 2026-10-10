@@ -169,6 +169,12 @@ jobs:
               const report = exports.readReport('public-report/report.json', context);
               success = process.env.COLLECTION_RESULT === 'success' && report.result === 'inconclusive';
             } catch (_) {}
+            const publicPR = Number(process.env.APPROVED_PR);
+            const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            success = success &&
+              Number.isSafeInteger(publicPR) && publicPR > 0 &&
+              Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
+              publicAttempt <= 50;
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: context.sha, context: 'hoben-experimental-h1h2',
               state: success ? 'success' : 'failure',
