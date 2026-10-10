@@ -50,6 +50,7 @@ jobs:
       actions: read
     outputs:
       approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,6 +64,7 @@ jobs:
             try {
               const decision = await gate.verify({github, context});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(decision.pr));
               const summary = decision.status === 'PENDING APPROVAL'
                 ? 'PENDING APPROVAL: reserved h1h2; required GitHub reviewer approval still applies.'
                 : 'READY FOR ENVIRONMENT: reserved h1h2; no required reviewers configured.';
@@ -106,14 +108,16 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/experimental-lab-gate.cjs');
             try {
-              await gate.verify({github, context, recheck: true});
+              const authorized = await gate.verify({github, context, recheck: true});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(authorized.pr));
             } catch (_) { core.setFailed('NOT RUN: approval or admission proof changed.'); }
       - id: capture
         name: Bounded H1/H2 with no runner tokens in the collector process
         if: steps.recheck.outputs.approved == 'true'
         env:
           EXPERIMENTAL_APPROVED_SHA: ${{ github.sha }}
+          EXPERIMENTAL_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
           HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: python trusted/scripts/launch_experimental_boundary.py
