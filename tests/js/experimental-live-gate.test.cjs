@@ -136,9 +136,6 @@ const refused = {
   "decision scenario": a => { a.approval.scenario = "hoben-live"; a.decision(); },
   "decision arbitrary key": a => { a.approval.script = "anything"; a.decision(); },
   "decision extra field": a => { a.approval.recipient_sha256 = "0".repeat(64); a.decision(); },
-  "no Issue link": a => { a.pr.body = "No authorization"; },
-  "blocked Issue": a => { a.issues.labels = [{name: "state:blocked"}]; },
-  "closed Issue": a => { a.issues.state = "closed"; },
   "pending changes": a => { a.reviews = [{user: {id: 3}, state: "CHANGES_REQUESTED"}, {user: {id: 3}, state: "COMMENTED"}]; },
   "unresolved thread": a => { a.threads = [{isResolved: false}]; },
   "CI wrong SHA": a => { a.ci.head_sha = sha; },
@@ -368,27 +365,35 @@ test("a superseded decision on an earlier HEAD is history, never an approval of 
   await assert.rejects(gate.verify(b), /manager_decision_unverified/);
 });
 
-test("issue #61 three missing premerge proofs are distinct refusals before any claim", async () => {
-  const absent = [
-    a => { a.pr.body = "No Issue reference"; },
-    a => { a.issues.labels = [{name: "state:blocked"}]; },
-    a => { a.comments = []; },
-  ];
-  for (const mutate of absent) {
-    const a = setup();
-    mutate(a);
-    await assert.rejects(gate.verify(a), error => {
-      assert.equal(gate.refusalCategory(error), "decision");
-      return true;
-    });
-    assert.equal(a.writes, 0);
-    assert.equal(a.refs.size, 0);
-  }
-  // Real MANAGER decision/CI is simulated here, not published by DEV.
-  const nominal = setup();
-  assert.equal((await gate.verify(nominal)).status, "READY FOR ENVIRONMENT");
-  assert.equal(nominal.writes, 1);
+test("missing MANAGER approval remains a hard refusal even for Issue-less PRs", async () => {
+  const a = setup();
+  a.pr.body = "Documentation-only change without an Issue reference";
+  a.issues.state = "closed";
+  a.issues.labels = [{name: "state:blocked"}];
+  a.comments = [];
+  await assert.rejects(gate.verify(a), error => {
+    assert.equal(gate.refusalCategory(error), "decision");
+    return true;
+  });
+  assert.equal(a.writes, 0);
 });
+
+for (const type of ["code", "tests", "documentation", "workflow"]) {
+  for (const linked of [true, false]) {
+    test("MANAGER-reviewed " + type + " PR " + (linked ? "with" : "without") +
+      " Refs #54 can be selected safely", async () => {
+      const a = setup();
+      a.pr.body = type + (linked ? " Refs #54" : " — unrelated to issue #54");
+      a.issues.state = "closed";
+      a.issues.labels = [{name: "state:blocked"}];
+      const result = await gate.verify(a);
+      assert.equal(result.status, "READY FOR ENVIRONMENT");
+      assert.equal(a.writes, 1);
+      assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+    });
+  }
+}
+
 
 function useProtectedBranches(a) {
   a.environment.deployment_branch_policy = {
