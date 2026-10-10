@@ -285,13 +285,8 @@ async function actualApproval(github, context, environment, proof) {
   const { data: history } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
     { ...API, run_id: context.runId });
   need(Array.isArray(history), "approval_unverified");
-  const relevant = history.filter(h => h.environments?.some(e =>
-    e.id === environment.id && e.name === policy.environment));
-  need(relevant.length > 0 && relevant.every(h => h.state === "approved" &&
-    h.user?.type === "User" && h.user.id !== MANAGER_ID &&
-    (proof.number === 1 || (Number.isFinite(Date.parse(h.created_at)) &&
-      Date.parse(h.created_at) >= proof.beganAt)) &&
-    environment.reviewers.some(r => r.id === h.user.id && r.login === h.user.login)), "approval_unverified");
+  need(rerun.freshEnvironmentApproval(history, environment, proof, policy.environment),
+    "approval_unverified");
 }
 
 async function verify({ github, context, env = process.env, recheck = false }) {
