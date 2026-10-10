@@ -21,7 +21,6 @@ async function verify({github, context, env = process.env}) {
   const payload = context.payload || {};
   need(match !== null &&
     context.eventName === "push" && context.actor === MANAGER.login &&
-    context.runAttempt === 1 &&
     SHA.test(context.sha) &&
     env.GITHUB_ACTIONS === "true" &&
     env.GITHUB_REPOSITORY === REPOSITORY &&
