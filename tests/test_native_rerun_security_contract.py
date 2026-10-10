@@ -39,8 +39,8 @@ def test_both_original_gates_cannot_reuse_v1_decision_for_attempt_two():
     for filename in ("experimental-lab-gate.cjs", "experimental-live-gate.cjs"):
         gate = (SCRIPTS / filename).read_text()
         assert "run.run_attempt === 1" in gate
-        assert '"state:review"' in gate
-        assert "tracking_issue_id === 5768789242" in gate
+        assert "tracking_issue_id" not in gate
+        assert "issue_number: 54" not in gate
         assert "campaign_id" not in gate
 
 
