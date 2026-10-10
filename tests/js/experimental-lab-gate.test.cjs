@@ -401,3 +401,80 @@ for (const type of ["code", "tests", "documentation", "workflow"]) {
   }
 }
 
+
+
+function nativeRerun(a, number, includeApproval = true) {
+  a.env.GITHUB_RUN_ATTEMPT = String(number);
+  a.run.run_attempt = number;
+  a.run.triggering_actor = {...user};
+  const dry = {name: "dry-run", id: 501, run_id: 123, run_attempt: number,
+    head_sha: sha, status: "completed", conclusion: "success",
+    started_at: "2026-10-09T08:12:00Z"};
+  const admission = {name: "admission", id: 502, run_id: 123, run_attempt: number,
+    head_sha: sha, status: "in_progress", conclusion: null};
+  const collect = {name: "collect", id: 503, run_id: 123, run_attempt: number,
+    head_sha: sha, status: "in_progress", conclusion: null};
+  a.rerunJobs = [dry, admission, collect];
+  a.github.rest.actions.listJobsForWorkflowRun = async p =>
+    ({data: p.run_id === 123 ? a.rerunJobs : a.jobs});
+  a.github.rest.actions.listJobsForWorkflowRunAttempt = async p =>
+    ({data: [{name: "dry-run", run_attempt: p.attempt_number,
+      conclusion: "success"}]});
+  const original = a.github.rest.git.createRef;
+  a.github.rest.git.createRef = async args => {
+    const response = await original(args);
+    admission.status = "completed"; admission.conclusion = "success";
+    return response;
+  };
+  if (includeApproval) {
+    const decision = {schema: 2, scenario: "h1h2", candidate_sha: head,
+      ci_run_id: 456, pr_number: a.pr.number, merge_sha: sha,
+      run_id: a.context.runId, run_attempt: number};
+    a.comments.push({id: 3000 + number, user: {...user},
+      created_at: "2026-10-09T08:11:00Z",
+      updated_at: "2026-10-09T08:11:00Z",
+      body: gate.MARKER_V2 + "\\n" + JSON.stringify(decision)});
+  }
+  return a;
+}
+
+for (const attempt of [2, 3]) {
+  test("native full rerun " + attempt + " admits new decision, reserves exactly once", async () => {
+    const a = nativeRerun(setup(), attempt);
+    assert.equal((await gate.verify(a)).status, "READY FOR ENVIRONMENT");
+    assert.equal(a.writes, 1);
+    assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+    await assert.rejects(gate.verify(a));
+    assert.equal(a.writes, 1);
+  });
+
+  for (const [cause, mutator] of [
+    ["absent fresh decision", a => {a.comments = [a.comment];}],
+    ["partial job rerun stale dry-run", a => {a.rerunJobs[0].run_attempt = 1;}],
+    ["partial job rerun stale admission", a => {a.rerunJobs[1].run_attempt = 1;}],
+    ["untrusted triggering actor", a => {a.run.triggering_actor.id = 1;}],
+    ["untrusted env triggering actor", a => {a.env.GITHUB_TRIGGERING_ACTOR = "untrusted";}],
+    ["duplicate approval", a => {a.comments.push({...a.comments.at(-1), id: 9898});}],
+    ["approval modified", a => {a.comments.at(-1).updated_at = "2026-10-09T08:11:01Z";}],
+    ["invalid CI", a => {a.jobs[0].conclusion = "failure";}],
+    ["invalid branch", a => {a.pr.base.ref = "main";}],
+    ["policy denied", a => {a.environment.name = "untrusted";}],
+  ]) {
+    test("NOT RUN " + attempt + " " + cause, async () => {
+      const a = nativeRerun(setup(), attempt);
+      mutator(a);
+      await assert.rejects(gate.verify(a));
+      assert.equal(a.writes, 0);
+    });
+  }
+}
+test("same SHA permits three distinct reservation names but no double admission", async () => {
+  const reserved = [];
+  for (const attempt of [1, 2, 3]) {
+    const a = attempt === 1 ? setup() : nativeRerun(setup(), attempt);
+    const result = await gate.verify(a);
+    assert.equal(result.status, "READY FOR ENVIRONMENT");
+    reserved.push(...a.refs.keys());
+  }
+  assert.equal(new Set(reserved).size, 3);
+});
