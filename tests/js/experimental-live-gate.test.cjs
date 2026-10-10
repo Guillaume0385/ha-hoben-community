@@ -536,7 +536,7 @@ function nativeRerun(a, number, includeApproval = true) {
     a.comments.push({id: 3000 + number, user: {...user},
       created_at: "2026-10-09T08:11:00Z",
       updated_at: "2026-10-09T08:11:00Z",
-      body: gate.MARKER_V2 + "\\n" + JSON.stringify(decision)});
+      body: gate.MARKER_V2 + " " + JSON.stringify(decision)});
   }
   return a;
 }
