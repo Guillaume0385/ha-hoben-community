@@ -104,6 +104,7 @@ def checkouts(tmp_path):
         "GITHUB_RUN_ID": "123",
         "GITHUB_EVENT_PATH": str(event),
         "EXPERIMENTAL_APPROVED_SHA": sha,
+        "EXPERIMENTAL_APPROVED_PR": "62",
         "RUNNER_TEMP": str(storage),
         "EXPERIMENTAL_PHASE": "dry-run",
     }
