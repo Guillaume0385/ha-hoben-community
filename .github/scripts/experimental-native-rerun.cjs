@@ -119,12 +119,14 @@ function freshEnvironmentApproval(history, environment, proof, name) {
       !whole(environment?.id) || !whole(proof?.number)) return false;
   const relevant = history.filter(h => h.environments?.some(e =>
     e.id === environment.id && e.name === name));
-  return relevant.length > 0 && relevant.every(h =>
+  // GitHub run approvals may include older attempts. Only *fresh* entries
+  // from this attempt qualify; old approvals neither authorize nor veto it.
+  const current = proof.number === 1 ? relevant : relevant.filter(h =>
+    Number.isFinite(when(h.created_at)) && when(h.created_at) >= proof.beganAt);
+  return current.length > 0 && current.every(h =>
     h.state === "approved" && h.user?.type === "User" &&
     h.user.id !== manager.id &&
-    environment.reviewers.some(r => r.id === h.user.id && r.login === h.user.login) &&
-    (proof.number === 1 || (Number.isFinite(when(h.created_at)) &&
-      when(h.created_at) >= proof.beganAt)));
+    environment.reviewers.some(r => r.id === h.user.id && r.login === h.user.login));
 }
 
 function claimName(scenario, sha, runId, attempt) {
