@@ -46,6 +46,7 @@ def context_valid(env: dict[str, str]) -> bool:
             )
         )
         and env.get("LIVE_APPROVED_SHA") == sha
+        and re.fullmatch(r"[1-9][0-9]{0,8}", env.get("LIVE_APPROVED_PR", "")) is not None
         and env.get("GITHUB_WORKFLOW_REF")
         == (
             "Guillaume0385/ha-hoben-community/"
@@ -65,6 +66,10 @@ def empty_report() -> dict[str, object]:
     return {
         "schema": 1,
         "scenario": SCENARIO,
+        "merge_sha": "",
+        "run_id": 0,
+        "run_attempt": 0,
+        "pr_number": 0,
         "status": "failure",
         "refreshes_completed": 0,
         "decoded_refreshes": 0,
@@ -166,10 +171,17 @@ def main() -> int:
     if not context_valid(env):
         report["error"] = "invalid_context"
     else:
+        report.update(
+            merge_sha=env["GITHUB_SHA"],
+            run_id=int(env["GITHUB_RUN_ID"]),
+            run_attempt=int(env["GITHUB_RUN_ATTEMPT"]),
+            pr_number=int(env["LIVE_APPROVED_PR"]),
+        )
         try:
-            report = asyncio.run(
+            observed = asyncio.run(
                 observe(env["HOBEN_USER_GUID"], env.get("HOBEN_DEVICE_GUID") or None)
             )
+            report.update(observed)
         except BaseException:
             report["error"] = "client_failure"
     written = write_report(report, env.get("RUNNER_TEMP", ""))
