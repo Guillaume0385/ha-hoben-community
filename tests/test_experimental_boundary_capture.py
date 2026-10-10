@@ -387,7 +387,7 @@ def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
         ("GITHUB_EVENT_NAME", "workflow_dispatch"),
         ("GITHUB_REF", "refs/heads/candidate"),
         ("GITHUB_REPOSITORY", "fork/repo"),
-        ("GITHUB_RUN_ATTEMPT", "2"),
+        ("GITHUB_RUN_ATTEMPT", "51"),
         ("GITHUB_SHA", "b" * 40),
         ("GITHUB_WORKFLOW_SHA", "b" * 40),
         ("GITHUB_WORKFLOW_REF", "candidate.yml"),
