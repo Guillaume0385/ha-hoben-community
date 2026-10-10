@@ -15,7 +15,7 @@ function report() {
     opening_context: {eligible: true, status: "accepted_v4_prefix"},
     h1_status: "compatible", h2_status: "compatible", comparison: "compatible_with_both",
   }));
-  return {schema: 1, scenario: "h1h2", phase: "live", experimental_sha: context.sha, candidate_sha: context.sha,
+  return {schema: 1, scenario: "h1h2", phase: "live", experimental_sha: context.sha, merge_sha: context.sha, candidate_sha: context.sha,
     run_id: 123, run_attempt: 1, pr_number: 62, boundary_proven: false, result: "inconclusive", reason: "hypotheses_unproven",
     executed_sessions: 12, planned_sessions: 12, eligible_sessions: 12, observation_seconds: 90, sessions};
 }
@@ -43,6 +43,7 @@ for (const [name, modify] of Object.entries({
   "unknown opening key": r => { r.sessions[0].opening_context.raw = "SYNTHETIC_PRIVATE"; },
   "synthetic success": r => { r.phase = "dry-run"; },
   "wrong SHA": r => { r.experimental_sha = "b".repeat(40); },
+  "wrong merged SHA": r => { r.merge_sha = "b".repeat(40); },
   "wrong run": r => { r.run_id++; },
   "wrong attempt": r => { r.run_attempt++; },
   "wrong PR": r => { r.pr_number++; },
