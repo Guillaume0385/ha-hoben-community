@@ -191,7 +191,9 @@ jobs:
               await core.summary.addRaw(
                 'Public correlation: scenario=h1h2; run_id=' + context.runId +
                 '; run_attempt=' + attempt + '; pr=' + pr +
-                '; sha=' + context.sha + '; status=' + (success ? 'completed' : 'NOT RUN') + '.'
+                '; sha=' + context.sha + '; status=' +
+                (success ? 'completed' : 'failed_or_not_run') +
+                '; observed_at=' + new Date().toISOString() + '.'
               ).write();
             }
 
