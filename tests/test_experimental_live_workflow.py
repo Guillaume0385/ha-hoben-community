@@ -233,3 +233,49 @@ def test_node_live_offline_security_regressions(suite):
         check=False,
     )
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 3])
+def test_ha_main_preserves_verified_campaign_identity_after_observe(
+    tmp_path, monkeypatch, attempt
+):
+    sha = "a" * 40
+    for key, value in live.REQUIRED.items():
+        monkeypatch.setenv(key, value)
+    for key, value in {
+        "GITHUB_SHA": sha,
+        "GITHUB_WORKFLOW_SHA": sha,
+        "GITHUB_WORKFLOW_REF": (
+            "Guillaume0385/ha-hoben-community/"
+            ".github/workflows/hoben-live-experimental.yml@refs/heads/experimental"
+        ),
+        "GITHUB_RUN_ATTEMPT": str(attempt),
+        "GITHUB_RUN_ID": "123",
+        "LIVE_APPROVED_SHA": sha,
+        "LIVE_APPROVED_PR": "62",
+        "RUNNER_TEMP": str(tmp_path),
+        "HOBEN_USER_GUID": "SYNTHETIC_PRIVATE_IDENTITY",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    async def simulated(*args, **kwargs):
+        model = live.empty_report()
+        model.update(
+            status="success",
+            error="none",
+            refreshes_completed=2,
+            decoded_refreshes=2,
+            device_identity_assigned=True,
+            device_identity_reused=True,
+            closed=True,
+        )
+        return model
+
+    monkeypatch.setattr(live, "observe", simulated)
+    assert live.main() == 0
+    report = json.loads((tmp_path / "hoben-live-public/report.json").read_text())
+    assert report["merge_sha"] == sha
+    assert report["run_id"] == 123
+    assert report["run_attempt"] == attempt
+    assert report["pr_number"] == 62
+    assert "SYNTHETIC_PRIVATE_IDENTITY" not in json.dumps(report)
