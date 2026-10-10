@@ -29,6 +29,7 @@ REQUIRED = {
     "GITHUB_EVENT_NAME": "push",
     "GITHUB_ACTOR": "Guillaume0385",
     "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
+    "GITHUB_RUN_ATTEMPT": "1",
 }
 SHA_RE = re.compile(r"[a-f0-9]{40}")
 
@@ -39,7 +40,6 @@ def context_valid(env: dict[str, str]) -> bool:
     return (
         all(env.get(key) == value for key, value in REQUIRED.items())
         and SHA_RE.fullmatch(sha) is not None
-        and re.fullmatch(r"(?:[1-9]|[1-4][0-9]|50)", env.get("GITHUB_RUN_ATTEMPT", "")) is not None
         and env.get("LIVE_APPROVED_SHA") == sha
         and env.get("GITHUB_WORKFLOW_REF")
         == (
