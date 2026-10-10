@@ -17,7 +17,8 @@ const when = s => typeof s === "string" && Number.isFinite(Date.parse(s)) ?
 function authorizeAttempt({context, env, run, jobs, previousJobs, workflow, phase}) {
   const attempt = Number(env.GITHUB_RUN_ATTEMPT);
   need(attemptPattern.test(env.GITHUB_RUN_ATTEMPT || "") &&
-    context.eventName === "push" && context.ref === "refs/heads/experimental" &&
+    context.eventName === "push" && context.actor === manager.login &&
+    context.ref === "refs/heads/experimental" &&
     shaPattern.test(context.sha) && whole(context.runId) &&
     env.GITHUB_RUN_ID === String(context.runId) &&
     env.GITHUB_REF === context.ref && env.GITHUB_SHA === context.sha &&
