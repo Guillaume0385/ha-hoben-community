@@ -278,8 +278,6 @@ def context(phase: str) -> tuple[dict, Path]:
     require(
         policy["schema"] == 1
         and policy["scenario"] == "h1h2"
-        and policy["tracking_issue"] == 54
-        and policy["tracking_issue_id"] == 5768789242
         and policy["environment"] == "hoben-experimental"
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
