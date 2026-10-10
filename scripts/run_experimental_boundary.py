@@ -284,7 +284,12 @@ def context(phase: str) -> tuple[dict, Path]:
         policy["schema"] == 1
         and policy["scenario"] == "h1h2"
         and policy["environment"] == "hoben-experimental"
-        and re.fullmatch(r"[1-9][0-9]{0,8}", os.environ.get("EXPERIMENTAL_APPROVED_PR", "")) is not None
+        and bool(
+            re.fullmatch(
+                r"[1-9][0-9]{0,8}",
+                os.environ.get("EXPERIMENTAL_APPROVED_PR", ""),
+            )
+        )
     )
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     require(
