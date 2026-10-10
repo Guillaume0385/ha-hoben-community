@@ -125,9 +125,16 @@ jobs:
         name: Validate strictly anonymized report before upload
         if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          APPROVED_PR: ${{ steps.recheck.outputs.pr }}
         with:
           script: |
-            require('./trusted/.github/scripts/experimental-exports.cjs').prepare({context, core});
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./trusted/.github/scripts/experimental-exports.cjs').prepare({core, context: proof});
       - name: Export only the validated public report
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
@@ -166,7 +173,12 @@ jobs:
             const exports = require('./.github/scripts/experimental-exports.cjs');
             let success = false;
             try {
-              const report = exports.readReport('public-report/report.json', context);
+              const proof = {
+                sha: context.sha, runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+                prNumber: Number(process.env.APPROVED_PR)
+              };
+              const report = exports.readReport('public-report/report.json', proof);
               success = process.env.COLLECTION_RESULT === 'success' && report.result === 'inconclusive';
             } catch (_) {}
             const publicPR = Number(process.env.APPROVED_PR);
