@@ -203,3 +203,25 @@ test("legacy first attempt keeps existing environment reviewer validation", () =
   assert.equal(contract.freshEnvironmentApproval(history, environment,
     {number: 2, beganAt: Date.parse("2026-10-10T12:00:00Z")}, "hoben-live"), false);
 });
+
+
+test("documented GitHub approval history has no root review timestamp: refuse rerun", () => {
+  // Official GET /actions/runs/{run_id}/approvals example puts created_at
+  // under environments, where it is environment creation time, NOT approval time.
+  const history = [{
+    state: "approved",
+    environments: [{id: 789, name: "hoben-live",
+      created_at: "2026-10-10T13:00:00Z",
+      updated_at: "2026-10-10T13:00:00Z"}],
+    user: {login: "independent-reviewer", id: 999, type: "User"}
+  }];
+  const environment = {id: 789, reviewers: [{id: 999, login: "independent-reviewer"}]};
+  const check = proof => contract.freshEnvironmentApproval(
+    history, environment, proof, "hoben-live");
+  assert.equal(check({number: 1}), true);
+  assert.equal(check({number: 2, beganAt: Date.parse("2026-10-10T12:00:00Z")}), false);
+  assert.equal(check({number: 3, beganAt: Date.parse("2026-10-10T12:00:00Z")}), false);
+  // Updating the ENVIRONMENT timestamp never proves a fresh approval.
+  history[0].environments[0].created_at = "2026-10-11T13:00:00Z";
+  assert.equal(check({number: 2, beganAt: Date.parse("2026-10-10T12:00:00Z")}), false);
+});
