@@ -72,7 +72,7 @@ def test_pure_native_rerun_gate_proves_attempt_and_decision_refusals_offline():
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
 
 
-def test_native_rerun_helper_does_not_unlock_current_hoben_workflows():
+def test_native_rerun_helper_is_used_only_by_both_trusted_gates():
     helper = (SCRIPTS / "experimental-native-rerun.cjs").read_text()
     assert "authorizeAttempt" in helper
     assert "authorizeDecision" in helper
