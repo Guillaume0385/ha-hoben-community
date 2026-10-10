@@ -207,7 +207,7 @@ def validate_simulated_export(checkouts, expected_result):
             "const gate = require("
             + json.dumps(str(ROOT / ".github/scripts/experimental-exports.cjs"))
             + "); process.env.RUNNER_TEMP = process.argv[1];"
-            "const context = {sha:process.argv[2],runId:123};"
+            "const context = {sha:process.argv[2],runId:123,runAttempt:1,prNumber:62};"
             "const outputs = {}, failures = [];"
             "const core = {setOutput:(k,v)=>outputs[k]=v,"
             "setFailed:v=>failures.push(v)};"
