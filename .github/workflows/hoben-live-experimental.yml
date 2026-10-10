@@ -52,6 +52,7 @@ jobs:
       actions: read
     outputs:
       approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -65,6 +66,7 @@ jobs:
             try {
               const result = await gate.verify({github, context});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(result.pr));
               await core.summary.addRaw(result.status === 'PENDING APPROVAL'
                 ? 'PENDING APPROVAL: real GitHub environment reviewers required.'
                 : 'READY FOR ENVIRONMENT: claim reserved; no required reviewers configured.').write();
@@ -107,8 +109,9 @@ jobs:
           script: |
             const gate = require('./trusted/.github/scripts/experimental-live-gate.cjs');
             try {
-              await gate.verify({github, context, recheck: true});
+              const authorized = await gate.verify({github, context, recheck: true});
               core.setOutput('approved', 'true');
+              core.setOutput('pr', String(authorized.pr));
             } catch (_) {
               core.setFailed('NOT RUN: live approval or admission evidence changed.');
             }
@@ -117,6 +120,7 @@ jobs:
         if: steps.recheck.outputs.approved == 'true'
         env:
           LIVE_APPROVED_SHA: ${{ github.sha }}
+          LIVE_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
           HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
         run: python trusted/scripts/launch_live_ha_parity.py
@@ -126,7 +130,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
-            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core});
+            require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core, context});
       - name: Export sanitized report only
         if: ${{ always() && steps.exports.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
@@ -164,7 +168,7 @@ jobs:
             let success = false;
             try {
               const report = require('./.github/scripts/experimental-live-report.cjs')
-                .readReport('public-report/report.json');
+                .readReport('public-report/report.json', context);
               success = process.env.COLLECTION_RESULT === 'success' && report.status === 'success';
             } catch (_) {}
             await github.rest.repos.createCommitStatus({
