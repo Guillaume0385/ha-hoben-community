@@ -27,8 +27,7 @@ async function verify({ github, context, scenario, env = process.env, workflow =
       context.actor !== MANAGER ||
       env.GITHUB_ACTOR !== MANAGER ||
       env.GITHUB_TRIGGERING_ACTOR !== MANAGER ||
-      !/^(?:[1-9]|[1-4][0-9]|50)$/.test(env.GITHUB_RUN_ATTEMPT || "") ||
-      (workflow === WORKFLOW && env.GITHUB_RUN_ATTEMPT !== "1") ||
+      env.GITHUB_RUN_ATTEMPT !== "1" ||
       env.GITHUB_WORKFLOW_REF !== workflow ||
       env.GITHUB_REPOSITORY !== REPOSITORY ||
       env.GITHUB_REF !== context.ref ||
