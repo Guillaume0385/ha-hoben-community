@@ -33,9 +33,8 @@ function authorizeAttempt({context, env, run, jobs, previousJobs, workflow, phas
     run.repository?.id === 1401398724 &&
     run.head_repository?.id === run.repository.id &&
     run.head_repository?.full_name === repository &&
-    [workflow.split("@")[0].split("/").slice(-2).join("/"),
-      workflow.slice(repository.length + 1)].some(p => p === run.path) ||
-    false,
+    [workflow.split("@")[0].slice(repository.length + 1),
+      workflow.slice(repository.length + 1)].includes(run.path),
   "attempt_unverified");
   need(attempt === 1 || isManager(run.triggering_actor), "attempt_unverified");
   need(Array.isArray(jobs) && jobs.length <= 8, "partial_rerun");
