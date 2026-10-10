@@ -30,17 +30,21 @@ def test_both_secret_bearing_workflows_still_fail_closed_on_rerun():
             "push": {"branches": ["experimental"]}
         }
         assert data["jobs"]["collect"]["environment"] == expected_environment
-        assert "github.run_attempt == 1" in data["jobs"]["dry-run"]["if"]
+        assert "github.run_attempt >= 1" in data["jobs"]["dry-run"]["if"]
+        assert "github.triggering_actor" in data["jobs"]["dry-run"]["if"]
         assert data["concurrency"]["group"] == "hoben-read-only-observation"
         assert data["concurrency"]["cancel-in-progress"] is False
 
 
-def test_both_original_gates_cannot_reuse_v1_decision_for_attempt_two():
+def test_native_gate_v2_is_required_after_attempt_one():
     push = (SCRIPTS / "experimental-push-preflight.cjs").read_text()
-    assert 'env.GITHUB_RUN_ATTEMPT !== "1"' in push
+    assert "GITHUB_RUN_ATTEMPT" in push
+    assert "workflow === WORKFLOW" in push
     for filename in ("experimental-lab-gate.cjs", "experimental-live-gate.cjs"):
         gate = (SCRIPTS / filename).read_text()
-        assert "run.run_attempt === 1" in gate
+        assert "rerun.authorizeAttempt" in (SCRIPTS / "experimental-native-rerun.cjs").read_text()
+        assert "rerun.authorizeDecision" in text
+        assert "rerun.claimName" in text
         assert "tracking_issue_id" not in gate
         assert "issue_number: 54" not in gate
         assert "campaign_id" not in gate
@@ -74,5 +78,5 @@ def test_native_rerun_helper_does_not_unlock_current_hoben_workflows():
     assert "claimName" in helper
     for filename in ("experimental-lab-gate.cjs", "experimental-live-gate.cjs"):
         text = (SCRIPTS / filename).read_text()
-        assert "experimental-native-rerun" not in text
-        assert "run.run_attempt === 1" in text
+        assert "experimental-native-rerun" in text
+        assert "proof.number === 1" in text
