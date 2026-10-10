@@ -91,6 +91,7 @@ def runner(tmp_path, monkeypatch):
         "GITHUB_RUN_ID": "123",
         "GITHUB_EVENT_PATH": str(event_path),
         "EXPERIMENTAL_APPROVED_SHA": POLICY["candidate_sha"],
+        "EXPERIMENTAL_APPROVED_PR": "62",
         "EXPERIMENTAL_PHASE": "dry-run",
         "RUNNER_TEMP": str(storage),
     }
