@@ -187,6 +187,14 @@ def main() -> int:
                 observe(env["HOBEN_USER_GUID"], env.get("HOBEN_DEVICE_GUID") or None)
             )
             report.update(observed)
+            # Identity from the rechecked Actions context takes precedence over
+            # the observer's default report (which has zeroed identifiers).
+            report.update(
+                merge_sha=env["GITHUB_SHA"],
+                run_id=int(env["GITHUB_RUN_ID"]),
+                run_attempt=int(env["GITHUB_RUN_ATTEMPT"]),
+                pr_number=int(env["LIVE_APPROVED_PR"]),
+            )
         except BaseException:
             report["error"] = "client_failure"
     written = write_report(report, env.get("RUNNER_TEMP", ""))
