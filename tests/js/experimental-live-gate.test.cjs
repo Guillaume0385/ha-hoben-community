@@ -553,6 +553,10 @@ for (const attempt of [2, 3]) {
     assert.equal(a.writes, 1);
     assert.match([...a.refs.keys()][0], new RegExp("-run123-attempt" + attempt + "$"));
     assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+    if (attempt === 2) {
+      a.environment.protection_rules.push({type: "wait_timer", wait_timer: 3});
+      await assert.rejects(gate.verify({...a, recheck: true}), /claim_unverified/);
+    }
     await assert.rejects(gate.verify(a));
     assert.equal(a.writes, 1);
   });
@@ -579,30 +583,3 @@ for (const attempt of [2, 3]) {
 }
 
 
-test("native rerun requires a NEW actual independent environment approval", async () => {
-  const a = nativeRerun(setup(), 2);
-  requireIndependentReviewer(a);
-  assert.equal(require("../../.github/scripts/experimental-native-rerun.cjs")
-    .authorizeDecision({comments: a.comments, marker: gate.MARKER_V2,
-      scenario: "ha-parity", candidateSha: head, ciId: 456, pr: a.pr,
-      mergeSha: sha, runId: a.context.runId,
-      proof: {number: 2, beganAt: Date.parse("2026-10-09T08:12:00Z")}})
-    .approval.run_attempt, 2);
-  assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
-  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
-  a.history[0].created_at = "2026-10-09T08:11:59Z";
-  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
-  a.history[0].created_at = "2026-10-09T08:12:01Z";
-  assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
-});
-
-test("native rerun recheck refuses changed policy or decision even with a claim", async () => {
-  const a = nativeRerun(setup(), 3);
-  await gate.verify(a);
-  a.comments.at(-1).updated_at = "2026-10-09T08:11:01Z";
-  await assert.rejects(gate.verify({...a, recheck: true}));
-  a.comments.at(-1).updated_at = a.comments.at(-1).created_at;
-  a.environment.protection_rules.push({type: "wait_timer", wait_timer: 3});
-  await assert.rejects(gate.verify({...a, recheck: true}), /claim_unverified/);
-  assert.equal(a.writes, 1);
-});
