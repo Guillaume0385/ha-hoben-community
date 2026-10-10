@@ -102,7 +102,7 @@ for (const scenario of ["h1h2", "ha-parity"]) {
       assert.equal(proof.comment.id, 777);
       assert(Object.isFrozen(proof));
     });
-    for (const [name, mutation] of Object.entries({
+    for (let [name, mutation] of Object.entries({
       "missing": a => {a.comments = [];},
       "edited": a => {a.comments[0].updated_at = "2026-10-10T11:58:59Z";},
       "wrong actor": a => {a.comments[0].user.id++;},
