@@ -50,8 +50,7 @@ function workflowPath(value, file, allowedRefs) {
 
 async function mergedPush(github, context, env) {
   need(policy.schema === 1 && policy.scenario === "ha-parity" &&
-    policy.environment === "hoben-live" && policy.tracking_issue === 54 &&
-    policy.tracking_issue_id === 5768789242,
+    policy.environment === "hoben-live",
   "invalid_policy");
   need(env.GITHUB_WORKFLOW_SHA === context.sha && positive(context.runId) &&
     env.GITHUB_RUN_ID === String(context.runId) &&
@@ -81,13 +80,11 @@ async function successfulPreflight(github, context) {
 }
 
 async function managerDecision(github, pr) {
-  need(SHA.test(pr.head.sha) && typeof pr.head.ref === "string" &&
-    /(?:^|\s)(?:Refs|Closes) #54(?:\s|$)/.test(pr.body || ""), "issue_scope_unverified");
-  const { data: issue } = await github.rest.issues.get({ ...API, issue_number: 54 });
-  const states = (issue.labels || []).map(l => l.name).filter(n => n.startsWith("state:"));
-  need(issue.number === 54 && issue.id === policy.tracking_issue_id && issue.state === "open" &&
-    !issue.pull_request && states.length === 1 &&
-    ["state:ready", "state:in-progress", "state:review"].includes(states[0]), "issue_scope_unverified");
+  // Eligibility is based on the reviewed PR, not a global Issue #54 label.
+  // A PR of any scope is eligible only with exact authenticated MANAGER approval.
+  need(SHA.test(pr.head?.sha) && positive(pr.number) &&
+    typeof pr.head.ref === "string" && pr.head.ref.length > 0,
+  "manager_decision_unverified");
   const comments = await github.paginate(github.rest.issues.listComments,
     { ...API, issue_number: pr.number, per_page: 100 });
   const choices = comments.filter(c => c.user?.login === "Guillaume0385" &&
