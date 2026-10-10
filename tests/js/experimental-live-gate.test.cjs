@@ -546,6 +546,7 @@ for (const attempt of [2, 3]) {
     const a = nativeRerun(setup(), attempt);
     assert.equal((await gate.verify(a)).status, "READY FOR ENVIRONMENT");
     assert.equal(a.writes, 1);
+    assert.match([...a.refs.keys()][0], new RegExp("-run123-attempt" + attempt + "$"));
     assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
     await assert.rejects(gate.verify(a));
     assert.equal(a.writes, 1);
@@ -571,13 +572,3 @@ for (const attempt of [2, 3]) {
     });
   }
 }
-test("same SHA permits three distinct reservation names but no double admission", async () => {
-  const reserved = [];
-  for (const attempt of [1, 2, 3]) {
-    const a = attempt === 1 ? setup() : nativeRerun(setup(), attempt);
-    const result = await gate.verify(a);
-    assert.equal(result.status, "READY FOR ENVIRONMENT");
-    reserved.push(...a.refs.keys());
-  }
-  assert.equal(new Set(reserved).size, 3);
-});
