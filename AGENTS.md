@@ -961,27 +961,27 @@ A feature is complete only when:
 - HACS/Home Assistant validation still passes;
 - code is documented well enough for an external contributor to maintain it.
 
-### Issue #54 — 2026-10-10, repeatable campaigns and PR scope
+### Issue #54 — 2026-10-10, native full Actions re-runs
 
-The owner/MANAGER updated the experimental policy on 10 October 2026. CODEX
-DEV must work through authorized Issues, with PRs targeting `experimental`
-exclusively; **never** create a development PR targeting `main` without a
-new explicit owner request. New authorized Hoben campaigns must be separate
-by immutable `(SHA, scenario, campaign_id)` and require MANAGER's own
-authenticated, exact-PR, exact-CI decision and any required GitHub environment
-approval. A previous campaign, mere push, PR mention, green CI, review,
-or rerun is not a new decision. The intended eventual eligible PR is any
-same-repository PR targeting `experimental`, not just `Refs #54`,
-including documentation-only PRs when specifically approved; no gate
-relaxation is authorized without corresponding offline refusal coverage.
+The current owner decision requires `Re-run all jobs` of an existing
+`experimental` Actions workflow to repeat H1/H2 and HA parity with the exact
+same reviewed SHA, not a new branch, tag-trigger or commit. The original
+`push` event and its MANAGER identity must still be verified. For a re-run,
+`github.triggering_actor` must independently prove MANAGER identity and the
+new attempt must have its **own** immutable PR decision, tied to
+`run_id + run_attempt + scenario + SHA`; the first attempt's pre-merge v1
+approval never authorizes future attempts. The runner must refuse when a
+complete rerun of all jobs cannot be demonstrated. Protected `experimental`,
+the original reviewed/merged PR and its exact tree, four CI jobs, environment
+policy, real reviewer approval when configured, atomic anti-replay reservation,
+read-only collection and fixed anonymized report remain mandatory.
 
-Until a **real** event is demonstrated, the secretless
-`experimental-campaign-trigger-proof.yml` is merely a trigger candidate.
-It checks MANAGER-created `hoben-campaign-proof/<16-32 lowercase hex>`
-branches pointing to unchanged protected `experimental` HEAD, never
-launches Hoben, exports an artifact, accesses an environment or a secret,
-or grants campaign approval. MANAGER alone may perform the proof creation
-after merge/review. Failure or absence of the expected push is `NOT RUN`.
-Future secret-bearing workflow integration requires separately approved
-development, CI, MANAGER review, and operational gate evidence.
-
+Any same-repository, MANAGER-reviewed PR targeting `experimental` can be
+selected for either scenario even without `Refs #54`. This makes the PR
+eligible, never automatically approved. CODEX DEV continues to take tasks only
+from authorized Issues with one state label, and sends `experimental` PRs
+directly to MANAGER review. No branch/PR targeting `main` without a fresh,
+explicit owner request. Re-runs execute the **original SHA's** workflows, so
+past historical SHA runs cannot inherit new code. The owner can initiate
+`Re-run all jobs` manually in GitHub Actions because the current connector
+lacks a whole-run rerun action; DEV must not launch live Hoben tests.
