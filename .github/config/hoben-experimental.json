@@ -1,5 +1,7 @@
 {
   "schema": 1,
   "scenario": "h1h2",
+  "tracking_issue": 54,
+  "tracking_issue_id": 5768789242,
   "environment": "hoben-experimental"
 }
