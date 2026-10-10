@@ -4,6 +4,8 @@ This deliberately DOES NOT simulate manager approval or enable live access.
 It prevents an accidental secret-bearing change from being reported as ready.
 """
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -50,3 +52,26 @@ def test_no_unreviewed_code_or_script_path_is_added_to_ha_runtime():
         text = component.read_text()
         assert "experimental-campaign-trigger-proof" not in text
         assert "experimental-attempt.cjs" not in text
+
+def test_pure_native_rerun_gate_proves_attempt_and_decision_refusals_offline():
+    assert shutil.which("node"), "Node.js required for independent gate tests"
+    result = subprocess.run(
+        ["node", "--test", "tests/js/experimental-native-rerun.test.cjs"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+
+
+def test_native_rerun_helper_does_not_unlock_current_hoben_workflows():
+    helper = (SCRIPTS / "experimental-native-rerun.cjs").read_text()
+    assert "authorizeAttempt" in helper
+    assert "authorizeDecision" in helper
+    assert "claimName" in helper
+    for filename in ("experimental-lab-gate.cjs", "experimental-live-gate.cjs"):
+        text = (SCRIPTS / filename).read_text()
+        assert "experimental-native-rerun" not in text
+        assert "run.run_attempt === 1" in text
