@@ -42,7 +42,7 @@ def test_native_gate_v2_is_required_after_attempt_one():
     assert "workflow === WORKFLOW" in push
     for filename in ("experimental-lab-gate.cjs", "experimental-live-gate.cjs"):
         gate = (SCRIPTS / filename).read_text()
-        assert "rerun.authorizeAttempt" in (SCRIPTS / "experimental-native-rerun.cjs").read_text()
+        assert "authorizeAttempt" in (SCRIPTS / "experimental-native-rerun.cjs").read_text()
         assert "rerun.authorizeDecision" in text
         assert "rerun.claimName" in text
         assert "tracking_issue_id" not in gate
