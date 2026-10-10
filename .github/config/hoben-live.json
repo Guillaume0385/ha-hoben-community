@@ -1,7 +1,5 @@
 {
   "schema": 1,
   "scenario": "ha-parity",
-  "environment": "hoben-live",
-  "tracking_issue": 54,
-  "tracking_issue_id": 5768789242
+  "environment": "hoben-live"
 }
