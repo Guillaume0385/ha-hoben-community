@@ -53,6 +53,7 @@ def test_no_unreviewed_code_or_script_path_is_added_to_ha_runtime():
         assert "experimental-campaign-trigger-proof" not in text
         assert "experimental-attempt.cjs" not in text
 
+
 def test_pure_native_rerun_gate_proves_attempt_and_decision_refusals_offline():
     assert shutil.which("node"), "Node.js required for independent gate tests"
     result = subprocess.run(
