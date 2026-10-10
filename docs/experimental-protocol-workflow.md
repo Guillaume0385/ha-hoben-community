@@ -10,13 +10,17 @@
 
 ## Campagnes répétées — décision propriétaire du 10 octobre 2026
 
-**État de la PR #75 après la revue du 10 octobre : NON LIVRÉ / NOT RUN.**
+**État de la PR #75 en brouillon : RERUN NON LIVRÉ / NOT RUN.**
 Ce qui suit est le **contrat cible** imposé par le propriétaire, pas une
-description des gates installés. Les fichiers actuels
-`experimental-lab-gate.cjs`, `experimental-live-gate.cjs` et les workflows
-secrets restent inchangés ; à ce stade ils refusent toujours les
-`run_attempt > 1`, exigent encore `Refs #54` et ne savent pas réserver
-plusieurs tentatives. Le déclencheur temporaire rejeté a été retiré.
+preuve d'installation. La PR prépare maintenant la sélection d'une PR
+`experimental` revue pour les deux scénarios, même sans `Refs #54`, en
+supprimant la dépendance au label global de l'Issue #54. Cette modification
+n'est **pas installée** avant fusion. Les workflows et gates actifs au HEAD
+`experimental` continuent à refuser `run_attempt > 1`. Dans la PR #75,
+le module `experimental-native-rerun.cjs` reste strictement **hors chemin
+des gates** : il teste seulement les preuves nécessaires, sans les activer.
+Il ne constitue pas une réservation ni un déclencheur opérationnel.
+Le déclencheur temporaire par branche, rejeté par le propriétaire, a été retiré.
 **Aucun clic « Re-run all jobs » ne doit être considéré comme autorisation
 d'accès Hoben avant fusion d'un correctif complet, revu et testé.**
 La PR #75 est explicitement interdite de fusion sans nouvel accord
