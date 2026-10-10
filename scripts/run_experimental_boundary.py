@@ -504,11 +504,11 @@ def run(phase: str, *, diagnostic: PhaseDiagnostic | None = None) -> int:
                 "reason": "no_hoben_connection",
                 "boundary_proven": False,
                 "experimental_sha": os.environ["GITHUB_SHA"],
-        "merge_sha": os.environ["GITHUB_SHA"],
+                "merge_sha": os.environ["GITHUB_SHA"],
                 "candidate_sha": policy["candidate_sha"],
                 "run_id": int(os.environ["GITHUB_RUN_ID"]),
-        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
+                "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
                 "executed_sessions": 0,
             }
             interrupted = False
