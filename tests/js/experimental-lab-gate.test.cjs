@@ -469,3 +469,26 @@ for (const attempt of [2, 3]) {
     });
   }
 }
+
+
+test("native rerun requires a NEW actual independent environment approval", async () => {
+  const a = nativeRerun(setup(), 2);
+  requireIndependentReviewer(a);
+  assert.equal((await gate.verify(a)).status, "PENDING APPROVAL");
+  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history[0].created_at = "2026-10-09T08:11:59Z";
+  await assert.rejects(gate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history[0].created_at = "2026-10-09T08:12:01Z";
+  assert.equal((await gate.verify({...a, recheck: true})).status, "approved");
+});
+
+test("native rerun recheck refuses changed policy or decision even with a claim", async () => {
+  const a = nativeRerun(setup(), 3);
+  await gate.verify(a);
+  a.comments.at(-1).updated_at = "2026-10-09T08:11:01Z";
+  await assert.rejects(gate.verify({...a, recheck: true}));
+  a.comments.at(-1).updated_at = a.comments.at(-1).created_at;
+  a.environment.protection_rules.push({type: "wait_timer", wait_timer: 3});
+  await assert.rejects(gate.verify({...a, recheck: true}), /claim_unverified/);
+  assert.equal(a.writes, 1);
+});
