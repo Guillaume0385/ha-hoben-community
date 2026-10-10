@@ -16,12 +16,18 @@ preuve d'installation. La PR prépare maintenant la sélection d'une PR
 `experimental` revue pour les deux scénarios, même sans `Refs #54`, en
 supprimant la dépendance au label global de l'Issue #54. Cette modification
 n'est **pas installée** avant fusion. Les workflows et gates actifs au HEAD
-`experimental` continuent à refuser `run_attempt > 1`. Dans la PR #75,
-le module `experimental-native-rerun.cjs` reste strictement **hors chemin
-des gates** : il teste seulement les preuves nécessaires, sans les activer.
-Il ne constitue pas une réservation ni un déclencheur opérationnel.
+`experimental` continuent à refuser `run_attempt > 1`. Dans la PR #75, le
+module `experimental-native-rerun.cjs` est maintenant raccordé aux **deux
+gates** et leurs tests hors ligne examinent la décision `v2` pour chaque
+`run_id/run_attempt/scénario/SHA`, l'acteur réel de relance, le SHA et
+l'autorisation de déploiement. Les workflows acceptent les tentatives 1–50
+mais aucune ne contourne l'admission, la réservation atomique, l'environnement
+ni le recheck. La nouvelle tentative réserve un tag distinct, alors que la
+tentative initiale garde la réservation historique pour préserver son
+anti-rejeu. Cela constitue une **implémentation en PR non fusionnée**,
+pas une validation opérationnelle de l'API et de l'UI de rerun complet.
 Le déclencheur temporaire par branche, rejeté par le propriétaire, a été retiré.
-**Aucun clic « Re-run all jobs » ne doit être considéré comme autorisation
+**Avant revue MANAGER du HEAD complet, aucun clic « Re-run all jobs » ne doit être considéré comme autorisation
 d'accès Hoben avant fusion d'un correctif complet, revu et testé.**
 La PR #75 est explicitement interdite de fusion sans nouvel accord
 du propriétaire.
@@ -69,6 +75,21 @@ Les gates ne devront plus exiger de lien bloquant avec l'état de l'Issue #54 ;
 ils exigent à la place les preuves exactes de **la PR choisie**, revue
 MANAGER et CI. Une PR documentaire ne déclenche aucun Hoben réel sans
 décision propre au scénario.
+
+
+
+**Limite des preuves de rerun :** les checks en CI des PR utilisent
+uniquement des données GitHub synthétiques et des appels d'API simulés.
+Le runner réel doit retourner `run_attempt`, les jobs courants avec
+`run_id/head_sha/started_at`, l'historique d'un dry-run antérieur réussi,
+et le `triggering_actor` authentifié ; en l'absence d'un champ, l'admission
+échoue fermée. Une répétition après échec antérieur du dry-run ne peut pas
+être distinguée sûrement d'un « Re-run failed jobs » et est donc refusée,
+y compris si le propriétaire voulait faire une relance complète. De même,
+une politique de reviewers réelle nécessite une approbation **fraîche**
+dotée d'un `created_at` au moins égal au démarrage du dry-run courant.
+Sans cette preuve fournie par l'API, `NOT RUN`.
+Un succès CI ne vaut ni une telle approbation ni un test Hoben réel.
 
 **Limite de livraison :** ne jamais fusionner PR #75 sans l'accord
 supplémentaire explicite du propriétaire. Aucun test live n'est exécuté
