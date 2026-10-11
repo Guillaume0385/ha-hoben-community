@@ -100,6 +100,7 @@ function prepare({context,core}) {
 }
 
 function publish({core,context,encoded}) {
+  let file;
   try {
     if (typeof encoded !== 'string' || encoded.length > 465000 ||
         !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
@@ -113,12 +114,16 @@ function publish({core,context,encoded}) {
     if (typeof parent !== 'string' || !path.isAbsolute(parent)) throw Error('invalid_path');
     const dir = path.join(parent,'hoben-experimental-public');
     fs.mkdirSync(dir,{mode:0o700});
-    const file = path.join(dir,'report.json');
+    file = path.join(dir,'report.json');
     fs.writeFileSync(file,bytes,{mode:0o600,flag:'wx'});
     // Independently validate exact bytes in a fresh job with no Hoben secrets
     // and no process, checkout or filesystem from the collection runner.
     readReport(file,context);
     core.setOutput('report','true');
-  } catch (_) { core.setFailed('NOT RUN: isolated public report rejected.'); }
+  } catch (_) {
+    // Never leave a rejected candidate JSON at the publication path.
+    if (file) { try { fs.unlinkSync(file); } catch (_) {} }
+    core.setFailed('NOT RUN: isolated public report rejected.');
+  }
 }
 module.exports = {readReport,prepare,publish};
