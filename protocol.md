@@ -1739,3 +1739,37 @@ TLS ne constitue pas en soi une frontière de message.
 
 Ce relevé ne dévoile aucun identifiant, registre, octet RX ou donnée domestique.
 Il ne modifie pas les sections de protocole CONFIRMÉ / À VALIDER.
+
+<!-- exp-run-38139534724 -->
+### 2026-10-11, 14:30 Europe/Paris — campagne #38139534724
+
+- **Identité observée :** workflow
+  [Hoben experimental (MANAGER) #38139534724](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38139534724),
+  événement `push` sur `experimental`, SHA exact
+  `f2c9b89f36404ad14193faac6dc006e84d7db36f`, tentative initiale
+  `run_attempt=1`, conclusion GitHub `failure`.
+- **OBSERVÉ (orchestration GitHub) :** `dry-run=success`,
+  `admission=failure`, puis `collect=skipped`, `publish=skipped` et
+  `result=skipped`. Le log public fixe la catégorie de refus à
+  `decision` avant tout secret Hoben.
+- **CAUSE CONFIRMÉE DU REFUS :** aucun commentaire de décision MANAGER ne
+  commence par le marqueur exact `hoben-experimental-approval:v1` sur la
+  PR #75. Le gate exige exactement une décision v1 authentifiée, liée au
+  HEAD candidat et à son run CI, créée sans modification avant la fusion.
+  L'autorisation conditionnelle en prose ne satisfait pas ce format.
+- **CONSÉQUENCE :** aucune collecte H1/H2 n'a été lancée, aucune session
+  réseau n'est attestée et aucun artefact ou rapport anonymisé n'existe.
+  Une décision v1 ajoutée après la fusion serait refusée par le contrôle
+  temporel ; un `Re-run all jobs` du même run ne peut donc pas réparer cette
+  campagne avec le gate installé.
+- **À VALIDER :** préparer une nouvelle petite PR vers `experimental`, obtenir
+  sa CI et sa revue exactes, publier la décision v1 H1/H2 avant fusion, puis
+  observer le nouveau run. Les répétitions N>1 ne pourront être évaluées
+  qu'après une tentative 1 effectivement admise.
+- **INCONNU / protocole :** H1 et H2 ne sont ni confirmées, ni contredites.
+  Aucune connexion TLS, lecture, frontière, fragmentation, concaténation,
+  donnée RX ou session n'est déduite de ce refus d'orchestration.
+
+Ce relevé ne contient aucun secret, identifiant privé, registre, octet RX ou
+donnée domestique. Il documente un refus de gate, pas un fait de protocole.
+
