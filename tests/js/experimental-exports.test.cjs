@@ -170,6 +170,59 @@ function prepareReport(file, temp) {
   }
 }
 
+// Simulates the separate GitHub-hosted publisher job, with a fresh temp root.
+function publishReport(encoded, proof = context) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "hoben-publisher-offline-"));
+  const previous = process.env.RUNNER_TEMP;
+  process.env.RUNNER_TEMP = temp;
+  const outputs = {}, failures = [];
+  const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
+  try {
+    exportsGate.publish({core, context: proof, encoded});
+    const file = path.join(temp, "hoben-experimental-public", "report.json");
+    return {outputs, failures,
+      report: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null};
+  } finally {
+    if (previous === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previous;
+    fs.rmSync(temp, {recursive: true, force: true});
+  }
+}
+
+test("collector mutation and symlink after prepare cannot change published bytes", () => {
+  withReport(report(), (file, temp) => {
+    const original = exportsGate.readReport(file, context).report;
+    const {outputs, destination} = prepareReport(file, temp);
+    const handoff = outputs.report_b64;
+    const source = path.join(temp, "hoben-experimental-exports", "report.json");
+    fs.unlinkSync(source);
+    fs.writeFileSync(file, JSON.stringify({...report(), user_guid: "SYNTHETIC_PRIVATE"}));
+    fs.symlinkSync(file, source);
+    assert.ok(!fs.existsSync(destination), "no candidate-controlled upload path");
+    const published = publishReport(handoff);
+    assert.deepEqual(published.outputs, {report: "true"});
+    assert.deepEqual(published.failures, []);
+    assert.deepEqual(published.report, original);
+  });
+});
+
+test("isolated publisher refuses altered attempts, raw fields and invalid base64", () => {
+  const reportB64 = Buffer.from(JSON.stringify(report())).toString("base64");
+  for (const encoded of [
+    Buffer.from(JSON.stringify({...report(), user_guid:"SYNTHETIC_PRIVATE"})).toString("base64"),
+    Buffer.from(JSON.stringify({...report(), run_attempt:2})).toString("base64"),
+    "%%%INVALID%%%"
+  ]) {
+    const result = publishReport(encoded);
+    assert.deepEqual(result.outputs, {});
+    assert.equal(result.report, null);
+    assert.deepEqual(result.failures, ["NOT RUN: isolated public report rejected."]);
+  }
+  const valid = publishReport(reportB64);
+  assert.deepEqual(valid.outputs, {report: "true"});
+  assert.deepEqual(valid.failures, []);
+});
+
 test("strict public timeline is permitted only as bounded timing and unknown offsets", () => {
   const r = report(); r.sessions[0].timing_observations = timeline();
   withReport(r, (file, temp) => {
@@ -177,11 +230,12 @@ test("strict public timeline is permitted only as bounded timing and unknown off
     assert.deepEqual(value.report.sessions[0].timing_observations, timeline());
     assert.equal(value.report.boundary_proven, false);
     const {outputs, failures, destination} = prepareReport(file, temp);
-    assert.deepEqual(outputs, {report: "true"});
+    assert.equal(outputs.report, "true");
+    assert.equal(typeof outputs.report_b64, "string");
     assert.deepEqual(failures, []);
-    assert.deepEqual(fs.readdirSync(destination), ["report.json"]);
-    const published = JSON.parse(fs.readFileSync(path.join(destination, "report.json")));
-    assert.deepEqual(published, value.report);
+    assert.ok(!fs.existsSync(destination), "collector must never have an upload directory");
+    const published = publishReport(outputs.report_b64, context);
+    assert.deepEqual(published.report, value.report);
   });
 });
 
@@ -201,10 +255,10 @@ test("zero-byte EOF read remains in the public timeline of a partial campaign", 
     assert.equal(value.result, "failure");
     assert.deepEqual(value.report.sessions[0].timing_observations, s.timing_observations);
     const {outputs, failures, destination} = prepareReport(file, temp);
-    assert.deepEqual(outputs, {report: "true"});
+    assert.equal(outputs.report, "true");
     assert.deepEqual(failures, []);
-    assert.equal(exportsGate.readReport(path.join(destination, "report.json"), context).result,
-      "failure");
+    assert.ok(!fs.existsSync(destination));
+    assert.equal(publishReport(outputs.report_b64, context).report.result, "failure");
   });
 });
 
