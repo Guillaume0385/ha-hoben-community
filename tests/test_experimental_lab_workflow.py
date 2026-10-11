@@ -31,11 +31,13 @@ def test_workflow_separates_admission_collection_and_publication():
     assert set(jobs) == {"dry-run", "admission", "collect", "publish", "result"}
     assert jobs["publish"]["needs"] == ["admission", "collect"]
     assert jobs["result"]["needs"] == ["admission", "collect", "publish"]
-    assert jobs["collect"]["outputs"]["report_b64"] == "${{ steps.exports.outputs.report_b64 }}"
+    assert jobs["collect"]["outputs"]["report_b64"] == (
+        "${{ steps.exports.outputs.report_b64 }}"
+    )
     assert "environment" not in jobs["publish"]
     assert jobs["publish"]["permissions"] == {"contents": "read"}
-    assert "needs.publish.result" in jobs["result"]["steps"][-1]["env"]["PUBLICATION_RESULT"] or (
-        jobs["result"]["steps"][-1]["env"]["PUBLICATION_RESULT"] == "${{ needs.publish.result }}"
+    assert jobs["result"]["steps"][-1]["env"]["PUBLICATION_RESULT"] == (
+        "${{ needs.publish.result }}"
     )
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
@@ -96,7 +98,9 @@ def test_workflow_separates_admission_collection_and_publication():
         "${{ runner.temp }}/hoben-experimental-public/report.json"
     )
     assert "*" not in upload["with"]["path"]
-    assert "needs.collect.outputs.report_b64" in jobs["publish"]["steps"][1]["env"]["PUBLIC_REPORT_B64"]
+    assert jobs["publish"]["steps"][1]["env"]["PUBLIC_REPORT_B64"] == (
+        "${{ needs.collect.outputs.report_b64 }}"
+    )
     assert "captures.cms" not in text
     assert "hoben-experimental-ciphertext" not in text
     assert "recipient" not in text.lower()
