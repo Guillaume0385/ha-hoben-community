@@ -238,19 +238,19 @@ def validate_simulated_export(checkouts, expected_result):
     # publish runner may materialize the validated report for upload.
     public = checkouts.storage / "hoben-experimental-public/report.json"
     assert not public.exists()
-    assert public.parent.stat().st_mode & 0o777 == 0o700
-    assert list(public.parent.iterdir()) == [public]
+    assert not public.parent.exists()
+    public_json = json.dumps(verified)
     for forbidden in (
         "0" * 32,
         OPENED_PREFIX[14:46].decode(),
         PRIVATE,
         "SYNTHETIC-PRIVATE-PYTHON-EXPRESSION",
     ):
-        assert forbidden not in public.read_text()
+        assert forbidden not in public_json
     assert not list(checkouts.storage.glob("hoben-experimental-private-*"))
     assert not list(checkouts.storage.rglob("rx.bin"))
     assert not list(checkouts.storage.rglob("captures.cms"))
-    return json.loads(public.read_text())
+    return verified
 
 
 @pytest.mark.parametrize("scenario", ["coalesced", "fragmented"])
