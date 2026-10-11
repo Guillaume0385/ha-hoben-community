@@ -176,6 +176,37 @@ for (const [name, modify] of Object.entries(refused)) {
   });
 }
 
+// Historical Hoben workflows lack the common mutex. The API status filter must
+// include pre-start runs, and admission AND pre-secret recheck must refuse them.
+for (const state of ["requested", "queued", "pending", "waiting", "in_progress"]) {
+  test("refuse historical " + state + " before reservation", async () => {
+    const a = setup();
+    a.github.rest.actions.listWorkflowRunsForRepo = async ({status}) =>
+      ({data: status === state
+        ? [{id: 777, path: ".github/workflows/live-validation.yml@refs/heads/main"}]
+        : []});
+    await assert.rejects(gate.verify(a));
+    assert.equal(a.writes, 0);
+  });
+  test("refuse historical " + state + " arising before secret recheck", async () => {
+    const a = setup();
+    await gate.verify(a);
+    a.github.rest.actions.listWorkflowRunsForRepo = async ({status}) =>
+      ({data: status === state
+        ? [{id: 778, path: ".github/workflows/manager-live-hoben.yml@refs/heads/main"}]
+        : []});
+    await assert.rejects(gate.verify({...a, recheck: true}));
+    assert.equal(a.writes, 1); // claim already reserved; never consumed twice
+  });
+}
+test("refuse an active workflow with unknown identity before reservation", async () => {
+  const a = setup();
+  a.github.rest.actions.listWorkflowRunsForRepo = async ({status}) =>
+    ({data: status === "queued" ? [{id: 778}] : []});
+  await assert.rejects(gate.verify(a));
+  assert.equal(a.writes, 0);
+});
+
 for (const fault of ["missing", "rejected", "wrong-user", "self", "wrong-environment", "policy-changed", "decision-changed", "SHA-changed"]) {
   test("refuse after environment waiting: " + fault, async () => {
     const a = setup(); requireIndependentReviewer(a); await gate.verify(a);
