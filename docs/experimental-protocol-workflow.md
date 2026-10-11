@@ -10,6 +10,8 @@
 
 ## Campagnes répétées — décision propriétaire du 10 octobre 2026
 
+**SEULE PROCÉDURE COURANTE POUR LES RÉPÉTITIONS :** les sections historiques plus bas décrivent les anciennes versions et ne rétablissent ni `Refs #54` comme prérequis, ni l'Issue #54 comme gate, ni le principe « un SHA = un seul essai ». Pour une tentative N>1 d'un run créé **après** l'installation autorisée de #75, utiliser uniquement **GitHub Actions → Re-run all jobs** sur le même SHA, avec décision MANAGER v2 propre à `scénario/run_id/run_attempt/SHA`, claim atomique distinct, rerun complet attesté, CI et revue de la PR exacte, contrôle de l'environnement et de toute approbation GitHub obligatoire. Si une preuve manque : **NOT RUN avant tout secret**. La PR #75 demeure DRAFT et sa fusion exige toujours une nouvelle autorisation expresse du propriétaire.
+
 **État de la PR #75 en brouillon : RERUN NON LIVRÉ / NOT RUN.**
 Ce qui suit est le **contrat cible** imposé par le propriétaire, pas une
 preuve d'installation. La PR prépare maintenant la sélection d'une PR
@@ -146,11 +148,13 @@ CODEX DEV : reprend le cycle
 ```
 
 - **Aucune approbation supplémentaire dans la conversation ChatGPT** n'est requise avant un test expérimental prévu par cette politique. MANAGER peut lancer, lire les résultats et préparer une nouvelle Issue sans attendre la réponse de l'utilisateur. **Une approbation d'environnement exigée par GitHub reste applicable : jamais de bypass, de modification de Settings, ni d'accès aux secrets avant accord effectif du reviewer GitHub.**
-- Plusieurs PR/Issues peuvent être fusionnées **successivement** sur `experimental` sans contrôle du propriétaire ; la revue MANAGER du SHA exact et la CI pertinente restent obligatoires. Éviter les grands chantiers simultanés ; ne déclencher de nouveau test que si le scénario/SHA a réellement changé et est revu.
+- Plusieurs PR/Issues peuvent être fusionnées **successivement** sur `experimental` sans contrôle du propriétaire ; la revue MANAGER du SHA exact et la CI pertinente restent obligatoires. Éviter les grands chantiers simultanés ; ne déclencher une nouvelle campagne sur un même SHA que sur décision MANAGER distincte propre à la tentative, avec vérification complète des gates et un rerun complet attesté.
 - Chaque étape effectuée déclenche une notification informative MANAGER (`EXP-REVIEW`, `EXP-MERGE`, `EXP-TEST-START`, `EXP-TEST-RESULT`, `EXP-PROTOCOL`, `EXP-ISSUES`, `EXP-NEXT`) et MANAGER **continue**. Aucun doublon de notification pour le même run/SHA/état.
 - **Aucune promotion vers `main` décidée par MANAGER** : seul le propriétaire peut demander de **préparer** la PR finale. Sans sa demande, pas de branche de promotion, pas de PR vers `main`, pas de merge. Lorsqu'elle est explicitement demandée, reprendre la revue CODEX REVIEW indépendante, les tests et règles de livraison stables ; aucune réussite expérimentale ne les remplace.
 
-## Mise en place technique — état actuel et travaux #54
+## Mise en place technique — archives datées des travaux #54
+
+**Les conditions obsolètes des phases #58 à #67 ci-dessous sont conservées comme contexte historique uniquement.** Elles ne doivent pas être utilisées pour autoriser/refuser une nouvelle campagne après le correctif #75 ; se référer à la procédure courante en tête de page.
 
 La PR #55 a été fusionnée sur `experimental`, apportant `scripts/run_experimental_boundary.py` et la capture/analyse H1/H2 ; ces scripts ne sont pas importés par le plugin HA. Le bootstrap précédent de la PR #56 visait `main` et a été fermé **sans fusion** ; ses mécanismes testés constituent au mieux des éléments de référence **à adapter**. Les workflows existants `live-validation.yml`, `manager-live-hoben.yml` et `opened-client-boundary.yml` conservent aujourd'hui des déclencheurs/règles liées à `main` : **ne pas les présenter comme des workflows expérimentaux opérationnels avant le développement et l'installation réels**.
 
@@ -177,7 +181,9 @@ Cette preuve ne valide ni l'accès aux environnements ni la connexion au serveur
 Cette installation utilisait les collecteurs #55 hors runtime HA et des exports
 CMS ; la voie `hoben-live` était alors différée. La phase 3 est décrite plus bas.
 
-### Procédure MANAGER H1/H2 préparée par #67 — rapport uniquement
+### Procédure MANAGER H1/H2 préparée par #67 — historique de la tentative 1
+
+**Archive de #67 :** les prérequis de nouvelle fusion, de lien à #54 et de réservation unique décrits ici n'encadrent pas les reruns N>1 du correctif #75. La décision v1 avant merge reste la preuve de la tentative initiale.
 
 1. Examiner le diff complet, le HEAD exact, la confidentialité du rapport
    anonymisé, ses validations indépendantes Python/Node et les quatre jobs CI
@@ -468,7 +474,9 @@ de le relancer : un nouveau SHA revu et fusionné est obligatoire. Les détails
 réels de configuration GitHub restent à confirmer via le prochain runner, et
 les tests de PR ne constituent **pas** une preuve de connexion MyHOBEN.
 
-## Handoff pré-fusion #54 — contrôle consultatif sans secret (PR suivant #61)
+## Handoff pré-fusion #54 — archive du contrôle consultatif #61
+
+**Historique, non normatif :** la restriction à `Refs #54` et à l'état de l'Issue #54 décrite ci-après n'est plus une condition des gates expérimentaux proposés dans #75. Le contrôle actuel cible la PR exacte (même dépôt, base `experimental`), sa revue MANAGER, l'arbre et les quatre CI ; les tentatives N>1 exigent leur décision v2 distincte.
 
 Le run post-fusion de #61 (37963217918, SHA
 `70a8a3bb480f3cdee27b169935c0dcb4f2be9e69`) a terminé le
@@ -478,7 +486,7 @@ Le run post-fusion de #61 (37963217918, SHA
 Issue #54 non bloquée, décision MANAGER authentifiée **avant** fusion.
 Ce run et ce SHA sont consommés : ni relance ni approbation rétroactive.
 
-**Ordre opératoire obligatoire pour la prochaine PR vers `experimental` :**
+**Ordre suivi historiquement pour #61 (remplacé pour les PR actuelles) :**
 
 1. **CODEX DEV** ouvre une nouvelle PR dans le même dépôt, base exactement
    `experimental`, avec la ligne littérale `Refs #54` dans le corps dès
@@ -545,7 +553,9 @@ lorsqu'elle est effectivement attestée par l'API runner pour
 réellement configurée reste obligatoire. Le diagnostic ne consulte ni
 environnements ni secrets.
 
-## Phase H1/H2 — nouveaux essais sans clé CMS (Issue #54)
+## Phase H1/H2 — chemin sans CMS, historique #67
+
+**La procédure de déclenchement/réservation qui suit concernait uniquement la tentative initiale #67 et est remplacée par la section « Campagnes répétées ».** Le contrat de rapport sans RX brut reste applicable.
 
 **Contrat de #67 pour les nouveaux HEAD après revue et fusion :** les captures
 brutes peuvent être utilisées temporairement dans un dossier privé 0700 du runner
@@ -568,13 +578,7 @@ postérieure aux quatre CI et antérieure à la fusion, au schéma exact :
 {"schema":1,"scenario":"h1h2","candidate_sha":"<HEAD_PR_40_HEX>","ci_run_id":0}
 ```
 
-Le déclencheur reste un **nouveau push de fusion MANAGER sur
-`experimental`**, pas `workflow_dispatch` inventé, ni un rerun
-d'Actions. Le SHA validé est réservé une seule fois pour ce scénario par
-tag atomique ; l'usage plusieurs fois d'un même SHA **n'est pas encore
-autorisé** sans une future implémentation de campagnes distinctes et
-d'autorisation indépendante. Les policies réelles d'environnement et
-approbations GitHub restent obligatoires.
+**Historique #67 :** le push MANAGER créait la tentative 1 et son tag unique `<scénario>-<SHA>`. **Après installation autorisée de #75**, les tentatives N>1 utilisent le bouton natif **« Re-run all jobs »** sur le même run/SHA, une décision MANAGER v2 propre à la tentative et un nouveau claim atomique non réutilisable. Les relances partielles sont refusées. Les politiques d'environnement et toutes leurs approbations exigées restent obligatoires ; preuve absente = **NOT RUN**.
 
 **Historique à ne pas réexécuter :** les paragraphes datés des phases
 précédentes décrivant le pin CMS, la possession hors GitHub d'une clé privée, le
@@ -632,6 +636,8 @@ brut ne devient jamais un artefact par suppression du chiffrement.
 
 ## Phase 3 — `hoben-live` expérimental, client Home Assistant réel
 
+**Note de version :** les anciennes conditions `Refs #54`, Issue #54 obligatoire et tag consommable une fois ci-dessous décrivent l'installation initiale, pas l'éligibilité courante. Le code #75 (encore DRAFT, non installé) permet à MANAGER de sélectionner une PR de tout périmètre vers `experimental`, avec CI/revue exactes et autorisation propre à chaque tentative. Toute incompatibilité de la présente archive est supplantée par « Campagnes répétées ».
+
 La phase H1/H2 a terminé sur le commit fusionné
 `5a904855ba1c3d74353301cf0c7605a168e04453` :
 [run #37974967946](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37974967946),
@@ -647,10 +653,10 @@ déclenché que par le `push` du merge MANAGER sur la branche exacte
 utilise `.github/scripts/experimental-live-gate.cjs` et demande une
 preuve séparée, non interchangeable avec l'approbation H1/H2 :
 
-- PR du même dépôt, base `experimental`, corps contenant `Refs #54`,
+- PR du même dépôt, base `experimental`, **avec ou sans** `Refs #54`,
   HEAD et arbre du merge identiques ;
-- Issue #54 ouverte avec un seul label admissible (`state:review` avant
-  fusion), revue MANAGER et threads résolus ;
+- **pas** de dépendance à l'état de l'Issue #54 dans les gates ;
+  revue MANAGER et threads résolus pour la PR précisément examinée ;
 - un run `Validate` `pull_request` tentative 1 sur le HEAD exact,
   quatre jobs `tests/ha-tests/hacs/hassfest` réussis ;
 - **commentaire réel MANAGER immuable**, pré-fusion, débutant exactement
@@ -685,11 +691,7 @@ mais ne prouve **pas** que la configuration GitHub est conforme : seul
 un nouveau run du runner sur un nouveau SHA revu peut l'établir.
 L'ancien SHA/run ne doit jamais être réexécuté.
 
-Avant tout secret, une réservation atomique
-`hoben-live-ha-parity-<SHA_MERGE>` lie run, décision, HEAD, scénario
-et empreinte de la politique d'environnement. Aucune reprise d'un run
-annulé/échoué n'est autorisée pour ce SHA/scénario ; un nouveau HEAD
-revu et une décision MANAGER distincte sont nécessaires. Les deux
+**Historique :** le premier run réservait le tag `hoben-live-ha-parity-<SHA_MERGE>`. **Sous le correctif #75 après installation autorisée**, un rerun N>1 du même SHA exige une nouvelle décision MANAGER v2, un rerun complet attesté et un claim atomique distinct `scénario/SHA/run_id/run_attempt`. Les réservations précédentes ne sont jamais effacées ni réutilisées. Échec, annulation ou preuve insuffisante : **NOT RUN**, aucun secret libéré. Les deux
 workflows utilisent le même mutex `hoben-read-only-observation`.
 L'environnement `hoben-live` reste distinct de `hoben-experimental`.
 
@@ -718,16 +720,18 @@ Ping/Pong, `DataUpdated` et reprise automatique après panne ne sont
 compteurs bornés. Aucun registre, température, GUID, trace ou exception
 libre ne peut apparaître dans l'artefact. Le validateur Node bloque
 tout champ additionnel ou résultat de succès partiel ; export du seul
-`live-ha-parity-report-<SHA>-<run_id>` (7 jours).
+`live-ha-parity-report-<SHA>-<run_id>-a<run_attempt>` (7 jours), avec identité publique `scenario/pr_number/merge_sha/run_id/run_attempt` validée dans le JSON avant export et dans le job de résultat.
 Le job `result`, sans secret, ne publie le statut
 `hoben-live-ha-parity=success` que si le job collecte et son
 rapport validé réussissent ensemble. Le succès **ne prouve pas**
 les fonctions absentes.
 
-### Handoff MANAGER
+### Handoff MANAGER — processus courant (sous réserve de l'installation autorisée)
 
-1. CODEX DEV livre la PR `Refs #54` vers `experimental`, HEAD
-   final et quatre jobs CI passants, puis `state:review`.
+1. CODEX DEV livre la PR autorisée vers `experimental`, HEAD
+   final et quatre jobs CI passants, puis `state:review` selon le workflow.
+   `Refs #54` n'est pas une condition générale des gates. La PR #75
+   demeure DRAFT et ne peut pas être fusionnée sans nouvel accord propriétaire.
 2. MANAGER inspecte diff, code exécuté, environnement isolé, HEAD,
    CI, provenance et limitations ; publie **avant merge** son
    commentaire authentique `hoben-live-approval:v1` sur la PR avec
@@ -737,7 +741,10 @@ les fonctions absentes.
    `dry-run`, `admission`, `collect`, `result`, statut associé et
    rapport expurgé. Une admission refusée, un export absent ou une
    expérience incomplète signifie **NOT RUN/FAILURE**, jamais un
-   succès simulé ni une relance.
+   succès simulé. Pour une tentative N>1, une nouvelle décision v2 doit
+   précéder le **Re-run all jobs** complet, avec nouvelle réservation et
+   approbations GitHub réellement exigées : aucun rerun partiel ni réutilisation
+   de la v1 ne sont autorisés. Une preuve manquante donne **NOT RUN**.
 4. MANAGER consigne séparément les constats et ouvre si nécessaire
    des Issues de session/reconnexion ; `protocol.md` reste fondé
    exclusivement sur les faits établis, jamais sur le dry-run.
@@ -776,7 +783,7 @@ Rapport refusé : échec fermé, aucun upload ni repli brut.
 
 **`hoben-experimental` :** conserver la campagne H1/H2 déjà documentée (#48/#49/#55), plafonds actuels **6 H1 + 6 H2**, **90 s et 1 Mio RX par session**, arrêt anticipé sans replay implicite. Les silences, préfixes et tailles observés ne prouvent pas à eux seuls la frontière OpenedClient. Le chemin de #67 utilise les fichiers RX temporairement dans le dossier privé, les détruit dans `finally` et publie uniquement les offsets, longueurs, temps et catégories validés du rapport ; jamais les octets inconnus ni une archive de capture.
 
-Chaque run doit être corrélé à son **SHA, scénario, acteur autorisé, état réel, identifiant/URL GitHub, résultats et limites**, et exécuté au plus une fois sans nouvelle décision et nouveau SHA/scénario. Pas de test réel dans pytest, CI PR, DEV, cron ou automatisme de merge dépourvu d'une décision MANAGER contrôlée. Un dry-run secretless permet d'établir le chemin de déclenchement **sans** interpréter un succès synthétique comme preuve réseau.
+Chaque campagne doit être corrélée à son **SHA, scénario, PR, run_id, run_attempt, acteur autorisé, état réel, URL GitHub, résultats et limites**. Le même SHA peut être testé de nouveau seulement via un rerun complet authentifié, une décision MANAGER v2 nouvelle et un claim distinct pour la tentative. Pas de test réel dans pytest, CI PR, DEV, cron ou automatisme de merge dépourvu d'une décision MANAGER contrôlée. Un dry-run secretless permet d'établir le chemin de déclenchement **sans** interpréter un succès synthétique comme preuve réseau.
 
 Après le run, MANAGER évalue les informations vérifiées, propose sur `experimental` une PR `protocol.md` uniquement pour les faits dûment étayés (`CONFIRMÉ` / `OBSERVÉ` / `À VALIDER`), crée ou actualise les Issues utiles, et peut autoriser la prochaine Issue `state:ready` sans solliciter le propriétaire. Un run échoué n'arrête pas les autres tâches sans lien avec lui.
 
