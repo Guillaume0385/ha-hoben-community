@@ -82,6 +82,8 @@ jobs:
     if: needs.admission.outputs.approved == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    outputs:
+      report_b64: ${{ steps.exports.outputs.report_b64 }}
     environment: hoben-live
     permissions:
       contents: read
@@ -138,8 +140,40 @@ jobs:
               prNumber: Number(process.env.APPROVED_PR)
             };
             require('./trusted/.github/scripts/experimental-live-report.cjs').prepare({core, context: proof});
-      - name: Export sanitized report only
-        if: ${{ always() && steps.exports.outputs.report == 'true' }}
+      # Do not upload from the secret-bearing collector runner: a leftover
+      # candidate process could replace a checked file before upload.
+      # Only the strictly validated, size-bounded job output is transferred.
+
+  publish:
+    needs: [admission, collect]
+    if: ${{ always() && needs.admission.outputs.approved == 'true' && needs.collect.outputs.report_b64 != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: publish
+        name: Re-validate and materialize allowlisted JSON on isolated runner
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          PUBLIC_REPORT_B64: ${{ needs.collect.outputs.report_b64 }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
+        with:
+          script: |
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./.github/scripts/experimental-live-report.cjs').publish({
+              core, context: proof, encoded: process.env.PUBLIC_REPORT_B64
+            });
+      - name: Publish only newly validated public JSON
+        if: ${{ steps.publish.outputs.report == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: live-ha-parity-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
@@ -148,7 +182,7 @@ jobs:
           retention-days: 7
 
   result:
-    needs: [admission, collect]
+    needs: [admission, collect, publish]
     if: ${{ always() && needs.admission.outputs.approved == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -170,6 +204,7 @@ jobs:
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           COLLECTION_RESULT: ${{ needs.collect.result }}
+          PUBLICATION_RESULT: ${{ needs.publish.result }}
           APPROVED_PR: ${{ needs.admission.outputs.pr }}
         with:
           script: |
@@ -182,7 +217,8 @@ jobs:
               };
               const report = require('./.github/scripts/experimental-live-report.cjs')
                 .readReport('public-report/report.json', proof);
-              success = process.env.COLLECTION_RESULT === 'success' && report.status === 'success';
+              success = process.env.COLLECTION_RESULT === 'success' &&
+                process.env.PUBLICATION_RESULT === 'success' && report.status === 'success';
             } catch (_) {}
             const publicPR = Number(process.env.APPROVED_PR);
             const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
