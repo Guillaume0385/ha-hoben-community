@@ -29,7 +29,6 @@ REQUIRED = {
     "GITHUB_EVENT_NAME": "push",
     "GITHUB_ACTOR": "Guillaume0385",
     "GITHUB_TRIGGERING_ACTOR": "Guillaume0385",
-    "GITHUB_RUN_ATTEMPT": "1",
 }
 SHA_RE = re.compile(r"[a-f0-9]{40}")
 
@@ -40,7 +39,19 @@ def context_valid(env: dict[str, str]) -> bool:
     return (
         all(env.get(key) == value for key, value in REQUIRED.items())
         and SHA_RE.fullmatch(sha) is not None
+        and bool(
+            re.fullmatch(
+                r"(?:[1-9]|[1-4][0-9]|50)",
+                env.get("GITHUB_RUN_ATTEMPT", ""),
+            )
+        )
         and env.get("LIVE_APPROVED_SHA") == sha
+        and bool(
+            re.fullmatch(
+                r"[1-9][0-9]{0,8}",
+                env.get("LIVE_APPROVED_PR", ""),
+            )
+        )
         and env.get("GITHUB_WORKFLOW_REF")
         == (
             "Guillaume0385/ha-hoben-community/"
@@ -60,6 +71,10 @@ def empty_report() -> dict[str, object]:
     return {
         "schema": 1,
         "scenario": SCENARIO,
+        "merge_sha": "",
+        "run_id": 0,
+        "run_attempt": 0,
+        "pr_number": 0,
         "status": "failure",
         "refreshes_completed": 0,
         "decoded_refreshes": 0,
@@ -161,9 +176,24 @@ def main() -> int:
     if not context_valid(env):
         report["error"] = "invalid_context"
     else:
+        report.update(
+            merge_sha=env["GITHUB_SHA"],
+            run_id=int(env["GITHUB_RUN_ID"]),
+            run_attempt=int(env["GITHUB_RUN_ATTEMPT"]),
+            pr_number=int(env["LIVE_APPROVED_PR"]),
+        )
         try:
-            report = asyncio.run(
+            observed = asyncio.run(
                 observe(env["HOBEN_USER_GUID"], env.get("HOBEN_DEVICE_GUID") or None)
+            )
+            report.update(observed)
+            # Identity from the rechecked Actions context takes precedence over
+            # the observer's default report (which has zeroed identifiers).
+            report.update(
+                merge_sha=env["GITHUB_SHA"],
+                run_id=int(env["GITHUB_RUN_ID"]),
+                run_attempt=int(env["GITHUB_RUN_ATTEMPT"]),
+                pr_number=int(env["LIVE_APPROVED_PR"]),
             )
         except BaseException:
             report["error"] = "client_failure"

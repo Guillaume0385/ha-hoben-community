@@ -19,8 +19,6 @@ RECIPIENT_SHA256 = "f0209da5d964c02b9733610bfb4457f7bebd24fdfd32934e1165460bf0ab
 POLICY = {
     "schema": 1,
     "scenario": "h1h2",
-    "tracking_issue": 54,
-    "tracking_issue_id": 5768789242,
     "environment": "hoben-experimental",
     "candidate_sha": "a" * 40,
 }
@@ -93,6 +91,7 @@ def runner(tmp_path, monkeypatch):
         "GITHUB_RUN_ID": "123",
         "GITHUB_EVENT_PATH": str(event_path),
         "EXPERIMENTAL_APPROVED_SHA": POLICY["candidate_sha"],
+        "EXPERIMENTAL_APPROVED_PR": "62",
         "EXPERIMENTAL_PHASE": "dry-run",
         "RUNNER_TEMP": str(storage),
     }
@@ -389,7 +388,7 @@ def test_invalid_public_report_is_never_exported_but_capture_remains_sealed(
         ("GITHUB_EVENT_NAME", "workflow_dispatch"),
         ("GITHUB_REF", "refs/heads/candidate"),
         ("GITHUB_REPOSITORY", "fork/repo"),
-        ("GITHUB_RUN_ATTEMPT", "2"),
+        ("GITHUB_RUN_ATTEMPT", "51"),
         ("GITHUB_SHA", "b" * 40),
         ("GITHUB_WORKFLOW_SHA", "b" * 40),
         ("GITHUB_WORKFLOW_REF", "candidate.yml"),

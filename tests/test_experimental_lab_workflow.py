@@ -28,7 +28,17 @@ def test_workflow_separates_admission_collection_and_publication():
         "queue": "max",
     }
     jobs = workflow["jobs"]
-    assert set(jobs) == {"dry-run", "admission", "collect", "result"}
+    assert set(jobs) == {"dry-run", "admission", "collect", "publish", "result"}
+    assert jobs["publish"]["needs"] == ["admission", "collect"]
+    assert jobs["result"]["needs"] == ["admission", "collect", "publish"]
+    assert jobs["collect"]["outputs"]["report_b64"] == (
+        "${{ steps.exports.outputs.report_b64 }}"
+    )
+    assert "environment" not in jobs["publish"]
+    assert jobs["publish"]["permissions"] == {"contents": "read"}
+    assert jobs["result"]["steps"][-1]["env"]["PUBLICATION_RESULT"] == (
+        "${{ needs.publish.result }}"
+    )
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
@@ -69,23 +79,35 @@ def test_workflow_separates_admission_collection_and_publication():
         "HOBEN_USER_GUID",
         "HOBEN_DEVICE_GUID",
         "EXPERIMENTAL_APPROVED_SHA",
+        "EXPERIMENTAL_APPROVED_PR",
     }
     assert step["run"] == "python trusted/scripts/launch_experimental_boundary.py"
+    assert not any(
+        "upload-artifact@" in step.get("uses", "") for step in jobs["collect"]["steps"]
+    )
     uploads = [
-        s for s in jobs["collect"]["steps"] if "upload-artifact@" in s.get("uses", "")
+        step
+        for step in jobs["publish"]["steps"]
+        if "upload-artifact@" in step.get("uses", "")
     ]
     assert len(uploads) == 1
-    for upload in uploads:
-        assert upload["with"]["retention-days"] <= 7
-        assert "always()" in upload["if"] and "steps.exports.outputs." in upload["if"]
-        assert upload["with"]["path"] == (
-            "${{ runner.temp }}/hoben-experimental-public/report.json"
-        )
-        assert "*" not in upload["with"]["path"]
+    upload = uploads[0]
+    assert upload["with"]["retention-days"] <= 7
+    assert "steps.publish.outputs.report" in upload["if"]
+    assert upload["with"]["path"] == (
+        "${{ runner.temp }}/hoben-experimental-public/report.json"
+    )
+    assert "*" not in upload["with"]["path"]
+    assert jobs["publish"]["steps"][1]["env"]["PUBLIC_REPORT_B64"] == (
+        "${{ needs.collect.outputs.report_b64 }}"
+    )
     assert "captures.cms" not in text
     assert "hoben-experimental-ciphertext" not in text
     assert "recipient" not in text.lower()
     assert "candidate/scripts/probe" not in text
+    assert "-a${{ github.run_attempt }}" in WORKFLOW.read_text()
+    assert "github.triggering_actor" in jobs["dry-run"]["if"]
+    assert "pr" in jobs["admission"]["outputs"]
     assert "workflow_dispatch" not in workflow.get("on", workflow.get(True))
     assert "issues" not in workflow.get("on", workflow.get(True))
 

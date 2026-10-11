@@ -167,6 +167,8 @@ def test_public_projection_includes_only_timing_fields_when_present(monkeypatch)
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("EXPERIMENTAL_APPROVED_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("EXPERIMENTAL_APPROVED_PR", "62")
     s = {
         "mode": "H1",
         "pause_seconds": 0,

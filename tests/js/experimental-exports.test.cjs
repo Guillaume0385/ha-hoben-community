@@ -3,7 +3,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const exportsGate = require("../../.github/scripts/experimental-exports.cjs");
-const context = {sha: "a".repeat(40), runId: 123};
+const context = {sha: "a".repeat(40), runId: 123, runAttempt: 1, prNumber: 62};
 
 function report() {
   const sessions = Array.from({length: 12}, (_, i) => ({
@@ -15,8 +15,8 @@ function report() {
     opening_context: {eligible: true, status: "accepted_v4_prefix"},
     h1_status: "compatible", h2_status: "compatible", comparison: "compatible_with_both",
   }));
-  return {schema: 1, scenario: "h1h2", phase: "live", experimental_sha: context.sha, candidate_sha: context.sha,
-    run_id: 123, boundary_proven: false, result: "inconclusive", reason: "hypotheses_unproven",
+  return {schema: 1, scenario: "h1h2", phase: "live", experimental_sha: context.sha, merge_sha: context.sha, candidate_sha: context.sha,
+    run_id: 123, run_attempt: 1, pr_number: 62, boundary_proven: false, result: "inconclusive", reason: "hypotheses_unproven",
     executed_sessions: 12, planned_sessions: 12, eligible_sessions: 12, observation_seconds: 90, sessions};
 }
 
@@ -43,7 +43,12 @@ for (const [name, modify] of Object.entries({
   "unknown opening key": r => { r.sessions[0].opening_context.raw = "SYNTHETIC_PRIVATE"; },
   "synthetic success": r => { r.phase = "dry-run"; },
   "wrong SHA": r => { r.experimental_sha = "b".repeat(40); },
+  "wrong merged SHA": r => { r.merge_sha = "b".repeat(40); },
   "wrong run": r => { r.run_id++; },
+  "wrong attempt": r => { r.run_attempt++; },
+  "wrong PR": r => { r.pr_number++; },
+  "bad PR type": r => { r.pr_number = "62"; },
+  "stolen approval metadata": r => { r.approval = "SYNTHETIC_PRIVATE"; },
   "false boundary": r => { r.boundary_proven = true; },
   "too many sessions": r => { r.sessions.push(r.sessions[0]); r.executed_sessions++; },
   "short success": r => { r.sessions.pop(); r.executed_sessions--; r.eligible_sessions--; },
@@ -104,7 +109,7 @@ test("report-only export never attempts CMS and rejects unsafe projection", () =
   });
 });
 
-test("safe report publishes exactly report.json and never ciphertext", () => {
+test("safe report is transferred to isolated publisher, not uploaded from collector", () => {
   withReport(report(), (file, temp) => {
     const dir = path.join(temp, "hoben-experimental-exports");
     fs.mkdirSync(dir);
@@ -114,10 +119,11 @@ test("safe report publishes exactly report.json and never ciphertext", () => {
     const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
     try {
       exportsGate.prepare({context, core});
-      assert.deepEqual(outputs, {report: "true"});
+      assert.equal(outputs.report, "true");
+      assert.equal(typeof outputs.report_b64, "string");
       assert.equal(failures.length, 0);
-      assert.deepEqual(fs.readdirSync(path.join(temp, "hoben-experimental-public")),
-        ["report.json"]);
+      assert.ok(!fs.existsSync(path.join(temp, "hoben-experimental-public")));
+      assert.deepEqual(publishReport(outputs.report_b64).report, report());
       assert.ok(!fs.existsSync(path.join(dir, "captures.cms")));
     } finally {
       if (before === undefined) delete process.env.RUNNER_TEMP;
@@ -165,6 +171,59 @@ function prepareReport(file, temp) {
   }
 }
 
+// Simulates the separate GitHub-hosted publisher job, with a fresh temp root.
+function publishReport(encoded, proof = context) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "hoben-publisher-offline-"));
+  const previous = process.env.RUNNER_TEMP;
+  process.env.RUNNER_TEMP = temp;
+  const outputs = {}, failures = [];
+  const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
+  try {
+    exportsGate.publish({core, context: proof, encoded});
+    const file = path.join(temp, "hoben-experimental-public", "report.json");
+    return {outputs, failures,
+      report: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null};
+  } finally {
+    if (previous === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previous;
+    fs.rmSync(temp, {recursive: true, force: true});
+  }
+}
+
+test("collector mutation and symlink after prepare cannot change published bytes", () => {
+  withReport(report(), (file, temp) => {
+    const original = exportsGate.readReport(file, context).report;
+    const {outputs, destination} = prepareReport(file, temp);
+    const handoff = outputs.report_b64;
+    const source = path.join(temp, "hoben-experimental-exports", "report.json");
+    fs.unlinkSync(source);
+    fs.writeFileSync(file, JSON.stringify({...report(), user_guid: "SYNTHETIC_PRIVATE"}));
+    fs.symlinkSync(file, source);
+    assert.ok(!fs.existsSync(destination), "no candidate-controlled upload path");
+    const published = publishReport(handoff);
+    assert.deepEqual(published.outputs, {report: "true"});
+    assert.deepEqual(published.failures, []);
+    assert.deepEqual(published.report, original);
+  });
+});
+
+test("isolated publisher refuses altered attempts, raw fields and invalid base64", () => {
+  const reportB64 = Buffer.from(JSON.stringify(report())).toString("base64");
+  for (const encoded of [
+    Buffer.from(JSON.stringify({...report(), user_guid:"SYNTHETIC_PRIVATE"})).toString("base64"),
+    Buffer.from(JSON.stringify({...report(), run_attempt:2})).toString("base64"),
+    "%%%INVALID%%%"
+  ]) {
+    const result = publishReport(encoded);
+    assert.deepEqual(result.outputs, {});
+    assert.equal(result.report, null);
+    assert.deepEqual(result.failures, ["NOT RUN: isolated public report rejected."]);
+  }
+  const valid = publishReport(reportB64);
+  assert.deepEqual(valid.outputs, {report: "true"});
+  assert.deepEqual(valid.failures, []);
+});
+
 test("strict public timeline is permitted only as bounded timing and unknown offsets", () => {
   const r = report(); r.sessions[0].timing_observations = timeline();
   withReport(r, (file, temp) => {
@@ -172,11 +231,12 @@ test("strict public timeline is permitted only as bounded timing and unknown off
     assert.deepEqual(value.report.sessions[0].timing_observations, timeline());
     assert.equal(value.report.boundary_proven, false);
     const {outputs, failures, destination} = prepareReport(file, temp);
-    assert.deepEqual(outputs, {report: "true"});
+    assert.equal(outputs.report, "true");
+    assert.equal(typeof outputs.report_b64, "string");
     assert.deepEqual(failures, []);
-    assert.deepEqual(fs.readdirSync(destination), ["report.json"]);
-    const published = JSON.parse(fs.readFileSync(path.join(destination, "report.json")));
-    assert.deepEqual(published, value.report);
+    assert.ok(!fs.existsSync(destination), "collector must never have an upload directory");
+    const published = publishReport(outputs.report_b64, context);
+    assert.deepEqual(published.report, value.report);
   });
 });
 
@@ -196,10 +256,10 @@ test("zero-byte EOF read remains in the public timeline of a partial campaign", 
     assert.equal(value.result, "failure");
     assert.deepEqual(value.report.sessions[0].timing_observations, s.timing_observations);
     const {outputs, failures, destination} = prepareReport(file, temp);
-    assert.deepEqual(outputs, {report: "true"});
+    assert.equal(outputs.report, "true");
     assert.deepEqual(failures, []);
-    assert.equal(exportsGate.readReport(path.join(destination, "report.json"), context).result,
-      "failure");
+    assert.ok(!fs.existsSync(destination));
+    assert.equal(publishReport(outputs.report_b64, context).report.result, "failure");
   });
 });
 
