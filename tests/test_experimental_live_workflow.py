@@ -33,7 +33,12 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
         "queue": "max",
     }
     jobs = workflow["jobs"]
-    assert set(jobs) == {"dry-run", "admission", "collect", "result"}
+    assert set(jobs) == {"dry-run", "admission", "collect", "publish", "result"}
+    assert jobs["publish"]["needs"] == ["admission", "collect"]
+    assert jobs["result"]["needs"] == ["admission", "collect", "publish"]
+    assert jobs["collect"]["outputs"]["report_b64"] == "${{ steps.exports.outputs.report_b64 }}"
+    assert "environment" not in jobs["publish"]
+    assert jobs["publish"]["permissions"] == {"contents": "read"}
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-live"
@@ -75,15 +80,22 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
     }
     assert secret["run"] == "python trusted/scripts/launch_live_ha_parity.py"
 
-    uploads = [
-        step
+    assert not any(
+        "upload-artifact@" in step.get("uses", "")
         for step in jobs["collect"]["steps"]
+    )
+    uploads = [
+        step for step in jobs["publish"]["steps"]
         if "upload-artifact@" in step.get("uses", "")
     ]
     assert len(uploads) == 1
     assert uploads[0]["with"]["retention-days"] <= 7
     assert uploads[0]["with"]["path"] == (
         "${{ runner.temp }}/hoben-live-public/report.json"
+    )
+    assert "steps.publish.outputs.report" in uploads[0]["if"]
+    assert jobs["publish"]["steps"][1]["env"]["PUBLIC_REPORT_B64"] == (
+        "${{ needs.collect.outputs.report_b64 }}"
     )
     script = next(s for s in jobs["admission"]["steps"] if s.get("id") == "gate")
     assert "gate.refusalCategory(error)" in script["with"]["script"]
