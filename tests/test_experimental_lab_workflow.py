@@ -87,7 +87,8 @@ def test_workflow_separates_admission_collection_and_publication():
         for step in jobs["collect"]["steps"]
     )
     uploads = [
-        step for step in jobs["publish"]["steps"]
+        step
+        for step in jobs["publish"]["steps"]
         if "upload-artifact@" in step.get("uses", "")
     ]
     assert len(uploads) == 1
