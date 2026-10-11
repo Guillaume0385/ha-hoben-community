@@ -1736,7 +1736,7 @@ not authorization. Re-runs use the workflow/code of the original commit.
 Each attempt requires provenance of both the original MANAGER push and the
 real triggering actor, a separate immutable MANAGER decision for attempts
 greater than one, an exact candidate PR/CI/tree, environment and reviewer
-gates, a never-reused claim per `run_id/run_attempt/scenario/SHA`, the
+gates, an atomically created claim per `run_id/run_attempt/scenario/SHA`, checked for reuse while its tag reference remains present, the
 shared observation concurrency lock, and report artifacts uniquely named by
 attempt. The MANAGER may select either scenario for any same-repository PR
 merged into `experimental`—code, tests, documentation, or workflow—whether
@@ -1748,3 +1748,5 @@ manually in the Actions UI. DEV never calls these partial-run tools and never
 starts live observations. The new PR #75 must not be merged without the
 owner's additional explicit permission; completion of offline CI does not
 waive that restriction.
+
+**Residual claim threat (#75):** GitHub `createRef` atomically rejects an existing reservation tag, but this is not proof of an immutable or indelible reservation. A principal with permission to delete or rewrite `refs/tags/<claim>` can invalidate anti-replay history; repository tag protection/rulesets are not verified by this connection. The gates recheck the current reference and fail closed on mismatch, but cannot detect a deleted-and-recreated claim with identical contents. Do not assert permanent single-use guarantees without independently verified tag protections. No Settings change is authorized.
