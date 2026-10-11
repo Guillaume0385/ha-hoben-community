@@ -713,7 +713,7 @@ mais ne prouve **pas** que la configuration GitHub est conforme : seul
 un nouveau run du runner sur un nouveau SHA revu peut l'établir.
 L'ancien SHA/run ne doit jamais être réexécuté.
 
-**Historique :** le premier run réservait le tag `hoben-live-ha-parity-<SHA_MERGE>`. **Sous le correctif #75 après installation autorisée**, un rerun N>1 du même SHA exige une nouvelle décision MANAGER v2, un rerun complet attesté et un claim atomique distinct `scénario/SHA/run_id/run_attempt`. Les réservations précédentes ne sont jamais effacées ni réutilisées. Échec, annulation ou preuve insuffisante : **NOT RUN**, aucun secret libéré. Les deux
+**Historique :** le premier run réservait le tag `hoben-live-ha-parity-<SHA_MERGE>`. **Sous le correctif #75 après installation autorisée**, un rerun N>1 du même SHA exige une nouvelle décision MANAGER v2, un rerun complet attesté et un claim atomique distinct `scénario/SHA/run_id/run_attempt`. La procédure interdit d'effacer ou de réécrire les réservations précédentes, sans pouvoir garantir techniquement leur indélébilité en l'absence de protection de tags vérifiée. Échec, annulation ou preuve insuffisante : **NOT RUN**, aucun secret libéré. Les deux
 workflows utilisent le même mutex `hoben-read-only-observation`.
 L'environnement `hoben-live` reste distinct de `hoben-experimental`.
 
@@ -812,3 +812,7 @@ Après le run, MANAGER évalue les informations vérifiées, propose sur `experi
 ## Portée des anciennes voies `main`
 
 Les anciens workflows et procédures de validation sur `main` restent historiques et inchangés tant que le propriétaire n'a pas demandé une livraison. **Ils ne doivent plus être considérés comme un prérequis** à la recherche H1/H2 ou à la validation expérimentale autonome. N'élargir ni secrets ni droits de `main` dans le cadre de #54. La préparation d'une PR de promotion sur `main` est réservée à une demande ultérieure et explicite du propriétaire.
+
+### Limite de sécurité des tags de réservation (#75)
+
+La création GitHub `createRef` est **atomique** : une référence de réservation existante empêche une seconde création tant qu'elle subsiste. Le recheck compare la référence et son contenu à la preuve attendue. **Ce n'est pas une garantie d'indélébilité** : un acteur autorisé à supprimer ou réécrire `refs/tags/<claim>` pourrait faire disparaître la trace de réservation ou la recréer à l'identique, sans que la simple relecture de la référence révèle l'historique. Les protections de tags/rulesets ne sont pas vérifiables par cette connexion et ne sont donc pas présumées actives. Cette menace résiduelle doit être évaluée par MANAGER avant une campagne ; si une preuve de non-réutilisation durable est requise et indisponible, conserver **NOT RUN**. Aucun changement de Settings ou de permissions n'est autorisé par cette note.
