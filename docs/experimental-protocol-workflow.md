@@ -65,10 +65,32 @@ l'approbation d'environnement réelle quand configurée et un nouveau claim
 atomique par `run_id/run_attempt/scenario/SHA`. Le dry-run et l'admission
 doivent appartenir à **la tentative en cours**, sans réutiliser un
 ancien succès de job. Le runner doit refuser toute preuve de relance
-complète insuffisante et toute tentative partielle. L'exécution est
-sérialisée par `hoben-read-only-observation` et les rapports/artefacts
-anonymisés sont séparés par tentative, avec rétention maximale de 7 jours.
-Aucun RX brut, GUID, secret ni donnée domestique n'est publiable.
+complète insuffisante et toute tentative partielle. Les **deux voies expérimentales** partagent le mutex
+`hoben-read-only-observation` ; cela **ne sérialise pas** les workflows
+historiques dont la configuration de concurrence est différente. Les gates
+interrogent à l'admission et au recheck les anciens runs dans les états
+`requested`, `queued`, `pending`, `waiting`, `in_progress`, et
+refusent tout run historique trouvé ou toute identification de run actif
+ambiguë. Ces deux lectures API ne constituent **pas un verrou global
+atomique** : un workflow extérieur au mutex peut démarrer entre le recheck
+et la collecte. MANAGER doit donc vérifier les éventuels chemins historiques
+encore déclenchables et ne jamais présenter l'exclusion globale comme
+acquise ; une absence de preuve suffisante reste un risque À VALIDER et
+ne justifie aucune autorisation supplémentaire.
+
+Le chemin d'export préparé par la PR #75 ne téléverse plus de fichier
+depuis le runner `collect` qui a exécuté le candidat et reçu les secrets.
+Il produit seulement un JSON quantitativement borné et strictement
+allowlisté, transmis par une sortie encodée ; un job `publish` séparé
+sur **un nouveau runner, sans environnement ni secret Hoben**, décode,
+revérifie et matérialise les octets du JSON avant `upload-artifact`.
+Une sortie absente, tronquée ou invalide signifie **NOT RUN** ; les limites
+de taille du canal GitHub Actions sont volontairement fermées plutôt que de
+déclencher un export brut. Les artefacts anonymisés sont séparés par
+tentative avec une rétention maximale de 7 jours. Aucune garantie
+opérationnelle n'est revendiquée avant installation du SHA et revue
+MANAGER des véritables jobs. Aucun RX brut, GUID, secret ni donnée
+domestique n'est publiable.
 
 **Éligibilité de toute PR `experimental` :** la PR d'origine peut porter
 sur du code, des tests, de la documentation, des workflows ou un protocole,
