@@ -76,3 +76,66 @@ test("report of earlier attempt cannot be reused for later attempt or PR", () =>
   assert.throws(() => report.validate(nominal(), {...proof, sha: "b".repeat(40)}), /invalid_report/);
   assert.throws(() => report.validate(nominal(), undefined), /invalid_report/);
 });
+
+test("isolated publisher preserves validated handoff despite source replacement", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-publish-"));
+  const old = process.env.RUNNER_TEMP;
+  try {
+    const collect = path.join(root, "collect");
+    const publish = path.join(root, "publish");
+    fs.mkdirSync(path.join(collect, "hoben-live-public"), {recursive: true});
+    fs.mkdirSync(publish);
+    const source = path.join(collect, "hoben-live-public", "report.json");
+    fs.writeFileSync(source, JSON.stringify(nominal()));
+    const outputs = {}, failures = [];
+    const core = {setOutput: (key, value) => {outputs[key] = value;}, setFailed: value => failures.push(value)};
+    process.env.RUNNER_TEMP = collect;
+    report.prepare({core, context: proof});
+    assert.deepEqual(failures, []);
+    assert.equal(outputs.report, "true");
+    assert.equal(fs.existsSync(path.join(publish, "hoben-live-public")), false);
+    fs.rmSync(source);
+    fs.symlinkSync(path.join(root, "missing.json"), source);
+    process.env.RUNNER_TEMP = publish;
+    const published = {}, rejected = [];
+    report.publish({core: {setOutput: (key, value) => {published[key] = value;}, setFailed: value => rejected.push(value)}, context: proof, encoded: outputs.report_b64});
+    assert.deepEqual(rejected, []);
+    assert.equal(published.report, "true");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(publish, "hoben-live-public", "report.json"))), nominal());
+  } finally {
+    if (old === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = old;
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test("publisher rejects malformed, private, oversized and mismatched campaign handoffs", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-reject-"));
+  const old = process.env.RUNNER_TEMP;
+  try {
+    process.env.RUNNER_TEMP = root;
+    const cases = [
+      "not-base64!", "A".repeat(6000),
+      ...[
+        {...nominal(), private: "SYNTHETIC_PRIVATE"},
+        {...nominal(), merge_sha: "b".repeat(40)},
+        {...nominal(), pr_number: 99},
+        {...nominal(), run_id: 999},
+        {...nominal(), run_attempt: 2},
+        {...nominal(), scenario: "h1h2"},
+      ].map(model => Buffer.from(JSON.stringify(model)).toString("base64")),
+    ];
+    for (const encoded of cases) {
+      const failures = [], outputs = {};
+      report.publish({core: {setOutput: (k,v) => {outputs[k]=v;}, setFailed: v => failures.push(v)}, context: proof, encoded});
+      assert.equal(outputs.report, undefined);
+      assert.equal(failures.length, 1);
+      assert.match(failures[0], /^NOT RUN:/);
+      assert.equal(fs.existsSync(path.join(root, "hoben-live-public", "report.json")), false);
+    }
+  } finally {
+    if (old === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = old;
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
