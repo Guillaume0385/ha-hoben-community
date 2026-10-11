@@ -109,7 +109,7 @@ test("report-only export never attempts CMS and rejects unsafe projection", () =
   });
 });
 
-test("safe report publishes exactly report.json and never ciphertext", () => {
+test("safe report is transferred to isolated publisher, not uploaded from collector", () => {
   withReport(report(), (file, temp) => {
     const dir = path.join(temp, "hoben-experimental-exports");
     fs.mkdirSync(dir);
@@ -119,10 +119,11 @@ test("safe report publishes exactly report.json and never ciphertext", () => {
     const core = {setOutput: (k,v) => {outputs[k] = v;}, setFailed: v => failures.push(v)};
     try {
       exportsGate.prepare({context, core});
-      assert.deepEqual(outputs, {report: "true"});
+      assert.equal(outputs.report, "true");
+      assert.equal(typeof outputs.report_b64, "string");
       assert.equal(failures.length, 0);
-      assert.deepEqual(fs.readdirSync(path.join(temp, "hoben-experimental-public")),
-        ["report.json"]);
+      assert.ok(!fs.existsSync(path.join(temp, "hoben-experimental-public")));
+      assert.deepEqual(publishReport(outputs.report_b64).report, report());
       assert.ok(!fs.existsSync(path.join(dir, "captures.cms")));
     } finally {
       if (before === undefined) delete process.env.RUNNER_TEMP;
