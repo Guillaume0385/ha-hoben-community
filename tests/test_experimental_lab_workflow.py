@@ -83,8 +83,7 @@ def test_workflow_separates_admission_collection_and_publication():
     }
     assert step["run"] == "python trusted/scripts/launch_experimental_boundary.py"
     assert not any(
-        "upload-artifact@" in step.get("uses", "")
-        for step in jobs["collect"]["steps"]
+        "upload-artifact@" in step.get("uses", "") for step in jobs["collect"]["steps"]
     )
     uploads = [
         step
