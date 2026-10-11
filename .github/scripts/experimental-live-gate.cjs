@@ -273,11 +273,17 @@ async function environmentPolicy(github, context) {
 
 async function noOtherObservation(github, context) {
   const historical = new Set(["live-validation.yml", "manager-live-hoben.yml", "opened-client-boundary.yml", "hoben-experimental.yml"]);
-  for (const status of ["in_progress", "waiting", "pending"]) {
+  // Historical live workflows do not share the experimental mutex. Inspect
+  // every pre-start state as well as running jobs at admission AND recheck.
+  // An unidentified active run is not proof of absence of a competing probe.
+  for (const status of ["requested", "queued", "pending", "waiting", "in_progress"]) {
     const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
       { ...API, status, per_page: 100 });
-    need(!runs.some(r => r.id !== context.runId && typeof r.path === "string" &&
-      historical.has(r.path.split("@")[0].split("/").pop())), "concurrent_observation");
+    need(Array.isArray(runs) && !runs.some(r =>
+      !Number.isSafeInteger(r.id) ||
+      (r.id !== context.runId &&
+        (typeof r.path !== "string" || historical.has(r.path.split("@")[0].split("/").pop())))),
+    "concurrent_observation");
   }
 }
 
