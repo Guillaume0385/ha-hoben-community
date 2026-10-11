@@ -79,14 +79,46 @@ function readReport(file, context) {
     '| --- | --- | --- | --- | --- | --- | --- | --- |\n' + rows.join('\n')};
 }
 
+// Job outputs are capped by GitHub (1 MiB in UTF-16 per job). Fail closed if
+// a validated report cannot fit in the cross-runner handoff.
+const MAX_REPORT_BYTES = 340 * 1024;
+function encode(report) {
+  const json = JSON.stringify(report);
+  if (Buffer.byteLength(json, 'utf8') > MAX_REPORT_BYTES) throw Error('report_too_large');
+  return Buffer.from(json, 'utf8').toString('base64');
+}
+
 function prepare({context,core}) {
   try {
     const source = path.join(process.env.RUNNER_TEMP,'hoben-experimental-exports/report.json');
     const {report} = readReport(source,context);
-    const destination = path.join(process.env.RUNNER_TEMP,'hoben-experimental-public');
-    fs.mkdirSync(destination,{mode:0o700});
-    fs.writeFileSync(path.join(destination,'report.json'),JSON.stringify(report),{mode:0o600,flag:'wx'});
+    // Only a fixed-schema validated JSON value crosses to a different runner;
+    // never upload any file from the runner that executed candidate Python.
+    core.setOutput('report_b64',encode(report));
     core.setOutput('report','true');
   } catch (_) { core.setFailed('Public report refused before upload.'); }
 }
-module.exports = {readReport,prepare};
+
+function publish({core,context,encoded}) {
+  try {
+    if (typeof encoded !== 'string' || encoded.length > 465000 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+      throw Error('invalid_transfer');
+    }
+    const bytes = Buffer.from(encoded,'base64');
+    if (bytes.toString('base64') !== encoded || bytes.length > MAX_REPORT_BYTES) {
+      throw Error('invalid_transfer');
+    }
+    const parent = process.env.RUNNER_TEMP;
+    if (typeof parent !== 'string' || !path.isAbsolute(parent)) throw Error('invalid_path');
+    const dir = path.join(parent,'hoben-experimental-public');
+    fs.mkdirSync(dir,{mode:0o700});
+    const file = path.join(dir,'report.json');
+    fs.writeFileSync(file,bytes,{mode:0o600,flag:'wx'});
+    // Independently validate exact bytes in a fresh job with no Hoben secrets
+    // and no process, checkout or filesystem from the collection runner.
+    readReport(file,context);
+    core.setOutput('report','true');
+  } catch (_) { core.setFailed('NOT RUN: isolated public report rejected.'); }
+}
+module.exports = {readReport,prepare,publish};
