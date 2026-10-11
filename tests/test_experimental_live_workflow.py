@@ -83,8 +83,7 @@ def test_exact_live_workflow_permissions_and_secret_lifecycle():
     assert secret["run"] == "python trusted/scripts/launch_live_ha_parity.py"
 
     assert not any(
-        "upload-artifact@" in step.get("uses", "")
-        for step in jobs["collect"]["steps"]
+        "upload-artifact@" in step.get("uses", "") for step in jobs["collect"]["steps"]
     )
     uploads = [
         step
