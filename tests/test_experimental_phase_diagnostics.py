@@ -1,5 +1,6 @@
 """Actual isolated CLI/launcher and simulated phase failures, never Hoben I/O."""
 
+import base64
 import json
 import os
 import shutil
@@ -224,15 +225,19 @@ def validate_simulated_export(checkouts, expected_result):
         check=True,
     )
     assert result.stderr == ""
-    assert json.loads(result.stdout) == {
-        "result": expected_result,
-        "outputs": {"report": "true"},
-        "failures": [],
-    }
+    result_model = json.loads(result.stdout)
+    assert result_model["result"] == expected_result
+    assert result_model["failures"] == []
+    outputs = result_model["outputs"]
+    assert outputs["report"] == "true"
+    assert set(outputs) == {"report", "report_b64"}
     source = checkouts.storage / "hoben-experimental-exports/report.json"
+    verified = json.loads(base64.b64decode(outputs["report_b64"], validate=True))
+    assert verified == json.loads(source.read_text())
+    # The collector is not an artifact publisher: only the separate, secretless
+    # publish runner may materialize the validated report for upload.
     public = checkouts.storage / "hoben-experimental-public/report.json"
-    assert json.loads(source.read_text()) == json.loads(public.read_text())
-    assert public.stat().st_mode & 0o777 == 0o600
+    assert not public.exists()
     assert public.parent.stat().st_mode & 0o777 == 0o700
     assert list(public.parent.iterdir()) == [public]
     for forbidden in (
