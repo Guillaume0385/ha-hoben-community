@@ -29,12 +29,12 @@ n'ajoute pas `state:validate` ou `manager-live-hoben` et ne lance pas de test r�
   depuis le 11 octobre (`f2c9b89f36404ad14193faac6dc006e84d7db36f`) : la preuve de
   rerun natif v2 est raccordée aux deux gates. Les anciennes mentions DRAFT/non
   installé décrivent la préparation de cette PR, pas l'état courant.
-- Les définitions exécutées sont [H1/H2](../.github/workflows/hoben-experimental.yml)
-  et [HA parity](../.github/workflows/hoben-live-experimental.yml), avec les gates
-  [lab](../.github/scripts/experimental-lab-gate.cjs),
-  [live](../.github/scripts/experimental-live-gate.cjs),
-  [push](../.github/scripts/experimental-push-preflight.cjs) et
-  [rerun](../.github/scripts/experimental-native-rerun.cjs).
+- Les définitions exécutées **uniquement sur `experimental`** sont [H1/H2](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/workflows/hoben-experimental.yml)
+  et [HA parity](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/workflows/hoben-live-experimental.yml), avec les gates
+  [lab](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-lab-gate.cjs),
+  [live](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-live-gate.cjs),
+  [push](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-push-preflight.cjs) et
+  [rerun](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-native-rerun.cjs).
 
 Une installation Git ne prouve ni les Settings effectifs, ni les secrets, ni
 l'approbation d'un environnement, ni le fonctionnement universel des reruns.
