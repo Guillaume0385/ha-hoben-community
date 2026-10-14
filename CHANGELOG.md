@@ -412,15 +412,21 @@ Neither validation establishes all-model support.
 Toute PR documente les modifications réellement livrées, avec date, numéro de PR, SHA de fusion et tests. MANAGER vérifie l'entrée ou une justification d'absence d'impact à chaque revue.
 
 
-### Documentation — PR #77 (non fusionnée)
+### Documentation — synchronisation vers `main` par PR #78 (en attente de fusion)
 
-Nettoyage des documents actifs, sécurité et gouvernance expérimentale. Cette
-entrée n'est pas une livraison ; aucun SHA de fusion n'est déclaré.
+Nettoyage des documents actifs, sécurité et gouvernance expérimentale. Ces changements proviennent de la documentation préparée sur `experimental`
+(notamment PR #77) ; la PR #78 propose leur synchronisation documentaire
+vers `main` sans importer de code, tests, scripts ni workflows expérimentaux.
+**Tant que la PR #78 n'est pas fusionnée, cette entrée décrit une livraison
+proposée et non réalisée ; le SHA de fusion et les tests de livraison restent
+à compléter après fusion.**
 
 Corrections documentaires du 14 octobre 2026 : contrats d'admission/recheck et
 limites des reruns restaurés depuis les gates installés ; statut de #75 vérifié ;
 archivage des sections non V4 complètes avec provenance ; cartographie V4,
 critères des six tâches actives et distinctions faits/hypothèses conservés ;
 liens et renvois corrigés ; observations H1/H2 reliées à leurs sources.
-Les vérifications et la CI sur le nouveau SHA sont consignées dans la PR #77.
-Aucun code exécutable, test live, commande poêle ou livraison `main`.
+Les vérifications des sources expérimentales sont consignées dans la PR #77 ;
+les vérifications propres à la livraison documentaire sont celles de la PR #78.
+Aucun code exécutable, test live ni commande poêle n'est inclus. La fusion de
+#78, si autorisée, sera une livraison **documentaire uniquement** sur `main`.
