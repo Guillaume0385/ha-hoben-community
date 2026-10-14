@@ -22,7 +22,7 @@ référence. Le [rapport PASS](https://github.com/Guillaume0385/ha-hoben-communi
 concerne ce poêle et les situations observées, sans prouver le support de tous
 les modèles. Chaque rafraîchissement utilise le client `HobenClient` et une connexion
 TLS bornée. Toutes les entités sont en lecture seule ; le contrôle reste indisponible.
-Une sonde manuelle conserve aussi les modes ponctuels TLS, `session-open` sans
+Historiquement, une sonde manuelle proposait les modes ponctuels TLS, `session-open` sans
 lecture et `read-v4-state`. L'identification suit MyHOBEN 2.2 build 34 :
 Identifiant HOBEN normalisé, DeviceGuid initial nul puis attribution/réutilisation
 en mémoire puis persistance dans Home Assistant, demande d'autorisation ou rejet
@@ -475,7 +475,28 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
-### Quatre couches de validation
+### Procédures live historiques de `main` — non applicables au workflow courant
+
+> **AVERTISSEMENT (14 octobre 2026) :** les instructions de validation live
+> ci-dessous (labels `manager-live-hoben`, `live-validation`, dispatch
+> `session-open` / `read-v4-state`, commandes de sonde et configuration des
+> environnements) documentent l'ancien fonctionnement de `main`. **Ne pas les
+> exécuter comme procédure courante ni comme autorisation de lancement.**
+> Le développement et les campagnes réelles sont désormais gouvernés sur
+> `experimental` par [le workflow actuel](docs/experimental-protocol-workflow.md),
+> ses gates et ses approbations GitHub. Les définitions expérimentales ne sont
+> **pas installées sur `main`** par la synchronisation documentaire PR #78.
+> Aucune opération live ni promotion n'est autorisée par ce README.
+>
+> **Lecture des sections archivées :** les tableaux, labels, étapes de déclenchement,
+> commandes shell et exemples ci-après sont conservés uniquement pour la
+> traçabilité historique. Ils ne décrivent **aucune procédure exécutable autorisée**.
+> Pour connaître les conditions actuelles d'admission, de revue, d'approbation
+> et de campagne, consulter la [procédure sur `experimental`](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/docs/experimental-protocol-workflow.md).
+> Les éventuels workflows historiques encore présents sur `main` ne doivent
+> pas être déclenchés sur la seule base de ce document.
+
+### Archive — quatre couches de validation sur `main` (historique, ne pas exécuter)
 
 | Couche | Déclenchement et portée |
 | --- | --- |
@@ -499,7 +520,7 @@ Lorsqu'elle est requise, cette validation porte sur le **commit candidat exact**
 est déclenchée volontairement après revue et ne peut être remplacée par un smoke
 TLS ou une observation négative.
 
-### Validation authentifiée avant fusion, après revue MANAGER
+### Archive — validation authentifiée avant fusion (historique, ne pas exécuter)
 
 Le workflow [MANAGER authenticated Hoben validation](.github/workflows/manager-live-hoben.yml)
 utilise uniquement **`pull_request_target: labeled`**. Sa définition provient de
