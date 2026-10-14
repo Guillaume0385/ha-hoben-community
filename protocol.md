@@ -372,37 +372,15 @@ code d'authentification. Un sous-code absent à EOF ou inconnu reste non interpr
 Les types réellement inattendus sont rapportés uniquement par leur numéro,
 sans payload ni hypothèse sur sa longueur. Aucun suffixe inconnu n'est reframé.
 
-### Choix de l'implémentation poêle — CONFIRMÉ
+### Profil V4 actif
 
-`StoveFactory.Create()` utilise les valeurs retournées lors de l'ouverture :
-
-- `type == 5` → `StoveV4`
-- `type == 2`, révisions 0/1 et vsoftMaj 0 → `StoveV6`
-- `type == 2`, révision 2 et vsoftMaj 0 → `BoilerV6_230`
-- `type == 3`, révision 0, vsoftMaj 0/1 → `StoveV6`
-- `type == 3`, révision 1, vsoftMaj 0/1, version <= 5 → `StoveV6`
-- `type == 3`, révision 1, vsoftMaj 0/1, version > 5 → `StoveV6v16`
-
-Dans `OpenedClient`, `type` correspond à `product_type`, la révision à
-`product_revision` et `vsoftMaj` à `software_major`. Ces correspondances permettent
-de sélectionner les quatre cas non ambigus ci-dessus.
-
-**À VALIDER — discriminant « version » :** le champ comparé au seuil 5 dans les
-deux règles `type == 3`, révision 1, vsoftMaj 0/1 n'est pas identifié explicitement.
-La documentation et l'historique du dépôt ne prouvent pas qu'il s'agit de
-`software_minor`, de `application_version` ou d'un autre champ. La liste des
-arguments d'`InstantiateStove` ci-dessus ne suffit pas à établir ce lien avec la
-comparaison dans `StoveFactory.Create()`.
-
-Tant que ce lien n'est pas prouvé, `select_stove_profile()` retourne `UNKNOWN`
-pour cette branche, quelles que soient les valeurs de `software_minor` et
-`application_version`. Les deux règles V6/V6v16 restent documentées en attente de
-validation du champ. Toute autre combinaison non documentée retourne également
-`UNKNOWN`. Le sélecteur renvoie uniquement un identifiant `StoveProfile`, sans
-cartographie ni comportement de poêle ; le DeviceGuid n'intervient jamais dans
-la sélection et n'est pas journalisé.
-
-Le plugin Home Assistant doit donc **attendre `OpenedClient` et sélectionner dynamiquement la cartographie**, plutôt que supposer que l'Osmose est V6/V6v16.
+Le développement actuel vise uniquement V4. La règle statiquement établie dans
+`StoveFactory.Create()` est `type == 5` → `StoveV4` ; `type` correspond à
+`product_type` dans `OpenedClient`. Attendre cette identification avant de choisir
+la cartographie ; le modèle commercial Osmose ne suffit pas. Les règles des
+autres profils et leur discriminant « version » non résolu sont conservés dans
+[l'archive](docs/archive-autres-versions.md). L'archivage ne change ni le sélecteur
+existant ni ses tests. La frontière totale d'OpenedClient reste à valider.
 
 ### Session de l'Osmose de référence — CONFIRMÉ dynamiquement le 2026-10-04
 
@@ -639,8 +617,7 @@ sur les registres ou les capacités d'un poêle Hoben.
 
 Le codec valide ces limites à l'encodage et au décodage MBAP, ainsi que la
 quantité et la fin de plage lors de la construction des requêtes de lecture.
-Les lectures applicatives V4 (20 registres) et V6/V6v16 (110 registres) documentées
-ci-dessous respectent ces contraintes.
+La lecture applicative V4 documentée ci-dessous (20 registres) respecte ces limites standard. Les autres profils sont décrits dans [l'archive](docs/archive-autres-versions.md).
 
 ### Requête lecture
 
@@ -712,33 +689,10 @@ Le code de réception possède un traitement spécifique pour `0xFFF0`, ce qui c
 
 ## 7. Lecture des données principales
 
-### Requête applicative V6 / V6v16 — CONFIRMÉ
-
-`StoveV6.GetRegApplicatif()` et `StoveV6v16.GetRegApplicatif()` font une lecture **Input Registers / fonction 04** :
-
-```text
-Transaction ID : FFFF
-Unit ID        : 01
-Function       : 04
-Start address  : 1024 = 0x0400
-Quantity       : 110  = 0x006E
-```
-
-Trame Modbus TCP :
-
-```text
-FF FF 00 00 00 06 01 04 04 00 00 6E
-```
-
-Trame MyHOBEN/TLS complète :
-
-```text
-0D FF FF 00 00 00 06 01 04 04 00 00 6E
-```
-
 ### Requête applicative V4 — CONFIRMÉ
 
-Même principe, mais seulement 20 registres :
+Lecture Input Registers, fonction `04`, transaction `FFFF`, unité `01`,
+adresse `1024 / 0x0400`, quantité `20 / 0x0014` :
 
 ```text
 0D FF FF 00 00 00 06 01 04 04 00 00 14
@@ -763,7 +717,7 @@ Le décodeur vérifie le MBAP, extrait le Transaction ID, puis convertit les reg
 L'analyse complémentaire de `HobenCore.dll` et `HobenApp.dll` de MyHOBEN
 2.2 build 34 permet maintenant de relier les 20 registres lus par le profil V4
 aux propriétés affichées par l'application. Cette cartographie est distincte de
-celle V6/V6v16.
+celle des autres profils archivés.
 
 | Adresse | Nom HOBEN V4 | Format / interprétation MyHOBEN |
 |---:|---|---|
@@ -941,48 +895,11 @@ et ses tests hors ligne ne constituent pas à eux seuls une preuve dynamique.
 Toute modification future de ce chemin nécessite sa propre revue, sa CI et la
 décision de validation authentifiée MANAGER sur le nouveau HEAD.
 
-### V6/V6v16 — zone applicative (lecture, base 1024)
+### Zone configuration utilisateur (lecture) — attribution V4 non établie
 
-| Adresse | Nom HOBEN | Utilité HA |
-|---:|---|---|
-| 1024 | erarConsigneMarchArret | état/consigne marche-arrêt |
-| 1025 | erarTemperatureDerogation1 | température dérogation 1 |
-| 1026 | erarTempoStartDerogation1 | départ dérogation 1 |
-| 1027 | erarDureeDerogation1 | durée dérogation 1 |
-| 1028-1036 | dérogations 2 à 4 | programmation/dérogations |
-| 1037 | erarPuissance_Etat | puissance + état, champ combiné |
-| 1038-1039 | erarDefautsCombustion1/2 | défauts combustion |
-| 1040-1041 | erarWarnings1/2 | avertissements |
-| 1042-1043 | erarInformations1/2 | informations |
-| 1044 | erarAnnee_Mois | date poêle |
-| 1045 | erarJourSemaineJourMois_Heures | date/heure |
-| 1046 | erarMinutes_Secondes | minute/seconde |
-| 1047 | erarConfigMiseAJour | indicateur config |
-| 1048 | erarTemperatureCorpsConv | température corps convertie |
-| 1049 | erarTemperatureFumeeConv | température fumées convertie |
-| 1050 | erarValeurVBatConv | tension batterie/convertie |
-| 1051 | erarTensionEntreeConv | tension entrée |
-| 1052 | erarELogiquesTOR | entrées logiques |
-| 1053 | erarConsigneMoteurVis | moteur vis |
-| 1054 | erarConsigneMoteurAirPrim | air primaire |
-| 1055 | erarConsigneMoteurAirSec | air secondaire |
-| 1056 | erarConsigneMoteurExchanger | échangeur/ventilation |
-| 1057 | erarConsigneMoteurNettoyage | nettoyage |
-| 1058 | erarSortiesTOR | sorties TOR |
-| 1059 | erarDefautsMoteurs | défauts moteurs |
-| 1060-1061 | erarDefautsSondes1/2 | défauts sondes |
-| 1062 | erarDefautsCommAcc | défaut communication accessoires |
-| 1063 | erarInfoStart | infos démarrage |
-| 1064 | erarCommandes | commandes |
-| 1065 | erarResultats | résultats |
-| 1070-1072 | Wi-Fi état/type | diagnostic Wi-Fi |
-| 1090+ | CE Hydro / sondes / accessoires | données supplémentaires selon modèle |
-| 1123 | erarCESondeRFExtTemperature | température sonde RF externe |
-| 1125/1127/1129/1131 | sondes RF ambiantes 1..4 | températures zones |
-| 1133 | erarCEPelletDetectLevel | niveau/détection granulés si présent |
-| 1134-1137 | fréquences moteurs | diagnostics |
-
-### Zone configuration utilisateur (lecture)
+Cette table historique est conservée sans la promouvoir en cartographie V4.
+Elle ne fait pas partie de la lecture V4 confirmée des 20 registres 1024–1043 ;
+son profil et ses conversions doivent être prouvés avant toute utilisation.
 
 | Adresse | Nom |
 |---:|---|
@@ -995,7 +912,9 @@ décision de validation authentifiée MANAGER sur le nouveau HEAD.
 | 1542 | ercur_TempsAnticipation |
 | 1543 | ercurUserBits |
 
-### Historique (lecture)
+### Historique (lecture) — profil et sémantique à valider
+
+Les éléments suivants sont des pistes historiques, pas une lecture V4 validée.
 
 La zone commence à `2560`. Elle contient notamment :
 
@@ -1060,7 +979,11 @@ du registre 1030 en §8 pour les 20 registres applicatifs V4.
 | 7 | DemarrageBlackout |
 | 8 | GestionCombustion |
 
-### Modes — CONFIRMÉ
+### Modes du modèle objet commun — CONFIRMÉ statiquement
+
+Ces numéros ne sont pas les octets du mode V4 du registre 1024 (voir §8),
+ni une liste de valeurs autorisées à écrire dans le registre V4 1285.
+`Magasin` et `ManuelTest` ne doivent jamais devenir des contrôles utilisateur.
 
 `EOperationMode` :
 
@@ -1096,236 +1019,61 @@ La valeur `4095 / 0x0FFF` est traitée comme indisponible par l'affichage. Cette
 règle s'applique aux températures V4 identifiées en §8, notamment ambiance,
 consigne, dérogation, air comburant, fumées et RF.
 
-Pour **V6/V6v16**, ne pas généraliser automatiquement ce facteur tant que le
-chemin d'affichage correspondant n'a pas été établi ou confirmé sur une capture
-réelle.
+Ce facteur de température concerne les champs V4 identifiés. Les règles des autres profils sont archivées.
 
 ---
 
-## 10. Commandes d'écriture utilisateur
+## 10. Commandes d'écriture utilisateur V4 — documentation statique, aucune exécution
 
-Toutes les commandes ci-dessous sont **CONFIRMÉES dans HobenCore** pour `StoveV6` et `StoveV6v16` sauf mention contraire.
+**Interdiction :** les tests et l'intégration actuels restent en lecture seule. Les commandes ci-dessous décrivent les chemins statiquement identifiés dans MyHOBEN pour V4, **pas** des commandes autorisées ou vérifiées sur le poêle. Les détails des profils non V4 (registres 1283–1286 dans d'autres usages, 1792–1801, modes techniques et exemples associés) sont conservés dans [l'archive](docs/archive-autres-versions.md).
 
-### 10.1 Marche / arrêt
+### 10.1 Marche / arrêt normal
 
-Méthode HOBEN : `SetOnOff`
+Le registre **1280 / 0x0500** figure dans la cartographie V4. **À VALIDER pour V4 :** l'utilisation de la fonction Modbus `06`, le champ `erawConsigneMarchArret`, l'encodage `OnOff XOR 1` et l'identifiant de transaction `0xFFF0` sont décrits pour V6/V6v16 dans [l'archive](docs/archive-autres-versions.md), mais aucune preuve spécifique V4 n'établit leur application à V4. Ne pas en déduire une trame d'écriture V4 ni implémenter une commande. Toute demande future d'arrêt devra respecter l'arrêt normal du contrôleur, **jamais** couper l'alimentation électrique.
 
-- Function Modbus : `06`
-- Register : **1280 / `0x0500`**
-- Nom : `erawConsigneMarchArret`
-- Valeur observée côté application : l'interface bascule `OnOff XOR 1`, donc valeurs logiques **0/1**.
-- Transaction ID application : `0xFFF0`
+### 10.2 Température de dérogation
 
-Requête ON (`value=1`) :
-
-```text
-MBAP/PDU : FF F0 00 00 00 06 01 06 05 00 00 01
-MyHOBEN  : 0D FF F0 00 00 00 06 01 06 05 00 00 01
-```
-
-Requête OFF (`value=0`) :
-
-```text
-0D FF F0 00 00 00 06 01 06 05 00 00 00
-```
-
-**Sécurité :** cette commande demande au contrôleur HOBEN son arrêt normal. Elle ne coupe pas l'alimentation électrique et doit rester la seule méthode d'arrêt depuis HA.
-
-### 10.2 Température de dérogation / consigne temporaire
-
-Méthode : `SetTemperatureDerogation`
-
-V6/V6v16 :
-
-- Function : `06`
-- Register : **1283 / `0x0503`**
-- Nom : `erawTemperatureDerogation`
-- Type transmis : valeur 16 bits (`Int16` converti en `UInt16` au niveau Modbus).
-
-V4 :
-
-- Register : **1281 / `0x0501`** ;
-- l'UI MyHOBEN travaille en dixièmes de degré : **190 = 19,0 °C** ;
-- pas utilisateur observé : **5 unités = 0,5 °C** ;
-- plage UI observée : **50..300 = 5,0..30,0 °C**.
-
-Le facteur V4 est confirmé statiquement par le chemin d'affichage/édition de
-MyHOBEN. Une écriture réelle reste toutefois interdite tant que la phase de
-contrôle prévue par `project.md` n'a pas été atteinte et validée par lecture de
-retour. Pour V6/V6v16, l'échelle d'écriture reste à valider séparément.
+Registre V4 **1281 / 0x0501** ; la valeur est codée en dixièmes de °C (190 = 19,0 °C), pas d'interface de 5 unités (0,5 °C), plage d'interface observée de 50 à 300 (5,0 à 30,0 °C). La correspondance vient du chemin statique d'affichage/édition MyHOBEN ; pas de validation d'écriture réelle.
 
 ### 10.3 Temporisation de dérogation
 
-Méthode : `SetTempoDerogation`
-
-V6/V6v16 :
-
-- Function : `06`
-- Register : **1284 / `0x0504`**
-- Nom : `erawTempoStartDerogation`
-- Valeur : UInt16.
-
-V4 : registre **1282**. MyHOBEN l'interprète en **minutes** pour calculer le
-début de dérogation relativement à l'heure courante.
-
-Pour V6/V6v16, l'unité reste **À VALIDER** avant exposition comme service HA.
+Registre V4 **1282 / 0x0502** ; unité **minute** dans le calcul MyHOBEN du début de dérogation relatif à l'heure courante. Effet réel non testé.
 
 ### 10.4 Durée de dérogation
 
-V4 :
+Registre V4 **1283 / 0x0503** ; unité **minute**, pas d'interface de 15 minutes, maximum d'interface 1440 minutes (24 h). Effet réel non testé.
 
-- **1283 / `0x0503`** ;
-- unité MyHOBEN : **minutes** ;
-- pas UI : **15 minutes** ;
-- maximum UI : **1440 minutes / 24 h**.
+### 10.5 Ventilation
 
-V6/V6v16 :
+Le registre **1284 / 0x0504** est documenté dans la cartographie V4 pour la ventilation. L'interface documente 0 = Normal, 1 = Silence, 2 = Boost. **À VALIDER pour V4 :** l'utilisation de la fonction Modbus `06` et son encodage d'écriture ne sont pas démontrés par une source spécifique V4 ; la méthode `SetModeVentil` et la fonction `06` sont décrites dans le contexte V6/V6v16 de [l'archive](docs/archive-autres-versions.md). Ne pas en déduire une trame d'écriture V4. Aucun essai réel et aucune commande autorisée.
 
-- **1285 / `0x0505`** = `erawDureeDerogation`.
+### 10.6 Mode direct et options
 
-Pour V6/V6v16, l'unité reste à valider dynamiquement.
+La cartographie V4 documente **1285** pour le mode de fonctionnement direct et **1286** pour les options utilisateur. Les valeurs et effets V4 sont **À VALIDER** ; ne pas reprendre les modes `Magasin`/`ManuelTest` ou les champs 1792–1801 d'autres profils.
 
-### 10.5 Mode ventilation
+### 10.7 Zones exclues
 
-Méthode : `SetModeVentil`
-
-V6/V6v16 :
-
-- Function : `06`
-- Register : **1286 / `0x0506`**
-- `0` Normal
-- `1` Silence
-- `2` Boost
-
-Exemple Silence :
-
-```text
-0D FF F0 00 00 00 06 01 06 05 06 00 01
-```
-
-V4 : registre **1284**.
-
-### 10.6 Mode de fonctionnement
-
-Méthode : `SetModeFonctionnement`
-
-V6/V6v16 :
-
-- Function : `06`
-- Register : **1792 / `0x0700`** (`ercuwModeFonctionnement`)
-- Valeurs envoyées :
-  - 0 Direct
-  - 1 Manuel
-  - 2 Automatic1
-  - 3 Automatic2
-  - 4 Magasin
-  - 5 ManuelTest
-- Toute valeur non reconnue par la méthode est ramenée à `2`.
-
-**Recommandation HA : ne pas exposer `Magasin` ni `ManuelTest` à l'utilisateur standard.** Ce sont des modes qui ne sont pas nécessaires au pilotage domestique normal.
-
-### 10.7 Température mode manuel
-
-Cartographie d'écriture V6/V6v16 :
-
-- **1798 / `0x0706`** = `ercuwTemperatureModeManuel`
-
-### 10.8 Puissance max mode manuel
-
-- **1799 / `0x0707`** = `ercuwPuissMaxModeManuel`
-
-### 10.9 Mode vacances
-
-Registres V6/V6v16 :
-
-- 1793 : année fin vacances
-- 1794 : mois/jour fin vacances
-- 1795 : heures/minutes fin vacances
-- 1796 : température mode vacances
-- 1797 : puissance max vacances
-- 1800 : temps anticipation vacances
-
-### 10.10 Option démarrage/arrêt automatique en mode manuel
-
-Méthode : `SetManuelStartStopAutoOption`
-
-- Function : **22 / Mask Write Register (`0x16`)**
-- Register : **1801 / `0x0709`** (`ercuwUserBits`)
-- Bit modifié : **bit 8** (`0x0100`)
-- AND mask : **65279 / `0xFEFF`**
-- OR mask : `0x0100` si activé, `0x0000` sinon.
-
-Cela permet de changer uniquement ce bit sans écraser les autres options utilisateur.
+Les registres **1287–1293** sont techniques/moteur/test ; la zone installateur commence à **2304**. Ils ne doivent jamais être exposés ni écrits par l'intégration. Les fonctions Modbus d'écriture **06/16/22** et la transaction applicative **0xFFF0** sont interdites dans les tests live et expérimentaux.
 
 ---
 
-## 11. Différences V4 à prendre en compte
+## 11. Cartographie V4 des commandes — documentation statique uniquement
 
-La cartographie V4 n'est pas identique à V6/V6v16. Pour les commandes principales :
+La cartographie V4 est différente des autres versions. Les adresses ci-dessous sont documentées à partir des chemins de MyHOBEN et **ne constituent pas une autorisation d'écriture ni une validation dynamique** :
 
-| Fonction | V4 | V6/V6v16 |
-|---|---:|---:|
-| Marche/arrêt | 1280 | 1280 |
-| Température dérogation | 1281 | 1283 |
-| Tempo dérogation | 1282 | 1284 |
-| Durée dérogation | 1283 | 1285 |
-| Ventilation | 1284 | 1286 |
-| Mode fonctionnement direct | 1285 (cartographie V4) | 1792 |
-| Options | 1286 | principalement zone utilisateur 1801 |
+| Fonction V4 | Registre V4 | État |
+| --- | ---: | --- |
+| Marche / arrêt normal | 1280 | Documentation statique, jamais exécutée par les tests |
+| Température de dérogation | 1281 | Documentation statique, dixièmes de °C |
+| Temporisation de dérogation | 1282 | Documentation statique, minutes |
+| Durée de dérogation | 1283 | Documentation statique, minutes |
+| Ventilation | 1284 | Documentation statique |
+| Mode de fonctionnement direct | 1285 | Cartographie V4, valeurs/effets à valider |
+| Options utilisateur | 1286 | Cartographie V4, bits/effets à valider |
 
-La lecture applicative V4 ne demande que 20 registres à partir de 1024, contre 110 pour V6/V6v16.
+Les registres techniques/test 1287–1293 et la zone installateur 2304+ sont exclus de toute exposition/écriture. La lecture applicative V4 documentée porte sur 20 registres à partir de 1024. Les cartographies des autres versions sont conservées dans [l'archive](docs/archive-autres-versions.md). **Aucune commande physique n'est autorisée.**
 
-Le plugin doit donc utiliser une classe de profil (`V4`, `V6`, `V6v16`) choisie après la réponse `OpenedClient`.
-
----
-
-## 12. Registres d'écriture V6/V6v16 identifiés
-
-### Zone applicative utilisateur
-
-| Adresse | Nom |
-|---:|---|
-| 1280 | erawConsigneMarchArret |
-| 1281 | erawConsigneTemperatureDir |
-| 1282 | erawConsignePMaxDir |
-| 1283 | erawTemperatureDerogation |
-| 1284 | erawTempoStartDerogation |
-| 1285 | erawDureeDerogation |
-| 1286 | erawModeVentilation |
-| 1287 | erawConsigneMoteurVis |
-| 1288 | erawConsigneMoteurFumee |
-| 1289 | erawConsigneMoteurVentilation |
-| 1290 | erawConsigneMoteurSecondaire |
-| 1291 | erawConsigneMoteurNettoyage |
-| 1292 | erawSortiesTOR |
-| 1293 | erawCommandes |
-
-**Les registres 1287-1293 sont techniques/test et ne doivent PAS être exposés dans Home Assistant.**
-
-### Configuration utilisateur
-
-| Adresse | Nom |
-|---:|---|
-| 1792 | ercuwModeFonctionnement |
-| 1793 | ercuwDateFinVacAnnee |
-| 1794 | ercuwDateFinVacMois_JourMois |
-| 1795 | ercuwDateFinVacHeures_Minutes |
-| 1796 | ercuwTemperatureModeVacances |
-| 1797 | ercuwPuissMaxModeVacances |
-| 1798 | ercuwTemperatureModeManuel |
-| 1799 | ercuwPuissMaxModeManuel |
-| 1800 | ercuwTempsAnticipationVac |
-| 1801 | ercuwUserBits |
-
-### Configuration installateur
-
-La zone d'écriture commence à 2304 (`erciw...`) et comprend puissance mini, corrections moteurs, offsets sondes, cycle nettoyage, temporisations auto, différentiels, etc.
-
-**Ne pas exposer ces registres dans l'intégration Home Assistant.** Ils modifient le réglage de combustion/installation et doivent rester sous contrôle du constructeur/installateur.
-
----
-
-## 13. Décodage recommandé côté Home Assistant
+## 12. Décodage recommandé côté Home Assistant
 
 Cette section décrit une **organisation possible pour le prototype initial**. Elle ne remplace pas l'architecture de référence définie dans `project.md`. Le code protocolaire doit conserver des frontières suffisamment propres pour être extrait vers la bibliothèque indépendante `pyhoben` lorsque la couche de lecture sera stable.
 
@@ -1341,8 +1089,6 @@ custom_components/hoben/
 ├── modbus.py         # MBAP/PDU encode/decode
 ├── stove.py          # profil de base
 ├── stove_v4.py
-├── stove_v6.py
-├── stove_v6v16.py
 ├── coordinator.py
 ├── sensor.py
 ├── binary_sensor.py
@@ -1418,7 +1164,7 @@ Pour `DataUpdated`, il faut retirer les 5 premiers octets avant de lire le MBAP.
 
 ---
 
-## 14. Entités Home Assistant proposées
+## 13. Entités Home Assistant proposées
 
 Cette section suit la roadmap de `project.md`.
 
@@ -1474,7 +1220,7 @@ Le registre 1280 est documenté plus haut pour l'interopérabilité, mais son ex
 
 ---
 
-## 15. Stratégie de sécurité pour les écritures
+## 14. Stratégie de sécurité pour les écritures
 
 Une intégration Home Assistant ne doit jamais :
 
@@ -1499,7 +1245,7 @@ Règles recommandées :
 
 ---
 
-## 16. Points encore à valider sur le HOBEN Osmose réel
+## 15. Points encore à valider sur le HOBEN Osmose réel
 
 La rétro-ingénierie statique permet maintenant de décrire beaucoup plus
 précisément la première connexion. Les validations dynamiques restantes doivent
@@ -1524,19 +1270,23 @@ session :
    la sémantique réellement exploitable de 1033 et 1042 ;
 6. contenu des **4 octets de métadonnées de `DataUpdated`**.
 
-Les deux premières validations concernent l'ouverture/association du client
-et peuvent être réalisées sans requête Modbus ni commande du poêle.
+Les deux premières validations concernent l'ouverture/association du client.
+Elles restent différées par la décision de portée du 2026-10-07 dans `project.md`,
+sauf le handoff local strictement nécessaire à la session persistante. Cette
+liste d’inconnues n’autorise aucune nouvelle expérience.
 Toute capture destinée au dépôt doit être anonymisée avant publication.
 
 
 ---
 
-## 17. Séquence minimale pour un prototype lecture seule
+## 16. Séquence minimale pour un prototype lecture seule
 
 La sonde ne met pas encore en œuvre tout le flux d'association décrit ci-dessous.
 `session-open` reste une observation ponctuelle sans Modbus. Après l'ouverture
 V4 confirmée, `read-v4-state` prépare une seule lecture brute documentée (§7),
-à lancer volontairement depuis `main` après revue/fusion, puis fermeture.
+dans l'ancienne voie manuelle `main`, puis fermeture. Cette description est
+historique ; les seuls lancements actuels suivent le
+[workflow expérimental](docs/experimental-protocol-workflow.md) et ses gates.
 Il ne met pas en œuvre la boucle de lecture ni les entités proposées ci-dessous.
 
 ### Première association d'un client
@@ -1564,14 +1314,16 @@ Il ne met pas en œuvre la boucle de lecture ni les entités proposées ci-desso
 ```text
 1. Démarrer boucle de lecture
 2. Si RX 0A -> SEND 0B
-3. SEND 0D + ModbusTCP(FFFF, unit=1, func=04, start=1024, qty=110 si V6)
+3. SEND 0D + ModbusTCP(FFFF, unit=1, func=04, start=1024, qty=20 pour V4)
 4. RX 0E + Modbus response
 5. Décode registres
 6. Publie entités Home Assistant
 7. Accepte RX 1B (DataUpdated), retire 5 octets puis décode Modbus
 ```
 
-Pour V4, utiliser `qty=20`.
+Cette boucle est une cible après handoff prouvé, pas une capacité validée du
+client actuel. Un candidat de 54 octets ne suffit pas à identifier `DataUpdated`
+ni à autoriser une mise à jour de l’état (voir les tâches 1 et 5 de `project.md`).
 
 Aucune étape d'association ne doit déclencher une commande de fonctionnement du
 poêle.
@@ -1579,66 +1331,14 @@ poêle.
 
 ---
 
-## 18. Exemples de trames
+## 17. Exemples de trames
 
-### Lire les 110 registres applicatifs V6
+La requête de lecture V4 complète figure au §7. Les exemples historiques
+marche/arrêt, ventilation et modes des autres profils sont conservés avec
+leurs adresses et qualifications dans [l'archive](docs/archive-autres-versions.md).
+Ils ne sont pas des instructions d'exécution.
 
-```text
-0D FF FF 00 00 00 06 01 04 04 00 00 6E
-```
-
-Décomposition :
-
-```text
-0D       MyHOBEN DataRequestClient
-FF FF    transaction ID
-00 00    protocol ID
-00 06    longueur MBAP
-01       unit ID
-04       Read Input Registers
-04 00    adresse 1024
-00 6E    110 registres
-```
-
-### Marche
-
-```text
-0D FF F0 00 00 00 06 01 06 05 00 00 01
-```
-
-### Arrêt normal
-
-```text
-0D FF F0 00 00 00 06 01 06 05 00 00 00
-```
-
-### Ventilation Silence (V6/V6v16)
-
-```text
-0D FF F0 00 00 00 06 01 06 05 06 00 01
-```
-
-### Ventilation Boost (V6/V6v16)
-
-```text
-0D FF F0 00 00 00 06 01 06 05 06 00 02
-```
-
-### Mode Manuel (V6/V6v16)
-
-```text
-0D FF F0 00 00 00 06 01 06 07 00 00 01
-```
-
-### Mode Automatic1 (V6/V6v16)
-
-```text
-0D FF F0 00 00 00 06 01 06 07 00 00 02
-```
-
----
-
-## 19. Niveau de confiance
+## 18. Niveau de confiance
 
 ### Confirmé par désassemblage IL
 
@@ -1658,11 +1358,12 @@ FF FF    transaction ID
   sans champ supplémentaire exploité, selon l'analyse statique examinée par le
   MANAGER le 2026-10-06 (§5) ;
 - interprétation des rejets `CloseClient` sous-codes `02` à `06` ;
-- sélection V4/V6/V6v16 ;
+- sélection V4 par `product_type == 5` ; autres règles et limites dans l’archive ;
 - MBAP Modbus TCP ;
 - Unit ID 1 ;
 - fonctions Modbus 03/04/06/16/22 ;
-- lecture V6 : fonction 04, 1024, 110 registres ;
+- lecture V4 : fonction 04, adresse 1024, 20 registres ;
+- lecture V6/V6v16 : fonction 04, adresse 1024, 110 registres (archive) ;
 - cartographie V4 des 20 registres 1024..1043 dans `UpdateApplicatif` ;
 - champs V4 combinés 1024 (mode + marche/arrêt) et 1030 (puissance + état) ;
 - températures V4 interprétées en Int16 et affichées avec un facteur /10 ;
@@ -1701,75 +1402,39 @@ de tous les modèles Hoben. Une première association avec code reste à valider
 
 ---
 
-## Journal de vérification H1/H2 sur `experimental` (sans inférence protocolaire)
+## Observations de protocole V4 — OBSERVÉ / À VALIDER
 
-Cette section conserve des preuves **d'exécution et d'absence de mesure**, non des
-trames ni des conclusions déduites du seul état d'une Action. Les confirmations
-statiques ou dynamiques documentées ailleurs restent distinctes. Une lecture
-TLS ne constitue pas en soi une frontière de message.
+Provenance documentaire : [comparaison MANAGER du 13 octobre 2026](https://github.com/Guillaume0385/ha-hoben-community/pull/77#issuecomment-6154916025)
+et [revue des rapports anonymisés](https://github.com/Guillaume0385/ha-hoben-community/pull/77#pullrequestreview-5509930190).
+Cette synthèse conserve les observations déjà consignées ; elle ne revendique
+ni nouvelle capture ni nouvelle lecture d'un artefact expiré.
 
-<!-- exp-run-37993325566 -->
-### 2026-10-09, 23:25 Europe/Paris — campagne #37993325566
+| Campagne | Source conservée | Sessions |
+| --- | --- | --- |
+| [#38036834012](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38036834012), tentative 1 | Rapport #11665220212 examiné par MANAGER | 6 H1 + 6 H2 |
+| [#38145162358](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38145162358), tentative 1 | Constat expurgé de la PR ; l'ancien artefact a1 n'était plus listé après rerun | 6 H1 + 6 H2 |
+| Même run, tentative 2 | Rapport #11848055922 examiné par MANAGER | 6 H1 + 6 H2 |
 
-- **Identité observée :** workflow
-  [Hoben experimental (MANAGER) #37993325566](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/37993325566),
-  événement `push` sur `experimental`, SHA exact
-  `05420f38c8b115646a91a8718a00d387066bc4b6`,
-  tentative initiale, conclusion GitHub `failure`.
-- **OBSERVÉ (orchestration GitHub) :** `dry-run=success`,
-  `admission=success`, `collect=failure`, `result=failure`.
-  Dans `collect`, la vérification SHA/claim/policy a réussi ; le processus
-  `launch_experimental_boundary.py` s'est terminé avec le code 1 sans
-  diagnostic de phase public. La validation des exports a refusé le
-  ciphertext **et** le rapport public. Aucun artefact de ce run n'a été
-  publié (contrôle de la liste des artefacts).
-- **OBSERVÉ (données disponibles) :** zéro session H1/H2 **attestée par
-  un rapport public**. Le nombre de sessions effectivement exécutées ou
-  ouvertes sur le réseau est **INCONNU** : aucune chronologie par `read()`,
-  aucun offset ni résultat des modèles H1/H2 n'est disponible pour ce run.
-- **À VALIDER :** déterminer la phase et la cause de l'échec par un
-  diagnostic de catégories fixes, expurgé, testé hors ligne ; effectuer une
-  nouvelle campagne uniquement sur un **nouveau SHA fusionné et autorisé**
-  avec ses propres contrôles GitHub. Ne pas réexécuter ce run consommé.
-- **INCONNU :** cause racine (prérequis, lancement, collecte, projection,
-  scellement CMS historique ou autre), éventuelle connexion TLS, nombre
-  effectif de sessions, contenu RX, frontières d'`OpenedClient`, H1/H2,
-  Ping/Pong, lectures V4 et états de communication. Aucun résultat de protocole
-  nouveau n'est confirmé, contredit ou invalidé par cet échec.
+Les deux tentatives du run #38145162358 portent sur le même SHA
+`ba007baf42f5120ce9b26aada95231c3930ca449`. Les 18 sessions par mode incluent
+la tentative 1 attestée par son constat documentaire, pas trois artefacts
+actuellement disponibles.
 
-Ce relevé ne dévoile aucun identifiant, registre, octet RX ou donnée domestique.
-Il ne modifie pas les sections de protocole CONFIRMÉ / À VALIDER.
-
-<!-- exp-run-38139534724 -->
-### 2026-10-11, 14:30 Europe/Paris — campagne #38139534724
-
-- **Identité observée :** workflow
-  [Hoben experimental (MANAGER) #38139534724](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38139534724),
-  événement `push` sur `experimental`, SHA exact
-  `f2c9b89f36404ad14193faac6dc006e84d7db36f`, tentative initiale
-  `run_attempt=1`, conclusion GitHub `failure`.
-- **OBSERVÉ (orchestration GitHub) :** `dry-run=success`,
-  `admission=failure`, puis `collect=skipped`, `publish=skipped` et
-  `result=skipped`. Le log public fixe la catégorie de refus à
-  `decision` avant tout secret Hoben.
-- **CAUSE CONFIRMÉE DU REFUS :** aucun commentaire de décision MANAGER ne
-  commence par le marqueur exact `hoben-experimental-approval:v1` sur la
-  PR #75. Le gate exige exactement une décision v1 authentifiée, liée au
-  HEAD candidat et à son run CI, créée sans modification avant la fusion.
-  L'autorisation conditionnelle en prose ne satisfait pas ce format.
-- **CONSÉQUENCE :** aucune collecte H1/H2 n'a été lancée, aucune session
-  réseau n'est attestée et aucun artefact ou rapport anonymisé n'existe.
-  Une décision v1 ajoutée après la fusion serait refusée par le contrôle
-  temporel ; un `Re-run all jobs` du même run ne peut donc pas réparer cette
-  campagne avec le gate installé.
-- **À VALIDER :** préparer une nouvelle petite PR vers `experimental`, obtenir
-  sa CI et sa revue exactes, publier la décision v1 H1/H2 avant fusion, puis
-  observer le nouveau run. Les répétitions N>1 ne pourront être évaluées
-  qu'après une tentative 1 effectivement admise.
-- **INCONNU / protocole :** H1 et H2 ne sont ni confirmées, ni contredites.
-  Aucune connexion TLS, lecture, frontière, fragmentation, concaténation,
-  donnée RX ou session n'est déduite de ce refus d'orchestration.
-
-Ce relevé ne contient aucun secret, identifiant privé, registre, octet RX ou
-donnée domestique. Il documente un refus de gate, pas un fait de protocole.
-
+- **OBSERVÉ H1, 18/18 :** lectures TLS de 48, puis 1, puis 2 octets,
+  octets tardifs vers 30/60 s, EOF vers 61 s sans lecture V4 ni Pong.
+  Ce sont des tailles de lectures, pas des frontières de messages ; la causalité
+  « absence de Pong → déconnexion » n'est pas démontrée.
+- **OBSERVÉ sous H2, 18/18 :** après le préfixe V4 de 48 octets, deux
+  réponses candidates de 50 octets corrélées aux deux lectures V4, puis deux
+  candidats d'un octet vers un intervalle de 30 s, avec deux Pong émis sous
+  hypothèse H2. Leur confiance reste `h2_hypothesis_only`.
+- **OBSERVÉ sous H2, 2/18 :** candidat supplémentaire de 54 octets :
+  run #38036834012, pause 0,1 s, répétition 1, offset 150 vers 89,962 s ;
+  run #38145162358 tentative 2, pause 0,1 s, répétition 2, offset 148 vers
+  52,989 s. Absent des six H2 de la tentative 1. Position et temps variables.
+- **À VALIDER :** frontière totale d'`OpenedClient`, identification des
+  candidats `Ping` et `DataUpdated`, métadonnées et segmentation indépendante.
+  Les rapports restent `inconclusive` / `boundary_proven=false`. Ne pas
+  interpréter ni jeter 54 octets sans framing sûr ; ne pas promouvoir les
+  annotations `notification_h2` en fait. La recherche discriminante reste
+  [#74](https://github.com/Guillaume0385/ha-hoben-community/issues/74).

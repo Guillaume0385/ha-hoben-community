@@ -29,7 +29,7 @@ The project should:
 - support safe user-level controls after validation;
 - remain understandable and maintainable by the community;
 - support HACS installation;
-- progressively support several Hoben protocol profiles/models;
+- prioritize V4; other profiles/models remain deferred in the future roadmap;
 - never expose installer/factory combustion controls.
 
 The first real validation target is a **Hoben Osmose**.
@@ -90,10 +90,10 @@ tests, or change its protocol semantics merely to bypass unresolved questions.
 Two narrow activities are **not** considered new OpenClient development and
 remain allowed:
 
-1. the existing MANAGER-controlled authenticated `--live-premerge` regression
-   gate, including its zero-DeviceGuid → assigned-DeviceGuid → reuse check, when
-   `AGENTS.md` requires that gate for a qualifying runtime PR; it validates the
-   already implemented opening path and does not authorize new pairing behavior;
+1. MANAGER-controlled regression of the existing opening/identity-reuse path
+   under the current experimental workflow; the historical `--live-premerge`
+   gate is not an experimental prerequisite. Neither route authorizes new
+   pairing behavior;
 2. the minimum evidence needed to prove a safe handoff from the already accepted
    `OpenedClient` result to the post-open persistent receive loop on the
    reference Osmose. This may validate message-length/type-transition behavior
@@ -112,12 +112,13 @@ decoding, diagnostics, polling reliability and deterministic tests. No new
 OpenClient/association feature or generalized reverse-engineering task should be
 started unless this scope decision is explicitly reversed.
 
-### Active development sequence — persistent post-OpenedClient session
+### Priorité : session persistante V4 en lecture seule
 
-Decision updated 2026-10-07 after comparison with the observed MyHOBEN lifecycle:
-the next v0.1 development series must reproduce a **long-lived post-OpenedClient
-session** instead of opening and closing a TLS connection for every coordinator
-refresh.
+Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les lectures V4, gérer les messages inconnus sans désynchronisation et reconnecter uniquement après perte de session. Aucun framing non prouvé ne peut être supposé. Tests hors ligne et live requis.
+
+### Critères de développement actifs — session persistante V4
+
+> Contrats de développement à revalider contre les Issues et le protocole avant exécution. Ils ne constituent pas des preuves de framing ni une autorisation de test live.
 
 The already implemented `OpenClient` / `OpenedClient` codec, validation and
 profile-selection path stays frozen. This series starts **after an opening has
@@ -243,18 +244,19 @@ ambiguity. Add a regression where a delayed response arrives after timeout or
 cancellation and prove that it is discarded with the old session and cannot
 satisfy the next refresh.
 
-Task 3 also changes the assumptions of the currently trusted authenticated
-`--live-premerge` gate, whose present contract deliberately performs two fresh
-sessions. **Before the Task 3 runtime PR is authorized/merged, land a separate
-reviewed governance/gate update on protected `main`**; do not let the candidate
-runtime PR bootstrap or weaken its own privileged validation. The replacement
-fixed gate should remain read-only and prove both properties required by the new
-architecture: two consecutive V4 reads on one healthy post-OpenedClient session,
-then a controlled close and a fresh client/session initialized with the assigned
-DeviceGuid to prove identity reuse across reconnect. It must keep the same
-privacy, exact-HEAD trust and no-control-command rules. Until that trusted update
-is installed on `main`, the existing two-fresh-session gate remains the source
-of truth and Task 3 cannot advance past the applicable validation boundary.
+Task 3 changes the assumptions of the installed experimental `ha-parity`
+validation, whose current client performs two fresh sessions. Before using it
+to validate persistent reads, land a separately reviewed gate/governance update
+on `experimental`; candidate runtime code must never bootstrap or weaken its
+own privileged validation. The bounded replacement must prove two consecutive
+V4 reads on one healthy session, then controlled close and a fresh client/session
+initialized with the assigned DeviceGuid. Preserve privacy, exact-SHA admission,
+read-only scope and every environment gate. Until that reviewed update is
+installed, do not claim persistent-session validation from the one-shot report.
+
+The former requirement to install this update on `main` is historical. A future
+promotion requires a new owner request and revalidation of the trusted stable
+gate under the [current workflow](docs/experimental-protocol-workflow.md).
 
 **Task 4 — reconnect only after session loss**
 
@@ -301,8 +303,8 @@ Extend privacy-safe diagnostics with bounded session/reconnect state only if it
 fits the existing allowlist contract; never expose UserGuid, DeviceGuid, frames,
 metadata bytes, registers or household values.
 
-After deterministic CI and independent review, perform the existing
-MANAGER-controlled opt-in real-Osmose validation appropriate to the changed
+After deterministic CI and MANAGER review on `experimental`, use only the
+separately authorized, gated real-Osmose validation appropriate to the changed
 runtime. Validate, without stove-control commands: connection reuse across
 multiple read intervals, Ping/Pong survival, repeated V4 reads, DataUpdated
 reception if naturally observed, deliberate/ordinary connection-loss recovery,
@@ -311,157 +313,33 @@ sanitized observations into regression fixtures/tests.
 
 #### Sequencing and dependencies
 
-PR #45 / Issue #43 (typed privacy-safe coordinator error observability) must be
-merged first so this series starts with reliable diagnostics. This documentation
-change (PR #46) must then be rebased/updated as needed against that merged main,
-pass its required checks/review, and merge **before creating/authorizing Task 1**.
+Historical prerequisites #45 (error observability) and #46 (session roadmap)
+were merged on 2026-10-07. They are not pending tasks; current work must still
+preserve the accepted diagnostics and frozen opening path.
 
 Tasks 1→6 are sequential by default. Keep each task in a small dedicated Issue
 and PR with one primary objective. Do not start the next large task until the
 current one is merged unless the MANAGER documents a genuinely independent need.
-The trusted live-gate governance update described under Task 3 is a prerequisite
-subtask to stage on protected `main` before Task 3 can cross its privileged
-validation boundary; it is not permission to weaken or bypass authenticated
-validation.
+Current experimental validation and future promotion follow the
+[experimental workflow](docs/experimental-protocol-workflow.md).
+Secondary V4 mapping (warnings/information bits, combustion-fault labels,
+date/time 1036–1038, practical meaning of 1033/1042) remains deferred behind
+session stability; these unknowns are not completed or discarded.
 
-The secondary V4 mapping work (warning/information bitmaps, combustion-fault
-labels, date/time 1036-1038, practical meaning of 1033/1042 and other nonessential
-fields) is temporarily lower priority than this session-stability series.
 
-Planned functionality:
+## Fonctionnalités futures
 
-- HACS-installable custom integration skeleton;
-- UI-based Home Assistant `config_flow`;
-- Identifiant HOBEN input, normalized to the 32-character MyHOBEN User GUID sent without dashes;
-- client Device GUID lifecycle matching MyHOBEN: 32 zero characters before first assignment, then persistence of the server-provided DeviceGuid from `OpenedClient`;
-- pairing/authorization flow using `DeviceAuthReq` / `DeviceAuthRes` when required by the server, with explicit handling of documented `CloseClient` rejection states;
-- TLS connection to `myhoben.fr:465`;
-- `OpenClient` / `OpenedClient` handling;
-- dynamic stove profile detection;
-- Ping/Pong keepalive;
-- automatic reconnect with backoff;
-- safe buffering of fragmented/coalesced TCP/TLS frames;
-- Modbus/TCP response parsing;
-- read-only polling and spontaneous `DataUpdated` support;
-- Home Assistant device registration;
-- ambient temperature;
-- smoke temperature where supported;
-- combustion-air temperature where useful/supported;
-- current target/derogation temperature read-back;
-- power/power level;
-- operation state;
-- operation mode;
-- ventilation mode;
-- connection/availability state;
-- warnings and fault diagnostics;
-- Wi-Fi/technical diagnostics where useful;
-- sanitized diagnostics export (implemented below, #36);
-- French and English translations;
-- full protocol unit tests and Home Assistant setup/entity tests.
+Tâche globale : réévaluer les fonctionnalités et contrôles après fiabilisation de V4 en lecture seule. Voir [fonctionnalités futures](docs/fonctionnalites-futures.md). Aucune commande physique autorisée.
 
-Validation objectives on the real Osmose:
+**Séquence normative des versions (sous réserve de validation réelle et de décision explicite de développement) :**
 
-- select the profile dynamically: the reference Osmose was confirmed as V4 on
-  2026-10-04, without generalizing to all Osmose units;
-- the raw V4 application read is already validated; implement the statically
-  recovered 1024..1043 semantic decoder in a dedicated, tested profile layer;
-- confirm on one sanitized live sample that the documented V4 temperature
-  conversion (Int16 / 10 °C) matches the simultaneous MyHOBEN display;
-- confirm the documented V4 packed state/power, mode and ventilation decoding
-  against one real raw sample;
-- observe and document `DataUpdated` metadata;
-- generate sanitized regression fixtures.
+- **v0.1.0 :** fondation V4 en lecture seule, stabilité de session et intégration HA ; aucune écriture.
+- **v0.2.0 :** contrôles utilisateur de température/dérogation, ventilation et modes utilisateur autorisés, seulement après preuves V4, liste blanche stricte, confirmation par relecture et protections anti-abus ; pas de marche/arrêt.
+- **v0.3.0 :** demandes normales de marche/arrêt par le contrôleur Hoben, uniquement après validation dédiée du protocole V4, des transitions et des protections ; jamais de coupure secteur.
+- **v0.4.0 :** robustesse communautaire, diagnostics, compatibilité multi-modèles et tests élargis ; aucun nouveau profil sans preuves.
+- **v1.0.0 :** stabilité communautaire, tests et validation des commandes éventuellement exposées, HACS/HA et documentation de publication.
 
-No Home Assistant control entity should send stove commands in this release.
-
----
-
-## v0.2.0 — User-level temperature and operating controls
-
-Goal: add the safest validated user controls after the read-only foundation is stable.
-
-Planned functionality after real-device validation:
-
-- write-command framework with strict register whitelist;
-- optional explicit setting to enable control if considered useful;
-- temperature/derogation command;
-- ventilation mode selection: Normal / Silence / Boost;
-- supported user operation modes;
-- read-back confirmation after writes;
-- command rate limiting;
-- clear error handling for rejected Modbus/server commands;
-- tests for every generated command frame;
-- tests confirming that unsupported/technical modes are not exposed.
-
-Do not expose `Magasin` or `ManuelTest` as normal user modes.
-
----
-
-## v0.3.0 — Safe start/stop and richer Home Assistant control
-
-Goal: provide normal day-to-day stove control while preserving Hoben's own shutdown and safety logic.
-
-Planned functionality:
-
-- normal controller ON request;
-- normal controller OFF request through Hoben register 1280;
-- state confirmation after command;
-- timeout and rejection handling;
-- no retry storm;
-- Home Assistant-friendly control entities;
-- automation-ready actions/entities;
-- expanded tests around state transitions and unavailable states.
-
-Important safety rule:
-
-- OFF means requesting the Hoben controller's normal shutdown sequence;
-- the integration must never cut mains power.
-
----
-
-## v0.4.0 — Community hardening and multi-model support
-
-Goal: move from a personal working integration to a community-quality HACS project.
-
-Planned functionality:
-
-- additional Hoben models/profiles based on community diagnostics;
-- additional V4 models/variants and edge cases beyond the reference Osmose;
-- V6/V6v16 mapping refinements and support where sufficiently validated;
-- graceful unknown-profile diagnostics;
-- expanded fault/warning decoding;
-- historical counters/statistics where useful;
-- documentation for contributors;
-- issue templates requesting sanitized diagnostics;
-- stronger translations;
-- compatibility testing against supported Home Assistant versions;
-- improved release automation;
-- broader regression fixture set from multiple stove models.
-
----
-
-## v1.0.0 — Stable community release
-
-Goal: declare the integration stable enough for broad community use.
-
-Requirements before v1.0.0:
-
-- stable config flow and pairing path;
-- robust reconnect behavior;
-- no known unsafe write paths;
-- all exposed write commands validated;
-- comprehensive protocol regression tests;
-- comprehensive Home Assistant tests;
-- HACS validation passes;
-- Home Assistant/Hassfest validation passes;
-- documented installation, configuration, troubleshooting and diagnostics;
-- stable entity IDs/unique IDs and migration strategy;
-- multiple community testers if possible;
-- published GitHub release with release notes.
-
-After stability is demonstrated, consider applying for inclusion in HACS default repositories if the project meets the current requirements.
-
----
+Les détails et pistes non normatives restent dans [fonctionnalités futures](docs/fonctionnalites-futures.md). Cette séquence ne constitue **aucune autorisation d'écriture au poêle**.
 
 # Architecture
 
@@ -492,521 +370,13 @@ Home Assistant user
 
 ## Recommended code layers
 
-### Current increment — privacy-safe Home Assistant diagnostics (#36)
+The six layer responsibilities and future library extraction remain documented
+in [the architecture appendix](docs/fonctionnalites-futures.md#architecture-cible-et-bibliothèque-indépendante).
+The active persistent-session acceptance criteria remain here in tasks 1–6.
 
-`diagnostics.async_get_config_entry_diagnostics` implements the standard HA
-config-entry download API using existing in-memory runtime state only. The
-integration-owned JSON is an explicit allowlist, intended for public GitHub
-support issues. HA wraps it with its standard system/integration metadata.
-No ConfigEntry data/options, entry ID/title, private identity fingerprint, entity
-state or decoded household value is read by the adapter. No transport, refresh,
-reconnect, association, Modbus operation or background task is started; no client,
-coordinator, registry, entity or ConfigEntry state is mutated.
+## Réalisations documentées
 
-The payload schema contains the public domain, entry lifecycle/schema versions
-and `runtime_available`. With a runtime, it selects bounded primitive fields from
-`HobenClient.safe_report()` (state, neutral profile, assigned-DeviceGuid boolean)
-and `RawStoveSnapshot.safe_report()` (profile, public product/revision/software/
-application metadata and register count). Coordinator metadata contains last
-update success, the fixed 60-second polling interval, snapshot availability and
-a sanitized last-error category. A retained snapshot describes the last accepted
-read, not current connectivity. Without runtime, only the lifecycle/static
-metadata is returned; without a successful snapshot, `snapshot` is null.
-
-The HA error boundary (#43) preserves typed Hoben categories through a real
-coordinator failure. The shared HA-only `safe_reports.py` validates and copies
-existing safe-report codes/reasons and limited numeric metadata into the existing
-HA exception class. Its message suffix lets HA's existing failure log distinguish
-those same categories without a new logger, traceback or event journal. This
-includes the existing decoder's `invalid_v4_snapshot` category when it rejects a
-local V4 snapshot, without exposing registers or attributing the failure to the
-server. HA keeps its normal logging/deduplication lifecycle. Diagnostics revalidate
-the copied primitives using the same allowlist, without retaining a source
-exception for export. Unannotated HA wrappers retain fixed authentication/update/config-entry
-categories; arbitrary errors or unusable Hoben error contracts use
-`unexpected_error`. No exception text, arguments, traceback or chains are
-inspected to reconstruct a cause. Unknown keys, malformed report contracts,
-non-primitive values and fields outside approved value ranges are omitted.
-After a successful refresh, `last_error` is null even if HA retains its previous
-`last_exception`: this is current status, without error history or counters.
-Error classes, authentication polling stop, availability, the 60-second interval,
-client retries/backoff, accepted data, identity persistence and cleanup are retained.
-GUIDs, authorization codes, credentials, raw frames/register values, private
-fingerprints, household measurements and derogation/entity states are excluded.
-Unresolved warnings/fault labels, information bits, date/time, PVI and DataUpdated
-remain unresolved in `protocol.md`; no mapping or unsafe raw field is added.
-
-Offline HA regressions cover the real diagnostics HTTP download, loaded and
-unloaded entries, missing runtime/snapshot, failed updates, typed/unexpected
-errors and future or malformed safe-report extensions. Synthetic private inputs
-are recursively excluded from keys and values, including the complete HA JSON
-download. Tests enforce JSON bounds, deterministic output, no new I/O/tasks and
-unchanged runtime/storage/registry state. Existing protocol/client, config-flow,
-entity, translation and trusted live code is unchanged. This completes only the
-sanitized-diagnostics implementation item; other v0.1 roadmap gaps remain.
-This runtime addition requires independent CODEX REVIEW and MANAGER exact-HEAD
-authenticated validation before merge under the existing policy. The trusted
-fixed read-only gate remains a regression gate and does not export diagnostics.
-
-The #43 regressions use real coordinator refreshes, scripted synthetic TLS
-responses, normal HA polling timers and full HTTP diagnostics downloads to cover
-typed categories, failure/recovery, deduplication, bounds, privacy and unchanged
-I/O/storage. They establish the observability defect and its correction only;
-the cause of the historical outages and the then-installed commit remain unknown.
-A future passive report needs the actual installed public ref, typed category,
-reliably observed recurrence/window, categorical availability and recovery.
-Deduplicated HA log counts do not establish the number of failed refreshes.
-
-### Home Assistant authorization pairing (offline, #34 / PR #35)
-
-Issue #34 connects the reviewed association API to the initial config flow and
-entry-bound reauthentication. The existing normalized private identifier,
-fingerprint duplicate check and refresh path remain the entry point. An already
-authorized V4 read succeeds without requesting a code. Authorization-required
-closes the temporary client before showing a password-only authorization form;
-no TLS connection, protocol task or code provider waits between forms. Only the
-initial flow keeps its normalized identifier privately between steps. Reauth
-reads the current ConfigEntry.data at each attempt and checks its fingerprint.
-
-Each explicit code submission locally converts decimal text to UInt16, opens a
-fresh client and calls async_associate exactly once. The client alone owns the
-handshake and decides whether a provider is needed. There is no automatic resend,
-retry, protocol duplication or Modbus read/write on this submission path. Only a
-supported, unambiguous V4 opening with nonzero DeviceGuid is committed; subsequent
-reading belongs to normal setup/coordinator operation. Reauth updates only the
-successful DeviceGuid assignment and reloads the same entry, preserving its ID,
-unique ID, title and options. Concurrent identity changes cannot adopt a stale
-assignment. Failures and cancellation close the client without altering storage.
-
-The authorization code stays local to the active submission and is never stored
-in ConfigEntry data/options, flow attributes/context, logs, exceptions or form
-defaults. English/French forms expose fixed errors for invalid identifiers,
-authorization-required/rejected/timed-out, stove connection required, maintenance,
-transport and unsupported/protocol responses. Retry requires another submission.
-UInt16 is a wire representation constraint, not a server code range, digit-count
-or lifetime claim. Code source/presentation and first real association remain
-unknown pending MANAGER evidence.
-
-Offline HA regressions exercise real form lifecycles, cancellation and cleanup,
-authoritative entry data, identity/duplicate protections, storage and privacy,
-plus real typed-client wire sequences on scripted TLS transports. This runtime
-config-flow change requires independent CODEX REVIEW and the existing exact-HEAD
-MANAGER authenticated gate before merge. The privileged fixed read-only suite,
-live workflows and credential policy are unchanged and do not submit a code.
-
-### Protocol foundation — DeviceAuth association (offline, #32 / PR #33)
-
-Issue #32 adds `HobenClient.async_associate(*, authorization_code_provider=None)`
-to the existing HA-independent client. The async zero-argument provider returns
-an int representable as UInt16 and is awaited only after DeviceAuthReq, at most
-once. The MANAGER's 2026-10-06 static analysis establishes the one-byte `2F`
-marker for this interoperability path (`protocol.md` §5). The shared handshake
-retains coalesced bytes, accumulates fragmented prefixes, answers leading Ping
-and sends the pure encoder's `30 + UInt16-LE(code)` before awaiting OpenedClient
-or a documented CloseClient. A repeated request after submission fails without
-resending. Existing OpenedClient suffix/profile checks still apply; its complete
-length and later-arriving suffixes remain unknown.
-
-Association performs one fresh verified TLS attempt, with no Modbus read/write
-and no automatic retry, regardless of the refresh retry settings. The existing
-finite handshake_timeout includes provider waiting; this local budget is not an
-inferred code lifetime. Successful supported V4 opening adopts DeviceGuid using
-the existing sensitive persistence accessor. `AssociationResult` contains only
-public opening metadata, without identifiers, code, provider or household data.
-Missing provider surfaces authorization-required; invalid/failed provider gets
-`HobenAuthorizationCodeError`, without arbitrary exception text. Documented
-server closures and transport/protocol failures retain distinct typed errors.
-No credential is written to storage. Association preserves last_snapshot and
-shares the refresh lock; async_close cancels either operation and cleans up.
-
-Offline regressions cover the wire sequence, all two-part receive splits,
-byte-at-a-time reads, coalescence, Ping/Pong, closure/rejection, invalid inputs,
-unsupported/ambiguous openings, timeouts, cancellation, serialization, identity
-reuse, confidentiality and absence of Modbus/control requests. Existing refresh
-and probes do not supply a code and keep their observation-only path. The HA
-form above uses this API only on explicit authorization submission. The first real
-association, code presentation and server timing still require MANAGER evidence;
-no authenticated validation is triggered by development or ordinary CI.
-
-### DONE — typed V4 decoder and first read entities (reference Osmose)
-
-Issue #26 / PR #27 implements a **Home Assistant-independent V4 semantic
-decoder** above the unchanged raw `RawStoveSnapshot` API. `v4_state.py` exposes
-`decode_v4_snapshot(snapshot) -> V4StoveState` and `decode_v4_temperature(raw)`.
-The state is frozen/hashable and the decoder requires V4 and exactly 20 UInt16.
-It performs no I/O and does not mutate the snapshot or move transport/session
-concerns into the profile layer. The milestone was validated by MANAGER and
-merged on **2026-10-05**, on exact HEAD
-`288d6408d376dcec875ea09135eab800e5563b4f`.
-The [MANAGER PASS report](https://github.com/Guillaume0385/ha-hoben-community/pull/27#issuecomment-6001144860)
-records authenticated validation, successful HA setup and a private simultaneous
-comparison with MyHOBEN. It applies to the reference Osmose and observed
-situations only, not all models or every possible state.
-
-This increment must at minimum:
-
-- decode V4 temperatures as signed Int16 values with the documented **/10 °C**
-  conversion and handle the `0x0FFF` unavailable sentinel;
-- decode register 1024 as packed mode + OnOff;
-- decode register 1030 as packed power + V4 operation state;
-- decode register 1028 ventilation as Normal / Silence / Boost;
-- expose the established derogation values/units while keeping write/control
-  behavior out of scope;
-- leave warnings, combustion-fault labels, date/time packing, PVI and other
-  partially established fields raw/partial until their mappings are complete;
-- add deterministic unit tests for every implemented conversion and boundary;
-- remain independent from Home Assistant entities so the decoder can later move
-  cleanly into `pyhoben`.
-
-`HobenCoordinatorData(raw, state)` combines raw metadata and semantic values from
-one client refresh every 60 seconds. Decoding runs before successful DeviceGuid
-rotation persistence; a decoding failure keeps the previous data and is sanitized
-through the existing protocol error mapping. Entities use `CoordinatorEntity`
-availability and read memory only. Setup forwards `sensor` and `binary_sensor`;
-real entity listeners replace the artificial no-op subscriber. Partial setup
-failure unloads platforms, shuts down polling, closes the client and discards
-runtime_data. Normal unload removes listeners before shutdown; reload preserves
-entity/device identities and uses the persisted DeviceGuid.
-
-The increment includes six core sensors (ambient/target temperature, power %, V4
-state/mode, ventilation), diagnostic smoke/combustion-air temperatures, diagnostic
-wired/RF ambient temperatures disabled by default, three derogation value sensors
-and active/scheduled binary flags. A third binary sensor explicitly names the
-controller OnOff request/read-back, without implying current combustion or using
-RUNNING. Inactive derogation numeric values are unknown. Setpoints have no
-measurement state class; enum sensors declare known snake_case options. Stable
-unique IDs append an entity key to the config entry's non-secret fingerprint.
-All attach to the existing stove and use EN/FR entity/state translations.
-
-The fixed MANAGER probe now decodes both existing client refreshes and reports
-only `v4_decode_count: 2` alongside prior sanitized metadata/counts. It adds no
-session/read/retry and publishes no raw/decoded household values; the trusted
-workflow is unchanged. This execution check cannot replace the private UI
-comparison.
-
-The separate manual `--live-v4-validation-values` CLI mode supports that private
-comparison with one `HobenClient.async_refresh()` and no retry. It refuses
-`GITHUB_ACTIONS=true` before credentials, client construction or network I/O and
-is never invoked by a workflow. Its sole JSON includes a UTC timestamp, twenty
-UInt16 words explicitly addressed 1024–1043, and the sixteen entity keys with
-raw codes, decoded values and effective HA properties. Inactive derogation
-numeric values remain in the raw/model fields while their HA values are null.
-Unknown codes retain their raw value with null semantics. The export excludes
-identifiers and tracebacks; it contains household values and must stay out of
-public logs, artifacts and PR comments. Sharing with MANAGER is voluntary and
-only through private chat during validation. Offline tests compare all sixteen
-exported HA values with the real entity properties and protect the unchanged
-public pre-merge report.
-
-The final MANAGER validation passed the exact-HEAD authenticated gate and
-confirmed ambient/target temperatures, operation mode, ventilation, OnOff and
-observable state/power against MyHOBEN, plus the observed derogation behavior.
-Only compared fields, pass/fail and date were published; no household values or
-identifiers were disclosed. This completed increment remains strictly
-**read-only**. Future changes require fresh exact-HEAD review and the applicable
-MANAGER validation; an earlier SHA's approval/live result cannot approve them.
-
-Next protocol gaps remain separate: warning-bit and fault-label tables,
-date/time packing, PVI's reliable V4 meaning, unknown information bits and
-DataUpdated metadata/framing. They have no ordinary HA entities in this increment.
-
-### DONE — Home Assistant config flow and raw coordinator
-
-Issue #23 adds the first functional HA runtime layer over the completed client.
-The UI accepts one sensitive **Identifiant HOBEN**, validates it with the existing
-normalizer and performs exactly one `HobenClient.async_refresh()` before entry
-creation. The temporary client closes on success, error and cancellation. Only
-a successful V4 raw refresh with a nonzero server-assigned DeviceGuid can create
-an entry on the original path. The later #34 increment above adds an explicit
-authorization form and an association-only opening path.
-
-`ConfigEntry.data` stores normalized `user_guid` and assigned `device_guid`, both
-sensitive. A full SHA-256 fingerprint with fixed `hoben:user_guid:` domain prefix
-provides the duplicate-resistant unique ID and device identifier. Titles, names,
-errors and logs never expose the GUIDs. English/French custom-component texts
-live directly in `translations/`, without a Core strings.json dependency.
-
-`async_setup_entry()` constructs the client from persisted identity, awaits the
-first refresh and stores typed client/coordinator objects in `entry.runtime_data`.
-The `HobenDataUpdateCoordinator` keeps `RawStoveSnapshot` data and polls every
-**60 seconds**. An entry-owned subscriber enables polling even before any entity
-exists. Successful identity rotations update only `device_guid` through HA's
-config-entry API; unchanged values do not update storage. Transport failures map
-to `UpdateFailed`/setup retry, authentication failures stop polling with
-`ConfigEntryAuthFailed`, and protocol/Modbus/unsupported profiles fail setup with
-sanitized `ConfigEntryError`. Only HobenClient owns network retries. Unload stops
-the timers and closes the client; HA discards runtime data, and reload reconstructs
-the client with the persisted identity.
-
-Authentication failures start an entry-bound `SOURCE_REAUTH` confirmation. It
-accepts no identifiers and retries one client refresh using the entry's current
-persisted UserGuid/DeviceGuid. The fingerprint must still match the existing
-entry. Success updates only a newly assigned DeviceGuid and uses HA's
-update/reload/abort helper to resume polling, even when the identity is unchanged.
-Failure keeps the confirmation open with a sanitized translated error, without
-changing storage or creating another entry. The #34 increment transitions an
-authorization request to a separate code form; only a subsequent explicit
-submission can send DeviceAuthRes. A different
-HOBEN identity requires an explicitly new configuration, not a silent reauth
-identity change.
-
-One device is registered with a neutral name, manufacturer Hoben, safe protocol
-profile and OpenedClient software version. No commercial Osmose model is inferred.
-No semantic entity, permanent connection, DataUpdated, diagnostics,
-reconfiguration or write/control path belongs to this increment.
-The subsequent V4 decoder/entities milestone (#26 / PR #27) completed that
-semantic layer and was validated on the reference Osmose on 2026-10-05.
-Explicit pairing is added separately by #34 above.
-
-HA orchestration is tested offline using the separately pinned
-`pytest-homeassistant-custom-component==0.13.367` / HA 2026.9.4 / Python 3.14.2+
-environment and new `ha-tests` CI job. The existing Python 3.12 protocol suite
-stays HA-independent. The trusted MANAGER authenticated exact-HEAD gate is retained
-unchanged; the existing live suite validates the underlying client path.
-HA tests also cover reauth initiation, confirmation, failure/retry, identity
-rotation, reload and resumed polling. Scripted transport tests use the real client
-to prove that initial reauth requests never send a pairing response automatically.
-The later #34 tests cover the response only after explicit code submission.
-
-### DONE — stateful read-only HobenClient and DeviceGuid lifecycle
-
-`client.py` implements the intended protocol API for the Home Assistant
-coordinator: `HobenClient(user_guid, device_guid=None)`, `async_refresh()` and
-idempotent `async_close()`. It contains no HA objects/imports and stays inside
-`custom_components/hoben/` until a later extraction to `pyhoben`.
-
-`DEFAULT_BUILD` (34) and `DEFAULT_DEVICE_INFO` are defined once in `client.py`
-and shared with the exploratory probes. The default DeviceInfo retains the
-documented historical community `GitHubActions` descriptor. The fixed live suite
-does not pass build/DeviceInfo overrides, so it exercises the same defaults the
-HA caller uses. Offline regressions pin the documented default packet
-and forbid the live suite from substituting exploratory probe settings.
-
-The client owns a private normalized UserGuid and a private, in-memory,
-persistable DeviceGuid. Without a persisted identity it starts with
-`INITIAL_DEVICE_GUID` (32 ASCII zeroes). A supplied identity is validated before
-any network I/O: only the proven 32-byte ASCII constraint is enforced, without
-inventing a hex/GUID format. After an unambiguous supported V4 OpenedClient, the
-returned DeviceGuid is validated and adopted immediately, before the read. It
-survives subsequent read failures and is automatically reused on every later
-refresh or transport retry. Unsupported/ambiguous openings do not update it.
-The deliberately sensitive `device_guid_for_persistence` accessor is the sole
-identity export; the client writes no storage. HA code explicitly
-persists it in ConfigEntry storage. `has_assigned_device_guid` is non-sensitive.
-
-Each refresh attempt uses a fresh verified `myhoben.fr:465` TLS transport:
-OpenClient with current identity → OpenedClient/profile/boundary checks → adopt
-identity → one raw application read → validate response → close. Only V4 is
-implemented: FFFF, unit 1, function 04, address 1024, quantity 20. UNKNOWN and
-other profiles fail with typed errors. `RawStoveSnapshot` is immutable and holds
-exactly 20 raw UInt16 registers plus public product/software/profile metadata,
-with no GUID, raw packet or session object. The **client still exposes raw values
-by design**, while `protocol.md` now documents the V4 1024..1043 semantics and
-formatting recovered from MyHOBEN. The dedicated V4 semantic decoder described
-above implements the next layer; the raw transport/client model must not be
-overloaded with UI conversion logic.
-
-The client shares `_open_session()` and the V4 exchange primitives instead of
-duplicating frames. Existing `open_session_once()` and
-`open_and_read_v4_once()` remain available for exploratory tools/tests. Leading
-Ping gets Pong; buffered unclassified OpenedClient suffixes and trailing response
-bytes are rejected without reframing. The complete OpenedClient length remains
-unresolved, including possible suffixes arriving in a later TLS read.
-
-The current fresh-session-per-refresh lifecycle is now explicitly transitional.
-The active v0.1 series above introduces a persistent session **only after** the
-existing strict opening path has accepted OpenedClient and Task 1 has established
-a safe reference-Osmose handoff to post-open reception. The persistent work must
-not resolve the unknown universal OpenedClient boundary by assumption. If the
-handoff remains ambiguous, persistent reception stays blocked.
-
-The default transport retry policy is two total attempts: immediate first
-attempt, close/discard on a transport failure, one nonblocking 1-second backoff,
-then a fresh transport using the current identity. Configuration permits 1..2
-total attempts and 0..30 seconds of backoff. Protocol/authentication errors,
-DeviceAuthReq, CloseClient, unsupported profiles and Modbus exceptions never
-retry. Cancellation propagates and closes the transport. An async lock serializes
-refreshes including backoff and identity updates. `async_close()` permanently
-closes the client, cancels its active refresh, waits for cleanup and prevents
-queued/new refreshes. The caller provides recurring scheduling.
-
-`exceptions.py` exposes distinct input, invalid-credential, authorization,
-documented server-closure, unsupported-profile, protocol, Modbus, transport,
-timeout, retry-exhaustion and closed-client failures. Repr, diagnostics and
-errors never contain identities, caller descriptions or server payloads. The
-last accepted profile and last successful snapshot are retained in memory.
-No pairing, file persistence, HA semantic entities or control belongs to this
-completed client increment. V4 semantics and read entities belong to the
-subsequent completed decoder increment described above.
-
-The opt-in probe keeps TLS-only, session-open, synthetic negative and exploratory
-`read-v4-state` modes. The fixed MANAGER-approved `--live-premerge` path now uses
-HobenClient itself: two sequential refreshes on one instance, initial zero
-DeviceGuid then automatic assigned-identity reuse, each with a fresh session and
-one V4 read. Live retries are disabled so success means exactly two sessions and
-two reads. Only public metadata/counts and validated reuse are exported; the
-credential remains the sole input. Offline CI precedes exact-HEAD MANAGER review.
-The MANAGER run for PR #22 confirmed identity reuse across two fresh TLS sessions
-and two successful 20-register raw V4 reads on the reference Osmose on 2026-10-04.
-The lifecycle is **DONE**; `protocol.md` records the reviewed SHA and sanitized
-successful run. This live run did not itself establish V4 register semantics; those semantics
-were subsequently recovered statically from MyHOBEN and are documented in
-`protocol.md` and validated dynamically by MANAGER on 2026-10-05 in PR #27.
-Neither validation establishes all-model support.
-
-### Layer 1 — transport
-
-Responsibilities:
-
-- async TLS socket connection;
-- certificate verification;
-- one bounded connection per transport (client orchestrates retry/backoff);
-- receive buffering;
-- write serialization;
-- timeouts;
-- keepalive transport behavior.
-
-This layer must not know about Home Assistant entities.
-
-### Layer 2 — MyHOBEN framing
-
-Responsibilities:
-
-- message type encode/decode;
-- `OpenClient`;
-- `OpenedClient`;
-- Ping/Pong;
-- pairing/authorization messages;
-- `DataRequestClient`;
-- `DataResponseClient`;
-- `DataUpdated`;
-- safe extraction of the embedded Modbus/TCP frame.
-
-### Layer 3 — Modbus/TCP codec
-
-Responsibilities:
-
-- MBAP encode/decode;
-- function 03/04 reads;
-- function 06 writes;
-- function 16 writes when needed;
-- function 22 mask writes when needed;
-- exception responses;
-- transaction IDs;
-- signed/unsigned conversion helpers.
-
-### Layer 4 — Hoben stove profiles
-
-Profiles should define differences between:
-
-- V4;
-- V6;
-- V6v16;
-- future discovered profiles.
-
-Responsibilities:
-
-- register maps;
-- state/mode enum mapping;
-- value conversion;
-- capability declarations;
-- whitelisted user commands;
-- validation ranges.
-
-The profile must be selected dynamically from `OpenedClient` data.
-
-### Layer 5 — stateful protocol client
-
-Current transitional responsibilities:
-
-- own normalized private UserGuid and in-memory/persistable DeviceGuid;
-- request one raw profile-specific refresh through a bounded TLS session;
-- serialize refreshes and apply finite transport retry/backoff;
-- expose an immutable raw snapshot and public profile metadata;
-- surface clear exceptions.
-
-Target v0.1 responsibilities defined by the active development series:
-
-- retain one accepted post-OpenedClient TLS session while healthy;
-- own one central post-open receive loop and deterministic frame dispatch;
-- answer Ping with Pong immediately;
-- serialize/correlate read-only Modbus requests and responses;
-- receive spontaneous DataUpdated without inventing metadata semantics;
-- close/cancel cleanly on unload;
-- reconnect only after actual session/transport loss, reusing the persisted
-  DeviceGuid through the existing frozen OpenClient path.
-
-Scheduling remains owned by the HA coordinator/caller. Stove-control command
-serialization/read-back belongs to later releases.
-
-### Layer 6 — Home Assistant integration
-
-Responsibilities:
-
-- config flow;
-- coordinator/lifecycle;
-- device registry;
-- entities;
-- diagnostics;
-- translations;
-- options/reconfiguration;
-- mapping protocol exceptions to Home Assistant behavior.
-
-Home Assistant code should consume a clean Python API rather than manipulate raw Hoben frames.
-
----
-
-# Dedicated Python library recommendation
-
-A dedicated protocol library is strongly recommended once the first protocol implementation is stable.
-
-Suggested name:
-
-```text
-pyhoben
-```
-
-Possible repository/package split later:
-
-```text
-pyhoben
-├── transport.py
-├── protocol.py
-├── messages.py
-├── modbus.py
-├── models.py
-├── exceptions.py
-├── profiles/
-│   ├── base.py
-│   ├── v4.py
-│   ├── v6.py
-│   └── v6v16.py
-└── client.py
-```
-
-Benefits:
-
-- protocol can be tested independently from Home Assistant;
-- reusable by other Python projects;
-- easier binary fixture testing;
-- Home Assistant integration becomes smaller and easier to review;
-- protocol releases can be versioned separately;
-- failures can be isolated to protocol vs Home Assistant layers;
-- future contributors do not need Home Assistant internals to improve protocol decoding.
-
-### When to extract
-
-Do not block v0.1 prototyping on publishing a separate package if that creates unnecessary overhead.
-
-Recommended sequence:
-
-1. keep strict internal module boundaries from day one;
-2. reach stable read-only parsing with strong tests;
-3. extract the protocol code into `pyhoben` before or during the control-feature phase;
-4. publish a pinned library version;
-5. declare that library in `manifest.json` requirements.
-
----
+Le décodeur V4, les entités de lecture, le flux de configuration, le client et les diagnostics sont résumés dans [CHANGELOG.md](CHANGELOG.md). La validation live demeure distincte.
 
 # Testing architecture
 
@@ -1022,7 +392,7 @@ This simulation should reproduce:
 - `DeviceAuthReq` / `DeviceAuthRes` association exchanges and documented `CloseClient` rejection codes;
 - persistence/reuse of the DeviceGuid returned by a successful `OpenedClient`;
 - normal `OpenedClient` responses;
-- V4/V6/V6v16 profile responses;
+- V4 profile responses pour les nouveaux développements ; conserver les simulations et tests de régression existants de sélection des profils V6 et chaudière (`tests/test_profiles.py`), sans étendre leur périmètre actif ;
 - Modbus read responses;
 - fragmented reads;
 - coalesced messages;
@@ -1037,118 +407,22 @@ The simulator is preferred over a live stove for CI because it is deterministic,
 
 ## Real stove
 
-Validation has four separate layers:
+Current validation separates deterministic offline CI (`tests`, `ha-tests`,
+`hacs`, `hassfest`) from two opt-in experimental lanes: H1/H2 research and
+HA parity using the actual client. Both real lanes require MANAGER authorization
+for the exact merged SHA, admission and environment approval when configured.
+No real connection belongs to pytest or ordinary PR CI. A secret-free dry-run,
+TLS smoke or synthetic rejection is not authenticated protocol validation.
 
-1. **Offline deterministic CI:** pytest/Ruff, HACS and Hassfest; no Hoben network
-   access or credential. Offline simulations remain reproducible and mandatory.
-2. **Secret-free protocol smoke:** optional TLS-only and synthetic-identity
-   diagnostics; these observations never establish authenticated success.
-3. **MANAGER-gated authenticated pre-merge validation:** required for PRs that
-   can change runtime or real-device behavior, after MANAGER classification and
-   review of the exact candidate HEAD, using a trusted main workflow and the
-   fixed read-only live suite on that SHA.
-4. **Manual exploratory live validation on main:** the existing dispatch modes
-   for reviewed protocol research and diagnostics, separate from merge approval.
+The [current workflow](docs/experimental-protocol-workflow.md) defines the
+branch, code/CI provenance, rerun, claim, privacy and environment contracts.
+Research PRs receive MANAGER review and ordinary CI before merge to
+`experimental`; a pre-merge `main` live gate is not their prerequisite.
+The sections below preserve historical main contracts for later re-evaluation
+only if the owner explicitly requests promotion. They grant no launch permission
+and must not override current experimental environment policies.
 
-The Hoben Osmose remains an opt-in environment for the live lanes; normal pytest
-and `Validate` never require it. Opt-in here means explicit MANAGER authorization
-after review whenever layer 3 is required by the PR's risk classification. It
-does not waive a required live gate or allow an older SHA's result to approve a
-changed HEAD.
-
-Authenticated Hoben validation is required for runtime protocol/transport/
-client/coordinator/entity/config-flow code, runtime dependencies, live-probe
-scripts, trusted live workflow logic, and stove profile/register data or
-executable protocol interpretation that can affect runtime or real-device
-behavior. It is not required for PRs demonstrably limited to documentation-only
-changes with no executable protocol effect, image/brand assets, non-runtime
-metadata, or CI/test-only changes that cannot alter the live execution path.
-Mixed or ambiguous PRs require the live gate. The MANAGER must explicitly
-classify and record the live-validation decision in the PR before merge.
-
-### Autonomous experimental testing and owner-controlled release — Issue #54
-
-**Owner decision of 2026-10-09 overrides the earlier proposed main-bootstrap
-approach:** development, experimental GitHub Actions and protocol validation
-happen on `experimental`; the closed PR #56 targeting `main` is **not** a
-dependency. MANAGER must **never prepare, open or merge** a promotion PR targeting
-`main` unless the owner explicitly asks for it. The stable review/CI/live
-gates documented below remain applicable **only if** that future request is
-made. No test success alone authorizes release preparation.
-
-Two independent GitHub environments may be used by MANAGER after reviewing and
-merging code on `experimental`:
-
-| Lane | Purpose | Boundary |
-| --- | --- | --- |
-| `hoben-live` | Exercise the **actual Home Assistant integration**: verified TLS, authentication, assigned/persisted DeviceGuid, real client/transport/Modbus reads, session and refresh behavior, loss/reconnect and lifecycle as implemented by the tested commit. | Reuse the real HA client logic wherever possible; only read the stove; document deviations and missing features rather than silently substituting a research probe. |
-| `hoben-experimental` | Observe H1/H2/OpenClient/Ping/Pong/DataUpdated network behavior with bounded raw RX capture, replay and hypothesis classification. | **Non-runtime research code:** capture/analysis scripts are not imported into Home Assistant; export only encrypted RX and sanitized findings. |
-
-The manager-driven loop is **CODEX DEV → targeted offline tests and PR to
-`experimental` → MANAGER-only review of exact diff/HEAD/CI and automatic
-merge → MANAGER-authorized `hoben-live` and/or `hoben-experimental` GitHub
-run → verified anonymized results → documented findings/next Issue →
-CODEX DEV**. Multiple small PRs may merge sequentially to `experimental`
-without owner confirmation; no CODEX REVIEW nor `state:validate` is required
-for this branch. MANAGER informs the owner after each completed step and
-continues without awaiting a reply. The **effective GitHub environment
-approval and secret protections remain mandatory** and cannot be bypassed
-by a general automation authorization.
-
-Implementation must use a trigger ACTUALLY usable from a workflow definition
-installed on `experimental`, with a MANAGER action available in the GitHub
-connector. `issues:labeled` loads its YAML from the default branch, and a new
-workflow cannot assume `workflow_dispatch` is dispatchable without `main`.
-A normal push alone must never release Hoben secrets to unreviewed code.
-Fail closed `NOT RUN` if a secure autonomous trigger is not demonstrable.
-Verify `experimental` branch protection and BOTH environment policies
-independently at run time; a public `protected=true` response is not proof
-of secrets/reviewer policy. Never modify Github Settings, credentials or
-branch rules from CODEX DEV.
-
-Offline tests/HA tests/Ruff/HACS/Hassfest stay deterministic and secret-free.
-Real device testing is a separate, bounded and authorized GitHub Actions
-stage: fixed `myhoben.fr:465` TLS, read-only protocols, no pairing/writes
-or stove controls, no token shared with the candidate, no secret in
-logs, no raw RX without recipient-authenticated CMS encryption. The existing
-H1/H2 budget remains **at most six sessions each**, **90 seconds and 1 MiB
-RX per session**, with ciphertext-only archives for up to seven days. A
-successful network workflow does not prove unknown packet boundaries.
-
-Document only real supported protocol observations in `protocol.md` as
-CONFIRMÉ/OBSERVÉ/À VALIDER, ideally with sanitized fixtures and regression
-tests; create deduplicated Issues for reproducible failures/unknowns. See
-[experimental workflow](docs/experimental-protocol-workflow.md) and
-[Issue #54](https://github.com/Guillaume0385/ha-hoben-community/issues/54).
-
-**Current installed state is distinct from this target policy:** PR #55
-provided the H1/H2 research scripts on `experimental`; PR #58 installed the
-secretless push preflight. Its real run `37903694784` on merge SHA
-`4eb8bb90252dae41ca3e83a58e751d36f57c8fd1` passed both dry-run jobs.
-It proves no secret policy, capture or Hoben behavior.
-The laboratory workflow `hoben-experimental.yml` was installed by PR #59.
-PR #60 then exposed the actual GitHub refusal category: the installed push
-run #37936003393 completed secretless preflight but refused admission with
-`environment_reviewers`, before any Hoben secret or network contact.
-
-**Owner decision 2026-10-09, Issue #54:** the repository has a single
-maintainer and no second GitHub account suitable for environment approval.
-Match the existing `hoben-live` environment model: an environment policy
-restricted to exactly the protected `experimental` branch may have **zero
-configured required reviewer rules**. If GitHub actually configures a required
-reviewer, keep that approval mandatory and verify the independent reviewer
-before contacting Hoben; malformed or unprovable policies still fail closed.
-The explicit MANAGER decision bound to the candidate PR HEAD and successful
-CI, merge-tree check, fresh secretless preflight, policy checks, one-use
-atomic reservation and post-admission recheck remain mandatory. No agent may
-change GitHub Settings. This removes independent human approval in the
-no-reviewer configuration and must not be described as equivalent assurance.
-After offline tests and MANAGER review, only a **new** reviewed merge SHA may
-start one new H1/H2 observation; never rerun the failed SHA. The actual-HA
-`hoben-live` experimental lane follows separately.
-No protocol fact or main-release acceptance is inferred from these stages.
-
-### MANAGER-gated authenticated candidate validation
+### Historique : ancien gate main, non applicable aux PR experimental
 
 `.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
 Only `pull_request_target: labeled`, the exact label `manager-live-hoben`, exact
@@ -1206,7 +480,7 @@ fixed bounded suite (for example persistent sessions, Ping/Pong, reconnect,
 documented reads or DataUpdated). Future real writes require a separate safety
 decision under AGENTS/project/protocol; write code alone never authorizes a test.
 
-### Existing exploratory and secret-free workflow
+### Historique : ancien workflow exploratoire main
 
 The dedicated `Live Validation` GitHub Actions workflow is explicitly opt-in:
 `workflow_dispatch` offers `tls-only`, real `session-open` or `read-v4-state`,
@@ -1229,6 +503,8 @@ deterministic/offline `Validate` CI. HA persistence, raw polling and the semanti
 V4 decoder/entities are established on the reference Osmose. Further pairing and
 protocol gaps require separate reviews and their applicable exact-HEAD gates.
 
+### Remaining protocol validation scope
+
 Real-device validation is important for the remaining **active** unknown or
 statically derived protocol semantics. OpenClient/OpenedClient first-association,
 authorization-code origin, universal opening boundaries and cross-model opening
@@ -1242,7 +518,8 @@ Active validation priorities are:
 - exact V4 warning/information bits and combustion-fault code labels;
 - packing of V4 date/time fields and practical meaning of 1033/1042;
 - DataUpdated metadata;
-- exact visible effect of writes;
+- exact visible effect of writes only in the deferred control phase, after a
+  separate owner safety decision; current campaigns remain read-only;
 - real reconnection behavior.
 
 Once confirmed, convert observations into sanitized fixtures and regression tests.
@@ -1536,8 +813,10 @@ with no executable protocol effect, image/brand assets, non-runtime metadata, or
 CI/test-only changes that cannot alter the live execution path. Mixed or
 ambiguous PRs are treated as requiring live validation.
 
-When required, the MANAGER uses the exact-HEAD `manager-live-hoben` gate defined
-in `AGENTS.md`. A successful result applies only to that exact SHA.
+For a future owner-requested promotion, revalidate the trusted exact-HEAD gate
+and effective environment policy first. The historical `manager-live-hoben`
+contract is retained above; it is not an authorization to run it now or a
+substitute for experimental validation. Success applies only to the tested SHA.
 
 The MANAGER merges only when every applicable check, review, and required
 authenticated validation succeeds on the exact reviewed HEAD.
@@ -1611,7 +890,8 @@ state:validate
 MANAGER re-reviews
 ```
 
-There is no direct CODEX DEV → MANAGER correction path.
+For the `main` route only, there is no direct CODEX DEV → MANAGER correction
+path. The experimental correction loop above returns directly to MANAGER.
 
 If any commit is pushed after CODEX REVIEW approval while the Issue is already in
 `state:validate`—including a rebase or trivial follow-up—the approval is stale
@@ -1724,29 +1004,6 @@ Where a real capture is needed for testing, sanitize identifiers before committi
 
 The project is successful when a user can install it through HACS, configure a Hoben stove from the Home Assistant UI, obtain stable telemetry and safe controls, and provide useful sanitized diagnostics when something fails — while another community developer can understand the protocol and contribute without relying on private reverse-engineering artifacts.
 
-### October 10, 2026 — native full-run attempt contract
+### Relances expérimentales — procédure actuelle
 
-The owner superseded the short-lived temporary-branch trigger approach for
-Issue #54. Both observation lanes remain on the protected `experimental`
-branch. A first MANAGER merge push can run attempt 1; independent campaigns
-on the **same run ID and SHA** must be explicitly approved and started with
-GitHub Actions **Re-run all jobs**. A re-run of failed jobs or one job is
-not authorization. Re-runs use the workflow/code of the original commit.
-
-Each attempt requires provenance of both the original MANAGER push and the
-real triggering actor, a separate immutable MANAGER decision for attempts
-greater than one, an exact candidate PR/CI/tree, environment and reviewer
-gates, an atomically created claim per `run_id/run_attempt/scenario/SHA`, checked for reuse while its tag reference remains present, the
-shared observation concurrency lock, and report artifacts uniquely named by
-attempt. The MANAGER may select either scenario for any same-repository PR
-merged into `experimental`—code, tests, documentation, or workflow—whether
-or not `Refs #54` appears in the PR. Eligibility alone grants no secrets.
-
-The current GitHub connector offers job rerun and failed-job rerun, but not
-the full-run rerun action. The owner accepts starting **Re-run all jobs**
-manually in the Actions UI. DEV never calls these partial-run tools and never
-starts live observations. The new PR #75 must not be merged without the
-owner's additional explicit permission; completion of offline CI does not
-waive that restriction.
-
-**Residual claim threat (#75):** GitHub `createRef` atomically rejects an existing reservation tag, but this is not proof of an immutable or indelible reservation. A principal with permission to delete or rewrite `refs/tags/<claim>` can invalidate anti-replay history; repository tag protection/rulesets are not verified by this connection. The gates recheck the current reference and fail closed on mismatch, but cannot detect a deleted-and-recreated claim with identical contents. Do not assert permanent single-use guarantees without independently verified tag protections. No Settings change is authorized.
+Les relances complètes sur le même SHA, l'admission du runner, les réservations anti-rejeu et les gates d'environnement sont définies dans [le workflow expérimental](docs/experimental-protocol-workflow.md). Les anciens résultats KO ne sont pas conservés dans cette roadmap.

@@ -6,7 +6,9 @@ This repository contains a **community-maintained, unofficial Home Assistant int
 
 The project must never present itself as an official Hoben, Inovalp, Home Assistant, or HACS product. It is intended to be understandable, testable, safe, maintainable, and useful to the Home Assistant community.
 
-The primary target device during early development is a **Hoben Osmose**, while the protocol layer must remain designed to support other Hoben stove profiles discovered in MyHOBEN (V4, V6, V6v16 and future variants where possible).
+The primary target device during early development is a **Hoben Osmose**, and the sole active protocol-development target is V4. Historical other-version material is [archived](docs/archive-autres-versions.md).
+Existing compatibility code/tests remain in place; a documentation priority does
+not authorize removing them.
 
 ---
 
@@ -211,7 +213,8 @@ Use deterministic fixtures and protocol simulations for:
 - TLS client state-machine behavior where practical;
 - `OpenClient` serialization;
 - `OpenedClient` parsing;
-- stove profile selection (V4/V6/V6v16);
+- V4 profile selection, unknown-profile rejection, and existing compatibility
+  regression tests; new other-profile development is deferred;
 - Ping/Pong;
 - Hoben message framing;
 - fragmented TCP/TLS reads;
@@ -311,101 +314,9 @@ HACS validation. Include type checking as an additional CI gate when adopted.
 
 Do not weaken or delete a failing test merely to make CI green. Fix the implementation or explicitly update the test because the documented behavior has changed.
 
-### MANAGER-gated authenticated pre-merge validation
+### Promotion experimental vers main
 
-Maintain four distinct validation layers:
-
-1. deterministic offline CI (`tests`/Ruff, `hacs`, `hassfest`), with no Hoben
-   connection or secret;
-2. optional secret-free protocol smoke (TLS or synthetic identity);
-3. authenticated pre-merge live validation, explicitly authorized by MANAGER
-   after code review of the exact candidate HEAD;
-4. manual exploratory live validation on protected main, including the existing
-   `session-open` / `read-v4-state` dispatch modes.
-
-Layer 3 is conditionally required according to the PR's effective risk surface.
-Real-device validation is never part of ordinary pytest or automatic PR CI. A TLS
-smoke, synthetic response or classified rejection cannot satisfy authenticated
-approval when layer 3 is required.
-
-The MANAGER must explicitly classify and record the live-validation decision in
-the PR before merge.
-
-Authenticated Hoben validation is required for any PR that can change runtime or
-real-device behavior, including runtime protocol/transport/client/coordinator/
-entity/config-flow code, runtime dependencies, live-probe scripts, trusted live
-workflow logic, and stove profile/register data or executable protocol
-interpretation.
-
-Authenticated Hoben validation is not required for a PR demonstrably limited to
-documentation-only changes with no executable protocol effect, image/brand
-assets, non-runtime metadata, or CI/test-only changes that cannot alter the live
-execution path. Mixed or ambiguous PRs are treated as requiring live validation.
-
-Use the trusted `main` definition of `manager-live-hoben.yml`, triggered only by
-`pull_request_target: labeled`. Only exact actor `Guillaume0385`, exact label
-`manager-live-hoben`, base `main`, a non-draft PR and exact same-repository head
-`Guillaume0385/ha-hoben-community` are eligible. No forks, automatic commit
-triggers, arbitrary labels or replay of a previous workflow run are permitted.
-Check identifiers strictly because GitHub expression equality ignores case;
-reject a queued approval if the current PR HEAD no longer matches the event SHA.
-
-> Adding `manager-live-hoben` means the MANAGER has reviewed the exact candidate HEAD and explicitly trusts that code to run with the Hoben live credential.
-
-Before adding it, MANAGER must inspect the complete diff, verify compliance with
-these rules/project/protocol, verify no secret exfiltration or identifier logging,
-verify no unauthorized write/control path, verify offline CI and record the full
-reviewed HEAD SHA. Implementing an issue or opening a PR does not itself grant
-this live approval. Codex must leave the PR open for MANAGER review.
-
-The privileged candidate run must checkout `github.event.pull_request.head.sha`
-exactly with `persist-credentials: false`, reuse `hoben-live` restricted to the
-exact protected main branch, and use only its existing `HOBEN_USER_GUID` secret.
-Inject it into the sole live probe step, never job-wide. Install no new
-candidate-controlled dependencies in that job. Keep the token with
-`statuses: write` on separate trusted runners, without candidate checkout;
-the candidate job has only `contents: read` and no GitHub status token input.
-Never export environment dumps, raw packets, identifiers, authorization codes,
-arbitrary server payloads or arbitrary exception text.
-
-The fixed v0.1 `--live-premerge` suite must exercise two sequential refreshes on
-the same HobenClient. Each refresh opens a fresh verified TLS session, requires
-authenticated OpenedClient and dynamically V4 without an unclassified suffix,
-makes exactly one function 04 read (FFFF, unit 1, start 1024, quantity 20),
-validates correlation and 20 UInt16 values, then closes. Refresh 1 starts from
-the initial zero DeviceGuid and must adopt a nonzero assigned identity; refresh
-2 must automatically reuse it. Disable retries in this fixed live suite, keeping
-exactly two sessions/reads on success. Client retry/backoff is tested offline.
-No exact register contents are expected. Report only sanitized metadata/counts
-and validated reuse, never either identifier. Do not send pairing, function
-06/16/22, transaction FFF0 or any stove-control command.
-
-Publish `live-hoben-authenticated` as pending/success/failure on that exact
-candidate SHA, with success only when the whole live job and probe succeed.
-Afterwards MANAGER checks the tested SHA and sanitized result, confirms success,
-removes the label and merges only if HEAD still matches. Each new commit requires
-fresh review and removal/re-addition of the label. The globally required
-branch-protection checks must include `tests`,
-`ha-tests`, `hacs`, and `hassfest`. Branch protection should dismiss stale
-pull-request approvals when new commits are pushed.
-
-Because authenticated Hoben validation is conditional, do not make
-`live-hoben-authenticated` an unconditional required check unless a future
-trusted conditional gate can also publish a safe pass result for explicitly
-exempt PRs. Until then, the MANAGER enforces the conditional live result before
-merging every qualifying PR.
-
-A new workflow present only in a PR cannot bootstrap its own trusted main
-definition. MANAGER must arrange a separate reviewed initial installation on
-protected main; leave the implementation PR open pending that prerequisite and
-its live review. Never run candidate workflow YAML to bypass the boundary.
-
-When a future v0.1 PR adds a safe read-only mechanism testable on the real stove,
-extend the fixed allowlisted suite with a bounded test for that mechanism.
-Future real write/control tests require a separate safety decision following
-the release roadmap and write-command policy; adding write code is insufficient.
-
----
+Toute PR de développement passe par experimental et les validations pertinentes avant promotion. Seules les PR strictement documentaires peuvent cibler directement main, sur demande explicite du propriétaire. Nouvelle demande explicite du propriétaire avant toute PR de promotion, puis CODEX REVIEW, MANAGER et CI. Voir [workflow courant](docs/experimental-protocol-workflow.md).
 
 ## Code readability and documentation
 
@@ -499,32 +410,17 @@ Do not silently convert a hypothesis into a confirmed fact.
 
 Only explicitly whitelisted user-level registers may ever be writable through the integration.
 
-For V6/V6v16, candidate user-facing writes currently include:
+Other-version write mappings are [archived](docs/archive-autres-versions.md);
+V4 remains read-only. Knowing an address never authorizes exposing a command: v0.1
+is read-only, validated temperature/ventilation/user modes belong to v0.2, and
+normal controller ON/OFF to v0.3, under [the roadmap](project.md).
 
-- 1280: normal controller ON/OFF request;
-- 1283: derogation temperature;
-- 1284: derogation start/timing;
-- 1285: derogation duration;
-- 1286: ventilation mode;
-- 1792: operation mode;
-- 1798: manual-mode temperature;
-- 1799: manual-mode max power;
-- 1801: selected user bits using mask-write.
+### Garde-fous normatifs — sécurité des écritures futures
 
-Knowing a writable register does **not** determine when it may be exposed. Follow the release sequencing in `project.md`: v0.1 remains strictly read-only; validated temperature/ventilation/user-mode controls belong to v0.2; normal controller ON/OFF belongs to v0.3.
+Les tests actuels, y compris live et expérimentaux, restent **strictement en lecture seule**. Les registres techniques/moteurs/test 1287–1293, les paramètres installateur à partir de 2304 et les paramètres fabricant ne doivent jamais être exposés ni écrits. La connaissance d'un registre ne vaut pas autorisation de commande.
 
-Do **not** expose registers 1287-1293 (technical/motor/test) or the installer/factory area beginning around 2304.
+Toute future fonctionnalité d'écriture exigerait une **nouvelle décision explicite du propriétaire**, une liste blanche de registres utilisateur prouvés pour le profil exact, une plage d'entrée validée, des tests hors ligne des octets, une validation du comportement réel dans un cadre de sécurité distinct, une limitation du débit, une confirmation par lecture et une gestion des erreurs sans boucle de retries. Aucun contournement des sécurités Hoben, aucune coupure secteur ni mode installateur/test.
 
-Before enabling a writable feature:
-
-- protocol bytes must be covered by tests;
-- real-device behavior must be validated if practical;
-- valid input range must be known;
-- command rate must be limited;
-- a read-back confirmation should be performed;
-- error responses must be handled without retry loops.
-
----
 
 ## Logging and diagnostics
 
@@ -542,101 +438,33 @@ Provide a helper for consistent redaction rather than relying on every log state
 
 Diagnostic exports should be designed so users can attach them to GitHub issues safely.
 
-### Bounded private RX capture exception — Issue #48
+### Captures privées
 
-The owner's 2026-10-07 H1/H2 amendment authorizes complete decrypted RX capture
-only for the reference-Osmose exploratory campaign, driven by MANAGER from
-GitHub Actions after exact-code review. It does not authorize runtime logging,
-ordinary pytest/PR CI, scheduled DEV live execution or any stove-control write.
-Keep raw RX, journals and assigned identity in private files outside the checkout
-(0700 directories, 0600 files). Never print them or upload plaintext captures.
+Le chemin H1/H2 courant sur `experimental` conserve temporairement RX/journaux
+hors checkout (dossier 0700, fichiers 0600), les détruit dans `finally` et
+n'exporte qu'un rapport anonymisé doublement validé Python/Node. Aucun export RX,
+GUID, secret, registre, donnée domestique ou exception libre. Publication sur
+un runner distinct sans secret Hoben, rétention maximale de sept jours. CMS
+concerne uniquement les anciennes voies chiffrées ; leur suppression du chemin
+courant n'autorise jamais le téléversement de captures brutes. Voir le
+[contrat courant](docs/experimental-protocol-workflow.md).
 
-The dedicated manual `opened-client-boundary.yml` and its dispatch gate must
-first be independently installed on protected main. Require exact MANAGER actor,
-fresh main dispatch, current reviewed same-repository #49 HEAD and the main-only
-`hoben-live` environment policy. Preserve the existing live workflows/gate.
-Preflight the MANAGER public recipient certificate before network I/O; export
-only authenticated AES-256-GCM CMS ciphertext and a separate numeric/categorical
-anonymized report. The RSA-OAEP/SHA256 private decryption key stays with MANAGER,
-never on GitHub or the runner. Artifacts expire after seven days.
+### Validation expérimentale autonome
 
-This exception preserves all prohibitions on publishing GUIDs, codes, packets,
-registers and household values. Hypothesis annotations cannot establish a
-production boundary. See the [campaign procedure](docs/opened-client-boundary-campaign.md)
-for fixed experimental budgets, stops, replay and the separate trusted-installation
-prerequisite. CODEX DEV prepares and tests these tools; MANAGER runs and interprets
-the real observations. Task 1's router and Tasks 2–6 await the evidence decision.
-
-### Autonomous experimental validation — Issue #54 (owner decision 2026-10-09)
-
-The current development and observation loop runs **only on `experimental`**.
-A GitHub PR **targeting `main` may be prepared only after a NEW, explicit
-request from the owner**. MANAGER must not autonomously open, prepare, or merge
-a promotion PR to `main`. The main delivery review/gates remain in force if
-and only if the owner requests a release; they are not prerequisites to research
-on `experimental`.
-
-Two **independent read-only** GitHub Actions lanes may be run against reviewed,
-merged `experimental` commits after MANAGER's SHA-specific authorization:
-
-- **`hoben-live`** (environment `hoben-live`): exercise the **actual integration
-  Home Assistant client/protocol/session/refresh/reconnection lifecycle** at the
-  tested commit and report what actually works, without synthetic protocol
-  shortcuts, new control paths, or invented persistent-session behavior.
-- **`hoben-experimental`** (environment `hoben-experimental`): fixed H1/H2
-  network observations/captures/analysis, with ciphertext-only raw RX export
-  and sanitized reports. **Never import or expose this instrumentation through
-  the Home Assistant runtime**.
-
-MANAGER may review, merge and test **multiple small PRs sequentially into
-`experimental`**, without obtaining further conversational approval from the
-owner. The loop is CODEX DEV → MANAGER (diff, tests, security, automatic merge,
-authorized live experiments, result analysis, next Issue) → CODEX DEV. Notify the
-owner of completed experimental stages **without pausing the loop**. A GitHub
-environment's actual required reviewer approval and other repository gates
-remain mandatory; neither this mandate nor a comment in GitHub can bypass them.
-If the workflow/signal/environment policy/credential proof is unavailable,
-report `NOT RUN` or `PENDING APPROVAL` instead of contacting Hoben. Never
-run live from a PR, from DEV or from routine pytest.
-
-The older main-based experimental bootstrap in closed PR #56 is **not
-installed** and must not be revived as a prerequisite; `issues:labeled` loads
-workflow definitions from the default branch, so DEV must demonstrate an
-actually usable experimental-branch trigger through MANAGER's GitHub operations.
-A routine `push` on `experimental` alone must not expose secrets to unreviewed
-code. Verify branch protection **and the separate live environment policies**
-at runtime; `experimental.protected=true` does not prove the settings, secrets,
-or reviewer approval. The owner manages settings; agents do not weaken them.
-
-Preserve fixed read-only MyHOBEN destination and TLS verification, the H1/H2
-budgets, pre-TLS CMS recipient validation, ciphertext-only artifacts, separate
-tokens/secrets, anonymous reports and seven-day retention. An experiment cannot
-establish an unknown OpenedClient boundary by assumption, cannot issue commands
-to the stove, and cannot serve as a main `live-hoben-authenticated` approval.
-Record observations in `protocol.md` only after real corroborated evidence.
-See [experimental workflow](docs/experimental-protocol-workflow.md).
-
-The #54 phase-2 laboratory workflow requires a separate, immutable MANAGER
-decision on the exact PR HEAD, CI run and pinned public CMS recipient before
-merge. Admission follows a successful secretless preflight, verifies the actual
-`hoben-experimental` policy, then atomically reserves a non-release tag for the
-merged SHA/scenario on a runner with no Hoben secret. The read-only collection
-runner rechecks that reservation and policy before its sole secret step.
-For the owner's single-maintainer workflow (decision 2026-10-09, Issue #54),
-an environment with no configured required reviewer is permitted, as with the
-existing `hoben-live` environment model. Any actual GitHub-required approval
-remains binding and must be proven; never bypass a configured reviewer rule.
-The protected `experimental` branch, an exactly scoped deployment policy,
-immutable pre-merge MANAGER decision/CI, and per-SHA reservation remain mandatory.
-This choice removes independent human approval when no reviewers are configured;
-it does NOT weaken existing controls on identities, secrets or stove commands.
-Never delete/reuse a reservation to rerun a failure.
-The `hoben-read-only-observation` concurrency group must also be used by future
-experimental live lanes. Do not run historical main probes concurrently.
-Only bounded, validated CMS bytes sealed again by the reviewed export code and
-an allowlisted report may leave this lane; two authenticated private decryptions
-are required. This implementation does not install or approve `hoben-live`.
----
+MANAGER peut fusionner sur `experimental` après revue du SHA exact et CI, sous
+réserve des instructions explicites du propriétaire. Une fusion n'autorise pas
+à elle seule un test réel : décision MANAGER propre au scénario, provenance de
+la PR/arbre/CI, acteur original et de relance, HEAD protégé exact, réservation
+anti-rejeu, politique d'environnement et approbations réelles restent requis.
+Le recheck précède l'unique étape secrète ; jetons GitHub et secrets Hoben sont
+séparés. Les deux voies partagent `hoben-read-only-observation` ; aucune sonde
+historique concurrente. Les reruns natifs complets exigent une nouvelle décision
+v2 et un claim par tentative ; aucune relance partielle ni réutilisation d'un
+succès. Preuve absente : `NOT RUN` / `PENDING APPROVAL`, jamais contournement de
+Settings. CODEX DEV et la CI restent hors ligne. Le
+[workflow courant](docs/experimental-protocol-workflow.md) détaille ces contrats,
+les limites des preuves de reviewers et des tags, et les chemins installés.
+Aucune promotion `main` sans nouvelle demande explicite du propriétaire.
 
 ## Version and feature discipline
 
@@ -654,7 +482,7 @@ The workflow uses four separated roles:
 
 - **MANAGER**: prepares and prioritizes issues, performs final review, decides whether authenticated live validation is required, authorizes it, and merges;
 - **CODEX DEV**: implements one authorized issue and all requested corrections;
-- **CODEX REVIEW**: independently reviews code, tests, documentation, and protocol compliance before MANAGER review.
+- **CODEX REVIEW**: independently reviews PRs targeting `main` only; experimental PRs receive MANAGER review.
 - **HOME ASSISTANT INTEGRATOR**: observes the installed integration once per day
   in read-only mode and files sanitized problem reports for MANAGER triage;
   never develops code or starts CODEX DEV.
@@ -900,7 +728,8 @@ CODEX REVIEW or MANAGER remarks
 
 CODEX DEV must reuse the existing branch and PR, address all actionable remarks,
 add/update regression tests when appropriate, and rerun relevant deterministic
-validation. There is no direct CODEX DEV → MANAGER correction path.
+validation. For the `main` route only, there is no direct CODEX DEV → MANAGER
+correction path; `experimental` returns directly to MANAGER as specified above.
 
 ### Stale approvals and new commits
 
@@ -961,27 +790,6 @@ A feature is complete only when:
 - HACS/Home Assistant validation still passes;
 - code is documented well enough for an external contributor to maintain it.
 
-### Issue #54 — 2026-10-10, native full Actions re-runs
+### Changelog obligatoire
 
-The current owner decision requires `Re-run all jobs` of an existing
-`experimental` Actions workflow to repeat H1/H2 and HA parity with the exact
-same reviewed SHA, not a new branch, tag-trigger or commit. The original
-`push` event and its MANAGER identity must still be verified. For a re-run,
-`github.triggering_actor` must independently prove MANAGER identity and the
-new attempt must have its **own** immutable PR decision, tied to
-`run_id + run_attempt + scenario + SHA`; the first attempt's pre-merge v1
-approval never authorizes future attempts. The runner must refuse when a
-complete rerun of all jobs cannot be demonstrated. Protected `experimental`,
-the original reviewed/merged PR and its exact tree, four CI jobs, environment
-policy, real reviewer approval when configured, atomic anti-replay reservation,
-read-only collection and fixed anonymized report remain mandatory.
-
-Any same-repository, MANAGER-reviewed PR targeting `experimental` can be
-selected for either scenario even without `Refs #54`. This makes the PR
-eligible, never automatically approved. CODEX DEV continues to take tasks only
-from authorized Issues with one state label, and sends `experimental` PRs
-directly to MANAGER review. No branch/PR targeting `main` without a fresh,
-explicit owner request. Re-runs execute the **original SHA's** workflows, so
-past historical SHA runs cannot inherit new code. The owner can initiate
-`Re-run all jobs` manually in GitHub Actions because the current connector
-lacks a whole-run rerun action; DEV must not launch live Hoben tests.
+Chaque PR met à jour [CHANGELOG.md](CHANGELOG.md) ou justifie l'absence d'impact livrable ; MANAGER vérifie ce point. Les entrées historiques non vérifiées ne doivent jamais être présentées comme des PR fusionnées.
