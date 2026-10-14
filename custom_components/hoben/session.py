@@ -110,6 +110,8 @@ async def _receive_response(
     transport: AsyncTlsTransport,
     *,
     authorization_code_provider: AuthorizationCodeProvider | None = None,
+    response_buffer: bytearray | None = None,
+    answer_ping: bool = True,
 ) -> SessionResult:
     """Keep one buffer through association; answer only standalone leading Ping.
 
@@ -119,12 +121,16 @@ async def _receive_response(
     One explicit code submission is allowed, with no resend or callback loop.
     Without a provider, preserve the observation-only authorization result.
     """
-    buffer = bytearray()
+    # An opening-only consumer may retain the bytes without asserting framing.
+    # Defaults preserve the reviewed one-shot/association behavior.
+    buffer = bytearray() if response_buffer is None else response_buffer
     authorization_sent = False
     while True:
         if buffer:
             message_type = buffer[0]
             if message_type == _PING:
+                if not answer_ping:
+                    raise SessionProtocolError("Ping handling is unavailable")
                 del buffer[0]
                 await transport.write(_PONG)
                 continue
@@ -188,6 +194,8 @@ async def _open_session(
     device_info: str,
     handshake_timeout: float = 30.0,
     authorization_code_provider: AuthorizationCodeProvider | None = None,
+    response_buffer: bytearray | None = None,
+    answer_ping: bool = True,
 ) -> SessionResult:
     """Shared handshake primitive; the one-shot caller must always close.
 
@@ -216,7 +224,10 @@ async def _open_session(
         async with asyncio.timeout(handshake_timeout):
             await transport.write(request)
             return await _receive_response(
-                transport, authorization_code_provider=authorization_code_provider
+                transport,
+                authorization_code_provider=authorization_code_provider,
+                response_buffer=response_buffer,
+                answer_ping=answer_ping,
             )
     except TransportError:
         # Preserve the operation-specific timeout/EOF instead of relabeling it.
