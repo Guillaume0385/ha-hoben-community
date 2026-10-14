@@ -1045,7 +1045,7 @@ Registre V4 **1283 / 0x0503** ; unité **minute**, pas d'interface de 15 minutes
 
 ### 10.5 Ventilation
 
-Méthode `SetModeVentil` ; registre V4 **1284 / 0x0504**, fonction Modbus `06`. L'interface documente 0 = Normal, 1 = Silence, 2 = Boost. Aucun essai réel et aucune commande autorisée.
+Le registre **1284 / 0x0504** est documenté dans la cartographie V4 pour la ventilation. L'interface documente 0 = Normal, 1 = Silence, 2 = Boost. **À VALIDER pour V4 :** l'utilisation de la fonction Modbus `06` et son encodage d'écriture ne sont pas démontrés par une source spécifique V4 ; la méthode `SetModeVentil` et la fonction `06` sont décrites dans le contexte V6/V6v16 de [l'archive](docs/archive-autres-versions.md). Ne pas en déduire une trame d'écriture V4. Aucun essai réel et aucune commande autorisée.
 
 ### 10.6 Mode direct et options
 
