@@ -1,5 +1,20 @@
 # Campagne exploratoire H1/H2 de #48 — GitHub Actions uniquement
 
+> **Portée historique mise à jour (décision propriétaire du 9 octobre 2026).**
+> Les sections ci-dessous décrivent les sondes H1/H2 et l'ancien mécanisme
+> `main` / `workflow_dispatch`. Elles **ne sont plus la procédure de
+> déclenchement du cycle expérimental actuel**. Les tests H1/H2 sont destinés
+> exclusivement à la voie `hoben-experimental` sur `experimental`, isolée du
+> plugin HA ; la voie séparée `hoben-live` doit valider le **vrai comportement
+> du client Home Assistant**. MANAGER peut déclencher ces essais après chaque
+> merge revu sans demander d'accord conversationnel, sous réserve des contrôles
+> et approbations effectivement imposés par GitHub. **Aucune PR vers `main`**
+> avant demande explicite du propriétaire. Les anciens plafonds, interdictions
+> d'écriture et exigences de chiffrement décrits ci-dessous restent applicables.
+> Voir [le workflow expérimental actuel](experimental-protocol-workflow.md)
+> et [l'Issue #54](https://github.com/Guillaume0385/ha-hoben-community/issues/54).
+
+
 Cette procédure prépare l'observation demandée par le propriétaire le
 2026-10-07. **Aucune session réelle H1/H2 n'a encore été exécutée.** Les tests
 pytest sont synthétiques, sans serveur ni identifiant réel. Le routeur de
@@ -62,8 +77,8 @@ SHA256 obtenue et saisit ses 64 caractères hexadécimaux minuscules lors du
 dispatch. Ce hash concerne seulement le certificat public, jamais un identifiant
 ou une trame du poêle.
 
-Avant toute connexion, la sonde vérifie cette empreinte, la validité du
-certificat pendant au moins une heure, RSA ≥3072 et un chiffrement de préflight.
+Avant toute connexion, la sonde vérifie cette empreinte, `notBefore ≤ maintenant`
+et `notAfter ≥ maintenant + 1 h`, RSA ≥3072 et un chiffrement de préflight.
 La capture utilise des dossiers 0700 et fichiers 0600 dans `RUNNER_TEMP`, hors
 checkout. Les octets RX sont append-only dans `rx.bin` ; les journaux et
 annotations sont séparés. Un tar privé est chiffré en CMS AuthEnvelopedData
@@ -171,6 +186,11 @@ autre requête. Une exception Modbus corrélée est terminale et n'entraîne auc
 deuxième lecture. Un framing invalide arrête les émissions tout en conservant
 le RX jusqu'à fermeture/budget ; si un waiter était en vol, la session ferme.
 Une même livraison valide puis invalide ne produit aucun Pong de ce lot.
+La validation couvre aussi les PDU et toutes les corrélations du lot avant tout
+Pong ou comptage de réponse ; une réponse surnuméraire invalide le lot entier.
+Une lecture déjà terminée est traitée selon son horodatage de fin, même si le
+collecteur reprend après l'échéance. Une réception réellement tardive est
+conservée dans l'archive sans compter comme réponse acceptée ni permettre de TX.
 Si la fenêtre globale expire avec une requête FFFF en vol, l'arrêt est
 `response_timeout`, le résultat est partiel et le lecteur/transport ferment.
 Il compte comme erreur pour l'arrêt après deux erreurs consécutives ; une
@@ -276,3 +296,36 @@ de chiffrement/stockage peut empêcher la récupération ; aucun résultat ni
 artefact complet n'est alors revendiqué. Les uploads ciblent seulement les deux
 fichiers d'export, jamais un wildcard du dossier privé. Les logs de la collecte
 sont supprimés, les summaries ne contiennent que le SHA et un statut générique.
+
+## Voie expérimentale distincte préparée par #54
+
+#54 réutilise les primitives H1/H2, capture, chiffrement et replay examinées dans
+#49/#52 sur une PR ciblant `experimental`, sans modifier ces deux PR ni conclure
+sur la frontière. L’entrée `run_experimental_boundary.py` fixe le scénario et
+la projection publique ; elle appelle la bibliothèque de campagne, sans lancer
+le CLI historique `workflow_dispatch` ni contourner ses contrôles.
+
+Le bootstrap main abandonné #56 n'est plus utilisé. La phase 1 #58 a prouvé le
+déclencheur sans secret sur experimental (run `37903694784`). La phase 2 prépare
+`hoben-experimental.yml` : push après merge MANAGER, préflight sans secret,
+décision de PR liée au HEAD/CI, politique **Branch experimental uniquement**,
+réservation atomique SHA/scénario, puis approbation GitHub indépendante et
+recheck avant collecte. Ni label d'Issue, ni dispatch absent de main, ni push
+ordinaire ne libère un secret. Le SHA exécuté est celui de la fusion examinée.
+Voir [la procédure MANAGER](experimental-protocol-workflow.md) pour le commentaire
+strict préalable, les contrôles runner, NOT RUN/PENDING APPROVAL et la découverte
+corrélée du run/rapport. Aucun Setting n'est modifié par les agents.
+
+Les artefacts de cette voie sont `experimental-ciphertext-<SHA>-<run_id>` et
+`experimental-report-<SHA>-<run_id>`, rétention 7 jours ; le déchiffrement privé
+CMS décrit plus haut reste applicable **deux fois** : le validateur expérimental
+rechiffre le CMS candidat avant export. Authentifier les deux couches avec la
+clé privée hors GitHub avant extraction, supprimer toute sortie partielle après
+échec. Le certificat public de #52 est épinglé sur experimental avant TLS ;
+aucun secret certificat ni clé privée n’est demandé à DEV.
+Les budgets, stops et hypothèses restent ceux de cette campagne. Les workflows
+historiques conservent leur procédure ; aucune substitution de validation stable.
+
+La préparation offline de #54 ne prouve ni installation, ni dry-run GitHub réel,
+ni observation Hoben et ne débloque pas #48/#51. Ces preuves et décisions restent
+à fournir par MANAGER après les revues et fusions autorisées.

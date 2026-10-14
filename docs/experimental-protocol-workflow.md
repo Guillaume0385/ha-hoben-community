@@ -1,124 +1,245 @@
-# Branche `experimental` — recherche du protocole Hoben en lecture seule
+# Workflow courant — développement experimental, validation et promotion
 
-> **Proposition documentaire en attente de revue du propriétaire.** Cette page
-> décrit le processus souhaité. Elle ne configure pas GitHub, ne change pas les
-> permissions, ne modifie pas les workflows et n'autorise aucun test réel par
-> elle-même. Les protections effectives restent celles des workflows en vigueur.
+## Règles de branche et de revue
 
-## Deux circuits séparés
+Toute PR de développement contenant du code, des tests, des sondes ou des
+workflows cible exactement `experimental`. Une Issue autorisée porte un seul
+label `state:*` : `state:ready` → CODEX DEV `state:in-progress` → `state:review`
+pour MANAGER. MANAGER relit l'intégralité du diff, le SHA exact, la CI, la sécurité,
+les faits de protocole et les remarques antérieures. Les corrections reviennent
+sur la même PR, puis en revue MANAGER. Les quatre checks ordinaires `tests`,
+`ha-tests`, `hacs`, `hassfest` doivent réussir sur le HEAD examiné.
+CODEX REVIEW et `state:validate` ne sont pas requis sur cette voie expérimentale.
 
-| Circuit | Branche cible | Objectif | Conditions de fusion |
-| --- | --- | --- | --- |
-| Recherche protocolaire | `experimental` | Expérimentations H1/H2, trames, Ping/Pong, observations Modbus **en lecture seule** | **Revue simplifiée MANAGER uniquement**, tests ciblés et vérification de sécurité ; **pas de CODEX REVIEW** ni de `state:validate` |
-| Intégration publiée | `main` | Code stable Home Assistant/HACS et bibliothèques protocolaires validées | **CODEX REVIEW indépendant, puis MANAGER**, tests complets, HACS/Hassfest et gate live pré-fusion si applicable, selon `AGENTS.md` |
+Une PR strictement documentaire peut cibler `main` seulement sur demande
+explicite du propriétaire. Toute promotion de développement vers `main` exige
+une nouvelle demande explicite ; ne pas préparer ou rouvrir une PR de promotion
+comme étape automatique. CODEX DEV ne fusionne pas, ne s'auto-approuve pas,
+n'ajoute pas `state:validate` ou `manager-live-hoben` et ne lance pas de test réel.
 
-Le propriétaire peut appliquer à `experimental` des vérifications de merge
-plus légères que celles de `main`. Cela concerne **la fusion de code**, pas
-l'autorisation de remettre les identifiants Hoben à ce code.
+## Installation vérifiée et limites de cette documentation
 
-## Revue MANAGER simplifiée pour les PR vers `experimental`
+État vérifié le 14 octobre 2026 sur la base `experimental`
+`ba007baf42f5120ce9b26aada95231c3930ca449` :
 
-Le **critère de routage est la branche cible de la PR** (champ GitHub `base.ref`),
-non son nom, ses labels ou la branche source :
+- [#67](https://github.com/Guillaume0385/ha-hoben-community/pull/67) est fusionnée
+  depuis le 10 octobre (`b9fa072ea061598e4855fface00133e9ec6eb921`) : les nouvelles
+  campagnes H1/H2 exportent seulement un rapport anonymisé, sans export RX ni CMS.
+- [#75](https://github.com/Guillaume0385/ha-hoben-community/pull/75) est fusionnée
+  depuis le 11 octobre (`f2c9b89f36404ad14193faac6dc006e84d7db36f`) : la preuve de
+  rerun natif v2 est raccordée aux deux gates. Les anciennes mentions DRAFT/non
+  installé décrivent la préparation de cette PR, pas l'état courant.
+- Les définitions exécutées **uniquement sur `experimental`** sont [H1/H2](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/workflows/hoben-experimental.yml)
+  et [HA parity](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/workflows/hoben-live-experimental.yml), avec les gates
+  [lab](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-lab-gate.cjs),
+  [live](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-live-gate.cjs),
+  [push](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-push-preflight.cjs) et
+  [rerun](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/.github/scripts/experimental-native-rerun.cjs).
 
-- **Base `experimental` :** aucune pré-revue CODEX REVIEW, aucune approbation
-  indépendante ni passage obligé par `state:validate`. CODEX DEV termine
-  l'implémentation, exécute les tests ciblés puis place l'Issue en `state:review`.
-  Le MANAGER prend **directement** la PR en revue, vérifie le diff, le scénario,
-  les résultats des tests ciblés, l'absence de fuite d'identifiants, et
-  l'absence de commande ou écriture réelle. Si ces points sont satisfaits,
-  il peut fusionner vers `experimental` sans attendre la campagne live H1/H2 ;
-  la campagne sera lancée séparément après autorisation du MANAGER. Des
-  corrections retournent à CODEX DEV (`state:in-progress` puis `state:review`),
-  **sans étape CODEX REVIEW**. Une erreur CI pertinente ou un risque de
-  sécurité réel reste un motif de correction, pas une dérogation silencieuse.
-- **Base `main` :** circuit complet inchangé : `state:review` → CODEX REVIEW
-  indépendant → `state:validate` → MANAGER → validations requises → merge.
-  La promotion depuis `experimental` passe obligatoirement par une PR dédiée
-  ciblant `main`; une revue passée sur `experimental` ne remplace jamais celle
-  du code finalement livré.
+Une installation Git ne prouve ni les Settings effectifs, ni les secrets, ni
+l'approbation d'un environnement, ni le fonctionnement universel des reruns.
+Le runner doit établir ces preuves à chaque admission et recheck. Les tests CI
+des gates utilisent des fixtures GitHub simulées. Les observations H1/H2 restent
+[sourcées séparément](../protocol.md#observations-de-protocole-v4--observé--à-valider).
+Les anciennes voies `main` sont historiques ; elles ne sont ni un préalable
+expérimental ni une autorisation de lancement. Les règles de sécurité des anciens
+exports CMS restent décrites dans la [procédure historique](opened-client-boundary-campaign.md).
 
-Les agents et tâches programmées doivent appliquer ce filtrage : **PRE-REVIEW
-ignore toute PR dont la base est `experimental`**, et MANAGER ne réclame pas
-son approbation avant une fusion expérimentale. Les approbations GitHub
-éventuellement exigées par une règle de protection de branche sont distinctes :
-leur réglage doit correspondre à cette politique. Les accès aux secrets sont
-gérés séparément dans la section suivante. Si l'Issue couvre aussi une future
-livraison stable, conserver sa traçabilité jusqu'à la PR finale vers `main` ;
-ne pas marquer cette livraison comme réalisée après une simple fusion de
-recherche.
+## Deux voies réelles distinctes, strictement en lecture seule
 
-## Cycle expérimental
+| Scénario | Environnement | Portée réelle au SHA indiqué |
+| --- | --- | --- |
+| `h1h2` | `hoben-experimental` | Recherche H1/H2 séparée du runtime HA ; au plus 6 H1 + 6 H2, 90 s et 1 MiB RX par session. |
+| `ha-parity` | `hoben-live` | Vrai `HobenClient` du SHA testé : deux `async_refresh()`, même `decode_v4_snapshot()` que le coordinator, puis `async_close()`. |
 
-1. Préparer une petite PR ciblant **`experimental`** (pas `main`) et y
-   associer le scénario, la capture attendue, les limites et un test hors ligne.
-2. Faire examiner les octets émis et les modules exécutés : TLS vérifié,
-   destination MyHOBEN documentée, requêtes de lecture uniquement, arrêt borné,
-   aucun paramètre libre de commande ou de destination. Ne jamais envoyer de
-   commande de marche/arrêt, écriture Modbus, association ou mode technique.
-3. Après fusion et examen du **commit exact**, MANAGER demande éventuellement
-   **un** run GitHub Actions expérimental ; aucun lancement implicite au merge,
-   au push, par cron ni à chaque passage horaire.
-4. Relever le SHA, la catégorie de résultat, les arrêts et les métadonnées
-   anonymisées. Stocker les RX privés uniquement chiffrés, avec une clé privée
-   conservée hors GitHub ; conserver les fixtures expurgées.
-5. Corriger ou recommencer dans une nouvelle PR de recherche. Le statut « test
-   expérimental réussi » ne démontre pas à lui seul la frontière OpenedClient
-   ni la sécurité de fusion vers `main`.
-6. Quand le comportement est confirmé, ouvrir une **PR finale vers `main`**,
-   avec les tests de non-régression et les mises à jour de `protocol.md` et
-   `project.md`. Les contrôles habituels de `main` demeurent obligatoires.
+HA parity utilise actuellement un client `one-shot`, deux connexions TLS et deux
+lectures V4 de 20 registres, avec réutilisation en mémoire du DeviceGuid,
+`max_attempts=1` et un budget global de 150 s. Il ne teste pas l'ordonnanceur HA
+complet. Session persistante, Ping/Pong post-open, DataUpdated et reprise après
+panne ne sont pas validés par ce rapport : conserver `unsupported`/`not_tested`.
+Une sonde H1/H2 ne remplace jamais le test du vrai client.
 
-La campagne #48/#49 peut préparer des observations avant une validation finale
-de PR ; `state:blocked` n'empêche pas le travail documentaire et les
-préparatifs sans secret. Une vraie observation reste soumise au contrôle du
-workflow installé et de la configuration effective de l'environnement.
+Les deux voies gardent TLS vérifié, destination fixe `myhoben.fr:465`, budgets
+bornés et arrêt sans replay implicite. Aucune association, écriture Modbus
+06/16/22, transaction de commande FFF0, consigne, marche/arrêt, ventilation,
+commande technique, destination/script/mode libre. L'instrumentation H1/H2
+reste hors de `custom_components/hoben/`. Les suites pytest/CI PR restent hors
+ligne, sans identifiant Hoben ni accès au poêle.
 
-## Accès aux secrets : ne pas confondre branche et environnement
+## Admission : provenance, revue et CI exactes
 
-**Préférer un environnement séparé `hoben-experimental`** : règle de déploiement
-sélectionnant uniquement la branche `experimental`, approbation obligatoire
-par le propriétaire ou un reviewer de confiance avant que le job puisse accéder
-aux secrets, secrets limités à la campagne, aucun accès aux forks ni aux PR
-non fusionnées. Le propriétaire configure ces règles dans GitHub Settings ;
-aucun agent ne les crée ou ne les assouplit.
+Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`
+après une fusion MANAGER. Un push seul ne libère aucun secret. Préflight,
+admission et recheck vérifient notamment :
 
-Si le propriétaire choisit plutôt d'ouvrir **`hoben-live`** à
-`experimental`, ne jamais utiliser « No restriction » : autoriser
-explicitement les deux branches `main` et `experimental`, conserver la
-protection de `main` et ajouter une approbation de déploiement indépendante
-pour toute exécution susceptible de recevoir un identifiant. Un code fusionné
-sur `experimental` pourrait autrement utiliser les secrets dans un workflow
-distinct : un simple `if:` du workflow habituel ne protège pas ce cas.
+- dépôt exact `Guillaume0385/ha-hoben-community`, ID `1401398724` ; acteur et
+  `triggering_actor` exacts `Guillaume0385` (identité GitHub User ID `18246624`
+  dans les preuves API applicables), événement et workflow attendus ;
+- SHA Actions, SHA du workflow et HEAD courant de la branche protégée
+  `experimental` identiques ; push ni forcé, ni création/suppression de branche ;
+- une seule PR associée, fusionnée par MANAGER, non draft, même dépôt/base
+  `experimental` ; SHA de fusion exact et arbre candidat identique à l'arbre
+  fusionné. Les conflits résolus dans un autre arbre exigent une nouvelle revue ;
+- revue MANAGER de cette PR, aucun avis actif `CHANGES_REQUESTED`, tous les
+  threads résolus ; la décision structurée ci-dessous lie la revue au candidat ;
+- run `Validate` de type `pull_request`, tentative **1**, même HEAD/branche/dépôt,
+  terminé avec succès avant la décision MANAGER ; exactement quatre jobs
+  `tests`, `ha-tests`, `hacs`, `hassfest` réussis sur ce SHA. Une association PR
+  restante doit correspondre à cette PR/base ; une liste vide après fusion
+  n'est acceptée qu'avec la décision MANAGER authentique liant CI/PR/HEAD.
 
-Dans les deux cas, la sélection de branche seule ne remplace pas la relecture
-du code exécuté ni le contrôle humain avant l'accès à un identifiant réel.
-Ne pas déplacer `HOBEN_USER_GUID` dans des secrets globaux du dépôt, les logs,
-les arguments shell, les commentaires GitHub ou des artefacts non chiffrés.
+Les PR code/tests/docs/workflows sont éligibles sans `Refs #54` ni état imposé à
+l'Issue #54 ; cette éligibilité ne vaut pas autorisation de campagne.
+Un rerun de CI ordinaire ne remplace pas la tentative 1 exigée par ces gates.
 
-## Changements techniques et administratifs encore nécessaires
+## Décisions MANAGER et preuve de relance complète
 
-- **Propriétaire GitHub :** configurer la protection légère de `experimental`
-  (PR + revue humaine pour les modifications de code ayant accès aux secrets),
-  puis l'environnement, ses branches explicitement autorisées et son
-  approbateur. Ne rien modifier sur `main` avant revue.
-- **PR technique distincte :** adapter les workflows/gates H1/H2 existants,
-  aujourd'hui strictement liés à `main` et à la politique `hoben-live`
-  `main`-only. Une PR purement documentaire n'active pas les nouvelles règles ;
-  les refus de gate existants ne doivent pas être contournés.
-- **MANAGER :** ne jamais considérer un résultat expérimental comme un
-  `live-hoben-authenticated=success` de validation de livraison et ne jamais
-  fusionner vers `main` sans la revue complète habituelle.
+Les commentaires de décision sont réels, authentifiés, uniques pour la cible,
+non modifiés (`created_at == updated_at`), avec uniquement les champs attendus :
 
-## Critères d'ouverture des tests réels
+| Tentative | Marqueur au début du commentaire | Champs JSON exacts |
+| --- | --- | --- |
+| 1 | `<!-- hoben-experimental-approval:v1 -->` ou `<!-- hoben-live-approval:v1 -->` | `schema=1`, `scenario`, `candidate_sha`, `ci_run_id` |
+| N > 1 | `<!-- hoben-experimental-approval:v2 -->` ou `<!-- hoben-live-approval:v2 -->` | `schema=2`, `scenario`, `candidate_sha`, `ci_run_id`, `pr_number`, `merge_sha`, `run_id`, `run_attempt` |
 
-Avant toute première sonde sur le serveur Hoben, vérifier cumulativement :
-l'environnement et la règle d'approbation effective, le commit exact revu,
-le workflow installé sur une branche de confiance, la destination TLS fixe,
-la liste des seuls messages de lecture autorisés, les budgets de temps/sessions,
-le chiffrement préalable des captures et la disponibilité d'un rapport
-anonymisé. Tout élément inconnu ou toute vérification inaccessible entraîne
-**NOT RUN** plutôt qu'un accès approximatif aux secrets.
+`scenario` vaut respectivement `h1h2` ou `ha-parity`. La v1 doit précéder la
+fusion et reste vérifiée lors des répétitions ; son absence ne se répare pas
+par une v1 post-fusion. La nouvelle v2 doit être postérieure à la fusion et
+antérieure au démarrage du dry-run de la tentative visée. Une v1 ou une ancienne
+v2 ne vaut jamais autorisation de la tentative suivante. DEV ne publie pas ces
+décisions et ne fabrique pas une approbation au nom de MANAGER.
 
-Ce document ne modifie aucune donnée de `protocol.md` et ne présume aucune
-longueur de trame inconnue.
+Après ces prérequis, seul **Re-run all jobs** sur le run original et le même SHA
+peut répéter la campagne (tentatives 2 à 50). Les jobs utilisent toujours le YAML
+et le code du SHA original : un ancien run ne reçoit pas les correctifs ultérieurs.
+Aucun commit factice, branche temporaire, tag déclencheur, `workflow_dispatch`
+indisponible, rerun de job isolé ou **Re-run failed jobs** n'est un substitut.
+Le propriétaire peut utiliser l'interface GitHub si le connecteur n'expose pas
+le rerun complet ; cette action seule n'autorise jamais l'accès Hoben.
+
+Pour N > 1, l'API doit fournir le run et son `run_attempt`, l'identité distincte
+`triggering_actor`, puis des jobs courants uniques avec `run_id`, `head_sha` et
+`run_attempt` concordants. Le dry-run courant doit être réussi et son
+`started_at` exploitable ; admission courante queued/in_progress à l'admission,
+puis réussie au recheck avec collect courant queued/in_progress/waiting.
+Le dry-run de N−1 doit lui aussi être attesté réussi. Après un dry-run antérieur
+en échec, une relance complète est indiscernable d'une relance partielle et reste
+refusée. Champ absent, succès réutilisé ou preuve ambiguë : **NOT RUN**.
+
+## Environnements, approbations et recheck avant secrets
+
+La politique effective doit être relue par API, sans déduire sa conformité de
+`experimental.protected=true` ou d'une déclaration de réglage. Les gates actuels
+n'acceptent pas les mêmes modes pour les deux environnements :
+
+| Environnement | Politique acceptée |
+| --- | --- |
+| `hoben-experimental` | `protected_branches=false`, `custom_branch_policies=true` ; exactement une règle `experimental` de type `branch`, sans wildcard ni tag. |
+| `hoben-live` | Même politique personnalisée, **ou** `protected_branches=true`, `custom_branch_policies=false` avec lecture API effective de `experimental`, `protected=true`, HEAD égal au SHA testé à l'admission et au recheck. |
+
+L'empreinte de réservation inclut la politique, la preuve de branche et les
+reviewers ; un changement de mode ou de politique refuse le recheck. Réponse
+incomplète, mode mixte/inconnu, erreur API ou branche déplacée : **NOT RUN**.
+
+L'absence de reviewers requis est admise uniquement si l'API l'atteste réellement.
+Une règle `required_reviewers` impose `prevent_self_review=true`, des utilisateurs
+GitHub identifiés, au moins un reviewer indépendant de MANAGER, et une véritable
+approbation du déploiement. Les règles inconnues sont refusées ; les règles
+GitHub configurées, notamment l'attente, restent obligatoires. Jusqu'à approbation
+requise : **PENDING APPROVAL**, sans vote à la place du reviewer ni contournement.
+
+Pour N > 1, le recheck exige une approbation fraîche propre à la tentative,
+avec date de décision au moins égale au début du dry-run courant. Le `created_at`
+de `environments[]` date l'environnement, **pas** l'approbation. Si l'historique
+GitHub ne fournit pas de date exploitable de décision, le gate refuse. Cette
+compatibilité avec reviewers requis reste **non validée opérationnellement** ;
+ni CI verte, ni ancien approval, ni commentaire ne comble cette preuve manquante.
+
+Le job collect attend l'environnement puis revalide toutes les preuves avant
+l'unique étape recevant `HOBEN_USER_GUID` et `HOBEN_DEVICE_GUID`. Ne pas installer
+de dépendance candidate arbitraire ni transmettre de token GitHub/Actions/OIDC
+ou de fichier de commandes Actions au sous-processus candidat. Les lanceurs
+utilisent une allowlist d'environnement et n'exportent pas stdout/stderr privés.
+Ne jamais modifier Settings, secrets, reviewers ou protections pour faire passer
+un test. Une configuration invérifiable laisse la campagne non exécutée.
+
+## Réservation anti-rejeu et concurrence
+
+Admission réserve atomiquement un tag non release, sur un runner sans secret
+Hoben. Tentative 1 : `hoben-experimental-h1h2-<SHA>` ou
+`hoben-live-ha-parity-<SHA>`. Tentative N > 1 :
+`hoben-<scenario>-<SHA>-run<run_id>-attempt<N>`. Au recheck, référence, objet,
+SHA et empreinte de décision/politique doivent correspondre exactement.
+Une réservation consommée par échec ou annulation n'est jamais supprimée,
+réécrite ou réutilisée pour contourner l'admission.
+
+`createRef` est atomique tant que la référence existe ; cela ne garantit pas
+son indélébilité. Les protections de tags/rulesets ne sont pas présumées actives.
+Un acteur pouvant supprimer/réécrire le tag pourrait effacer la trace ; MANAGER
+doit évaluer cette limite. Si une preuve durable de non-réutilisation est requise
+et indisponible, conserver **NOT RUN**, sans changer les permissions.
+
+Les deux voies partagent le mutex `hoben-read-only-observation`. À l'admission
+et au recheck, les gates recherchent aussi les workflows historiques actifs
+(`requested`, `queued`, `pending`, `waiting`, `in_progress`) et refusent une
+observation concurrente ou une identification ambiguë. Ces deux lectures API
+ne sont pas un verrou global atomique contre un workflow hors mutex. MANAGER
+doit contrôler les chemins historiques encore déclenchables et ne pas exécuter
+une ancienne sonde simultanément. Ne pas revendiquer une exclusion globale non
+prouvée.
+
+## Données privées, publication et résultat
+
+Le chemin H1/H2 courant conserve RX, journaux et identité dans un dossier privé
+hors checkout (0700, fichiers 0600), puis les détruit dans `finally`. Aucun RX,
+GUID, secret, code, registre ou donnée domestique ne quitte le runner. Les anciens
+exports CMS restent chiffrés ; aucune clé ancienne n'est demandée ou reconstruite.
+Leur procédure n'autorise pas un export brut dans le chemin actuel sans CMS.
+
+Seul un rapport numérique/catégoriel allowlisté sort de collect, après projection
+Python et validation Node indépendante. Les chronologies portent sur temps
+relatifs, tailles, offsets, catégories TX/RX, fermeture et candidats H2, jamais
+les octets inconnus ni des exceptions libres. Les candidats restent
+`h2_hypothesis_only` ; les compteurs de fragmentation/concaténation ne prouvent
+pas de frontières. Bornes de validation : 260 lectures, 100 TX, 256 annotations,
+1 MiB RX, 180 s de chronologie par session, lecture du rapport au plus 2 MiB.
+Le transfert vers publish impose en plus un JSON d'au plus **340 KiB**
+(`MAX_REPORT_BYTES`) ; dépasser cette borne refuse la sortie encodée. Ces
+plafonds n'étendent pas le budget d'expérience de 90 s par session.
+
+Collect ne téléverse aucun fichier. Sa sortie encodée et bornée est transmise
+au job publish sur un **nouveau runner sans environnement ni secret Hoben**,
+qui décode, valide et matérialise à nouveau le JSON. Sortie absente/tronquée ou
+champ supplémentaire : aucun upload ni repli brut. Les rapports contiennent
+`scenario`, `merge_sha`, `pr_number`, `run_id`, `run_attempt`, vérifiés contre
+les preuves Actions/recheck avant upload et de nouveau au résultat. Artefacts
+`experimental-report-<SHA>-<run_id>-a<N>` ou
+`live-ha-parity-report-<SHA>-<run_id>-a<N>`, rétention maximale de 7 jours.
+
+Le job result, sans secret Hoben, publie le statut correspondant seulement si
+collect, publication et rapport validé satisfont leur contrat. Un succès H1/H2
+reste `inconclusive` / `boundary_proven=false`, jamais une validation de framing.
+Une expérience absente/incomplète ne devient pas un succès protocolaire.
+
+## Handoff MANAGER et promotion
+
+Avant campagne, MANAGER contrôle le code, les preuves ci-dessus et la nécessité
+du scénario ; il publie la v1 avant fusion ou la v2 avant rerun. Après lancement
+réel, relever SHA, scénario, PR, run_id, run_attempt, acteur, URL, état effectif
+et limites du rapport. Une opération indisponible reste **NOT RUN** ; ne pas
+inventer un déclenchement ou une review. Aucun test live par DEV, cron ou CI PR.
+
+Les observations étayées vont dans [protocol.md](../protocol.md), la roadmap dans
+[project.md](../project.md), les règles d'agents dans [AGENTS.md](../AGENTS.md).
+Les résultats KO d'orchestration restent dans les runs/PR/Issues, pas comme faits
+de protocole. Dédupliquer les Issues ; `state:waiting` par défaut, `state:ready`
+uniquement après triage MANAGER. Une observation inconclusive ne clôt pas une
+inconnue. Chaque PR actualise [CHANGELOG.md](../CHANGELOG.md) ou justifie l'absence
+d'impact ; séparer fusions vérifiées, recherche expérimentale et travail en cours.
+
+Après développement et validations pertinentes sur `experimental`, seule une
+**nouvelle demande explicite du propriétaire** autorise à préparer la promotion
+vers `main`. Cette future PR exige CODEX REVIEW, MANAGER, CI et les validations
+conditionnelles applicables au SHA exact. Un résultat expérimental ne remplace
+pas le gate stable ; ses anciennes politiques doivent être revalidées avant
+usage. Cette documentation ne prépare ni n'autorise cette promotion.
