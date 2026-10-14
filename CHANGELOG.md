@@ -415,7 +415,7 @@ Toute PR documente les modifications réellement livrées, avec date, numéro de
 ### Documentation — synchronisation vers `main` par PR #78 (en attente de fusion)
 
 Nettoyage des documents actifs, sécurité et gouvernance expérimentale. Ces changements proviennent de la documentation préparée sur `experimental`
-(notamment PR #77) ; la PR #78 propose leur synchronisation documentaire
+(notamment la PR #77, fusionnée sur `experimental` le 14 octobre 2026, commit de fusion `fd4453e9bd229d9c33c91c0c63ccdc31acbd528c`) ; la PR #78 propose leur synchronisation documentaire
 vers `main` sans importer de code, tests, scripts ni workflows expérimentaux.
 **Tant que la PR #78 n'est pas fusionnée, cette entrée décrit une livraison
 proposée et non réalisée ; le SHA de fusion et les tests de livraison restent
