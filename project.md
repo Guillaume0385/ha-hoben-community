@@ -143,10 +143,11 @@ de budget arrêtent la session, sans saut d'octets ni resynchronisation devinée
 Les lectures restent fixes et strictement en lecture seule, avec TLS vérifié
 vers `myhoben.fr:465` et un seul propriétaire RX.
 
-La tranche documentaire 7/8-A n'installe aucun framer, sonde ou workflow et
-n'autorise aucun lancement réel. La future tâche 7/8-B devra fixer les budgets
-propres et les gates avant revue/fusion MANAGER ; voir le
-[contrat de la future voie](docs/experimental-protocol-workflow.md#future-voie-session-300--hypothèse-expérimentale).
+La tranche documentaire 7/8-A n'autorisait aucun lancement réel. La tranche
+7/8-B fournit une voie dédiée (300 s utiles, plafond global 360 s, trois
+ouvertures, 1 Mio RX et six lectures fixes au maximum) qui reste soumise aux
+gates et à une décision MANAGER distincte avant merge ; voir le
+[contrat de la voie](docs/experimental-protocol-workflow.md#voie-session-300--hypothèse-expérimentale).
 `NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
