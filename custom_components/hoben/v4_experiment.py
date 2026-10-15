@@ -36,6 +36,8 @@ class Session300BudgetError(HobenProtocolError):
 class Session300:
     """One shared lifetime budget, explicitly named for the fixed experiment."""
 
+    MAX_READS = 6
+
     def __init__(self, *, clock=time.monotonic):
         self.clock = clock
         self.opens = self.rx_bytes = self.rx_chunks = self.pings = self.pongs = 0
@@ -94,12 +96,43 @@ class Session300:
 
     def request(self):
         now = self.clock()
-        if self.requests >= 6 or (
+        if self.requests >= self.MAX_READS or (
             self._last_read is not None and now - self._last_read < 60
         ):
             raise Session300BudgetError()
         self.requests += 1
         self._last_read = now
+
+
+class SessionReconnect(Session300):
+    """Fixed second-scenario budget, never an extension of Session300 defaults.
+
+    Acceptance/loss callbacks come from the sole session owner, so a loss and
+    recovery between collector ticks cannot masquerade as continuous stability.
+    Ten reads share one cadence across every opening; no budget is replenished.
+    """
+
+    MAX_READS = 10
+
+    def __init__(self, *, clock=time.monotonic):
+        super().__init__(clock=clock)
+        self.accepted_at = None
+        self.generation_pongs = 0
+        self.last_lost_generation = None
+
+    def __repr__(self):
+        return "SessionReconnect()"
+
+    def accepted(self, generation):
+        super().accepted(generation)
+        self.accepted_at = self.clock()
+        self.generation_pongs = self.pongs
+
+    def lost(self, generation):
+        if self.connected_generation == generation and generation is not None:
+            self.last_lost_generation = generation
+            self.accepted_at = None
+        super().lost(generation)
 
 
 @dataclass(frozen=True, slots=True)

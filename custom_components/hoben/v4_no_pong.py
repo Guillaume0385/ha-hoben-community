@@ -21,9 +21,20 @@ class NoPongAfter120:
         self._opened_at = None
         self._first = self._current = self._last_eof = None
         self.suppressed = self.peer_eofs = self.peer_eofs_after_suppression = 0
+        self.first_eof_after_suppression_at = None
 
     def __repr__(self):
         return "NoPongAfter120()"
+
+    @property
+    def first_opened_at(self):
+        """Monotonic first acceptance, not TCP connect or collector start."""
+        return self._opened_at
+
+    @property
+    def first_generation(self):
+        """Opaque session generation to which the suppression applies."""
+        return self._first
 
     def accepted(self, generation):
         if self._first is None:
@@ -50,3 +61,4 @@ class NoPongAfter120:
         self.peer_eofs += 1
         if generation == self._first and self.suppressed:
             self.peer_eofs_after_suppression += 1
+            self.first_eof_after_suppression_at = self._clock()

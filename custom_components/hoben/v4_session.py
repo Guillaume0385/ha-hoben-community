@@ -59,7 +59,12 @@ from .session import (
     _open_session,
 )
 from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
-from .v4_experiment import BudgetTransport, ExperimentalV4Framer, Session300
+from .v4_experiment import (
+    BudgetTransport,
+    ExperimentalV4Framer,
+    Session300,
+    SessionReconnect,
+)
 from .v4_no_pong import NoPongAfter120
 
 
@@ -228,7 +233,10 @@ class V4Session:
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
-        if session_300 is not None and type(session_300) is not Session300:
+        if session_300 is not None and type(session_300) not in (
+            Session300,
+            SessionReconnect,
+        ):
             raise HobenInvalidInputError()
         if no_pong_after_120 is not None and (
             type(no_pong_after_120) is not NoPongAfter120 or session_300 is None
