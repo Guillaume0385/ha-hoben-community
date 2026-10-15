@@ -117,7 +117,10 @@ def validate_report(report, proof):
     }.items():
         require(type(report[key]) is int and 0 <= report[key] <= limit)
     require(report["result"] in RESULTS and report["terminal"] in STOPS)
-    require(report["failure_phase"] in {"none", "opening", "scheduled_read", "lifecycle_transition", "teardown"})
+    require(
+        report["failure_phase"]
+        in {"none", "opening", "scheduled_read", "lifecycle_transition", "teardown"}
+    )
     require(report["failure_category"] in STOPS)
     require(report["message_category"] == "unclassified")
     require(report["failure_category"] == report["terminal"])
@@ -230,7 +233,9 @@ async def observe(
     except Exception:
         result, terminal = "interrupted", "internal"
     finally:
-        failure_phase = "none" if terminal in {"completed", "recovery_verified"} else phase
+        failure_phase = (
+            "none" if terminal in {"completed", "recovery_verified"} else phase
+        )
         measured = 0 if start is None else max(0, int((clock() - start) * 1000))
         if stop is not None:
             stop.cancel()
