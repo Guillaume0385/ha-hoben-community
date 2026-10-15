@@ -23,7 +23,7 @@ class Session300:
 
     def __init__(self, *, clock=time.monotonic):
         self.clock = clock
-        self.opens = self.rx_bytes = self.pings = self.pongs = 0
+        self.opens = self.rx_bytes = self.rx_chunks = self.pings = self.pongs = 0
         self.requests = self.responses = 0
         self.partial = False
         self.connected_generation = None
@@ -51,6 +51,7 @@ class Session300:
     def receive(self, data):
         if not isinstance(data, bytes) or len(data) > 4096:
             raise Session300BudgetError()
+        self.rx_chunks += 1
         self.rx_bytes += len(data)
         if self.rx_bytes > 1048576:
             raise Session300BudgetError()
