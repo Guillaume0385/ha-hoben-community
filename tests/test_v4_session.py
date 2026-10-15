@@ -25,6 +25,7 @@ from custom_components.hoben.transport import (
     TransportTlsError,
 )
 from custom_components.hoben.v4_session import (
+    HandoffState,
     SessionNotImplementedError,
     SessionSnapshot,
     SessionState,
@@ -333,14 +334,21 @@ def test_shutdown_failure_does_not_mask_opening_failure():
     assert session._transport is None
 
 
-def test_byte_at_a_time_retains_prefix_without_reading_delayed_suffix():
+def test_byte_at_a_time_retains_prefix_and_refuses_delayed_suffix():
     prefix = opened_prefix()
     session, transport, _ = opening_session([bytes([b]) for b in prefix] + [b"\x0a"])
-    asyncio.run(session.connect())
-    assert transport.read.await_count == 48
-    assert session._opening_buffer == prefix
-    assert not session.snapshot.boundary_proven
-    asyncio.run(session.close())
+
+    async def scenario():
+        await session.connect()
+        with pytest.raises(HobenAmbiguousSessionError):
+            await session.wait_rx_stopped()
+        assert transport.read.await_count == 49
+        assert session._opening_buffer == prefix + b"\x0a"
+        assert session.snapshot.handoff is HandoffState.AMBIGUOUS
+        assert not session.snapshot.boundary_proven
+        await session.close()
+
+    asyncio.run(scenario())
 
 
 def test_tls_failure_before_openclient_is_sanitized_and_closed():
@@ -382,3 +390,193 @@ def test_real_transport_with_another_destination_is_rejected_before_network(stre
         asyncio.run(session.connect())
     streams.connect.assert_not_called()
     assert session.state is SessionState.DISCONNECTED
+
+
+@pytest.mark.parametrize(
+    "tail", [b"\x0a", b"\x0eopaque", b"\x1bopaque", b"\xffunknown"]
+)
+@pytest.mark.parametrize("split", range(1, 49))
+def test_every_prefix_split_and_coalesced_tail_preserves_order_without_routing(
+    split, tail
+):
+    prefix = opened_prefix()
+    session, transport, _ = opening_session([prefix[:split], prefix[split:] + tail])
+
+    async def scenario():
+        if split < 48:
+            with pytest.raises(HobenAmbiguousSessionError):
+                await session.connect()
+            assert session._rx_task is None
+        else:
+            await session.connect()
+            with pytest.raises(HobenAmbiguousSessionError):
+                await session.wait_rx_stopped()
+            assert session._rx_task.done()
+        assert session._opening_buffer == prefix + tail
+        assert session.state is SessionState.DISCONNECTED
+        assert session.snapshot.unclassified_bytes == len(tail)
+        assert session.snapshot.handoff is HandoffState.AMBIGUOUS
+        assert not session.snapshot.boundary_proven
+        transport.write.assert_awaited_once()
+        transport.close.assert_awaited_once()
+        await session.close()
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_one_rx_owner_with_concurrent_observers_requests_and_close():
+    session, transport, factory = opening_session([])
+
+    async def scenario():
+        active_reads = 0
+        owners = []
+        rx_started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def read(*args, bounded=True):
+            nonlocal active_reads
+            assert active_reads == 0, "overlapping transport readers"
+            active_reads += 1
+            try:
+                owners.append(asyncio.current_task())
+                if bounded:
+                    return opened_prefix()
+                rx_started.set()
+                await release.wait()
+                return b"\x0a\x0eopaque\x1bopaque\xff"
+            finally:
+                active_reads -= 1
+
+        transport.read.side_effect = read
+        await session.connect()
+        await rx_started.wait()
+        reader = session._rx_task
+        assert owners == [asyncio.current_task(), reader]
+        assert session.snapshot.handoff is HandoffState.UNPROVEN
+        with pytest.raises(SessionStateError):
+            await session.connect()
+        with pytest.raises(SessionNotImplementedError):
+            await session.request_v4_data()
+        observer = asyncio.create_task(session.wait_rx_stopped())
+        await asyncio.sleep(0)  # Enter the shielded observer before cancelling it.
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+        assert not reader.done() and not reader.cancelling()
+        release.set()
+        results = await asyncio.gather(
+            session.wait_rx_stopped(), session.wait_rx_stopped(), return_exceptions=True
+        )
+        assert all(isinstance(r, HobenAmbiguousSessionError) for r in results)
+        assert (
+            session._opening_buffer == opened_prefix() + b"\x0a\x0eopaque\x1bopaque\xff"
+        )
+        with pytest.raises(HobenAmbiguousSessionError):
+            await session.request_v4_data()
+        assert owners == [asyncio.current_task(), reader]
+        assert active_reads == 0
+        await asyncio.gather(session.close(), session.close())
+        assert reader.done()
+        assert session.state is SessionState.CLOSED
+
+    asyncio.run(scenario())
+    factory.assert_called_once()
+    transport.write.assert_awaited_once()
+    transport.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TransportEOF("synthetic"),
+        TransportTlsError("synthetic"),
+        RuntimeError("synthetic-private-failure"),
+    ],
+)
+def test_rx_error_is_sanitized_and_owner_is_awaited(failure, caplog):
+    session, transport, _ = opening_session([opened_prefix(), failure])
+
+    async def scenario():
+        await session.connect()
+        error = (
+            HobenProtocolError
+            if isinstance(failure, RuntimeError)
+            else HobenTransportError
+        )
+        with pytest.raises(error):
+            await session.wait_rx_stopped()
+        assert session._rx_task.done()
+        assert session.state is SessionState.DISCONNECTED
+        assert session.snapshot.handoff is HandoffState.UNPROVEN
+        assert session._opening_buffer == opened_prefix()
+        assert "synthetic-private-failure" not in repr(session.snapshot) + repr(session)
+        assert not caplog.records
+        await session.close()
+
+    asyncio.run(scenario())
+    transport.close.assert_awaited_once()
+    transport.write.assert_awaited_once()
+
+
+@pytest.mark.parametrize("cancel_owner", [True, False])
+def test_rx_cancellation_and_close_wait_for_transport_cleanup(cancel_owner):
+    session, transport, _ = opening_session([])
+
+    async def scenario():
+        started = asyncio.Event()
+
+        async def read(*args, bounded=True):
+            if bounded:
+                return opened_prefix()
+            started.set()
+            await asyncio.Future()
+
+        transport.read.side_effect = read
+        await session.connect()
+        await started.wait()
+        reader = session._rx_task
+        if cancel_owner:
+            reader.cancel()
+            with pytest.raises(HobenTransportError):
+                await session.wait_rx_stopped()
+            assert session.state is SessionState.DISCONNECTED
+        await asyncio.gather(session.close(), session.close())
+        assert reader.done()
+        assert session._transport is None
+        assert not session._opening_buffer
+        assert session.state is SessionState.CLOSED
+
+    asyncio.run(scenario())
+    transport.close.assert_awaited_once()
+
+
+def test_idle_rx_has_no_application_deadline_or_boundary_proof(streams, deadlines):
+    session = V4Session(user_guid="b" * 32)
+
+    async def scenario():
+        started = asyncio.Event()
+        reads = 0
+
+        async def read(*args):
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                return opened_prefix()
+            started.set()
+            await asyncio.Future()
+
+        streams.reader.read.side_effect = read
+        await session.connect()
+        await started.wait()
+        assert deadlines.contexts[-1][0] is None
+        assert deadlines.contexts[-1][1].when() is None
+        assert session.state is SessionState.CONNECTED
+        assert not session.snapshot.boundary_proven
+        assert session.snapshot.handoff is HandoffState.UNPROVEN
+        await session.close()
+        assert session._rx_task.done()
+
+    asyncio.run(scenario())
+    streams.writer.close.assert_called_once()
+    streams.writer.write.assert_called_once()
