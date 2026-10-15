@@ -98,14 +98,16 @@ remain allowed:
    `OpenedClient` result to the post-open persistent receive loop on the
    reference Osmose. This may validate message-length/type-transition behavior
    but must not invent or change an OpenClient/OpenedClient format. If the
-   handoff cannot be established safely, the persistent-session task must block
-   rather than guess.
+   handoff cannot be established safely, ordinary persistent reception must
+   block rather than guess. The narrowly scoped `session-300` experiment below
+   is an explicit exception for evaluating a hypothesis, not a framing proof.
 
 Unknown OpenClient/OpenedClient facts remain documented as unknown in
 `protocol.md`. Universal boundary knowledge is not a prerequisite for the
-reference-Osmose v0.1 target, but the **local handoff needed by the persistent
-session must itself be proven safe** before long-lived reception or DataUpdated
-state handling is enabled.
+reference-Osmose v0.1 target. Outside the opt-in `session-300` experiment below,
+the **local handoff needed by the persistent session must itself be proven
+safe** before long-lived reception is enabled. The experiment does not authorize
+DataUpdated state handling or change the current Home Assistant client.
 
 New v0.1 tasks should prioritize post-opening read-only behavior, V4 semantic
 decoding, diagnostics, polling reliability and deterministic tests. No new
@@ -114,7 +116,40 @@ started unless this scope decision is explicitly reversed.
 
 ### Priorité : session persistante V4 en lecture seule
 
-Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les lectures V4, gérer les messages inconnus sans désynchronisation et reconnecter uniquement après perte de session. Aucun framing non prouvé ne peut être supposé. Tests hors ligne et live requis.
+Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les lectures V4, gérer les messages inconnus sans désynchronisation et reconnecter uniquement après perte de session. Aucun framing non prouvé ne peut être présenté comme confirmé. L'hypothèse locale ci-dessous reste limitée à son scénario expérimental. Tests hors ligne et live requis.
+
+### Décision de périmètre — handoff expérimental `session-300`
+
+La [décision du propriétaire sur #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+et la [tâche MANAGER de #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+distinguent trois niveaux :
+
+- **Preuve factuelle :** seul le préfixe V4 décodable de 48 octets est établi.
+  La longueur totale d'OpenedClient reste **À VALIDER** ; les observations H1/H2
+  conservent `boundary_proven=false`. Une lecture TLS ne prouve aucune frontière.
+- **Décision de périmètre :** pour le seul scénario opt-in et borné
+  `session-300`, sur `experimental` et l'Osmose V4 de référence, le futur
+  gestionnaire pourra traiter les octets suivant le préfixe strictement accepté
+  comme trafic post-ouverture. C'est une **hypothèse expérimentale autorisée**,
+  sans nouvelle preuve locale ni généralisation aux autres profils.
+- **Validation fonctionnelle :** la session utile de 300 s reste **NOT RUN**.
+  Une décision de périmètre ne valide ni le futur code ni son résultat, et un
+  résultat fonctionnel ne démontre pas une longueur totale universelle.
+
+Le futur framer de cette voie devra s'arrêter en cas d'ambiguïté : seuls Ping
+et DataResponse corrélée selon les types/longueurs documentés seront admis.
+Type inconnu, DataUpdated, MBAP invalide, suffixe indécidable ou dépassement
+de budget arrêtent la session, sans saut d'octets ni resynchronisation devinée.
+Les lectures restent fixes et strictement en lecture seule, avec TLS vérifié
+vers `myhoben.fr:465` et un seul propriétaire RX.
+
+La tranche documentaire 7/8-A n'installe aucun framer, sonde ou workflow et
+n'autorise aucun lancement réel. La future tâche 7/8-B devra fixer les budgets
+propres et les gates avant revue/fusion MANAGER ; voir le
+[contrat de la future voie](docs/experimental-protocol-workflow.md#future-voie-session-300--hypothèse-expérimentale).
+`NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
+l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
+avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
 ### Critères de développement actifs — session persistante V4
 
@@ -123,8 +158,9 @@ Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les le
 The already implemented `OpenClient` / `OpenedClient` codec, validation and
 profile-selection path stays frozen. This series starts **after an opening has
 already been accepted** by the existing strict implementation. It must not invent
-a new OpenClient layout, change association behavior, guess an unresolved
-OpenedClient suffix, or broaden model support.
+a new OpenClient layout, change association behavior or broaden model support.
+Unresolved opening bytes remain unclassified outside the explicitly scoped
+`session-300` hypothesis above; that hypothesis never becomes a confirmed fact.
 
 The intended lifecycle for the reference Osmose is:
 
@@ -172,18 +208,21 @@ may later refresh state between polls once its safe merge semantics are proven.
 
 **Task 1 — post-open stream framing and router**
 
-First prove the safe handoff from the existing accepted OpenedClient path to
-post-open reception on the reference Osmose. This is a bounded validation of the
-transition only, not authorization to redesign OpenClient/OpenedClient. The
-implementation must never reinterpret unknown trailing opening bytes as a
-post-open message. If delayed/unclassified opening bytes are observed or the
-handoff cannot be established deterministically, stop and mark the task blocked
-for MANAGER/protocol review.
+Outside `session-300`, first prove the safe handoff from the existing accepted
+OpenedClient path to post-open reception on the reference Osmose. This is a
+bounded validation of the transition only, not authorization to redesign
+OpenClient/OpenedClient. Unknown trailing opening bytes must remain unclassified;
+if the handoff cannot be established deterministically, stop and block for
+MANAGER/protocol review. In `session-300` only, evaluate the named experimental
+hypothesis above, retain its uncertainty and stop on any undecidable suffix.
 
 Then create a deterministic HA-independent parser/router for traffic received
-after that proven handoff. It must support Ping/Pong,
+after a proven handoff, or within the scoped experiment. The general target
+includes Ping/Pong,
 `DataResponseClient (0x0E)`, `DataUpdated (0x1B)`, documented close/error
 conditions that are valid post-open, and fragmented/coalesced TLS reads.
+For `session-300`, the narrower scope above applies: Ping and correlated
+DataResponse only; DataUpdated stops the experiment and is never interpreted.
 
 For `0x0E`, the MyHOBEN prefix is one byte and the embedded Modbus/TCP ADU size
 comes from the MBAP Length field. For `0x1B`, the prefix is five bytes and the
