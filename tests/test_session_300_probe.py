@@ -340,7 +340,9 @@ def test_diagnostic_schema_rejects_unbounded_or_sensitive_values(key, value):
     async def scenario():
         clock = Clock()
         budget = Session300(clock=clock)
-        return await observe(Lifecycle(budget), budget, PROOF, clock=clock, sleep=clock.sleep)
+        return await observe(
+            Lifecycle(budget), budget, PROOF, clock=clock, sleep=clock.sleep
+        )
 
     report = asyncio.run(scenario())
     report[key] = value
