@@ -66,14 +66,18 @@ commande technique, destination/script/mode libre. L'instrumentation H1/H2
 reste hors de `custom_components/hoben/`. Les suites pytest/CI PR restent hors
 ligne, sans identifiant Hoben ni accès au poêle.
 
-## Future voie `session-300` — hypothèse expérimentale
+## Voie `session-300` — hypothèse expérimentale
 
 La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
 et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 autorisent la préparation d'une validation fonctionnelle expérimentale de 300 s
-avec le gestionnaire partagé. Cette voie reste **à développer et installer** :
-la tranche documentaire 7/8-A n'ajoute ni code, ni workflow, ni autorisation live.
-Routage réel et validation 300 s : **NOT RUN**.
+avec le gestionnaire partagé. Après l'alignement documentaire 7/8-A, la tranche
+7/8-B fournit le [workflow dédié](../.github/workflows/hoben-session-300.yml),
+son [gate](../.github/scripts/session-300-gate.cjs), la
+[sonde](../scripts/run_session_300.py) et le
+[validateur d'export](../.github/scripts/session-300-report.cjs).
+Le code seul n'autorise aucun accès réel. Routage réel et validation 300 s :
+**NOT RUN** jusqu'à un run admis et un rapport effectivement vérifiés.
 
 Pour ce seul scénario opt-in, borné, sur `experimental` et l'Osmose V4 de
 référence, les octets suivant le préfixe V4 de 48 octets strictement accepté
@@ -84,8 +88,12 @@ Le [contrat de périmètre](../project.md#décision-de-périmètre--handoff-exp�
 limite le futur framer à Ping et DataResponse corrélée, avec arrêt sûr sur type
 inconnu, DataUpdated, MBAP invalide, suffixe indécidable ou dépassement de budget.
 
-La future tâche 7/8-B devra définir et tester hors ligne la sonde, ses budgets
-propres et une voie dédiée : scénario exact `session-300`, environnement
+La voie fixe vise 300 s utiles, avec plafond dur de processus 360 s, au plus
+trois ouvertures, 1 Mio RX cumulé et six lectures fixes espacées d'au moins 60 s.
+La collecte réserve 350 s, puis au plus 10 s au nettoyage. Le rapport n'exporte
+que la provenance SHA/run/PR/tentative, `boundary_proven=false`, les compteurs
+et des catégories fermées ; aucun registre, identifiant ni RX brut.
+Scénario exact `session-300`, environnement
 `hoben-experimental`, mutex `hoben-read-only-observation`, déclenchement uniquement
 par le push du merge MANAGER sur `experimental`. Avant tout accès réel, elle
 devra conserver la provenance dépôt/branche/SHA/acteur, la PR revue et fusionnée
@@ -94,12 +102,25 @@ distincte, unique, immuable et antérieure au merge. Admission, politique
 d'environnement lue par API, approbation éventuelle, réservation anti-rejeu et
 recheck avant secrets restent obligatoires ; aucun token GitHub/Actions ne doit
 être transmis à la sonde. DEV et la CI PR restent hors ligne. Aucun commentaire
-d'autorisation live ne sera publié pour cette PR documentaire.
+d'autorisation live n'est publié par DEV. Le marqueur dédié est
+`<!-- hoben-session-300-approval:v1 -->`, suivi d'un objet JSON strict avec
+`schema=1`, `scenario=session-300`, `candidate_sha` et `ci_run_id` seulement.
+MANAGER publie cette décision immuable après revue et CI du HEAD, avant merge.
+La réservation atomique `hoben-session-300-<candidate_sha>` reste consommée même
+en cas d'échec. Seule la tentative 1 est admise : aucun rerun n'est autorisé par
+cette voie. Le recheck relit SHA, politique, décision et claim après l'attente
+d'environnement ; si des reviewers sont requis, une approbation indépendante
+datée après le début du dry-run doit être réellement vérifiable. Sinon NOT RUN.
+Les données validées passent vers un runner de publication sans secret, puis
+sont revalidées avant artefact (rétention sept jours) et résultat. Seules
+`continuous_300s` et `reconnected` peuvent valider la fenêtre fonctionnelle ;
+les autres catégories sont `interrupted`, `inconclusive` et `not_run`.
 
 Cette future voie n'étend ni ne remplace H1/H2 ou HA parity : leurs budgets,
 gates, rapports, réservations et statuts restent inchangés. Les contrats détaillés
-ci-dessous décrivent ces deux voies installées ; ils ne prouvent pas qu'un gate
-`session-300` existe déjà. Une nouvelle revue exacte sera requise avant son usage.
+ci-dessous décrivent ces deux voies historiques installées ; leur v1/v2 ne
+vaut jamais autorisation `session-300`. La revue et les gates dédiés restent
+requis pour le scénario exact, sans réutilisation d'une décision H1/H2.
 `NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
 l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée comme
 une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
