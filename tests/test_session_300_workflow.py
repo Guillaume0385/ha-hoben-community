@@ -20,14 +20,13 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
     jobs = workflow["jobs"]
     assert set(jobs) == {
-        "suite-installation",
         "dry-run",
         "admission",
         "collect",
         "publish",
         "result",
     }
-    assert jobs["dry-run"]["needs"] == "suite-installation"
+    assert "needs" not in jobs["dry-run"]
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
@@ -74,31 +73,43 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert "steps.capture.outcome == 'success'" in jobs["collect"]["steps"][-1]["if"]
 
 
-def test_uninstalled_suite_barrier_reports_both_not_run_before_all_live_jobs(tmp_path):
+def test_activatable_suite_keeps_preflight_admission_and_recheck_before_secrets():
     workflow = yaml.load(
         (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    job = workflow["jobs"]["suite-installation"]
-    assert job["permissions"] == {} and "environment" not in job and "if" not in job
-    assert len(job["steps"]) == 1 and "uses" not in job["steps"][0]
-    summary = tmp_path / "summary"
-    result = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-c", job["steps"][0]["run"]],
-        env={"GITHUB_STEP_SUMMARY": str(summary), "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
+    jobs = workflow["jobs"]
+    assert " ".join(jobs["dry-run"]["if"].split()) == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/experimental' && "
+        "github.actor == 'Guillaume0385' && "
+        "github.triggering_actor == 'Guillaume0385' && github.run_attempt == 1"
     )
-    assert result.returncode == 1
-    assert summary.read_text().splitlines() == [
-        "session-300: NOT RUN (suite_not_installed)",
-        "session-reconnect-no-pong: NOT RUN (suite_not_installed)",
-    ]
-    # No always()/continue-on-error may bypass the failed prerequisite.
-    assert "always(" not in workflow["jobs"]["dry-run"]["if"]
-    assert "continue-on-error" not in json.dumps(job)
+    assert "needs" not in jobs["dry-run"]
+    assert jobs["admission"]["needs"] == "dry-run"
+    assert "if" not in jobs["admission"]  # Default success(), no failed-gate bypass.
+    assert jobs["collect"]["needs"] == "admission"
+    assert jobs["collect"]["if"] == "needs.admission.outputs.approved == 'true'"
+    for name in ("dry-run", "admission", "collect"):
+        assert "continue-on-error" not in json.dumps(jobs[name])
+    preflight = jobs["dry-run"]["steps"][-1]["with"]["script"]
+    admission = jobs["admission"]["steps"][-1]["with"]["script"]
+    assert "await gate.dryRun({github, context})" in preflight
+    assert "await gate.verify({github, context})" in admission
+    steps = jobs["collect"]["steps"]
+    recheck = next(s for s in steps if s.get("id") == "recheck")
+    capture = next(s for s in steps if s.get("id") == "capture")
+    exports = next(s for s in steps if s.get("id") == "exports")
+    assert steps.index(recheck) < steps.index(capture) < steps.index(exports)
+    assert (
+        "await gate.verify({github, context, recheck: true})"
+        in recheck["with"]["script"]
+    )
+    assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
+    assert exports["if"] == (
+        "${{ always() && steps.recheck.outputs.approved == 'true' && "
+        "steps.capture.outcome == 'success' }}"
+    )
+    assert jobs["result"]["needs"] == ["admission", "collect", "publish"]
 
 
 @pytest.mark.parametrize("suite", ["session-300-gate", "session-300-report"])

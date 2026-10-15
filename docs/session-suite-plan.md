@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — raccordement verrouillé 7/8-G2
+# Suite « Tests expérimentaux session » — activation candidate 7/8-H
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -9,20 +9,27 @@ SHA `4ea1c802155b95014d50c6a4aab8250621959466`, résultat vérifié par MANAGER
 `continuous_300s`, sans reconnexion. Elle ne valide pas le nouveau scénario ni
 la suite, et ne prouve aucune frontière universelle OpenedClient.
 
-## Installation structurelle : aucun accès réel
+## Installation revue, activation candidate sans résultat réel
 
 La fondation 7/8-E livre
 la politique opt-in `NoPongAfter120`, son raccordement au vrai `V4Session`, et
-ses tests avec le vrai `V4Lifecycle`. Aucun collecteur live n'instancie cette
-politique. Le scénario `session-300` conserve son fonctionnement par défaut.
+ses tests avec le vrai `V4Lifecycle`. Le collecteur de suite installé par G2
+instancie cette politique uniquement pour le second scénario. Le scénario
+`session-300` conserve son fonctionnement par défaut.
 
-Le job initial `suite-installation` échoue inconditionnellement, sans checkout,
-permission, environnement ni secret. Il écrit deux résultats **NOT RUN** dans
-le résumé du run. `dry-run` en dépend et ne peut continuer ; admission, collecte
-et publication restent derrière leurs dépendances et conditions existantes.
-Une ancienne autorisation session-300, même authentique, ne lève pas ce verrou.
-Cette pause mécanique empêche une exécution réelle du premier scénario seul.
-Elle ne modifie aucun Setting, secret, claim, gate historique ou H1/H2.
+G2 (PR #95) a raccordé la suite complète derrière le job en échec inconditionnel
+`suite-installation`. MANAGER a revu son HEAD et ses quatre checks réussis avant
+fusion. La petite tranche H prépare uniquement le retrait de ce job et de son
+`needs` dans `dry-run` ; aucun gate, budget, collecteur ou runtime n'est modifié.
+Le candidat doit encore être revu sur son SHA exact et sa CI avant toute fusion
+par MANAGER. Une PR ouverte ne lance rien : la nouvelle suite et la reconnexion
+réelle restent **NOT RUN**, aucun nouveau rapport n'est acquis.
+
+Après une éventuelle fusion autorisée, le push `experimental` commence par le
+préflight sans secret, puis admission, environnement et recheck avant l'unique
+étape utilisant l'identité. Sans décision de suite valide, aucun scénario ne
+démarre ; une ancienne autorisation session-300 ne suffit jamais. Aucun Setting,
+secret, claim réel, gate historique ou H1/H2 n'est modifié par DEV.
 
 ## Politique de Pong testée hors ligne
 
@@ -37,9 +44,9 @@ Elle ne modifie aucun Setting, secret, claim, gate historique ou H1/H2.
   Un EOF après inhibition est une observation temporelle, pas une preuve de
   timeout Ping. Aucun payload, registre, identifiant ou exception n'est exporté.
 
-La tranche 7/8-F a livré le moteur partagé décrit ci-dessous. G2 raccorde le
-point d'entrée et la publication, toujours derrière le verrou ; aucun nouveau
-rapport réel ni résultat de reconnexion n'est acquis par cette installation.
+La tranche 7/8-F a livré le moteur partagé décrit ci-dessous. G2 a raccordé le
+point d'entrée et la publication sous verrou ; H prépare son retrait isolé.
+Aucun nouveau rapport réel ni résultat de reconnexion n'est acquis.
 
 ## Plafonds approuvés pour le moteur offline, sans autorisation live
 
@@ -105,9 +112,9 @@ deadlines, nettoyage et refus des champs sensibles par les deux validateurs.
 ## Contrat d'admission spécifique — sous-ensemble 7/8-G1
 
 La tranche G1 a installé le contrat et le gate de suite, testés hors ligne.
-G2 les branche au workflow existant et raccorde launcher/collecteur/publication.
-Le verrou `suite-installation` reste strictement inchangé. Aucun commentaire
-d'approbation réel n'est publié par DEV.
+G2 les a branchés au workflow existant avec launcher/collecteur/publication sous
+verrou. H retire seulement le préalable structurel, sans changer ce contrat ni
+son implémentation. Aucun commentaire d'approbation réel n'est publié par DEV.
 
 Le point d'entrée fixe `.github/scripts/session-suite-gate.cjs` réutilise les
 mêmes contrôles que le gate historique : dépôt/acteur/push/HEAD protégé, workflow,
@@ -204,12 +211,27 @@ Les refus pré-secrets inscrivent séparément les deux NOT RUN. Tests Python/No
 et scripts réels du workflow exécutés hors ligne couvrent ces chemins, les
 plafonds d'export, les champs sensibles et les faux succès partiels.
 
-## Activation séparée toujours nécessaire
+## Handoff d'activation au MANAGER
 
-Le branchement G2 conserve le préalable en échec inconditionnel, sans checkout,
-permission, environnement ou secret. Une ancienne approbation ne peut lancer
-aucun scénario. Son retrait final et l'autorisation du run réel exigent une
-PR/décision d'activation séparée, après revue du contrat installé, du diff complet
-G2 et des quatre checks CI sur le HEAD exact par MANAGER.
+Le candidat H retire seulement le job `suite-installation` et son `needs`.
+Le contrat, les gates, le superviseur, les collecteurs, les schémas et budgets
+installés restent identiques. Les tests structurels vérifient la chaîne
+préflight → admission → recheck → capture, l'unique étape avec secrets et
+l'export après succès ; les régressions offline conservent le refus des décisions
+absentes/anciennes/fausses, claims invalides et preuves CI/SHA/politique/revue
+incorrectes, ainsi que la publication isolée et le résultat global indivisible.
+
+MANAGER doit relire le diff et les quatre checks sur le HEAD candidat exact,
+puis publier l'unique décision immuable du contrat installé, avec le bon SHA,
+le run CI exact, les deux scénarios et leurs limites fixes, **avant** la fusion
+au HEAD attendu. DEV ne publie ni cette décision ni un claim réel et ne lance
+aucun run. Après fusion, le push reste soumis à tous les gates installés et au
+recheck ; aucune ancienne décision/claim ni relance ne constitue un repli.
+
+La validation exige ensuite un run réellement admis et son rapport anonymisé
+vérifié : premier scénario admissible et second `recovered_120s`. `NOT RUN`,
+`no_disconnect`, `not_exercised`, `inconclusive` ou échec ne valident pas la suite.
+Un EOF après inhibition ne prouve pas sa cause ; `boundary_proven=false` reste
+obligatoire. L'étape 8 demeure suspendue tant que cette validation manque.
 DEV/CI restent offline ; ni rerun ancien, ni workflow indépendant, ni déclencheur
 manuel, ni HA/hoben-live/main, ni commande/association/écriture Modbus.

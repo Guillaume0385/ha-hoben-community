@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-H : candidat d'activation limité au retrait du job
+  `suite-installation` et de son `needs`. Conditions push, gates session-suite,
+  contrat, runtime, budgets, publication et statut global conservés ; tests
+  structurels adaptés et régressions de refus offline maintenues. Revue MANAGER
+  du HEAD/CI puis décision immuable distincte requises avant fusion. Aucun run,
+  approbation ou claim réel par DEV ; suite/reconnexion NOT RUN, étape 8 suspendue.
+
 - Issue #81, tranche 7/8-G2 : raccordement du gate session-suite, du moteur partagé
   et des deux rapports au workflow push existant. Superviseur externe 360/600/
   1020 s avec ACK avant scénario 2 et arrêt du groupe de processus, tests hors

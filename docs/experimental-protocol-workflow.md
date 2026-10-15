@@ -68,12 +68,13 @@ ligne, sans identifiant Hoben ni accès au poêle.
 
 ## Voie `session-300` — hypothèse expérimentale
 
-La [tranche structurelle 7/8-E](session-suite-plan.md) suspend les accès réels de
-cette voie pendant la préparation d'une suite unique à deux scénarios. Un job
-initial refuse toute collecte et annonce deux NOT RUN jusqu'à une activation
-complète revue par MANAGER. Les gates ci-dessous restent conservés ; aucune
-ancienne autorisation ne lève ce verrou. La validation historique 300 s acquise
-ne vaut pas validation du nouveau scénario ni autorisation de l'étape 8.
+La [tranche structurelle 7/8-E](session-suite-plan.md) a suspendu cette voie avec
+un job en échec pendant l'installation de la suite complète à deux scénarios.
+G1/G2 sont fusionnées ; H prépare le seul retrait de ce préalable, après revue
+MANAGER du raccordement. Tous les gates ci-dessous restent conservés ; aucune
+ancienne autorisation session-300 n'admet la suite. Une PR candidate ne lance
+aucun test réel : suite/reconnexion restent NOT RUN. La validation historique
+300 s acquise ne vaut pas validation du nouveau scénario ni autorisation de 8.
 
 La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
 et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
@@ -133,13 +134,17 @@ l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée co
 une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
 étape 7 réellement concluante ; aucune promotion automatique vers `main`.
 
-## Suite raccordée sous verrou, activation réelle séparée
+## Suite installée, activation candidate 7/8-H
 
 Le [sous-ensemble 7/8-G1](session-suite-plan.md#contrat-dadmission-spécifique--sous-ensemble-78-g1)
-installe `session-suite-gate.cjs` et son contrat fixe. G2 branche ce gate dans le
-workflow push existant et ajoute le launcher/collecteur de suite. Le préalable
-`suite-installation` échoue toujours,
-avec deux NOT RUN ; aucune ancienne décision ne peut activer un run partiel.
+installe `session-suite-gate.cjs` et son contrat fixe. G2 (PR #95) a branché ce gate
+dans le workflow push existant et ajouté le launcher/collecteur de suite sous
+verrou. H retire seulement `suite-installation` et son `needs` dans `dry-run` ;
+conditions exactes push/branche/acteurs/tentative, permissions, gates, runtime,
+contrat et budgets restent identiques. Aucune ancienne décision ne peut activer
+un run partiel. Le préflight sans secret mène à l'admission, puis à
+l'environnement et au recheck avant capture ; tout refus pré-secrets conserve
+les deux NOT RUN.
 Le gate `session-300` historique garde son contrat et ses contrôles. Les deux
 wrappers réutilisent les mêmes vérifications de provenance/revue/CI/politique
 d'environnement et le même recheck, avec des décisions et claims distincts.
@@ -177,10 +182,17 @@ ou refusé reste en échec. Les refus pré-secrets annoncent les deux NOT RUN,
 sans fabriquer de rapport de collecte. Les scripts du workflow et cette
 chaîne d'export/publication sont testés hors ligne.
 
-Le retrait final du verrou et tout accès réel restent une PR/décision d'activation
-séparée par MANAGER, après revue du contrat, du raccordement installé et de sa CI.
-Aucun nouveau résultat live, aucune validation de reconnexion ni preuve de
-frontière OpenedClient ne découle des tests simulés du gate.
+Ce candidat d'activation doit être revu par MANAGER sur son SHA exact et ses
+quatre checks CI. MANAGER publie ensuite la décision unique immuable conforme au
+contrat installé avant la fusion au HEAD attendu. DEV ne publie aucune décision,
+ne réserve aucun claim réel et ne lance aucun run. Le push après fusion reste
+soumis aux contrôles installés, dont recheck, politique et approbation fraîche
+si requise. La PR ouverte ou fusionnée ne prouve aucun résultat réel.
+Suite/reconnexion : NOT RUN tant qu'aucun run admis et rapport anonymisé ne sont
+vérifiés. Il faut le premier scénario admissible et `recovered_120s` ; absence
+d'EOF, scénario non exercé, résultat inconclusif ou échec bloquent l'étape 8.
+EOF après inhibition n'établit pas sa cause ; `boundary_proven=false` demeure.
+Aucune preuve de frontière OpenedClient ne découle des tests simulés du gate.
 
 ## Admission : provenance, revue et CI exactes
 
