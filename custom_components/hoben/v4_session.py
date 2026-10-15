@@ -2,7 +2,8 @@
 
 OpenClient is the opening request. The observed V4 OpenedClient response has a
 decodable 48-byte prefix, not a proven complete-message boundary. This skeleton
-retains opening bytes privately and never routes post-open traffic.
+retains opening bytes privately in ordinary mode. Only an explicit Session300
+budget opts into the owner's local experimental handoff hypothesis.
 """
 
 import asyncio
@@ -58,6 +59,7 @@ from .session import (
     _open_session,
 )
 from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
+from .v4_experiment import BudgetTransport, ExperimentalV4Framer, Session300
 
 
 class SessionState(StrEnum):
@@ -75,14 +77,15 @@ class HandoffState(StrEnum):
 
     UNPROVEN = "unproven"
     AMBIGUOUS = "ambiguous"
+    EXPERIMENTAL = "experimental_hypothesis"
 
 
 class DelimitedV4Message(Enum):
-    """Semantic input from proven framing, never an interpretation of raw RX.
+    """Semantic input from an explicit framing contract, never raw RX input.
 
-    This token does not prove a boundary. Only an independently established
-    message boundary may produce it. The current conservative RX owner never
-    creates this token and never invokes the delimited-message handler.
+    This token does not prove a boundary. Ordinary RX never creates it. The
+    session-300 framer may create it under the explicit local hypothesis, with
+    boundary_proven remaining false and no generalization to ordinary sessions.
     """
 
     PING = _PING
@@ -91,9 +94,9 @@ class DelimitedV4Message(Enum):
 class DelimitedV4DataResponse:
     """Private bytes of one complete response, bound to its originating exchange.
 
-    This contract is not a framer or a proof of wire freshness. A future proven
-    framer must preserve the originating exchange; it must not relabel old bytes
-    with the current waiter. The conservative RX owner never creates this object.
+    This contract is not a framer or proof of wire freshness. Every framer must
+    preserve the originating exchange, never relabel old bytes with a new waiter.
+    Only session-300 currently routes RX under its named experimental hypothesis.
     """
 
     __slots__ = ("_frame", "_exchange")
@@ -207,6 +210,8 @@ class V4Session:
         "_retryable_loss",
         "_operations",
         "_tx_operations",
+        "_experiment",
+        "_framer",
     )
 
     def __init__(
@@ -215,9 +220,14 @@ class V4Session:
         user_guid: str | None = None,
         device_guid: str = INITIAL_DEVICE_GUID,
         transport_factory: TransportFactory = AsyncTlsTransport,
+        session_300: Session300 | None = None,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
+        if session_300 is not None and type(session_300) is not Session300:
+            raise HobenInvalidInputError()
+        self._experiment = session_300
+        self._framer = ExperimentalV4Framer() if session_300 is not None else None
         self._transport_factory = transport_factory
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
         self._transport: SessionTransport | None = None
@@ -344,9 +354,9 @@ class V4Session:
     async def _send_delimited_ping(self, message: DelimitedV4Message) -> None:
         """Respond once to an already-delimited Ping (protocol.md §3).
 
-        This is an offline-testable primitive for a future proven framer, not a
-        stream parser. Raw bytes, including a lone 0x0A, cannot enter this API.
-        No current RX path calls it: post-OpenedClient framing is still unproven.
+        This primitive accepts semantic tokens, never raw bytes. Ordinary RX
+        does not call it. Only session-300 routes framed events under the local
+        experimental handoff hypothesis; a boundary is still not proven.
         A failed/cancelled write closes without replay, since emission is uncertain.
         """
         if message is not DelimitedV4Message.PING:
@@ -420,11 +430,15 @@ class V4Session:
         succeeded = False
         try:
             try:
+                if self._experiment is not None:
+                    self._experiment.opening()
                 self._transport = self._transport_factory()
                 if isinstance(self._transport, AsyncTlsTransport) and (
                     self._transport.host != "myhoben.fr" or self._transport.port != 465
                 ):
                     raise HobenInvalidInputError()
+                if self._experiment is not None:
+                    self._transport = BudgetTransport(self._transport, self._experiment)
                 result = await _open_session(
                     self._transport,
                     user_guid=self._user_guid,
@@ -444,7 +458,7 @@ class V4Session:
                 self._snapshot = replace(
                     self._snapshot, unclassified_bytes=result.unclassified_bytes
                 )
-                if result.unclassified_bytes:
+                if result.unclassified_bytes and self._experiment is None:
                     self._snapshot = replace(
                         self._snapshot, handoff=HandoffState.AMBIGUOUS
                     )
@@ -464,6 +478,10 @@ class V4Session:
                         opened.application_version,
                     ),
                 )
+                if self._experiment is not None:
+                    self._snapshot = replace(
+                        self._snapshot, handoff=HandoffState.EXPERIMENTAL
+                    )
                 self._device_guid = assigned
                 self._transition(SessionState.CONNECTED)
                 # Handshake reads have finished before this sole RX task starts.
@@ -476,6 +494,7 @@ class V4Session:
             except TransportError:
                 raise HobenTransportError() from None
             except (
+                HobenProtocolError,
                 HobenAuthorizationRequiredError,
                 HobenClosedError,
                 HobenAmbiguousSessionError,
@@ -507,24 +526,29 @@ class V4Session:
         No future/read-request method may read this transport independently.
         """
         try:
-            data = await transport.read(4096, bounded=False)
-            if not isinstance(data, bytes):
-                raise HobenProtocolError()
-            if not data:
-                raise TransportEOF("eof")
-            self._opening_buffer.extend(data)
-            self._snapshot = replace(
-                self._snapshot,
-                handoff=HandoffState.AMBIGUOUS,
-                unclassified_bytes=len(data),
-            )
-            self._rx_error = HobenAmbiguousSessionError()
+            if self._experiment is not None:
+                await self._receive_experimental(transport)
+            else:
+                data = await transport.read(4096, bounded=False)
+                if not isinstance(data, bytes):
+                    raise HobenProtocolError()
+                if not data:
+                    raise TransportEOF("eof")
+                self._opening_buffer.extend(data)
+                self._snapshot = replace(
+                    self._snapshot,
+                    handoff=HandoffState.AMBIGUOUS,
+                    unclassified_bytes=len(data),
+                )
+                self._rx_error = HobenAmbiguousSessionError()
         except asyncio.CancelledError:
             if self.state is not SessionState.CLOSED:
                 self._rx_error = HobenTransportError()
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             self._rx_error = HobenTransportError()
+        except HobenError as failure:
+            self._rx_error = failure
         except Exception:
             self._rx_error = HobenProtocolError()
         finally:
@@ -546,6 +570,34 @@ class V4Session:
         # Bind an observer's outcome to this transport, even if a caller later
         # makes a fresh explicit connection and resets the current session error.
         return self._rx_error
+
+    async def _receive_experimental(self, transport: SessionTransport) -> None:
+        """Sole RX owner under the session-300 hypothesis; never proves a boundary."""
+        data = bytes(self._opening_buffer[48:])
+        self._opening_buffer.clear()
+        first = True
+        while True:
+            exchange = (
+                None if first else (self._pending_read if self._read_sent else None)
+            )
+            first = False
+            events = self._framer.feed(data, exchange)
+            self._experiment.partial = self._framer.partial
+            for event in events:
+                if event.payload == b"\x0a":
+                    self._experiment.pings += 1
+                    await self._handle_delimited_ping(DelimitedV4Message.PING)
+                    self._experiment.pongs += 1
+                else:
+                    await self._handle_delimited_data_response(
+                        DelimitedV4DataResponse(event.payload, exchange=event.exchange)
+                    )
+                    self._experiment.responses += 1
+            data = await transport.read(4096, bounded=False)
+            if not data:
+                if self._framer.partial:
+                    raise HobenProtocolError()
+                raise TransportEOF("eof")
 
     async def wait_rx_stopped(self) -> None:
         """Await the RX owner and report its fixed typed error, without reading.
@@ -620,7 +672,8 @@ class V4Session:
     async def _request_v4_data(self, *, timeout: float) -> ModbusReadResponse:
         """Send the sole fixed V4 read and await a delimited contract response.
 
-        No live RX dispatch is installed. The total deadline covers TX queueing,
+        Ordinary RX has no dispatch; session-300 alone opts in. The total
+        deadline covers TX queueing,
         write and response. Abandoned requests close the session: fixed FFFF
         cannot distinguish a late wire response on a reused transport.
         """
@@ -651,6 +704,8 @@ class V4Session:
                         or self._transport is not transport
                     ):
                         raise HobenClientClosedError()
+                    if self._experiment is not None:
+                        self._experiment.request()
                     request = encode_data_request_client(
                         build_read_input_registers(
                             0xFFFF, 1024, 20, unit_id=HOBEN_UNIT_ID
@@ -731,6 +786,8 @@ class V4Session:
             await self._release_transport()
         finally:
             self._opening_buffer.clear()
+            if self._framer is not None:
+                self._framer.clear()
             self._user_guid = None
             self._device_guid = INITIAL_DEVICE_GUID
         if cancelled:
