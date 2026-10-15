@@ -8,7 +8,7 @@ retains opening bytes privately and never routes post-open traffic.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Protocol
 
 from .client import DEFAULT_BUILD, DEFAULT_DEVICE_INFO, _validate_device_guid
@@ -28,6 +28,8 @@ from .modbus import ModbusReadResponse
 from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason, encode_open_client
 from .profiles import StoveProfile
 from .session import (
+    _PING,
+    _PONG,
     AuthorizationRequiredResult,
     ClosedSessionResult,
     OpenSessionResult,
@@ -52,6 +54,17 @@ class HandoffState(StrEnum):
 
     UNPROVEN = "unproven"
     AMBIGUOUS = "ambiguous"
+
+
+class DelimitedV4Message(Enum):
+    """Semantic input from proven framing, never an interpretation of raw RX.
+
+    This token does not prove a boundary. Only an independently established
+    message boundary may produce it. The current conservative RX owner never
+    creates this token and never invokes the delimited-message handler.
+    """
+
+    PING = _PING
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +159,7 @@ class V4Session:
         "_device_guid",
         "_rx_task",
         "_rx_error",
+        "_tx_lock",
     )
 
     def __init__(
@@ -166,6 +180,7 @@ class V4Session:
         self._device_guid = device_guid
         self._rx_task: asyncio.Task[HobenError | None] | None = None
         self._rx_error: HobenError | None = None
+        self._tx_lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         return f"V4Session(state={self.state.value})"
@@ -195,13 +210,62 @@ class V4Session:
         return self._device_guid
 
     async def _release_transport(self) -> None:
-        """Detach before awaiting shutdown, preventing duplicate closes."""
-        transport, self._transport = self._transport, None
-        if transport is not None:
+        """Wait for any current TX, then detach and close exactly once."""
+        async with self._tx_lock:
+            transport, self._transport = self._transport, None
+            if transport is not None:
+                try:
+                    await transport.close()
+                except Exception:
+                    raise HobenTransportError() from None
+
+    async def _handle_delimited_ping(self, message: DelimitedV4Message) -> None:
+        """Respond once to an already-delimited Ping (protocol.md §3).
+
+        This is an offline-testable primitive for a future proven framer, not a
+        stream parser. Raw bytes, including a lone 0x0A, cannot enter this API.
+        No current RX path calls it: post-OpenedClient framing is still unproven.
+        A failed/cancelled write closes without replay, since emission is uncertain.
+        """
+        if message is not DelimitedV4Message.PING:
+            raise HobenProtocolError()
+        transport = self._transport
+        error: HobenError | None = None
+        cancelled = False
+        async with self._tx_lock:
+            # Recheck under the lock: a queued Pong must not outlive RX failure
+            # or close(), nor be sent on a replacement/absent transport.
+            if self._rx_error is not None:
+                raise self._rx_error from None
+            if (
+                self.state is not SessionState.CONNECTED
+                or transport is None
+                or self._transport is not transport
+            ):
+                raise SessionStateError()
             try:
-                await transport.close()
+                await transport.write(_PONG)
+            except asyncio.CancelledError:
+                cancelled = True
+                error = HobenTransportError()
+            except TransportError:
+                error = HobenTransportError()
             except Exception:
-                raise HobenTransportError() from None
+                error = HobenProtocolError()
+            if error is not None:
+                # Stop queued TX before releasing the lock for shutdown.
+                self._rx_error = self._rx_error or error
+                self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
+                if self.state is not SessionState.CLOSED:
+                    self._transition(SessionState.CLOSED)
+        if error is not None:
+            try:
+                await self.close()
+            except HobenTransportError:
+                pass  # Retain the primary, sanitized transmission failure.
+            if cancelled:
+                raise asyncio.CancelledError()
+            raise error from None
 
     async def connect(self) -> None:
         """Accept only the existing V4 opening, without post-open processing.
@@ -386,7 +450,7 @@ class V4Session:
                 pass  # The opening caller receives its sanitized failure.
         reader = self._rx_task
         cancelled = False
-        if reader is not None:
+        if reader is not None and reader is not asyncio.current_task():
             if not reader.done() and not reader.cancelling():
                 reader.cancel()
             try:

@@ -25,6 +25,7 @@ from custom_components.hoben.transport import (
     TransportTlsError,
 )
 from custom_components.hoben.v4_session import (
+    DelimitedV4Message,
     HandoffState,
     SessionNotImplementedError,
     SessionSnapshot,
@@ -580,3 +581,193 @@ def test_idle_rx_has_no_application_deadline_or_boundary_proof(streams, deadline
     asyncio.run(scenario())
     streams.writer.close.assert_called_once()
     streams.writer.write.assert_called_once()
+
+
+async def connected_ping_session():
+    """Inject a known synthetic prefix; park RX without manufacturing a boundary."""
+    session, transport, _ = opening_session([opened_prefix()])
+    await session.connect()
+
+    async def parked_read(*args, **kwargs):
+        await asyncio.Future()
+
+    transport.read.side_effect = parked_read
+    transport.write.reset_mock()
+    return session, transport
+
+
+def test_already_delimited_ping_produces_exactly_one_pong():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        before = session.snapshot
+        await session._handle_delimited_ping(DelimitedV4Message.PING)
+        transport.write.assert_awaited_once_with(b"\x0b")
+        assert session.snapshot is before
+        assert not session.snapshot.boundary_proven
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        10,
+        "ping",
+        b"",
+        b"\x0a",
+        b"\x0a\x0a",
+        b"\x0eopaque",
+        b"\x1bopaque",
+        bytearray(b"\x0a"),
+    ],
+)
+def test_raw_bytes_cannot_claim_to_be_a_delimited_ping(raw, caplog):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        before = bytes(session._opening_buffer)
+        with pytest.raises(HobenProtocolError, match="^malformed_response$"):
+            await session._handle_delimited_ping(raw)
+        assert session._opening_buffer == before
+        assert not session.snapshot.boundary_proven
+        transport.write.assert_not_awaited()
+        assert not caplog.records
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_pongs_are_serialized_across_awaits_without_another_reader():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        active = 0
+
+        async def write(payload):
+            nonlocal active
+            assert payload == b"\x0b"
+            assert active == 0, "overlapping TX"
+            active += 1
+            try:
+                entered.set()
+                await release.wait()
+                await asyncio.sleep(0)
+            finally:
+                active -= 1
+
+        transport.write.side_effect = write
+        tasks = [
+            asyncio.create_task(session._handle_delimited_ping(DelimitedV4Message.PING))
+            for _ in range(3)
+        ]
+        await entered.wait()
+        await asyncio.sleep(0)
+        assert transport.write.await_count == 1
+        assert not session._rx_task.done()
+        release.set()
+        await asyncio.gather(*tasks)
+        assert transport.write.await_count == 3
+        assert transport.read.await_count == 2  # Handshake + sole parked RX owner.
+        assert active == 0
+        await session.close()
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [TransportTlsError("synthetic-private-tx"), RuntimeError("synthetic-private-tx")],
+)
+def test_pong_failure_is_sanitized_closed_and_never_replayed(failure, caplog):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        transport.write.side_effect = failure
+        error = (
+            HobenTransportError
+            if isinstance(failure, TransportTlsError)
+            else HobenProtocolError
+        )
+        with pytest.raises(error) as raised:
+            await session._handle_delimited_ping(DelimitedV4Message.PING)
+        assert "synthetic-private-tx" not in str(raised.value) + repr(session.snapshot)
+        assert session.state is SessionState.CLOSED
+        assert session._rx_task.done()
+        assert not caplog.records
+        transport.write.assert_awaited_once_with(b"\x0b")
+        transport.close.assert_awaited_once()
+        with pytest.raises((HobenProtocolError, HobenTransportError)):
+            await session._handle_delimited_ping(DelimitedV4Message.PING)
+        transport.write.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_cancel_during_pong_closes_without_replay_or_orphan():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered = asyncio.Event()
+
+        async def write(payload):
+            entered.set()
+            await asyncio.Future()
+
+        transport.write.side_effect = write
+        sending = asyncio.create_task(
+            session._handle_delimited_ping(DelimitedV4Message.PING)
+        )
+        await entered.wait()
+        sending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sending
+        assert session.state is SessionState.CLOSED
+        assert session._rx_task.done()
+        transport.write.assert_awaited_once_with(b"\x0b")
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_close_waits_for_active_pong_and_rejects_queued_pong():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def write(payload):
+            entered.set()
+            await release.wait()
+
+        transport.write.side_effect = write
+        first = asyncio.create_task(
+            session._handle_delimited_ping(DelimitedV4Message.PING)
+        )
+        await entered.wait()
+        queued = asyncio.create_task(
+            session._handle_delimited_ping(DelimitedV4Message.PING)
+        )
+        closing = asyncio.create_task(session.close())
+        await asyncio.sleep(0)
+        assert session.state is SessionState.CLOSED
+        assert not closing.done()
+        transport.close.assert_not_awaited()
+        release.set()
+        await first
+        with pytest.raises(SessionStateError):
+            await queued
+        await closing
+        assert session._rx_task.done()
+        transport.write.assert_awaited_once_with(b"\x0b")
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("state", list(SessionState))
+def test_delimited_ping_refused_without_a_connected_transport(state):
+    session, factory = session_in(state)
+    with pytest.raises(SessionStateError):
+        asyncio.run(session._handle_delimited_ping(DelimitedV4Message.PING))
+    factory.assert_not_called()
