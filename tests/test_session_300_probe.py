@@ -291,3 +291,58 @@ def test_loss_at_window_end_cannot_use_a_stale_connected_snapshot():
         assert life.closed
 
     asyncio.run(scenario())
+
+
+def test_second_read_failure_reports_only_fixed_diagnostics():
+    """A successful first slot followed by a protocol error is not framed anew."""
+
+    class SecondReadFails(Lifecycle):
+        async def request_v4_data(self, *, timeout):
+            self.budget.request()
+            if self.budget.requests == 2:
+                raise HobenProtocolError()
+            self.budget.responses += 1
+            return {"registers": "synthetic-private"}
+
+    async def scenario():
+        clock = Clock()
+        budget = Session300(clock=clock)
+        budget.receive(b"synthetic")
+        life = SecondReadFails(budget)
+        report = await observe(life, budget, PROOF, clock=clock, sleep=clock.sleep)
+        assert report["result"] == "inconclusive"
+        assert report["terminal"] == report["failure_category"] == "protocol"
+        assert report["failure_phase"] == "scheduled_read"
+        assert report["message_category"] == "unclassified"
+        assert report["read_slot"] == 2
+        assert report["reads_ok"] == 1
+        assert report["rx_bytes_total"] == 9
+        assert report["rx_chunks_total"] == 1
+        assert "synthetic" not in json.dumps(report)
+        assert life.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("rx_bytes_total", 1048577),
+        ("rx_chunks_total", -1),
+        ("rx_chunks_total", True),
+        ("read_slot", 7),
+        ("failure_phase", "private/path"),
+        ("failure_category", "raw-exception"),
+        ("message_category", "0x0e"),
+    ],
+)
+def test_diagnostic_schema_rejects_unbounded_or_sensitive_values(key, value):
+    async def scenario():
+        clock = Clock()
+        budget = Session300(clock=clock)
+        return await observe(Lifecycle(budget), budget, PROOF, clock=clock, sleep=clock.sleep)
+
+    report = asyncio.run(scenario())
+    report[key] = value
+    with pytest.raises(ValueError, match="^invalid_session_300_report$"):
+        validate_report(report, PROOF)
