@@ -16,6 +16,17 @@ const SHA = /^[a-f0-9]{40}$/;
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const digest = v => crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const need = (fact, reason) => { if (!fact) throw new Error(reason); };
+const suite = require("./session-suite-contract.cjs");
+const legacyContract = Object.freeze({
+  marker: MARKER, scenario: "session-300", claimPrefix: "hoben-session-300-",
+  validApproval: (a, candidate) => a && !Array.isArray(a) &&
+    Object.keys(a).sort().join() === ["schema","scenario","candidate_sha","ci_run_id"].sort().join() &&
+    a.schema === 1 && a.scenario === "session-300" && a.candidate_sha === candidate && positive(a.ci_run_id),
+});
+const suiteContract = Object.freeze({
+  marker: suite.MARKER, scenario: "session-suite", claimPrefix: "hoben-session-suite-",
+  validApproval: suite.validApproval, claimContract: suite.CONTRACT,
+});
 // Only these fixed, non-sensitive categories may appear in Actions summaries.
 // Never publish an exception message, API response, URL or reviewer identity.
 const PUBLIC_REFUSALS = Object.freeze({
@@ -81,6 +92,10 @@ async function dryRun({ github, context, env = process.env }) {
   return result; // Secret-free: no identity, certificate, transport or network I/O.
 }
 
+async function suiteDryRun(options) {
+  return {...await dryRun(options), scenario: "session-suite"};
+}
+
 async function successfulPreflight(github, context, env, recheck) {
   const {data: run} = await github.rest.actions.getWorkflowRun({...API, run_id: context.runId});
   const manager = u => u?.id === MANAGER_ID && u.login === "Guillaume0385" && u.type === "User";
@@ -103,7 +118,7 @@ async function successfulPreflight(github, context, env, recheck) {
   return {number: 1, beganAt: Date.parse(dry[0].started_at)};
 }
 
-async function managerDecision(github, pr, context, proof) {
+async function managerDecision(github, pr, context, proof, contract) {
   need(SHA.test(pr.head?.sha) && positive(pr.number) &&
     typeof pr.head.ref === "string" && pr.head.ref.length > 0,
   "manager_decision_unverified");
@@ -112,17 +127,14 @@ async function managerDecision(github, pr, context, proof) {
   // Keep original pre-merge v1 binding for PR/HEAD/CI, even on repeats.
   // Reject a malformed/duplicate original decision, not only the new v2.
   const choices = comments.filter(c => c.user?.login === "Guillaume0385" &&
-    c.user.id === MANAGER_ID && c.user.type === "User" && c.body?.startsWith(MARKER));
+    c.user.id === MANAGER_ID && c.user.type === "User" && c.body?.startsWith(contract.marker));
   need(choices.length === 1, "manager_decision_unverified");
   let approvalValue;
-  try { approvalValue = JSON.parse(choices[0].body.slice(MARKER.length).trim()); }
+  try { approvalValue = JSON.parse(choices[0].body.slice(contract.marker.length).trim()); }
   catch (_) { throw Error("manager_decision_unverified"); }
   const chosen = {comment: choices[0], approval: approvalValue};
   const { comment, approval } = chosen;
-  need(approval && !Array.isArray(approval) && Object.keys(approval).sort().join() ===
-    ["schema", "scenario", "candidate_sha", "ci_run_id"].sort().join() &&
-    approval.schema === 1 && approval.scenario === "session-300" &&
-    approval.candidate_sha === pr.head.sha && positive(approval.ci_run_id) &&
+  need(contract.validApproval(approval, pr.head.sha) &&
     positive(comment.id) && comment.created_at === comment.updated_at &&
     Number.isFinite(Date.parse(comment.created_at)) &&
     Date.parse(comment.created_at) < Date.parse(pr.merged_at),
@@ -272,7 +284,7 @@ async function actualApproval(github, context, environment, proof) {
     "approval_unverified");
 }
 
-async function verify({ github, context, env = process.env, recheck = false }) {
+async function verifyContract({ github, context, env = process.env, recheck = false }, contract) {
   const merged = await mergedPush(github, context, env);
   const proof = await successfulPreflight(github, context, env, recheck);
   const { data: pr } = await github.rest.pulls.get({ ...API, pull_number: merged.pr });
@@ -286,19 +298,20 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   need(candidate.sha === pr.head.sha && mergedCommit.sha === context.sha &&
     SHA.test(candidate.tree?.sha) && candidate.tree.sha === mergedCommit.tree?.sha,
   "merged_tree_unreviewed");
-  const decision = await managerDecision(github, pr, context, proof);
+  const decision = await managerDecision(github, pr, context, proof, contract);
   await reviewsAndCI(github, pr, decision);
   const environment = await environmentPolicy(github);
   await noOtherObservation(github, context);
-  const name = "hoben-session-300-" + pr.head.sha;
-  const claim = { schema: 1, scenario: "session-300",
+  const name = contract.claimPrefix + pr.head.sha;
+  const claim = { schema: 1, scenario: contract.scenario,
     sha: context.sha, run_id: context.runId,
     run_attempt: 1,
     pr: pr.number, candidate_sha: pr.head.sha, decision_id: decision.comment.id,
     decision_digest: digest({ id: decision.comment.id, body: decision.comment.body,
       created_at: decision.comment.created_at, updated_at: decision.comment.updated_at,
       user: { id: decision.comment.user.id, login: decision.comment.user.login,
-        type: decision.comment.user.type } }), environment_digest: environment.digest };
+        type: decision.comment.user.type } }), environment_digest: environment.digest,
+    ...(contract.claimContract ? {contract: contract.claimContract} : {}) };
   if (recheck) {
     const { data: reference } = await github.rest.git.getRef({ ...API, ref: "tags/" + name });
     need(reference.ref === "refs/tags/" + name && reference.object?.type === "tag", "claim_unverified");
@@ -315,9 +328,14 @@ async function verify({ github, context, env = process.env, recheck = false }) {
   }
   const {data: finalBranch} = await github.rest.repos.getBranch({...API, branch: "experimental"});
   need(finalBranch.protected === true && finalBranch.commit?.sha === context.sha, "merge_changed");
-  return { sha: context.sha, candidate_sha: pr.head.sha, pr: pr.number, scenario: "session-300",
+  return { sha: context.sha, candidate_sha: pr.head.sha, pr: pr.number, scenario: contract.scenario,
     status: recheck ? "approved" : environment.approvalRequired ? "PENDING APPROVAL" : "READY FOR ENVIRONMENT" };
 }
 
+// Fixed wrappers keep all existing provenance/review/CI/environment/recheck
+// evidence identical. Supplying a contract in options never selects a profile.
+async function verify(options) { return verifyContract(options, legacyContract); }
+async function suiteVerify(options) { return verifyContract(options, suiteContract); }
+
 module.exports = { dryRun, verify, refusalCategory,
-  WORKFLOW, MARKER, workflowPath };
+  WORKFLOW, MARKER, workflowPath, suiteDryRun, suiteVerify };

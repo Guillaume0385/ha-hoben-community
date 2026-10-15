@@ -133,6 +133,32 @@ l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée co
 une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
 étape 7 réellement concluante ; aucune promotion automatique vers `main`.
 
+## Contrat de suite installé hors ligne, raccordement non terminé
+
+Le [sous-ensemble 7/8-G1](session-suite-plan.md#contrat-dadmission-spécifique--sous-ensemble-78-g1)
+installe `session-suite-gate.cjs` et son contrat fixe, sans les appeler depuis
+le workflow ou le launcher. Le préalable `suite-installation` échoue toujours,
+avec deux NOT RUN ; aucune ancienne décision ne peut activer un run partiel.
+Le gate `session-300` historique garde son contrat et ses contrôles. Les deux
+wrappers réutilisent les mêmes vérifications de provenance/revue/CI/politique
+d'environnement et le même recheck, avec des décisions et claims distincts.
+
+Le futur marqueur dédié est `<!-- hoben-session-suite-approval:v1 -->`.
+Ses clés exactes sont `schema`, `scenario`, `candidate_sha`, `ci_run_id`,
+`scenarios`, `limits` : scénario `session-suite`, ordre fixe session-300 puis
+session-reconnect-no-pong, plafonds fixes détaillés dans le plan. La décision
+unique doit être authentique, immuable et antérieure à la fusion. DEV ne la
+publie pas. Le claim `hoben-session-suite-<candidate_sha>` lie le contrat entier,
+la décision, PR/CI via cette décision, SHA/run/tentative et politique. Une ancienne
+décision ou référence session-300/H1H2/ha-parity n'est jamais utilisée comme repli.
+
+Ce contrat n'installe ni limites externes de processus, ni exports/publication de
+suite, ni nouveau statut global du workflow. Le raccordement complet fera l'objet
+d'une tranche revue supplémentaire en conservant le verrou ; son retrait final
+et tout accès réel restent une activation séparée décidée par MANAGER.
+Aucun nouveau résultat live, aucune validation de reconnexion ni preuve de
+frontière OpenedClient ne découle des tests simulés du gate.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`
