@@ -26,6 +26,7 @@ class Session300:
         self.opens = self.rx_bytes = self.pings = self.pongs = 0
         self.requests = self.responses = 0
         self.partial = False
+        self.connected_generation = None
         self._last_read = None
 
     def __repr__(self):
@@ -35,6 +36,17 @@ class Session300:
         if self.opens >= 3:
             raise Session300BudgetError()
         self.opens += 1
+
+    @property
+    def usable(self):
+        return self.connected_generation == self.opens and not self.partial
+
+    def accepted(self, generation):
+        self.connected_generation = generation
+
+    def lost(self, generation):
+        if self.connected_generation == generation:
+            self.connected_generation = None
 
     def receive(self, data):
         if not isinstance(data, bytes) or len(data) > 4096:
