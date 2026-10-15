@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-G2 : raccordement du gate session-suite, du moteur partagé
+  et des deux rapports au workflow push existant. Superviseur externe 360/600/
+  1020 s avec ACK avant scénario 2 et arrêt du groupe de processus, tests hors
+  réseau d'un processus bloqué et de ses descendants. Export Python/Node borné,
+  publication isolée et statut global sans succès partiel. Verrou suite-installation
+  conservé à l'identique : aucun accès réel ni nouvelle validation de reconnexion.
+
 - Issue #81, sous-ensemble 7/8-G1 : contrat d'admission `session-suite` fermé,
   ordre des deux scénarios et plafonds fixes liés à la décision MANAGER immuable
   et au claim distinct. Réutilisation des contrôles de provenance/revue/CI/

@@ -1,4 +1,4 @@
-name: Hoben session-300 (MANAGER)
+name: Tests expérimentaux session (MANAGER)
 
 # Only a reviewed MANAGER merge + explicit PR decision can reach admission.
 # The default-branch Issue/dispatch events are deliberately not used.
@@ -51,11 +51,14 @@ jobs:
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
-            const gate = require('./.github/scripts/session-300-gate.cjs');
+            const gate = require('./.github/scripts/session-suite-gate.cjs');
             try {
               await gate.dryRun({github, context});
-              core.info('DRY RUN ONLY: session-300 report-only; no secret or Hoben connection.');
-            } catch (_) { core.setFailed('NOT RUN: secretless preflight refused.'); }
+              core.info('DRY RUN ONLY: session-suite report-only; no secret or Hoben connection.');
+            } catch (_) {
+              core.setFailed('NOT RUN: secretless preflight refused.');
+              await core.summary.addRaw('session-300: NOT RUN (preflight)\nsession-reconnect-no-pong: NOT RUN (preflight)').write();
+            }
 
   admission:
     needs: dry-run
@@ -79,28 +82,28 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
-            const gate = require('./.github/scripts/session-300-gate.cjs');
+            const gate = require('./.github/scripts/session-suite-gate.cjs');
             try {
               const decision = await gate.verify({github, context});
               core.setOutput('approved', 'true');
               core.setOutput('pr', String(decision.pr));
               core.setOutput('candidate', decision.candidate_sha);
               const summary = decision.status === 'PENDING APPROVAL'
-                ? 'PENDING APPROVAL: reserved session-300; required GitHub reviewer approval still applies.'
-                : 'READY FOR ENVIRONMENT: reserved session-300; no required reviewers configured.';
+                ? 'PENDING APPROVAL: reserved session-suite; required GitHub reviewer approval still applies.'
+                : 'READY FOR ENVIRONMENT: reserved session-suite; no required reviewers configured.';
               await core.summary.addRaw(summary).write();
             } catch (error) {
               // Fixed enum only: never forward raw exception text, stack, API data or headers.
               const category = gate.refusalCategory(error);
               core.setFailed('NOT RUN: admission refused; category=' + category);
-              await core.summary.addRaw('NOT RUN: admission refused before Hoben secrets; category=' + category + '.').write();
+              await core.summary.addRaw('session-300: NOT RUN (admission)\nsession-reconnect-no-pong: NOT RUN (admission)\ncategory=' + category + '.').write();
             }
 
   collect:
     needs: admission
     if: needs.admission.outputs.approved == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 22
     outputs:
       report_b64: ${{ steps.exports.outputs.report_b64 }}
     environment: hoben-experimental
@@ -128,26 +131,29 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
-            const gate = require('./trusted/.github/scripts/session-300-gate.cjs');
+            const gate = require('./trusted/.github/scripts/session-suite-gate.cjs');
             try {
               const authorized = await gate.verify({github, context, recheck: true});
               core.setOutput('approved', 'true');
               core.setOutput('pr', String(authorized.pr));
               core.setOutput('candidate', authorized.candidate_sha);
-            } catch (_) { core.setFailed('NOT RUN: approval or admission proof changed.'); }
+            } catch (_) {
+              core.setFailed('NOT RUN: approval or admission proof changed.');
+              await core.summary.addRaw('session-300: NOT RUN (recheck)\nsession-reconnect-no-pong: NOT RUN (recheck)').write();
+            }
       - id: capture
-        name: Bounded session-300 with no runner tokens in the collector process
+        name: Bounded sequential suite with external per-scenario and global process deadlines
         if: steps.recheck.outputs.approved == 'true'
         env:
-          SESSION300_APPROVED_SHA: ${{ github.sha }}
-          SESSION300_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
-          SESSION300_CANDIDATE_SHA: ${{ steps.recheck.outputs.candidate }}
+          SESSION_SUITE_APPROVED_SHA: ${{ github.sha }}
+          SESSION_SUITE_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
+          SESSION_SUITE_CANDIDATE_SHA: ${{ steps.recheck.outputs.candidate }}
           HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
           HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
-        run: python trusted/scripts/launch_session_300.py
+        run: python trusted/scripts/launch_session_suite.py
       - id: exports
         name: Validate strictly anonymized report before upload
-        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.capture.outcome == 'success' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
           APPROVED_PR: ${{ steps.recheck.outputs.pr }}
@@ -159,7 +165,7 @@ jobs:
               run_id: context.runId, run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
               pr_number: Number(process.env.APPROVED_PR)
             };
-            require('./trusted/.github/scripts/session-300-report.cjs').prepare({core, proof});
+            require('./trusted/.github/scripts/session-suite-report.cjs').prepare({core, proof});
       # Do not upload from the secret-bearing collector runner: a leftover
       # candidate process could replace a checked file before upload.
       # Only the strictly validated, size-bounded job output is transferred.
@@ -190,15 +196,15 @@ jobs:
               run_id: context.runId, run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
               pr_number: Number(process.env.APPROVED_PR)
             };
-            require('./.github/scripts/session-300-report.cjs').publish({
+            require('./.github/scripts/session-suite-report.cjs').publish({
               core, proof, encoded: process.env.PUBLIC_REPORT_B64
             });
       - name: Publish only newly validated public JSON
         if: ${{ steps.publish.outputs.report == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: session-300-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
-          path: ${{ runner.temp }}/hoben-session-300-public/report.json
+          name: session-suite-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hoben-session-suite-public/report.json
           if-no-files-found: error
           retention-days: 7
 
@@ -220,7 +226,7 @@ jobs:
         id: download
         continue-on-error: true
         with:
-          name: session-300-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: session-suite-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: public-report
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
@@ -230,8 +236,8 @@ jobs:
           APPROVED_CANDIDATE: ${{ needs.admission.outputs.candidate }}
         with:
           script: |
-            const exports = require('./.github/scripts/session-300-report.cjs');
-            let success = false, category = 'not_run';
+            const exports = require('./.github/scripts/session-suite-report.cjs');
+            let success = false, category = 'not_run', first = 'unverified', second = 'unverified';
             try {
               const proof = {
                 merge_sha: context.sha, candidate_sha: process.env.APPROVED_CANDIDATE,
@@ -240,8 +246,9 @@ jobs:
               };
               const report = exports.readReport('public-report/report.json', proof);
               category = report.result;
-              success = process.env.COLLECTION_RESULT === 'success' &&
-                process.env.PUBLICATION_RESULT === 'success' && ['continuous_300s','reconnected'].includes(report.result);
+              first = report.session_300.result;
+              second = report.session_reconnect_no_pong.result;
+              success = exports.completed(report, proof, process.env.COLLECTION_RESULT, process.env.PUBLICATION_RESULT);
             } catch (_) {}
             const publicPR = Number(process.env.APPROVED_PR);
             const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
@@ -250,12 +257,13 @@ jobs:
               Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
               publicAttempt === 1;
             await github.rest.repos.createCommitStatus({
-              ...context.repo, sha: context.sha, context: 'hoben-experimental-session-300',
+              ...context.repo, sha: context.sha, context: 'hoben-experimental-session-suite',
               state: success ? 'success' : 'failure',
               target_url: 'https://github.com/Guillaume0385/ha-hoben-community/actions/runs/' + context.runId,
-              description: success ? 'Functional 300 s completed; boundary hypothesis unproven' : 'NOT RUN or collection/export failed'
+              description: success ? 'Both session scenarios completed; boundary unproven' : 'NOT RUN or collection/export failed'
             });
-            await core.summary.addRaw('Session-300 result=' + category + '; boundary_proven=false.').write();
+            await core.summary.addRaw('Session-suite result=' + category + '; boundary_proven=false.\n' +
+              'session-300: ' + first + '\nsession-reconnect-no-pong: ' + second + '.').write();
             const pr = Number(process.env.APPROVED_PR);
             const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
             if (!Number.isSafeInteger(pr) || pr <= 0 ||
@@ -263,7 +271,7 @@ jobs:
               core.setFailed('NOT RUN: missing public attempt correlation.');
             } else {
               await core.summary.addRaw(
-                'Public correlation: scenario=session-300; run_id=' + context.runId +
+                'Public correlation: scenario=session-suite; run_id=' + context.runId +
                 '; run_attempt=' + attempt + '; pr=' + pr +
                 '; sha=' + context.sha + '; status=' +
                 (success ? 'completed' : 'failed_or_not_run') +

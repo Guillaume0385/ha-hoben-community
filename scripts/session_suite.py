@@ -1,6 +1,6 @@
-"""Offline suite engine. No CLI, credential lookup, launcher or live activation.
+"""Shared suite engine. No CLI, credential lookup or live authorization.
 
-An admitted future caller must provide the shared V4Lifecycle/V4Session factory.
+An admitted caller provides the shared V4Lifecycle/V4Session factory.
 Only this sequential entry point schedules the second collector. The installed
 suite-installation barrier is deliberately unchanged; these APIs grant no access.
 """
@@ -328,7 +328,7 @@ async def observe_suite(
 
     The factory takes (fixed_budget, optional_pong_policy); it must instantiate
     the existing shared lifecycle/session, with its bounded retry policy. This
-    offline API is intentionally not wired into any secret-bearing entry point.
+    runner entry point remains behind the suite-installation barrier.
     Cancellation propagates after each collector has cleaned up its owner.
     A hard deadline refuses a report rather than inventing a completed scenario.
     """

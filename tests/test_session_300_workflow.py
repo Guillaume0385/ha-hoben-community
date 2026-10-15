@@ -56,7 +56,7 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     name, step = secret_steps[0]
     assert name == "collect"
     assert step["if"] == "steps.recheck.outputs.approved == 'true'"
-    assert step["run"] == "python trusted/scripts/launch_session_300.py"
+    assert step["run"] == "python trusted/scripts/launch_session_suite.py"
     assert set(k for k in step["env"] if k.startswith("HOBEN_")) == {
         "HOBEN_USER_GUID",
         "HOBEN_DEVICE_GUID",
@@ -65,10 +65,13 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
         "upload-artifact" in s.get("uses", "") for s in jobs["collect"]["steps"]
     )
     assert jobs["publish"]["needs"] == ["admission", "collect"]
-    assert "session-300-report.cjs" in json.dumps(jobs["publish"])
-    assert "['continuous_300s','reconnected'].includes(report.result)" in json.dumps(
-        jobs["result"]
-    )
+    assert "session-suite-report.cjs" in json.dumps(jobs["publish"])
+    assert "exports.completed(report, proof," in json.dumps(jobs["result"])
+    assert jobs["collect"]["timeout-minutes"] == "22"
+    for name in ("dry-run", "admission", "collect"):
+        assert "session-suite-gate.cjs" in json.dumps(jobs[name])
+        assert "session-300-gate.cjs" not in json.dumps(jobs[name])
+    assert "steps.capture.outcome == 'success'" in jobs["collect"]["steps"][-1]["if"]
 
 
 def test_uninstalled_suite_barrier_reports_both_not_run_before_all_live_jobs(tmp_path):

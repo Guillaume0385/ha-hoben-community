@@ -133,11 +133,12 @@ l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée co
 une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
 étape 7 réellement concluante ; aucune promotion automatique vers `main`.
 
-## Contrat de suite installé hors ligne, raccordement non terminé
+## Suite raccordée sous verrou, activation réelle séparée
 
 Le [sous-ensemble 7/8-G1](session-suite-plan.md#contrat-dadmission-spécifique--sous-ensemble-78-g1)
-installe `session-suite-gate.cjs` et son contrat fixe, sans les appeler depuis
-le workflow ou le launcher. Le préalable `suite-installation` échoue toujours,
+installe `session-suite-gate.cjs` et son contrat fixe. G2 branche ce gate dans le
+workflow push existant et ajoute le launcher/collecteur de suite. Le préalable
+`suite-installation` échoue toujours,
 avec deux NOT RUN ; aucune ancienne décision ne peut activer un run partiel.
 Le gate `session-300` historique garde son contrat et ses contrôles. Les deux
 wrappers réutilisent les mêmes vérifications de provenance/revue/CI/politique
@@ -152,10 +153,32 @@ publie pas. Le claim `hoben-session-suite-<candidate_sha>` lie le contrat entier
 la décision, PR/CI via cette décision, SHA/run/tentative et politique. Une ancienne
 décision ou référence session-300/H1H2/ha-parity n'est jamais utilisée comme repli.
 
-Ce contrat n'installe ni limites externes de processus, ni exports/publication de
-suite, ni nouveau statut global du workflow. Le raccordement complet fera l'objet
-d'une tranche revue supplémentaire en conservant le verrou ; son retrait final
-et tout accès réel restent une activation séparée décidée par MANAGER.
+Le launcher fixe `launch_session_suite.py` lance un unique collecteur
+`run_session_suite.py` qui appelle `observe_suite()` et la vraie implémentation
+partagée. Le parent supervise les plafonds externes 360/600/1020 s, arme le
+second plafond avant son ACK et tue le groupe entier au timeout, à l'annulation
+ou à la fin. Les budgets internes 350+10 et 590+10 restent distincts ; aucun
+commentaire ou input ne fournit de durée libre. Une seconde est réservée au
+SIGKILL/reaping dans chaque plafond. Les tests offline incluent un processus
+résistant à l'annulation asyncio et son descendant dans chacune des phases.
+Le collecteur reçoit seulement l'allowlist de contexte et preuves
+`SESSION_SUITE_*`, avec identité privée : aucun token GitHub/Actions/OIDC,
+fichier de commandes Actions, hook Python ni installation de dépendance libre.
+
+Après validation Python, le rapport exclusif 0600/0700 est borné à 8192 octets.
+Le workflow exporte uniquement après recheck et superviseur réussis. Node
+revalide le double schéma, la provenance et la taille avant transfert base64
+canonique (10924 caractères maximum), puis revalide et matérialise le JSON sur
+un runner séparé sans secret Hoben. L'artefact
+`session-suite-report-<SHA>-<run_id>-a1` conserve sept jours maximum de rétention.
+Le statut `hoben-experimental-session-suite` exige les deux sous-résultats
+admissibles, la collecte et la publication réussies ; rapport absent/incomplet
+ou refusé reste en échec. Les refus pré-secrets annoncent les deux NOT RUN,
+sans fabriquer de rapport de collecte. Les scripts du workflow et cette
+chaîne d'export/publication sont testés hors ligne.
+
+Le retrait final du verrou et tout accès réel restent une PR/décision d'activation
+séparée par MANAGER, après revue du contrat, du raccordement installé et de sa CI.
 Aucun nouveau résultat live, aucune validation de reconnexion ni preuve de
 frontière OpenedClient ne découle des tests simulés du gate.
 
