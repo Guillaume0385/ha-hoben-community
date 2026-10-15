@@ -53,7 +53,7 @@ class Session300:
             raise Session300BudgetError()
         self.rx_chunks += 1
         self.rx_bytes += len(data)
-        if self.rx_bytes > 1048576:
+        if self.rx_bytes > 1048576 or self.rx_chunks > 1048576:
             raise Session300BudgetError()
 
     @property
