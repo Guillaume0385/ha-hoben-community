@@ -5,16 +5,16 @@ const api=require("../../.github/scripts/session-300-report.cjs");
 const proof={merge_sha:"a".repeat(40),candidate_sha:"b".repeat(40),run_id:123,run_attempt:1,pr_number:89};
 const good=()=>({schema:1,scenario:"session-300",boundary_proven:false,...proof,
   result:"continuous_300s",terminal:"completed",duration_ms:300000,opens:1,reconnections:0,
-  pings:10,pongs:10,reads:5,reads_ok:5,reads_failed:0,responses:5});
+  pings:10,pongs:10,reads:5,reads_ok:5,reads_failed:0,responses:5,rx_bytes_total:128,rx_chunks_total:3,read_slot:5,failure_phase:"none",failure_category:"completed",message_category:"unclassified"});
 test("strict success projection and recovery are distinct",()=>{
   assert.equal(api.validate(good(),proof).result,"continuous_300s");
-  const r={...good(),opens:2,reconnections:1,result:"reconnected",terminal:"recovery_verified"};
+  const r={...good(),opens:2,reconnections:1,result:"reconnected",terminal:"recovery_verified",failure_category:"recovery_verified"};
   assert.equal(api.validate(r,proof).result,"reconnected");
 });
 for(const [key,value] of Object.entries({registers:[17],temperature:12,identity:"private",
   terminal:"private-exception",scenario:"h1h2",merge_sha:"c".repeat(40),candidate_sha:"d".repeat(40),
   run_id:321,run_attempt:2,pr_number:90,boundary_proven:true,duration_ms:299999,
-  opens:4,reconnections:1,reads:7,reads_ok:4,pongs:11,schema:true,result:"success"})){
+  opens:4,reconnections:1,reads:7,reads_ok:4,pongs:11,schema:true,result:"success",rx_bytes_total:1048577,rx_chunks_total:-1,read_slot:7,failure_phase:"raw",failure_category:"private",message_category:"0x0e"})){
   test("refuse extra or inconsistent field "+key,()=>{
     assert.throws(()=>api.validate({...good(),[key]:value},proof));
   });
