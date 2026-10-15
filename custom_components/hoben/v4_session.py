@@ -7,6 +7,7 @@ retains opening bytes privately and never routes post-open traffic.
 
 import asyncio
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
 from typing import Protocol
@@ -56,7 +57,7 @@ from .session import (
     SessionTimeout,
     _open_session,
 )
-from .transport import AsyncTlsTransport, TransportError, TransportTimeout
+from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
 
 
 class SessionState(StrEnum):
@@ -202,6 +203,10 @@ class V4Session:
         "_tx_lock",
         "_pending_read",
         "_read_sent",
+        "_loss_event",
+        "_retryable_loss",
+        "_operations",
+        "_tx_operations",
     )
 
     def __init__(
@@ -225,6 +230,62 @@ class V4Session:
         self._tx_lock = asyncio.Lock()
         self._pending_read: asyncio.Future[ModbusReadResponse] | None = None
         self._read_sent = False
+        self._loss_event = asyncio.Event()
+        self._retryable_loss = False
+        self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
+        self._tx_operations: set[asyncio.Task] = set()
+
+    @asynccontextmanager
+    async def _transmitting(self):
+        """Record queued/active senders so abort never cancels read-error delivery."""
+        task = asyncio.current_task()
+        self._tx_operations.add(task)
+        try:
+            async with self._tx_lock:
+                yield
+        finally:
+            self._tx_operations.discard(task)
+
+    @property
+    def loss_is_retryable(self) -> bool:
+        """True only for an observed transport loss, never caller cancellation."""
+        return self._retryable_loss
+
+    async def wait_lost(self) -> None:
+        """Notify lifecycle ownership before RX cleanup waits for an active TX.
+
+        This is a terminal notification, never an idle/read deadline. The owner
+        can abort active operations before waiting for the old transport to close.
+        """
+        await self._loss_event.wait()
+        raise self._rx_error or HobenClientClosedError()
+
+    async def abort(self) -> None:
+        """Stop owned TX/read operations, then finish the existing close path.
+
+        Lifecycle teardown uses this stronger stop; ordinary close retains its
+        existing orderly-TX semantics. Never cancel the calling teardown task.
+        """
+        if self.state is not SessionState.CLOSED:
+            self._transition(SessionState.CLOSED)
+        self._loss_event.set()
+        self._fail_pending_read(self._rx_error or HobenClientClosedError())
+        operations = [
+            (task, done)
+            for task, done in self._operations.items()
+            if task is not asyncio.current_task()
+        ]
+        for task, _ in operations:
+            if (
+                task in self._tx_operations
+                and not task.done()
+                and not task.cancelling()
+            ):
+                task.cancel()
+        # Wait for each operation's completion, never for its caller's whole
+        # lifetime: the caller may immediately wait for this same recovery.
+        await asyncio.gather(*(asyncio.shield(done) for _, done in operations))
+        await self.close()
 
     def _fail_pending_read(self, error: HobenError) -> None:
         """Complete the sole waiter at most once, without exposing its payload."""
@@ -270,6 +331,17 @@ class V4Session:
                     raise HobenTransportError() from None
 
     async def _handle_delimited_ping(self, message: DelimitedV4Message) -> None:
+        """Track the sender so lifecycle shutdown can abort an in-flight write."""
+        task = asyncio.current_task()
+        done = asyncio.get_running_loop().create_future()
+        self._operations[task] = done
+        try:
+            await self._send_delimited_ping(message)
+        finally:
+            self._operations.pop(task, None)
+            done.set_result(None)
+
+    async def _send_delimited_ping(self, message: DelimitedV4Message) -> None:
         """Respond once to an already-delimited Ping (protocol.md §3).
 
         This is an offline-testable primitive for a future proven framer, not a
@@ -282,7 +354,7 @@ class V4Session:
         transport = self._transport
         error: HobenError | None = None
         cancelled = False
-        async with self._tx_lock:
+        async with self._transmitting():
             # Recheck under the lock: a queued Pong must not outlive RX failure
             # or close(), nor be sent on a replacement/absent transport.
             if self._rx_error is not None:
@@ -298,13 +370,16 @@ class V4Session:
             except asyncio.CancelledError:
                 cancelled = True
                 error = HobenTransportError()
-            except TransportError:
+            except TransportError as failure:
+                if self._rx_error is None:
+                    self._retryable_loss = not isinstance(failure, TransportTimeout)
                 error = HobenTransportError()
             except Exception:
                 error = HobenProtocolError()
             if error is not None:
                 # Stop queued TX before releasing the lock for shutdown.
                 self._rx_error = self._rx_error or error
+                self._loss_event.set()
                 self._fail_pending_read(self._rx_error)
                 self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
                 if self.state is not SessionState.CLOSED:
@@ -337,6 +412,8 @@ class V4Session:
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
         self._opening_buffer.clear()
         self._rx_error = None
+        self._loss_event.clear()
+        self._retryable_loss = False
         self._rx_task = None
         self._transition(SessionState.CONNECTING)
         self._opening_task = asyncio.current_task()
@@ -434,7 +511,7 @@ class V4Session:
             if not isinstance(data, bytes):
                 raise HobenProtocolError()
             if not data:
-                raise HobenTransportError()
+                raise TransportEOF("eof")
             self._opening_buffer.extend(data)
             self._snapshot = replace(
                 self._snapshot,
@@ -445,12 +522,14 @@ class V4Session:
         except asyncio.CancelledError:
             if self.state is not SessionState.CLOSED:
                 self._rx_error = HobenTransportError()
-        except TransportError:
+        except TransportError as failure:
+            self._retryable_loss = not isinstance(failure, TransportTimeout)
             self._rx_error = HobenTransportError()
         except Exception:
             self._rx_error = HobenProtocolError()
         finally:
             if self._rx_error is not None:
+                self._loss_event.set()
                 self._fail_pending_read(self._rx_error)
             try:
                 await self._release_transport()
@@ -513,6 +592,7 @@ class V4Session:
         except Exception:
             error = HobenProtocolError()
         self._rx_error = self._rx_error or error
+        self._loss_event.set()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
@@ -527,6 +607,17 @@ class V4Session:
         raise error from None
 
     async def request_v4_data(self, *, timeout: float = 30.0) -> ModbusReadResponse:
+        """Track a single caller through deterministic lifecycle teardown."""
+        task = asyncio.current_task()
+        done = asyncio.get_running_loop().create_future()
+        self._operations[task] = done
+        try:
+            return await self._request_v4_data(timeout=timeout)
+        finally:
+            self._operations.pop(task, None)
+            done.set_result(None)
+
+    async def _request_v4_data(self, *, timeout: float) -> ModbusReadResponse:
         """Send the sole fixed V4 read and await a delimited contract response.
 
         No live RX dispatch is installed. The total deadline covers TX queueing,
@@ -550,7 +641,7 @@ class V4Session:
         cancelled = False
         try:
             async with asyncio.timeout(timeout):
-                async with self._tx_lock:
+                async with self._transmitting():
                     if pending.done():
                         pending.result()
                     if self._rx_error is not None:
@@ -577,6 +668,8 @@ class V4Session:
         except (TransportTimeout, TimeoutError):
             error = HobenTimeoutError()
         except TransportError:
+            if self._rx_error is None:
+                self._retryable_loss = True
             error = HobenTransportError()
         except HobenModbusError:
             # A correlated exception is a consumed terminal response, not an
@@ -597,6 +690,7 @@ class V4Session:
                 self._pending_read = None
                 self._read_sent = False
         self._rx_error = self._rx_error or error
+        self._loss_event.set()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
@@ -610,6 +704,7 @@ class V4Session:
 
     async def close(self) -> None:
         """Stop opening, await its cleanup, then close once; CLOSED is terminal."""
+        self._loss_event.set()
         self._fail_pending_read(HobenClientClosedError())
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
