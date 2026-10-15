@@ -442,28 +442,72 @@ def test_real_shared_session_accepts_all_five_scheduled_reads_offline():
     asyncio.run(scenario())
 
 
-def test_rx_overrun_still_exports_a_bounded_budget_failure():
+@pytest.mark.parametrize("chunk_size", [4096, 4097])
+def test_rx_overrun_still_exports_a_bounded_budget_failure(chunk_size):
+    from custom_components.hoben.v4_experiment import BudgetTransport
+    from scripts.run_session_300 import ROOT
+
+    class Source:
+        async def read(self, max_bytes, *, bounded):
+            assert max_bytes == 4096
+            # The second case deliberately violates the transport contract.
+            return b"x" * chunk_size
+
     class Overrun(Lifecycle):
         async def request_v4_data(self, *, timeout):
             if self.budget.requests == 1:
                 self.budget.request()
+                transport = BudgetTransport(Source(), self.budget)
                 for _ in range(257):
-                    self.budget.receive(b"x" * 4096)
+                    await transport.read()
             return await super().request_v4_data(timeout=timeout)
 
     async def scenario():
         clock = Clock()
         budget = Session300(clock=clock)
-        report = await observe(
-            Overrun(budget), budget, PROOF, clock=clock, sleep=clock.sleep
-        )
+        life = Overrun(budget)
+        report = await observe(life, budget, PROOF, clock=clock, sleep=clock.sleep)
         assert report["result"] == "inconclusive"
         assert report["terminal"] == report["failure_category"] == "budget"
-        assert report["rx_bytes_total"] == 1048576
-        assert report["rx_chunks_total"] == 257
+        assert report["failure_phase"] == "tls_read"
+        assert report["message_category"] == "unclassified"
+        if chunk_size == 4096:
+            assert budget.rx_bytes == 257 * 4096
+            assert report["rx_bytes_total"] == 1048576
+            assert report["rx_chunks_total"] == 257
+        else:
+            # Oversized chunks are refused before accounting or routing.
+            assert budget.rx_bytes == budget.rx_chunks == 0
+            assert report["rx_bytes_total"] == report["rx_chunks_total"] == 0
         assert report["read_slot"] == 2 and report["reads_ok"] == 1
+        assert report["reads_failed"] == 1 and report["responses"] == 1
+        assert life.closed
+        assert report["boundary_proven"] is False
+        return report
 
-    asyncio.run(scenario())
+    # Observe returns the real Python projection; feed that exact JSON to the
+    # independent validator used by export and isolated publication.
+    report = asyncio.run(scenario())
+    assert validate_report(report, PROOF) == report
+    result = subprocess.run(
+        [
+            "node",
+            "-e",
+            """
+const api=require('./.github/scripts/session-300-report.cjs');
+const [report,proof]=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+process.stdout.write(JSON.stringify(api.validate(report,proof)));
+""",
+        ],
+        cwd=ROOT,
+        input=json.dumps([report, PROOF]),
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=5,
+    )
+    assert json.loads(result.stdout) == report
+    assert result.stderr == ""
 
 
 def test_python_and_publication_validate_the_same_closed_diagnostic_schema():

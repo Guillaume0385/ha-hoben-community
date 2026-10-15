@@ -10,6 +10,8 @@
   Les points d'arrêt distinguent classification, frontière, corrélation,
   validation de réponse et transport, sans exporter de type inconnu numérique.
   Les compteurs publics saturent à 1 Mio sans changer le budget d'arrêt.
+  Régressions du rapport projeté après dépassement cumulé et chunk >4096 octets,
+  avec validation indépendante Python/Node du même JSON projeté.
 
 - Issue #81, tranche 7/8-C : correction de la création exclusive du rapport
   `session-300` en mode 0600, avec nettoyage du fichier partiel et fermeture du
