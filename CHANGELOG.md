@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche structurelle 7/8-E : inhibition Pong opt-in à T+120 s sous
+  verrou TX, rétablissement à la génération suivante, compteurs d'EOF observés
+  distincts des fermetures locales. Tests offline du gestionnaire partagé.
+  Verrou du workflow existant : deux résultats NOT RUN, aucun accès Hoben avant
+  installation et revue de la suite complète. Plafonds proposés non activés dans
+  [le plan de suite](docs/session-suite-plan.md). Aucun nouveau test réel par DEV.
+
 - Issue #81, tranche 7/8-D : compteurs RX bornés et diagnostic catégoriel
   (`failure_phase`, `failure_category`, `message_category`, `read_slot`)
   dans le rapport `session-300`, validés côté Python et JS. Aucun octet RX,

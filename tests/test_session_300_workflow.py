@@ -19,7 +19,15 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert workflow["concurrency"]["group"] == "hoben-read-only-observation"
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
     jobs = workflow["jobs"]
-    assert set(jobs) == {"dry-run", "admission", "collect", "publish", "result"}
+    assert set(jobs) == {
+        "suite-installation",
+        "dry-run",
+        "admission",
+        "collect",
+        "publish",
+        "result",
+    }
+    assert jobs["dry-run"]["needs"] == "suite-installation"
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
@@ -61,6 +69,33 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert "['continuous_300s','reconnected'].includes(report.result)" in json.dumps(
         jobs["result"]
     )
+
+
+def test_uninstalled_suite_barrier_reports_both_not_run_before_all_live_jobs(tmp_path):
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["suite-installation"]
+    assert job["permissions"] == {} and "environment" not in job and "if" not in job
+    assert len(job["steps"]) == 1 and "uses" not in job["steps"][0]
+    summary = tmp_path / "summary"
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", job["steps"][0]["run"]],
+        env={"GITHUB_STEP_SUMMARY": str(summary), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert summary.read_text().splitlines() == [
+        "session-300: NOT RUN (suite_not_installed)",
+        "session-reconnect-no-pong: NOT RUN (suite_not_installed)",
+    ]
+    # No always()/continue-on-error may bypass the failed prerequisite.
+    assert "always(" not in workflow["jobs"]["dry-run"]["if"]
+    assert "continue-on-error" not in json.dumps(job)
 
 
 @pytest.mark.parametrize("suite", ["session-300-gate", "session-300-report"])
