@@ -68,6 +68,13 @@ ligne, sans identifiant Hoben ni accès au poêle.
 
 ## Voie `session-300` — hypothèse expérimentale
 
+La [tranche structurelle 7/8-E](session-suite-plan.md) suspend les accès réels de
+cette voie pendant la préparation d'une suite unique à deux scénarios. Un job
+initial refuse toute collecte et annonce deux NOT RUN jusqu'à une activation
+complète revue par MANAGER. Les gates ci-dessous restent conservés ; aucune
+ancienne autorisation ne lève ce verrou. La validation historique 300 s acquise
+ne vaut pas validation du nouveau scénario ni autorisation de l'étape 8.
+
 La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
 et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 autorisent la préparation d'une validation fonctionnelle expérimentale de 300 s

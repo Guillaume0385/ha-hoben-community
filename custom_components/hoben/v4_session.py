@@ -60,6 +60,7 @@ from .session import (
 )
 from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
 from .v4_experiment import BudgetTransport, ExperimentalV4Framer, Session300
+from .v4_no_pong import NoPongAfter120
 
 
 class SessionState(StrEnum):
@@ -213,6 +214,7 @@ class V4Session:
         "_experiment",
         "_experiment_generation",
         "_framer",
+        "_no_pong",
     )
 
     def __init__(
@@ -222,11 +224,17 @@ class V4Session:
         device_guid: str = INITIAL_DEVICE_GUID,
         transport_factory: TransportFactory = AsyncTlsTransport,
         session_300: Session300 | None = None,
+        no_pong_after_120: NoPongAfter120 | None = None,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
         if session_300 is not None and type(session_300) is not Session300:
             raise HobenInvalidInputError()
+        if no_pong_after_120 is not None and (
+            type(no_pong_after_120) is not NoPongAfter120 or session_300 is None
+        ):
+            raise HobenInvalidInputError()
+        self._no_pong = no_pong_after_120
         self._experiment = session_300
         self._experiment_generation = None
         self._framer = (
@@ -348,18 +356,18 @@ class V4Session:
                 except Exception:
                     raise HobenTransportError() from None
 
-    async def _handle_delimited_ping(self, message: DelimitedV4Message) -> None:
+    async def _handle_delimited_ping(self, message: DelimitedV4Message) -> bool:
         """Track the sender so lifecycle shutdown can abort an in-flight write."""
         task = asyncio.current_task()
         done = asyncio.get_running_loop().create_future()
         self._operations[task] = done
         try:
-            await self._send_delimited_ping(message)
+            return await self._send_delimited_ping(message)
         finally:
             self._operations.pop(task, None)
             done.set_result(None)
 
-    async def _send_delimited_ping(self, message: DelimitedV4Message) -> None:
+    async def _send_delimited_ping(self, message: DelimitedV4Message) -> bool:
         """Respond once to an already-delimited Ping (protocol.md §3).
 
         This primitive accepts semantic tokens, never raw bytes. Ordinary RX
@@ -383,6 +391,10 @@ class V4Session:
                 or self._transport is not transport
             ):
                 raise SessionStateError()
+            if self._no_pong is not None and self._no_pong.suppress(
+                self._experiment_generation
+            ):
+                return False
             try:
                 await transport.write(_PONG)
             except asyncio.CancelledError:
@@ -410,6 +422,7 @@ class V4Session:
             if cancelled:
                 raise asyncio.CancelledError()
             raise error from None
+        return True
 
     async def connect(self) -> None:
         """Accept only the existing V4 opening, without post-open processing.
@@ -494,6 +507,8 @@ class V4Session:
                 self._device_guid = assigned
                 if self._experiment is not None:
                     self._experiment.accepted(self._experiment_generation)
+                if self._no_pong is not None:
+                    self._no_pong.accepted(self._experiment_generation)
                 self._transition(SessionState.CONNECTED)
                 # Handshake reads have finished before this sole RX task starts.
                 self._rx_task = asyncio.create_task(
@@ -600,7 +615,9 @@ class V4Session:
                 if event.payload == b"\x0a":
                     self._experiment.pings += 1
                     try:
-                        await self._handle_delimited_ping(DelimitedV4Message.PING)
+                        sent = await self._handle_delimited_ping(
+                            DelimitedV4Message.PING
+                        )
                     except HobenError as failure:
                         category = (
                             "transport"
@@ -609,14 +626,21 @@ class V4Session:
                         )
                         self._experiment.note_failure("pong_tx", category, "ping")
                         raise
-                    self._experiment.pongs += 1
+                    self._experiment.pongs += sent
                 else:
                     await self._handle_delimited_data_response(
                         DelimitedV4DataResponse(event.payload, exchange=event.exchange)
                     )
                     self._experiment.responses += 1
-            data = await transport.read(4096, bounded=False)
+            try:
+                data = await transport.read(4096, bounded=False)
+            except TransportEOF:
+                if self._no_pong is not None:
+                    self._no_pong.peer_closed(self._experiment_generation)
+                raise
             if not data:
+                if self._no_pong is not None:
+                    self._no_pong.peer_closed(self._experiment_generation)
                 if self._framer.partial:
                     self._experiment.note_failure(
                         "frame_boundary", "protocol", "ambiguous"
