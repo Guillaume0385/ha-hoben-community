@@ -182,7 +182,7 @@ async def observe(
             complete = (
                 clock() >= end
                 and lifecycle.state is SessionState.CONNECTED
-                and not budget.partial
+                and budget.usable
                 and reads_ok > 0
                 and last_success_attempt == lifecycle.snapshot.attempts
                 and budget.pings == budget.pongs
