@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — contrat offline 7/8-G1
+# Suite « Tests expérimentaux session » — raccordement verrouillé 7/8-G2
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -37,8 +37,9 @@ Elle ne modifie aucun Setting, secret, claim, gate historique ou H1/H2.
   Un EOF après inhibition est une observation temporelle, pas une preuve de
   timeout Ping. Aucun payload, registre, identifiant ou exception n'est exporté.
 
-La tranche 7/8-F ajoute le moteur hors ligne décrit ci-dessous. Aucun collecteur
-live n'appelle ce moteur ; aucun nouveau rapport n'est publié sur les runs réels.
+La tranche 7/8-F a livré le moteur partagé décrit ci-dessous. G2 raccorde le
+point d'entrée et la publication, toujours derrière le verrou ; aucun nouveau
+rapport réel ni résultat de reconnexion n'est acquis par cette installation.
 
 ## Plafonds approuvés pour le moteur offline, sans autorisation live
 
@@ -62,7 +63,8 @@ partagé, sans lire d'identité, d'environnement ou de destination. Il appelle l
 collecteur `session-300` inchangé, attend son nettoyage, puis le second collecteur
 uniquement si le premier résultat est `continuous_300s` ou `reconnected`. Sinon,
 le deuxième sous-rapport porte explicitement `not_run/first_not_admissible`.
-Il n'existe aucun point d'entrée CLI ni raccordement au launcher dans cette PR.
+L'API du moteur n'expose aucun mode autonome pour le deuxième scénario. Le seul
+point d'entrée de G2 appelle cette API séquentielle sans réimplémenter le protocole.
 
 Le second collecteur réutilise `V4Lifecycle` et `V4Session` avec `NoPongAfter120`.
 Il ne lit pas TLS et ne possède aucun protocole ni backoff. Les lectures fixes
@@ -84,7 +86,7 @@ Le délai d'une lecture ne peut dépasser la deadline d'observation courante.
 La suite garde une deadline de 1020 s, sans prolongation automatique ; une
 expiration globale refuse de produire un rapport complet. L'annulation nettoie
 le propriétaire partagé et se propage. Un nettoyage échoué interdit le succès.
-Le futur launcher devra aussi appliquer un plafond externe dur de processus.
+Le launcher G2 applique en plus les limites externes décrites ci-dessous.
 
 Deux sous-rapports identifiés contiennent uniquement provenance SHA/run/PR/
 tentative, `boundary_proven=false`, compteurs bornés et catégories fermées.
@@ -102,9 +104,8 @@ deadlines, nettoyage et refus des champs sensibles par les deux validateurs.
 
 ## Contrat d'admission spécifique — sous-ensemble 7/8-G1
 
-La tâche 7/8-G permet un sous-ensemble cohérent si le raccordement complet
-dépasse une petite PR. Cette tranche installe uniquement le contrat et le gate
-de suite, testés hors ligne ; elle ne raccorde aucun launcher, workflow ou export.
+La tranche G1 a installé le contrat et le gate de suite, testés hors ligne.
+G2 les branche au workflow existant et raccorde launcher/collecteur/publication.
 Le verrou `suite-installation` reste strictement inchangé. Aucun commentaire
 d'approbation réel n'est publié par DEV.
 
@@ -150,22 +151,65 @@ exacte et ce contenu ; aucun repli vers un ancien claim, aucune suppression ou
 réécriture d'un claim consommé, aucun rerun. La création d'un claim n'est testée
 qu'avec GitHub simulé dans cette tranche, sans réservation réelle.
 
-## Raccordement restant avant toute activation
+## Launcher G2 : plafonds externes et nettoyage
 
-Une tranche MANAGER suivante devra installer ensemble : le raccordement de ce moteur
-au collecteur/launcher existant, les plafonds de processus externes, l'export et la
-publication isolée des deux sous-rapports, le statut global du workflow et l'appel
-du nouveau gate de suite installé mais encore inutilisé. Les limites de processus
-360/600/1020 s, le nettoyage des enfants et l'allowlist d'environnement doivent
-être démontrés hors ligne avant ce raccordement. Un premier résultat non valide
-doit laisser le second NOT RUN. Sans Ping inhibé : `not_exercised` ; sans perte
-observée : `no_disconnect` ; sans reprise/stabilité : échec ou inconclusif.
+`launch_session_suite.py` lance uniquement `run_session_suite.py` avec Python
+isolé, stdin/stdout/stderr neutralisés et un environnement allowlisté : contexte
+Actions public, trois preuves `SESSION_SUITE_*`, dossier temporaire et identité
+Hoben privée. Aucun token GitHub/Actions/OIDC, fichier de commandes Actions,
+hook Python ou dépendance candidate arbitraire n'est transmis/installé.
+Le collecteur refuse les seules anciennes preuves `SESSION300_*`, vérifie le HEAD
+Git exact avant toute lecture d'identité, puis appelle `observe_suite()` avec le
+vrai `V4Lifecycle`/`V4Session` et la politique partagée. Aucun scénario libre.
 
-Le nouveau contrat doit refuser les anciennes décisions et claims session-300,
-conserver les gates acteur/SHA/CI/environnement/recheck et la publication isolée,
-et réserver une nouvelle autorisation anti-rejeu de suite. Ce raccordement complet
-conservera le verrou structurel. Son retrait final et l'autorisation du run réel
-exigeront une PR/décision d'activation séparée, après revue du contrat installé
-et de tous les raccordements par MANAGER.
+Un superviseur parent possède un groupe de processus distinct. Son horloge
+monotone arme 360 s dès le démarrage, avec un plafond global de 1020 s. Après
+nettoyage du premier scénario admissible, le collecteur demande l'unique
+transition via un octet fixe sur un pipe privé. Le parent arme les 600 s avant
+son acquittement sur un second pipe ; le deuxième lifecycle attend cet ACK.
+Ni les plafonds ni un mode ne proviennent du pipe, d'un commentaire ou d'un input.
+Transition doublée/invalide : arrêt, sans rapport inventé. Premier résultat KO :
+aucune demande de transition et deuxième sous-rapport NOT RUN.
+
+Le parent réserve la dernière seconde de chaque plafond à SIGKILL/reaping,
+et arrête le groupe entier au plus tard au seuil 359/599/1019 s applicable.
+Le nettoyage des descendants a lieu aussi après sortie normale, exception,
+SIGINT ou SIGTERM du launcher ; les signaux sont brièvement masqués pendant
+l'acquisition/nettoyage pour conserver la propriété du processus. Le collecteur
+isolé rétablit ensuite leur livraison normale. Un timeout asyncio ignoré ou un
+blocage du collecteur ne prolonge donc pas son budget externe. Échec/expiration
+du superviseur : pas d'export, pas de faux sous-rapport de collecte.
+
+Les tests horloge/processus simulés vérifient les plafonds propres et global,
+l'ACK et les refus de contexte/IPC. Les tests POSIX hors réseau lancent un
+processus résistant à l'annulation asyncio avec un descendant : arrêt dans
+chacune des deux phases, sortie normale et SIGTERM du parent sans enfant actif.
+
+## Export, publication et résultat G2
+
+Le collecteur valide le double rapport Python avant création exclusive 0600
+dans `hoben-session-suite-exports` (0700), au plus 8192 octets. Le workflow
+n'exporte qu'après recheck réussi et sortie réussie du superviseur. Node relit
+un fichier régulier sans suivre de symlink, revalide provenance et schéma,
+puis transmet seulement du base64 canonique borné (10924 caractères maximum).
+Un runner de publication distinct, sans environnement ni secret Hoben, valide
+et matérialise à nouveau un fichier neuf 0600, sans écraser une sortie existante.
+Artefact `session-suite-report-<SHA>-<run_id>-a1`, rétention sept jours maximum.
+
+Le résultat `hoben-experimental-session-suite` relit et revalide le rapport.
+Il réussit uniquement si collecte/publication sont réussies et si le résultat
+global est `success` avec ses deux sous-résultats admissibles. Rapport manquant
+ou refusé : sous-résultats non vérifiés et statut d'échec, sans données inventées.
+Les refus pré-secrets inscrivent séparément les deux NOT RUN. Tests Python/Node
+et scripts réels du workflow exécutés hors ligne couvrent ces chemins, les
+plafonds d'export, les champs sensibles et les faux succès partiels.
+
+## Activation séparée toujours nécessaire
+
+Le branchement G2 conserve le préalable en échec inconditionnel, sans checkout,
+permission, environnement ou secret. Une ancienne approbation ne peut lancer
+aucun scénario. Son retrait final et l'autorisation du run réel exigent une
+PR/décision d'activation séparée, après revue du contrat installé, du diff complet
+G2 et des quatre checks CI sur le HEAD exact par MANAGER.
 DEV/CI restent offline ; ni rerun ancien, ni workflow indépendant, ni déclencheur
 manuel, ni HA/hoben-live/main, ni commande/association/écriture Modbus.

@@ -154,12 +154,13 @@ avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
 ### Installation de la suite session — accès réels verrouillés
 
-Le moteur offline 7/8-F est fusionné par la PR #93 ; la tranche 7/8-G1 prépare
-le contrat d'admission spécifique `session-suite`, sans raccordement au workflow.
+Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
+spécifique `session-suite` de G1 est fusionné par la PR #94. La tranche G2
+raccorde ce gate, un launcher à plafonds externes et la publication de suite.
 Le verrou `suite-installation` conserve deux NOT RUN. Le [plan courant de suite](docs/session-suite-plan.md)
-distingue contrat testé hors ligne, raccordement launcher/gates/rapports restant,
-et activation finale séparée. Les plafonds de processus 360/600/1020 s devront
-être appliqués extérieurement et testés avant activation ; les budgets ne sont
+distingue le raccordement installé sous verrou et l'activation finale séparée.
+Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
+et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. L'étape 8 reste suspendue.
 Aucun développement du client HA, test hoben-live ou promotion main n'est autorisé
 par cette préparation. La validation historique 300 s ne valide pas la nouvelle

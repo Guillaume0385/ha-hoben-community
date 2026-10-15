@@ -1,5 +1,8 @@
 "use strict";
-// Offline schema only: no export, publication or gate is activated here.
+// Strict suite projection; used on export and a separate secretless publisher.
+const fs = require("node:fs"), path = require("node:path");
+const safe = require("./experimental-report-file.cjs");
+const MAX_REPORT_BYTES = 8192;
 const firstApi = require("./session-300-report.cjs");
 const need = v => { if (!v) throw Error("invalid_session_suite_report"); };
 const provenance = ["merge_sha","candidate_sha","run_id","run_attempt","pr_number"];
@@ -60,4 +63,43 @@ function validate(r,p) {
   return {...Object.fromEntries([...suiteKeys].sort().map(k => [k,r[k]])),
     session_300:first,session_reconnect_no_pong:second};
 }
-module.exports = {validate,validateSecond};
+function readReport(file, proof) {
+  return validate(JSON.parse(safe.snapshot(file,MAX_REPORT_BYTES).toString("utf8")),proof);
+}
+function prepare({core,proof}) {
+  try {
+    const r = readReport(path.join(process.env.RUNNER_TEMP,"hoben-session-suite-exports/report.json"),proof);
+    const bytes = Buffer.from(JSON.stringify(r));
+    need(bytes.length <= MAX_REPORT_BYTES);
+    core.setOutput("report_b64",bytes.toString("base64"));
+  } catch (_) {core.setFailed("NOT RUN: session-suite export refused.");}
+}
+function publish({core,proof,encoded}) {
+  let file, created = false;
+  try {
+    need(typeof encoded === "string" && encoded.length <= 10924);
+    const bytes = Buffer.from(encoded,"base64");
+    need(bytes.toString("base64") === encoded && bytes.length <= MAX_REPORT_BYTES);
+    const r = validate(JSON.parse(bytes.toString("utf8")),proof);
+    const parent = process.env.RUNNER_TEMP;
+    need(typeof parent === "string" && path.isAbsolute(parent));
+    const dir = path.join(parent,"hoben-session-suite-public");
+    fs.mkdirSync(dir,{mode:0o700});
+    fs.chmodSync(dir,0o700);
+    file = path.join(dir,"report.json");
+    const fd = fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|
+      fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
+    created = true;
+    try {fs.fchmodSync(fd,0o600);fs.writeFileSync(fd,JSON.stringify(r));}
+    finally {fs.closeSync(fd);}
+    readReport(file,proof);
+    core.setOutput("report","true");
+  } catch (_) {
+    if (created) {try {fs.unlinkSync(file);} catch (_) {}}
+    core.setFailed("NOT RUN: session-suite publication refused.");
+  }
+}
+function completed(r, proof, collection, publication) {
+  return validate(r,proof).result === "success" && collection === "success" && publication === "success";
+}
+module.exports = {validate,validateSecond,readReport,prepare,publish,completed,MAX_REPORT_BYTES};
