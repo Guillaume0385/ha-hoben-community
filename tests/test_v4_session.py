@@ -11,8 +11,10 @@ from custom_components.hoben.client import DEFAULT_BUILD, DEFAULT_DEVICE_INFO
 from custom_components.hoben.exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
+    HobenClientClosedError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
+    HobenModbusError,
     HobenProtocolError,
     HobenTimeoutError,
     HobenTransportError,
@@ -25,9 +27,9 @@ from custom_components.hoben.transport import (
     TransportTlsError,
 )
 from custom_components.hoben.v4_session import (
+    DelimitedV4DataResponse,
     DelimitedV4Message,
     HandoffState,
-    SessionNotImplementedError,
     SessionSnapshot,
     SessionState,
     SessionStateError,
@@ -98,7 +100,7 @@ def test_transition_guard(source, target):
 
 
 @pytest.mark.parametrize("state", list(SessionState))
-def test_unimplemented_operations_never_succeed_or_change_state(state):
+def test_operations_without_transport_never_succeed_or_change_state(state):
     session, factory = session_in(state)
     previous = session.snapshot
 
@@ -108,14 +110,9 @@ def test_unimplemented_operations_never_succeed_or_change_state(state):
             if state is SessionState.DISCONNECTED
             else SessionStateError
         )
-        read_error = (
-            SessionNotImplementedError
-            if state is SessionState.CONNECTED
-            else SessionStateError
-        )
         with pytest.raises(connect_error):
             await session.connect()
-        with pytest.raises(read_error):
+        with pytest.raises(SessionStateError):
             await session.request_v4_data()
 
     asyncio.run(operations())
@@ -189,8 +186,7 @@ def test_fragmented_opening_preserves_bytes_and_accepts_only_prefix(split):
         assert session._opening_buffer == prefix
         assert session.device_guid_for_persistence == "a" * 32
         transport.close.assert_not_awaited()
-        with pytest.raises(SessionNotImplementedError):
-            await session.request_v4_data()
+        assert session._pending_read is None
         with pytest.raises(SessionStateError):
             await session.connect()
         await session.close()
@@ -457,8 +453,7 @@ def test_one_rx_owner_with_concurrent_observers_requests_and_close():
         assert session.snapshot.handoff is HandoffState.UNPROVEN
         with pytest.raises(SessionStateError):
             await session.connect()
-        with pytest.raises(SessionNotImplementedError):
-            await session.request_v4_data()
+        assert session._pending_read is None
         observer = asyncio.create_task(session.wait_rx_stopped())
         await asyncio.sleep(0)  # Enter the shielded observer before cancelling it.
         observer.cancel()
@@ -771,3 +766,363 @@ def test_delimited_ping_refused_without_a_connected_transport(state):
     with pytest.raises(SessionStateError):
         asyncio.run(session._handle_delimited_ping(DelimitedV4Message.PING))
     factory.assert_not_called()
+
+
+def synthetic_data_response(*, transaction=0xFFFF, unit=1, function=4, count=20):
+    """Independent synthetic MBAP fixture, never a captured response."""
+    pdu = bytes([function, 2 * count]) + b"".join(
+        value.to_bytes(2, "big") for value in range(count)
+    )
+    return (
+        b"\x0e"
+        + transaction.to_bytes(2, "big")
+        + b"\x00\x00"
+        + (len(pdu) + 1).to_bytes(2, "big")
+        + bytes([unit])
+        + pdu
+    )
+
+
+async def start_synthetic_read(session, transport):
+    sent = asyncio.Event()
+    transport.write.side_effect = lambda payload: sent.set()
+    task = asyncio.create_task(session.request_v4_data(timeout=7.0))
+    await sent.wait()
+    return task, session._pending_read
+
+
+def test_fixed_read_exact_tx_typed_result_and_single_waiter(caplog):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        task, exchange = await start_synthetic_read(session, transport)
+        with pytest.raises(SessionStateError):
+            await session.request_v4_data()
+        event = DelimitedV4DataResponse(synthetic_data_response(), exchange=exchange)
+        await session._handle_delimited_data_response(event)
+        result = await task
+        assert (result.transaction_id, result.unit_id, result.function_code) == (
+            0xFFFF,
+            1,
+            4,
+        )
+        assert result.registers == tuple(range(20))
+        assert "registers" not in repr(result)
+        assert repr(event) == "DelimitedV4DataResponse()"
+        assert not session.snapshot.boundary_proven
+        assert session._pending_read is None
+        assert session.state is SessionState.CONNECTED
+        transport.write.assert_awaited_once_with(
+            bytes.fromhex("0D FF FF 00 00 00 06 01 04 04 00 00 14")
+        )
+        assert transport.read.await_count == 2
+        assert not caplog.records
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        b"",
+        b"\x0e",
+        synthetic_data_response()[:-1],
+        synthetic_data_response() + b"\x00",
+        synthetic_data_response() * 2,
+        synthetic_data_response(transaction=1),
+        synthetic_data_response(unit=2),
+        synthetic_data_response(function=3),
+        synthetic_data_response(count=19),
+    ],
+)
+def test_malformed_or_uncorrelated_response_fails_waiter_and_closes(frame):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        task, exchange = await start_synthetic_read(session, transport)
+        with pytest.raises(HobenProtocolError):
+            await session._handle_delimited_data_response(
+                DelimitedV4DataResponse(frame, exchange=exchange)
+            )
+        with pytest.raises(HobenProtocolError):
+            await task
+        assert session._pending_read is None
+        assert session.state is SessionState.CLOSED
+        transport.close.assert_awaited_once()
+        transport.write.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "raw", [b"\x0e", synthetic_data_response(), bytearray(b"\x0e")]
+)
+def test_raw_data_response_cannot_claim_delimitation(raw):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        with pytest.raises(HobenProtocolError):
+            await session._handle_delimited_data_response(raw)
+        transport.write.assert_not_awaited()
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_correlated_modbus_exception_is_typed_and_consumed():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        task, exchange = await start_synthetic_read(session, transport)
+        await session._handle_delimited_data_response(
+            DelimitedV4DataResponse(
+                bytes.fromhex("0E FF FF 00 00 00 03 01 84 02"), exchange=exchange
+            )
+        )
+        with pytest.raises(HobenModbusError) as raised:
+            await task
+        assert raised.value.exception_code == 2
+        assert session.state is SessionState.CONNECTED
+        assert session._pending_read is None
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mode", ["duplicate", "stale", "unsolicited"])
+def test_response_exchange_cannot_be_reassigned(mode):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        old_exchange = object()
+        if mode != "unsolicited":
+            first, old_exchange = await start_synthetic_read(session, transport)
+            event = DelimitedV4DataResponse(
+                synthetic_data_response(), exchange=old_exchange
+            )
+            await session._handle_delimited_data_response(event)
+            if mode == "duplicate":
+                with pytest.raises(HobenProtocolError):
+                    await session._handle_delimited_data_response(event)
+                with pytest.raises(HobenProtocolError):
+                    await first
+            else:
+                await first
+        if mode != "duplicate":
+            pending = None
+            if mode == "stale":
+                pending, _ = await start_synthetic_read(session, transport)
+            with pytest.raises(HobenProtocolError):
+                await session._handle_delimited_data_response(
+                    DelimitedV4DataResponse(
+                        synthetic_data_response(), exchange=old_exchange
+                    )
+                )
+            if pending:
+                with pytest.raises(HobenProtocolError):
+                    await pending
+        assert session._pending_read is None
+        assert session.state is SessionState.CLOSED
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, float("nan"), float("inf"), "bad"])
+def test_read_timeout_validation_precedes_tx(timeout):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        with pytest.raises(HobenInvalidInputError):
+            await session.request_v4_data(timeout=timeout)
+        assert session.state is SessionState.CONNECTED
+        transport.write.assert_not_awaited()
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mode", ["timeout", "cancel", "close", "rx", "eof", "tx"])
+def test_read_failure_terminates_waiter_without_replay(mode, deadlines):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        rx_release = asyncio.Event()
+        if mode in ("rx", "eof"):
+
+            async def read(*args, **kwargs):
+                await rx_release.wait()
+                if mode == "eof":
+                    raise TransportEOF("private-synthetic-eof")
+                return synthetic_data_response()
+
+            transport.read.side_effect = read
+        if mode == "tx":
+            transport.write.side_effect = TransportTlsError("private-synthetic-error")
+            task = asyncio.create_task(session.request_v4_data())
+        else:
+            task, exchange = await start_synthetic_read(session, transport)
+        error = HobenTransportError
+        if mode == "timeout":
+            context = next(
+                context for delay, context in deadlines.contexts if delay == 7
+            )
+            context.reschedule(asyncio.get_running_loop().time())
+            error = HobenTimeoutError
+        elif mode == "cancel":
+            task.cancel()
+            error = asyncio.CancelledError
+        elif mode == "close":
+            await session.close()
+            error = HobenClientClosedError
+        elif mode in ("rx", "eof"):
+            # The sole real RX owner rejects bytes, including apparent responses.
+            rx_release.set()
+            error = HobenAmbiguousSessionError if mode == "rx" else HobenTransportError
+        with pytest.raises(error) as raised:
+            await task
+        assert type(raised.value) is error
+        assert "private-synthetic" not in str(raised.value) + repr(session.snapshot)
+        assert session._pending_read is None
+        assert session.state is SessionState.CLOSED
+        assert session._rx_task.done()
+        transport.close.assert_awaited_once()
+        transport.write.assert_awaited_once()
+        with pytest.raises(
+            (
+                SessionStateError,
+                HobenTransportError,
+                HobenProtocolError,
+                HobenClientClosedError,
+            )
+        ):
+            await session.request_v4_data()
+        if mode == "timeout":
+            with pytest.raises(HobenProtocolError):
+                await session._handle_delimited_data_response(
+                    DelimitedV4DataResponse(
+                        synthetic_data_response(), exchange=exchange
+                    )
+                )
+        transport.write.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_read_tx_serialized_with_pong_and_deadline_covers_queue(deadlines):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def write(payload):
+            assert payload == b"\x0b"
+            entered.set()
+            await release.wait()
+
+        transport.write.side_effect = write
+        pong = asyncio.create_task(
+            session._handle_delimited_ping(DelimitedV4Message.PING)
+        )
+        await entered.wait()
+        task = asyncio.create_task(session.request_v4_data(timeout=7))
+        await asyncio.sleep(0)
+        context = next(context for delay, context in deadlines.contexts if delay == 7)
+        context.reschedule(asyncio.get_running_loop().time())
+        await asyncio.sleep(0)
+        release.set()
+        await pong
+        with pytest.raises(HobenTimeoutError):
+            await task
+        transport.write.assert_awaited_once_with(b"\x0b")
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("during_tx", [False, True])
+def test_cancel_read_while_queued_or_writing_closes(during_tx):
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered = asyncio.Event()
+
+        async def write(payload):
+            entered.set()
+            await asyncio.Future()
+
+        transport.write.side_effect = write
+        if not during_tx:
+            await session._tx_lock.acquire()
+        task = asyncio.create_task(session.request_v4_data())
+        if during_tx:
+            await entered.wait()
+        else:
+            await asyncio.sleep(0)
+        task.cancel()
+        if not during_tx:
+            session._tx_lock.release()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert session._pending_read is None
+        assert transport.write.await_count == int(during_tx)
+        transport.close.assert_awaited_once()
+        assert session._rx_task.done()
+
+    asyncio.run(scenario())
+
+
+def test_response_before_tx_is_rejected_without_sending():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        await session._tx_lock.acquire()
+        task = asyncio.create_task(session.request_v4_data())
+        await asyncio.sleep(0)
+        with pytest.raises(HobenProtocolError):
+            await session._handle_delimited_data_response(
+                DelimitedV4DataResponse(
+                    synthetic_data_response(), exchange=session._pending_read
+                )
+            )
+        session._tx_lock.release()
+        with pytest.raises(HobenProtocolError):
+            await task
+        transport.write.assert_not_awaited()
+        transport.close.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_read_and_pong_share_tx_lock_and_response_can_arrive_during_drain():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        entered, release = asyncio.Event(), asyncio.Event()
+        active = 0
+
+        async def write(payload):
+            nonlocal active
+            assert active == 0
+            active += 1
+            try:
+                if payload == b"\x0b":
+                    entered.set()
+                    await release.wait()
+                else:
+                    await session._handle_delimited_data_response(
+                        DelimitedV4DataResponse(
+                            synthetic_data_response(), exchange=session._pending_read
+                        )
+                    )
+                await asyncio.sleep(0)
+            finally:
+                active -= 1
+
+        transport.write.side_effect = write
+        pong = asyncio.create_task(
+            session._handle_delimited_ping(DelimitedV4Message.PING)
+        )
+        await entered.wait()
+        read = asyncio.create_task(session.request_v4_data())
+        await asyncio.sleep(0)
+        assert transport.write.await_count == 1
+        release.set()
+        await pong
+        assert (await read).registers == tuple(range(20))
+        assert transport.write.await_count == 2
+        assert transport.read.await_count == 2
+        assert session._pending_read is None
+        await session.close()
+
+    asyncio.run(scenario())
