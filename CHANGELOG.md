@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, sous-ensemble 7/8-G1 : contrat d'admission `session-suite` fermé,
+  ordre des deux scénarios et plafonds fixes liés à la décision MANAGER immuable
+  et au claim distinct. Réutilisation des contrôles de provenance/revue/CI/
+  environnement/recheck, avec tests GitHub simulés et refus des anciennes décisions
+  et claims. Workflow, launcher et verrou suite-installation inchangés ;
+  raccordement complet et activation restent à réaliser séparément. Aucun live.
+
 - Issue #81, tranche 7/8-F : moteur séquentiel offline `session-300` puis
   `session-reconnect-no-pong`, budget fixe distinct, mesure de 120 s sur une même
   génération après EOF observé et inhibition Pong. Deux sous-rapports stricts

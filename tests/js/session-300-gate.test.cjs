@@ -305,3 +305,151 @@ test("malformed duplicate owner decision is a refusal", async () => {
   const a=setup();a.comments.push({...a.comment,id:999,body:gate.MARKER+"invalid"});
   await assert.rejects(gate.verify(a));assert.equal(a.writes,0);
 });
+
+// Run the same evidence mutations through the suite entry point: the new
+// contract must not acquire a parallel, weaker implementation of the gate.
+const suiteGate = require("../../.github/scripts/session-suite-gate.cjs");
+function suiteSetup() {
+  const a = setup();
+  Object.assign(a.approval, {scenario: "session-suite", ...structuredClone(suiteGate.CONTRACT)});
+  a.decision = () => {a.comment.body = suiteGate.MARKER + "\n" + JSON.stringify(a.approval);};
+  a.decision();
+  return a;
+}
+
+test("suite: fixed contract, independent claim and read-only recheck", async () => {
+  const a = suiteSetup();
+  assert.equal((await suiteGate.dryRun(a)).scenario, "session-suite");
+  assert.equal(a.writes, 0);
+  assert.equal((await suiteGate.verify(a)).scenario, "session-suite");
+  const name = "refs/tags/hoben-session-suite-" + head;
+  assert.deepEqual([...a.refs.keys()], [name]);
+  const tag = a.tags.get(a.refs.get(name).object.sha);
+  const claim = JSON.parse(tag.message);
+  assert.equal(claim.scenario, "session-suite");
+  assert.deepEqual(claim.contract, suiteGate.CONTRACT);
+  assert.equal((await suiteGate.verify({...a,recheck:true})).status, "approved");
+  assert.equal(a.writes, 1);
+  assert(Object.isFrozen(suiteGate.CONTRACT.limits.session_300));
+  assert(Object.isFrozen(suiteGate.CONTRACT.scenarios));
+});
+
+for (const [name, modify] of Object.entries(refused)) {
+  test("suite refuses before claim: " + name, async () => {
+    const a = suiteSetup(); modify(a);
+    await assert.rejects(suiteGate.verify(a));
+    assert.equal(a.writes, 0);
+  });
+}
+
+for (const [name, modify] of Object.entries({
+  "scenarios reversed": a => {a.approval.scenarios.reverse();},
+  "scenario two alone": a => {a.approval.scenarios.shift();},
+  "third scenario": a => {a.approval.scenarios.push("ha-parity");},
+  "missing scenarios": a => {delete a.approval.scenarios;},
+  "missing limits": a => {delete a.approval.limits;},
+  "extra limit": a => {a.approval.limits.destination = "private";},
+  "missing max opens": a => {delete a.approval.limits.session_300.max_opens;},
+  "larger global budget": a => {a.approval.limits.suite_process_seconds++;},
+  "smaller global budget": a => {a.approval.limits.suite_process_seconds--;},
+  "boolean limit": a => {a.approval.limits.session_300.max_opens = true;},
+  "string limit": a => {a.approval.limits.session_reconnect_no_pong.max_reads = "10";},
+  "missing EOF wait": a => {delete a.approval.limits.session_reconnect_no_pong.eof_wait_seconds;},
+  "changed stable window": a => {a.approval.limits.session_reconnect_no_pong.stable_seconds = 119;},
+  "extra nested limit": a => {a.approval.limits.session_300.script = "private";},
+})) {
+  test("suite refuses non-fixed contract: " + name, async () => {
+    const a = suiteSetup(); modify(a); a.decision();
+    await assert.rejects(suiteGate.verify(a), /manager_decision_unverified/);
+    assert.equal(a.writes, 0);
+  });
+}
+
+for (const marker of [gate.MARKER,"<!-- hoben-experimental-approval:v1 -->",
+  "<!-- hoben-experimental-approval:v2 -->","<!-- hoben-live-approval:v1 -->"]) {
+  test("suite never consumes a legacy approval " + marker, async () => {
+    const a = suiteSetup(); a.comment.body = marker + "\n" + JSON.stringify(a.approval);
+    await assert.rejects(suiteGate.verify(a), /manager_decision_unverified/);
+    assert.equal(a.writes, 0);
+  });
+}
+test("suite marker with old four-field session-300 decision is refused", async () => {
+  const a = setup();a.comment.body = suiteGate.MARKER + "\n" + JSON.stringify(a.approval);
+  await assert.rejects(suiteGate.verify(a), /manager_decision_unverified/);
+  assert.equal(a.writes, 0);
+});
+
+test("suite replay: exactly one concurrent claim; cancellation never releases it", async () => {
+  const a = suiteSetup();
+  const outcomes = await Promise.allSettled([suiteGate.verify(a),suiteGate.verify(a),suiteGate.verify(a)]);
+  assert.equal(outcomes.filter(r => r.status === "fulfilled").length, 1);
+  a.admissionStatus = "in_progress";
+  await assert.rejects(suiteGate.verify(a));
+  assert.equal(a.writes, 1);
+});
+
+test("old claim cannot substitute for a suite claim, even with matching content", async () => {
+  const a = suiteSetup(); await suiteGate.verify(a);
+  const name = "refs/tags/hoben-session-suite-" + head;
+  const reservation = a.refs.get(name);
+  a.refs.delete(name); // Simulated missing evidence, never a real deletion.
+  a.refs.set("refs/tags/hoben-session-300-" + head,reservation);
+  await assert.rejects(suiteGate.verify({...a,recheck:true}));
+  assert.equal(a.writes, 1);
+});
+test("claim binds fixed limits, ordered scenarios, run and immutable decision", async () => {
+  for (const change of [
+    c => {c.contract.scenarios.reverse();},
+    c => {c.contract.limits.suite_process_seconds++;},
+    c => {c.scenario = "session-300";},
+    c => {c.run_id++;},
+  ]) {
+    const a = suiteSetup(); await suiteGate.verify(a);
+    const tag = [...a.tags.values()][0], claim = JSON.parse(tag.message);
+    change(claim);tag.message = JSON.stringify(claim);
+    await assert.rejects(suiteGate.verify({...a,recheck:true}), /claim_unverified/);
+    assert.equal(a.writes, 1);
+  }
+});
+for (const fault of ["missing","rejected","wrong-user","self","wrong-environment",
+  "policy-changed","decision-changed","SHA-changed"]) {
+  test("suite recheck refuses after environment waiting: " + fault, async () => {
+    const a = suiteSetup();requireIndependentReviewer(a);await suiteGate.verify(a);
+    if (fault === "missing") a.history.splice(0);
+    if (fault === "rejected") a.history[0].state = "rejected";
+    if (fault === "wrong-user") a.history[0].user.id = 2;
+    if (fault === "self") a.history[0].user = {...user};
+    if (fault === "wrong-environment") a.history[0].environments[0].name = "hoben-live";
+    if (fault === "policy-changed") a.environment.protection_rules[0].id++;
+    if (fault === "decision-changed") a.comment.id++;
+    if (fault === "SHA-changed") a.github.rest.repos.getBranch = async () =>
+      ({data:{protected:true,commit:{sha:head}}});
+    await assert.rejects(suiteGate.verify({...a,recheck:true}));
+    assert.equal(a.writes,1);
+  });
+}
+test("suite fresh independent approval required after admission", async () => {
+  const a = suiteSetup();requireIndependentReviewer(a);
+  assert.equal((await suiteGate.verify(a)).status,"PENDING APPROVAL");
+  a.history[0].created_at = "2026-10-09T08:00:00Z";
+  await assert.rejects(suiteGate.verify({...a,recheck:true}), /approval_unverified/);
+  a.history[0].created_at = "2026-10-09T08:12:00Z";
+  assert.equal((await suiteGate.verify({...a,recheck:true})).status,"approved");
+});
+for (const status of ["requested","queued","pending","waiting","in_progress"]) {
+  test("suite historical concurrency remains refused at recheck: " + status, async () => {
+    const a = suiteSetup();await suiteGate.verify(a);
+    a.github.rest.actions.listWorkflowRunsForRepo = async p => ({data:p.status === status
+      ? [{id:777,path:".github/workflows/live-validation.yml"}] : []});
+    await assert.rejects(suiteGate.verify({...a,recheck:true}), /concurrent_observation/);
+    assert.equal(a.writes,1);
+  });
+}
+test("suite profile cannot be selected or weakened by options/env", async () => {
+  const a = setup();
+  await assert.rejects(suiteGate.verify({...a,contract:{marker:gate.MARKER},scenario:"session-300"}));
+  assert.equal(a.writes,0);
+  const b = suiteSetup();
+  await assert.rejects(gate.verify({...b,contract:{marker:suiteGate.MARKER}}));
+  assert.equal(b.writes,0);
+});

@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — moteur offline 7/8-F
+# Suite « Tests expérimentaux session » — contrat offline 7/8-G1
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -100,19 +100,72 @@ simulés : ordre, échec du premier scénario, suppression puis EOF, reprise et 
 absence de Ping/EOF, erreur TLS, nouvelle perte, plafonds et cadence, annulation,
 deadlines, nettoyage et refus des champs sensibles par les deux validateurs.
 
-## Suite requise avant toute activation
+## Contrat d'admission spécifique — sous-ensemble 7/8-G1
 
-Une tranche MANAGER suivante devra activer ensemble : le raccordement de ce moteur
+La tâche 7/8-G permet un sous-ensemble cohérent si le raccordement complet
+dépasse une petite PR. Cette tranche installe uniquement le contrat et le gate
+de suite, testés hors ligne ; elle ne raccorde aucun launcher, workflow ou export.
+Le verrou `suite-installation` reste strictement inchangé. Aucun commentaire
+d'approbation réel n'est publié par DEV.
+
+Le point d'entrée fixe `.github/scripts/session-suite-gate.cjs` réutilise les
+mêmes contrôles que le gate historique : dépôt/acteur/push/HEAD protégé, workflow,
+PR fusionnée et arbre identique, décision MANAGER, revue et CI exacte, politique
+d'environnement, exclusion des observations historiques, réservation puis
+recheck et approbation indépendante fraîche si requise. Il ne permet pas de
+choisir un profil, des scénarios ou des budgets via des options ou l'environnement.
+Les wrappers historiques `session-300` conservent leur contrat à quatre champs.
+
+Le futur commentaire MANAGER doit commencer exactement par le marqueur
+`<!-- hoben-session-suite-approval:v1 -->`, suivi d'un unique objet JSON fermé :
+
+| Clé exacte | Valeur attendue |
+| --- | --- |
+| `schema` | Entier `1`. |
+| `scenario` | `session-suite`. |
+| `candidate_sha` | HEAD candidat revu, 40 caractères hexadécimaux minuscules. |
+| `ci_run_id` | Entier positif du run Validate PR, tentative 1, quatre checks réussis avant la décision. |
+| `scenarios` | Tableau ordonné exact : `session-300`, puis `session-reconnect-no-pong`. |
+| `limits` | Objet fixe de `.github/scripts/session-suite-contract.cjs`, ci-dessous. |
+
+`limits` contient exactement `suite_process_seconds=1020`, `session_300` et
+`session_reconnect_no_pong`. Les clés exactes de `session_300` sont
+`useful_seconds=300`, `process_seconds=360`, `max_opens=3`,
+`max_rx_bytes=1048576`, `max_reads=6`, `min_read_interval_seconds=60`.
+Les clés exactes de `session_reconnect_no_pong` sont `process_seconds=600`,
+`observation_seconds=590`, `cleanup_seconds=10`, `max_opens=3`,
+`max_rx_bytes=1048576`, `max_reads=10`, `min_read_interval_seconds=60`,
+`suppress_after_seconds=120`, `eof_wait_seconds=180`, `stable_seconds=120`.
+Toutes les limites sont des entiers exacts ; aucune clé libre, valeur différente,
+conversion de chaîne/booléen, sélection partielle ou permutation n'est acceptée.
+Ces valeurs attestent un contrat revu ; elles ne paramètrent aucun processus.
+
+La décision doit être unique, authentifiée MANAGER, non modifiée et antérieure
+à la fusion. Les anciens marqueurs session-300/H1H2/ha-parity n'autorisent pas
+la suite, même avec des valeurs ressemblantes. La réservation atomique distincte
+est `refs/tags/hoben-session-suite-<candidate_sha>`. Son objet lie scénario,
+contrat fixe complet, SHA candidat/merge, PR, run/tentative 1, décision immuable
+et empreinte de politique d'environnement. Le recheck exige cette référence
+exacte et ce contenu ; aucun repli vers un ancien claim, aucune suppression ou
+réécriture d'un claim consommé, aucun rerun. La création d'un claim n'est testée
+qu'avec GitHub simulé dans cette tranche, sans réservation réelle.
+
+## Raccordement restant avant toute activation
+
+Une tranche MANAGER suivante devra installer ensemble : le raccordement de ce moteur
 au collecteur/launcher existant, les plafonds de processus externes, l'export et la
-publication isolée des deux sous-rapports, le statut global du workflow et le nouveau
-contrat d'approbation de suite
-liant SHA, CI, deux scénarios et plafonds approuvés. Un premier résultat non valide
+publication isolée des deux sous-rapports, le statut global du workflow et l'appel
+du nouveau gate de suite installé mais encore inutilisé. Les limites de processus
+360/600/1020 s, le nettoyage des enfants et l'allowlist d'environnement doivent
+être démontrés hors ligne avant ce raccordement. Un premier résultat non valide
 doit laisser le second NOT RUN. Sans Ping inhibé : `not_exercised` ; sans perte
 observée : `no_disconnect` ; sans reprise/stabilité : échec ou inconclusif.
 
 Le nouveau contrat doit refuser les anciennes décisions et claims session-300,
 conserver les gates acteur/SHA/CI/environnement/recheck et la publication isolée,
-et réserver une nouvelle autorisation anti-rejeu de suite. Le verrou structurel
-ne pourra être retiré que dans cette activation complète revue par MANAGER.
+et réserver une nouvelle autorisation anti-rejeu de suite. Ce raccordement complet
+conservera le verrou structurel. Son retrait final et l'autorisation du run réel
+exigeront une PR/décision d'activation séparée, après revue du contrat installé
+et de tous les raccordements par MANAGER.
 DEV/CI restent offline ; ni rerun ancien, ni workflow indépendant, ni déclencheur
 manuel, ni HA/hoben-live/main, ni commande/association/écriture Modbus.
