@@ -211,6 +211,7 @@ class V4Session:
         "_operations",
         "_tx_operations",
         "_experiment",
+        "_experiment_generation",
         "_framer",
     )
 
@@ -227,6 +228,7 @@ class V4Session:
         if session_300 is not None and type(session_300) is not Session300:
             raise HobenInvalidInputError()
         self._experiment = session_300
+        self._experiment_generation = None
         self._framer = ExperimentalV4Framer() if session_300 is not None else None
         self._transport_factory = transport_factory
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
@@ -278,6 +280,8 @@ class V4Session:
         """
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
+        if self._experiment is not None:
+            self._experiment.lost(self._experiment_generation)
         self._loss_event.set()
         self._fail_pending_read(self._rx_error or HobenClientClosedError())
         operations = [
@@ -432,6 +436,7 @@ class V4Session:
             try:
                 if self._experiment is not None:
                     self._experiment.opening()
+                    self._experiment_generation = self._experiment.opens
                 self._transport = self._transport_factory()
                 if isinstance(self._transport, AsyncTlsTransport) and (
                     self._transport.host != "myhoben.fr" or self._transport.port != 465
@@ -483,6 +488,8 @@ class V4Session:
                         self._snapshot, handoff=HandoffState.EXPERIMENTAL
                     )
                 self._device_guid = assigned
+                if self._experiment is not None:
+                    self._experiment.accepted(self._experiment_generation)
                 self._transition(SessionState.CONNECTED)
                 # Handshake reads have finished before this sole RX task starts.
                 self._rx_task = asyncio.create_task(
@@ -553,6 +560,8 @@ class V4Session:
             self._rx_error = HobenProtocolError()
         finally:
             if self._rx_error is not None:
+                if self._experiment is not None:
+                    self._experiment.lost(self._experiment_generation)
                 self._loss_event.set()
                 self._fail_pending_read(self._rx_error)
             try:
@@ -759,6 +768,8 @@ class V4Session:
 
     async def close(self) -> None:
         """Stop opening, await its cleanup, then close once; CLOSED is terminal."""
+        if self._experiment is not None:
+            self._experiment.lost(self._experiment_generation)
         self._loss_event.set()
         self._fail_pending_read(HobenClientClosedError())
         if self.state is not SessionState.CLOSED:
