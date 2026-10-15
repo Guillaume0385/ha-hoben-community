@@ -1,4 +1,4 @@
-"""HA-independent V4 opening; post-open reception remains unimplemented.
+"""HA-independent V4 opening and conservative RX ownership, without routing.
 
 OpenClient is the opening request. The observed V4 OpenedClient response has a
 decodable 48-byte prefix, not a proven complete-message boundary. This skeleton
@@ -16,6 +16,7 @@ from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
     HobenClosedError,
+    HobenError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenProtocolError,
@@ -46,6 +47,13 @@ class SessionState(StrEnum):
     CLOSED = "closed"
 
 
+class HandoffState(StrEnum):
+    """No current evidence promotes UNPROVEN to a routable message boundary."""
+
+    UNPROVEN = "unproven"
+    AMBIGUOUS = "ambiguous"
+
+
 @dataclass(frozen=True, slots=True)
 class OpeningMetadata:
     """Allowlisted V4 prefix metadata; no identity or claim of complete framing."""
@@ -65,6 +73,8 @@ class SessionSnapshot:
     opening: OpeningMetadata | None = None
     unclassified_bytes: int = 0
     boundary_proven: bool = False
+    handoff: HandoffState = HandoffState.UNPROVEN
+    rx_error: str | None = None
 
 
 class SessionTransport(Protocol):
@@ -76,7 +86,7 @@ class SessionTransport(Protocol):
 
     async def connect(self) -> None: ...
 
-    async def read(self, max_bytes: int = 4096) -> bytes: ...
+    async def read(self, max_bytes: int = 4096, *, bounded: bool = True) -> bytes: ...
 
     async def write(self, data: bytes) -> None: ...
 
@@ -121,8 +131,9 @@ class V4Session:
     """Reusable contract for probes and clients, independent of their runners.
 
     CONNECTED means an accepted V4 prefix with no already-received suffix. It
-    does not prove a complete boundary or authorize reads/routing. No worker is
-    started. The default factory creates verified TLS to myhoben.fr:465 only.
+    does not prove a complete boundary or authorize routing. One RX owner waits
+    after opening; any further bytes are ambiguous and cause safe closure. The
+    default factory creates verified TLS to myhoben.fr:465 only.
     """
 
     __slots__ = (
@@ -133,6 +144,8 @@ class V4Session:
         "_opening_buffer",
         "_user_guid",
         "_device_guid",
+        "_rx_task",
+        "_rx_error",
     )
 
     def __init__(
@@ -151,6 +164,8 @@ class V4Session:
         self._opening_buffer = bytearray()
         self._user_guid = user_guid
         self._device_guid = device_guid
+        self._rx_task: asyncio.Task[HobenError | None] | None = None
+        self._rx_error: HobenError | None = None
 
     def __repr__(self) -> str:
         return f"V4Session(state={self.state.value})"
@@ -206,6 +221,8 @@ class V4Session:
             raise HobenInvalidInputError() from None
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
         self._opening_buffer.clear()
+        self._rx_error = None
+        self._rx_task = None
         self._transition(SessionState.CONNECTING)
         self._opening_task = asyncio.current_task()
         succeeded = False
@@ -236,6 +253,9 @@ class V4Session:
                     self._snapshot, unclassified_bytes=result.unclassified_bytes
                 )
                 if result.unclassified_bytes:
+                    self._snapshot = replace(
+                        self._snapshot, handoff=HandoffState.AMBIGUOUS
+                    )
                     raise HobenAmbiguousSessionError()
                 if result.profile is not StoveProfile.V4:
                     raise HobenUnsupportedProfileError(result.profile)
@@ -254,6 +274,10 @@ class V4Session:
                 )
                 self._device_guid = assigned
                 self._transition(SessionState.CONNECTED)
+                # Handshake reads have finished before this sole RX task starts.
+                self._rx_task = asyncio.create_task(
+                    self._receive_unproven_handoff(self._transport), name="hoben-v4-rx"
+                )
                 succeeded = True
             except (TransportTimeout, SessionTimeout):
                 raise HobenTimeoutError() from None
@@ -281,8 +305,69 @@ class V4Session:
             finally:
                 self._opening_task = None
 
+    async def _receive_unproven_handoff(
+        self, transport: SessionTransport
+    ) -> HobenError | None:
+        """Keep all delivered bytes; never guess a boundary or drain past failure.
+
+        With current evidence the first nonempty post-prefix read must stop us,
+        regardless of fragmentation, its leading byte or time spent silent.
+        No future/read-request method may read this transport independently.
+        """
+        try:
+            data = await transport.read(4096, bounded=False)
+            if not isinstance(data, bytes):
+                raise HobenProtocolError()
+            if not data:
+                raise HobenTransportError()
+            self._opening_buffer.extend(data)
+            self._snapshot = replace(
+                self._snapshot,
+                handoff=HandoffState.AMBIGUOUS,
+                unclassified_bytes=len(data),
+            )
+            self._rx_error = HobenAmbiguousSessionError()
+        except asyncio.CancelledError:
+            if self.state is not SessionState.CLOSED:
+                self._rx_error = HobenTransportError()
+        except TransportError:
+            self._rx_error = HobenTransportError()
+        except Exception:
+            self._rx_error = HobenProtocolError()
+        finally:
+            try:
+                await self._release_transport()
+            except HobenTransportError:
+                if self._rx_error is None and self.state is not SessionState.CLOSED:
+                    self._rx_error = HobenTransportError()
+            finally:
+                self._snapshot = replace(
+                    self._snapshot,
+                    rx_error=self._rx_error.code if self._rx_error else None,
+                )
+                if self.state is not SessionState.CLOSED:
+                    self._transition(SessionState.DISCONNECTED)
+        # Bind an observer's outcome to this transport, even if a caller later
+        # makes a fresh explicit connection and resets the current session error.
+        return self._rx_error
+
+    async def wait_rx_stopped(self) -> None:
+        """Await the RX owner and report its fixed typed error, without reading.
+
+        Cancelling an observer cannot cancel the owner. close() owns shutdown.
+        The RX task records its failure instead of leaking unhandled exceptions.
+        """
+        task = self._rx_task
+        if task is None:
+            raise SessionStateError()
+        error = await asyncio.shield(task)
+        if error is not None:
+            raise error from None
+
     async def request_v4_data(self) -> ModbusReadResponse:
         """Future solicited read only; no request is emitted by this contract."""
+        if self._rx_error is not None:
+            raise self._rx_error from None
         if self.state is not SessionState.CONNECTED:
             raise SessionStateError()
         raise SessionNotImplementedError()
@@ -299,9 +384,22 @@ class V4Session:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass  # The opening caller receives its sanitized failure.
+        reader = self._rx_task
+        cancelled = False
+        if reader is not None:
+            if not reader.done() and not reader.cancelling():
+                reader.cancel()
+            try:
+                await reader
+            except asyncio.CancelledError:
+                # A task cancelled before its first instruction has no finally.
+                # close still owns transport cleanup; preserve caller cancellation.
+                cancelled = bool(asyncio.current_task().cancelling())
         try:
             await self._release_transport()
         finally:
             self._opening_buffer.clear()
             self._user_guid = None
             self._device_guid = INITIAL_DEVICE_GUID
+        if cancelled:
+            raise asyncio.CancelledError()
