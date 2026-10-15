@@ -2,6 +2,12 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-D : compteurs RX bornés et diagnostic catégoriel
+  (`failure_phase`, `failure_category`, `message_category`, `read_slot`)
+  dans le rapport `session-300`, validés côté Python et JS. Aucun octet RX,
+  identifiant ou valeur domestique exporté. La cause du run précédent reste
+  inconnue et l'étape 7 non validée ; aucun nouveau run réel par DEV.
+
 - Issue #81, tranche 7/8-C : correction de la création exclusive du rapport
   `session-300` en mode 0600, avec nettoyage du fichier partiel et fermeture du
   descripteur en cas d'erreur. Tests hors ligne du writer et de son appel réel
