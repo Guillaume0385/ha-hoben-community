@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-F : moteur séquentiel offline `session-300` puis
+  `session-reconnect-no-pong`, budget fixe distinct, mesure de 120 s sur une même
+  génération après EOF observé et inhibition Pong. Deux sous-rapports stricts
+  Python/Node et résultat global refusant tout succès partiel. Tests sur le vrai
+  gestionnaire simulé, nettoyage et deadlines. Verrou suite-installation conservé,
+  aucun raccordement live/launcher, aucune nouvelle validation réelle ni étape HA.
+
 - Issue #81, tranche structurelle 7/8-E : inhibition Pong opt-in à T+120 s sous
   verrou TX, rétablissement à la génération suivante, compteurs d'EOF observés
   distincts des fermetures locales. Tests offline du gestionnaire partagé.
