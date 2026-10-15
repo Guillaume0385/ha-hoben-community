@@ -4,7 +4,7 @@ The caller supplies exactly one complete frame. This module has no transport,
 MyHOBEN envelope, register interpretation, or Home Assistant dependencies.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from struct import Struct
 
 MODBUS_PROTOCOL_ID = 0x0000
@@ -44,7 +44,7 @@ class ModbusReadResponse:
     transaction_id: int
     unit_id: int
     function_code: int
-    registers: tuple[int, ...]
+    registers: tuple[int, ...] = field(repr=False)
 
 
 @dataclass(frozen=True)
