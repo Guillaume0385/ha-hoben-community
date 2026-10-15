@@ -44,6 +44,7 @@ class Lifecycle:
 
     async def connect(self):
         self.budget.opening()
+        self.budget.accepted(self.budget.opens)
         self.state = SessionState.CONNECTED
 
     async def wait_stopped(self):
@@ -52,6 +53,7 @@ class Lifecycle:
     async def wait_connected(self):
         if self.state is SessionState.RECONNECTING:
             self.budget.opening()
+            self.budget.accepted(self.budget.opens)
             self.snapshot.attempts += 1
             self.state = SessionState.CONNECTED
 
@@ -267,5 +269,25 @@ def test_authorization_required_is_not_reported_as_a_transport_failure():
         assert report["result"] == "inconclusive"
         assert report["terminal"] == "authorization"
         assert life.closed and report["reads"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_loss_at_window_end_cannot_use_a_stale_connected_snapshot():
+    async def scenario():
+        clock = Clock()
+        budget = Session300(clock=clock)
+        life = Lifecycle(budget)
+
+        async def sleep(delay):
+            await clock.sleep(delay)
+            if clock() >= 300:
+                budget.lost(budget.opens)
+                # The supervisor has not yet updated its CONNECTED snapshot.
+
+        report = await observe(life, budget, PROOF, clock=clock, sleep=sleep)
+        assert report["result"] == "inconclusive"
+        assert report["duration_ms"] == 300000
+        assert life.closed
 
     asyncio.run(scenario())
