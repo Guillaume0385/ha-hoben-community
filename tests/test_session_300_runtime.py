@@ -177,3 +177,16 @@ def test_shared_limits_and_cadence_are_strict_across_instances():
     with pytest.raises(Session300BudgetError):
         budget.receive(b"x")
     assert budget.opens == 3 and budget.requests == 6
+
+
+def test_an_old_generation_cannot_mark_a_new_session_lost():
+    budget = Session300()
+    budget.opening()
+    budget.accepted(1)
+    budget.opening()
+    assert not budget.usable
+    budget.accepted(2)
+    budget.lost(1)
+    assert budget.usable
+    budget.lost(2)
+    assert not budget.usable
