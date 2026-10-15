@@ -28,6 +28,7 @@ from custom_components.hoben.exceptions import (  # noqa: E402
     HobenTransportError,
 )
 from custom_components.hoben.v4_experiment import (  # noqa: E402
+    DIAGNOSTIC_MESSAGES,
     Session300,
     Session300BudgetError,
 )
@@ -117,14 +118,18 @@ def validate_report(report, proof):
     }.items():
         require(type(report[key]) is int and 0 <= report[key] <= limit)
     require(report["result"] in RESULTS and report["terminal"] in STOPS)
-    require(
-        report["failure_phase"]
-        in {"none", "opening", "scheduled_read", "lifecycle_transition", "teardown"}
-    )
+    require(type(report["failure_phase"]) is str)
+    require(report["failure_phase"] in DIAGNOSTIC_MESSAGES)
     require(report["failure_category"] in STOPS)
-    require(report["message_category"] == "unclassified")
+    require(type(report["message_category"]) is str)
+    require(report["message_category"] in DIAGNOSTIC_MESSAGES[report["failure_phase"]])
     require(report["failure_category"] == report["terminal"])
-    require(report["read_slot"] <= report["reads"])
+    require(report["read_slot"] == report["reads"])
+    require(report["rx_chunks_total"] <= report["rx_bytes_total"])
+    require(
+        (report["failure_phase"] == "none")
+        == (report["terminal"] in {"completed", "recovery_verified"})
+    )
     require(report["reconnections"] == max(0, report["opens"] - 1))
     require(report["pongs"] <= report["pings"])
     require(report["reads_ok"] + report["reads_failed"] == report["reads"])
@@ -199,6 +204,7 @@ async def observe(
                     # session after the lifecycle has completed cleanup/backoff.
                     if stop.done():
                         stop.result()
+                phase = "lifecycle_transition"
             phase = "lifecycle_transition"
             await race(sleep(max(0, end - clock())))
             complete = (
@@ -247,6 +253,13 @@ async def observe(
             result, terminal = "interrupted", "closed"
             failure_phase = "teardown"
     duration = min(300000, measured)
+    message_category = "unclassified"
+    if (
+        budget.failure is not None
+        and budget.failure[1] == terminal
+        and failure_phase not in {"none", "teardown"}
+    ):
+        failure_phase, _, message_category = budget.failure
     return validate_report(
         {
             "schema": 1,
@@ -264,12 +277,14 @@ async def observe(
             "reads_ok": reads_ok,
             "reads_failed": budget.requests - reads_ok,
             "responses": budget.responses,
-            "rx_bytes_total": budget.rx_bytes,
-            "rx_chunks_total": budget.rx_chunks,
+            # Saturate public counters at the existing RX budget. The overrun
+            # still fails closed, but must not make its diagnostic unexportable.
+            "rx_bytes_total": min(1048576, budget.rx_bytes),
+            "rx_chunks_total": min(1048576, budget.rx_chunks),
             "read_slot": budget.requests,
             "failure_phase": failure_phase,
             "failure_category": terminal,
-            "message_category": "unclassified",
+            "message_category": message_category,
         },
         proof,
     )

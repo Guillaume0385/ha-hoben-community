@@ -229,7 +229,11 @@ class V4Session:
             raise HobenInvalidInputError()
         self._experiment = session_300
         self._experiment_generation = None
-        self._framer = ExperimentalV4Framer() if session_300 is not None else None
+        self._framer = (
+            ExperimentalV4Framer(diagnostic=session_300)
+            if session_300 is not None
+            else None
+        )
         self._transport_factory = transport_factory
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
         self._transport: SessionTransport | None = None
@@ -595,7 +599,16 @@ class V4Session:
             for event in events:
                 if event.payload == b"\x0a":
                     self._experiment.pings += 1
-                    await self._handle_delimited_ping(DelimitedV4Message.PING)
+                    try:
+                        await self._handle_delimited_ping(DelimitedV4Message.PING)
+                    except HobenError as failure:
+                        category = (
+                            "transport"
+                            if isinstance(failure, HobenTransportError)
+                            else "protocol"
+                        )
+                        self._experiment.note_failure("pong_tx", category, "ping")
+                        raise
                     self._experiment.pongs += 1
                 else:
                     await self._handle_delimited_data_response(
@@ -605,7 +618,11 @@ class V4Session:
             data = await transport.read(4096, bounded=False)
             if not data:
                 if self._framer.partial:
+                    self._experiment.note_failure(
+                        "frame_boundary", "protocol", "ambiguous"
+                    )
                     raise HobenProtocolError()
+                self._experiment.note_failure("tls_read", "transport")
                 raise TransportEOF("eof")
 
     async def wait_rx_stopped(self) -> None:
@@ -627,6 +644,7 @@ class V4Session:
         """Deliver one complete, exchange-bound response; never read the socket."""
         pending = self._pending_read
         error: HobenError | None = None
+        failure_phase = "request_correlation"
         try:
             if (
                 type(event) is not DelimitedV4DataResponse
@@ -636,6 +654,7 @@ class V4Session:
                 or not self._read_sent
             ):
                 raise HobenProtocolError()
+            failure_phase = "response_validation"
             response = decode_read_response(decode_data_response_client(event._frame))
             if (
                 response.transaction_id != 0xFFFF
@@ -651,6 +670,10 @@ class V4Session:
                 pending.set_result(response)
             return
         except Exception:
+            if self._experiment is not None:
+                self._experiment.note_failure(
+                    failure_phase, "protocol", "data_response"
+                )
             error = HobenProtocolError()
         self._rx_error = self._rx_error or error
         self._loss_event.set()

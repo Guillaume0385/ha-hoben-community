@@ -70,3 +70,33 @@ test("second-slot failure is categorical and rejects payload leakage",()=>{
   assert.throws(()=>api.validate({...failed,read_slot:3},proof));
   assert.throws(()=>api.validate({...failed,rx_raw:"synthetic-private"},proof));
 });
+
+for (const [phase,message] of [
+  ["tls_read","unclassified"], ["frame_boundary","ambiguous"],
+  ["message_classification","unknown"], ["request_correlation","data_response"],
+  ["response_validation","data_response"], ["pong_tx","ping"],
+]) {
+  test("allow only the fixed diagnostic pair " + phase,()=>{
+    const r={...good(),result:"inconclusive",terminal:"protocol",failure_category:"protocol",
+      failure_phase:phase,message_category:message};
+    assert.equal(api.validate(r,proof).message_category,message);
+    assert.throws(()=>api.validate({...r,message_category:"private-exception"},proof));
+    assert.throws(()=>api.validate({...good(),failure_phase:phase,message_category:message},proof));
+  });
+}
+test("counters saturate at the existing budget and inconsistent metadata is refused",()=>{
+  const r={...good(),result:"inconclusive",terminal:"budget",failure_category:"budget",
+    failure_phase:"tls_read",rx_bytes_total:1048576,rx_chunks_total:1048576};
+  assert.equal(api.validate(r,proof).rx_bytes_total,1048576);
+  for(const change of [
+    {rx_chunks_total:1048577},{rx_chunks_total:true},{rx_bytes_total:-1},
+    {rx_bytes_total:0,rx_chunks_total:1},{read_slot:0},{failure_phase:"none"},
+    {message_category:"unknown"},{failure_category:"protocol"},
+    {rx_raw:"synthetic-private"},{transaction_id:1},{traceback:"private"},
+  ]) assert.throws(()=>api.validate({...r,...change},proof));
+  for(const key of ["failure_phase","failure_category","message_category",
+    "rx_bytes_total","rx_chunks_total","read_slot"]) {
+    const missing={...r}; delete missing[key];
+    assert.throws(()=>api.validate(missing,proof));
+  }
+});

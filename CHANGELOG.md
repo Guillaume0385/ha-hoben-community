@@ -7,6 +7,9 @@
   dans le rapport `session-300`, validés côté Python et JS. Aucun octet RX,
   identifiant ou valeur domestique exporté. La cause du run précédent reste
   inconnue et l'étape 7 non validée ; aucun nouveau run réel par DEV.
+  Les points d'arrêt distinguent classification, frontière, corrélation,
+  validation de réponse et transport, sans exporter de type inconnu numérique.
+  Les compteurs publics saturent à 1 Mio sans changer le budget d'arrêt.
 
 - Issue #81, tranche 7/8-C : correction de la création exclusive du rapport
   `session-300` en mode 0600, avec nettoyage du fichier partiel et fermeture du
