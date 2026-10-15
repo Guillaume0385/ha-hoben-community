@@ -66,6 +66,45 @@ commande technique, destination/script/mode libre. L'instrumentation H1/H2
 reste hors de `custom_components/hoben/`. Les suites pytest/CI PR restent hors
 ligne, sans identifiant Hoben ni accès au poêle.
 
+## Future voie `session-300` — hypothèse expérimentale
+
+La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+autorisent la préparation d'une validation fonctionnelle expérimentale de 300 s
+avec le gestionnaire partagé. Cette voie reste **à développer et installer** :
+la tranche documentaire 7/8-A n'ajoute ni code, ni workflow, ni autorisation live.
+Routage réel et validation 300 s : **NOT RUN**.
+
+Pour ce seul scénario opt-in, borné, sur `experimental` et l'Osmose V4 de
+référence, les octets suivant le préfixe V4 de 48 octets strictement accepté
+pourront être traités comme trafic post-ouverture. Cette **hypothèse
+expérimentale** ne prouve ni le handoff local ni une longueur totale universelle,
+et ne transforme aucune observation en fait `CONFIRMÉ`.
+Le [contrat de périmètre](../project.md#décision-de-périmètre--handoff-expérimental-session-300)
+limite le futur framer à Ping et DataResponse corrélée, avec arrêt sûr sur type
+inconnu, DataUpdated, MBAP invalide, suffixe indécidable ou dépassement de budget.
+
+La future tâche 7/8-B devra définir et tester hors ligne la sonde, ses budgets
+propres et une voie dédiée : scénario exact `session-300`, environnement
+`hoben-experimental`, mutex `hoben-read-only-observation`, déclenchement uniquement
+par le push du merge MANAGER sur `experimental`. Avant tout accès réel, elle
+devra conserver la provenance dépôt/branche/SHA/acteur, la PR revue et fusionnée
+par MANAGER, les quatre checks CI du HEAD exact et une autorisation MANAGER
+distincte, unique, immuable et antérieure au merge. Admission, politique
+d'environnement lue par API, approbation éventuelle, réservation anti-rejeu et
+recheck avant secrets restent obligatoires ; aucun token GitHub/Actions ne doit
+être transmis à la sonde. DEV et la CI PR restent hors ligne. Aucun commentaire
+d'autorisation live ne sera publié pour cette PR documentaire.
+
+Cette future voie n'étend ni ne remplace H1/H2 ou HA parity : leurs budgets,
+gates, rapports, réservations et statuts restent inchangés. Les contrats détaillés
+ci-dessous décrivent ces deux voies installées ; ils ne prouvent pas qu'un gate
+`session-300` existe déjà. Une nouvelle revue exacte sera requise avant son usage.
+`NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
+l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée comme
+une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
+étape 7 réellement concluante ; aucune promotion automatique vers `main`.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`

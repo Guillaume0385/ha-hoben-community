@@ -372,6 +372,15 @@ code d'authentification. Un sous-code absent à EOF ou inconnu reste non interpr
 Les types réellement inattendus sont rapportés uniquement par leur numéro,
 sans payload ni hypothèse sur sa longueur. Aucun suffixe inconnu n'est reframé.
 
+> **Note normative — décision de périmètre, pas preuve protocolaire :** la
+> [décision #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+> et la tâche #81 permettent de préparer l'hypothèse locale opt-in `session-300`
+> décrite dans [project.md](project.md#décision-de-périmètre--handoff-expérimental-session-300).
+> Elle ne change ni le chemin ponctuel décrit ici ni la preuve factuelle :
+> longueur totale **À VALIDER**, observations `boundary_proven=false`, validation
+> fonctionnelle 300 s **NOT RUN**. La boucle cible du §16 et les observations
+> H1/H2 ci-dessous ne deviennent pas des capacités validées par cette décision.
+
 ### Profil V4 actif
 
 Le développement actuel vise uniquement V4. La règle statiquement établie dans
