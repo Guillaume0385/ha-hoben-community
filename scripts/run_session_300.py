@@ -280,6 +280,27 @@ def context_proof(env):
     return proof
 
 
+def write_report(file: Path, report):
+    """Create a private report exclusively; leave no partial output on failure.
+
+    The caller owns the newly created 0700 export directory. O_EXCL refuses
+    existing files and links; fdopen owns the descriptor only after it succeeds.
+    """
+    descriptor = os.open(
+        file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as out:
+            descriptor = None
+            json.dump(report, out)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        file.unlink()
+        raise
+
+
 def main():
     try:
         require(len(sys.argv) == 1)
@@ -306,11 +327,7 @@ def main():
         report = asyncio.run(observe(lifecycle, budget, proof))
         directory = Path(os.environ["RUNNER_TEMP"]) / "hoben-session-300-exports"
         directory.mkdir(mode=0o700)
-        file = directory / "report.json"
-        with file.open(
-            "x", encoding="utf-8", opener=lambda p, f: os.open(p, f, 0o600)
-        ) as out:
-            json.dump(report, out)
+        write_report(directory / "report.json", report)
         return 0
     except (Exception, KeyboardInterrupt):
         return 1  # No arbitrary error, capture or stdout/stderr is published.
