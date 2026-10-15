@@ -28,6 +28,7 @@ from custom_components.hoben.exceptions import (  # noqa: E402
     HobenTransportError,
 )
 from custom_components.hoben.v4_experiment import (  # noqa: E402
+    DIAGNOSTIC_MESSAGES,
     Session300,
     Session300BudgetError,
 )
@@ -71,6 +72,12 @@ KEYS = {
     "reads_ok",
     "reads_failed",
     "responses",
+    "rx_bytes_total",
+    "rx_chunks_total",
+    "read_slot",
+    "failure_phase",
+    "failure_category",
+    "message_category",
 }
 
 
@@ -105,9 +112,24 @@ def validate_report(report, proof):
         "reads_ok": 6,
         "reads_failed": 6,
         "responses": 6,
+        "rx_bytes_total": 1048576,
+        "rx_chunks_total": 1048576,
+        "read_slot": 6,
     }.items():
         require(type(report[key]) is int and 0 <= report[key] <= limit)
     require(report["result"] in RESULTS and report["terminal"] in STOPS)
+    require(type(report["failure_phase"]) is str)
+    require(report["failure_phase"] in DIAGNOSTIC_MESSAGES)
+    require(report["failure_category"] in STOPS)
+    require(type(report["message_category"]) is str)
+    require(report["message_category"] in DIAGNOSTIC_MESSAGES[report["failure_phase"]])
+    require(report["failure_category"] == report["terminal"])
+    require(report["read_slot"] == report["reads"])
+    require(report["rx_chunks_total"] <= report["rx_bytes_total"])
+    require(
+        (report["failure_phase"] == "none")
+        == (report["terminal"] in {"completed", "recovery_verified"})
+    )
     require(report["reconnections"] == max(0, report["opens"] - 1))
     require(report["pongs"] <= report["pings"])
     require(report["reads_ok"] + report["reads_failed"] == report["reads"])
@@ -137,6 +159,7 @@ async def observe(
     reads_ok = 0
     last_success_attempt = None
     result, terminal = "not_run", "context"
+    phase = "opening"
 
     async def race(awaitable):
         operation = asyncio.create_task(awaitable)
@@ -156,6 +179,7 @@ async def observe(
         async with asyncio.timeout(350):
             await lifecycle.connect()
             start = clock()
+            phase = "lifecycle_transition"
             end = start + 300
             stop = asyncio.create_task(lifecycle.wait_stopped())
             while clock() < end and budget.requests < 6:
@@ -166,6 +190,7 @@ async def observe(
                 await race(lifecycle.wait_connected())
                 if clock() >= end:
                     break
+                phase = "scheduled_read"
                 try:
                     # Discard the returned registers; never put them in a report.
                     await race(
@@ -173,11 +198,14 @@ async def observe(
                     )
                     reads_ok += 1
                     last_success_attempt = lifecycle.snapshot.attempts
+                    phase = "lifecycle_transition"
                 except HobenTransportError:
                     # No replay: a subsequent scheduled slot may use a fresh
                     # session after the lifecycle has completed cleanup/backoff.
                     if stop.done():
                         stop.result()
+                phase = "lifecycle_transition"
+            phase = "lifecycle_transition"
             await race(sleep(max(0, end - clock())))
             complete = (
                 clock() >= end
@@ -211,6 +239,9 @@ async def observe(
     except Exception:
         result, terminal = "interrupted", "internal"
     finally:
+        failure_phase = (
+            "none" if terminal in {"completed", "recovery_verified"} else phase
+        )
         measured = 0 if start is None else max(0, int((clock() - start) * 1000))
         if stop is not None:
             stop.cancel()
@@ -220,7 +251,15 @@ async def observe(
                 await lifecycle.close()
         except Exception:
             result, terminal = "interrupted", "closed"
+            failure_phase = "teardown"
     duration = min(300000, measured)
+    message_category = "unclassified"
+    if (
+        budget.failure is not None
+        and budget.failure[1] == terminal
+        and failure_phase not in {"none", "teardown"}
+    ):
+        failure_phase, _, message_category = budget.failure
     return validate_report(
         {
             "schema": 1,
@@ -238,6 +277,14 @@ async def observe(
             "reads_ok": reads_ok,
             "reads_failed": budget.requests - reads_ok,
             "responses": budget.responses,
+            # Saturate public counters at the existing RX budget. The overrun
+            # still fails closed, but must not make its diagnostic unexportable.
+            "rx_bytes_total": min(1048576, budget.rx_bytes),
+            "rx_chunks_total": min(1048576, budget.rx_chunks),
+            "read_slot": budget.requests,
+            "failure_phase": failure_phase,
+            "failure_category": terminal,
+            "message_category": message_category,
         },
         proof,
     )

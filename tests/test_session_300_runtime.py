@@ -190,3 +190,23 @@ def test_an_old_generation_cannot_mark_a_new_session_lost():
     assert budget.usable
     budget.lost(2)
     assert not budget.usable
+
+
+def test_diagnostics_are_fixed_preserved_through_cleanup_and_reset_on_new_open():
+    budget = Session300()
+    budget.opening()
+    budget.note_failure("message_classification", "protocol", "unknown")
+    budget.note_failure("tls_read", "transport")
+    budget.lost(1)
+    assert budget.failure == ("message_classification", "protocol", "unknown")
+    for args in [
+        ("private/path", "protocol"),
+        ("tls_read", "private-error"),
+        ("frame_boundary", "protocol", "private-payload"),
+    ]:
+        with pytest.raises(ValueError, match="^invalid_session_300_diagnostic$"):
+            budget.note_failure(*args)
+    budget.opening()
+    assert budget.failure is None
+    budget.receive(b"")
+    assert budget.rx_chunks == budget.rx_bytes == 0

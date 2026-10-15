@@ -10,6 +10,21 @@ from dataclasses import dataclass, field
 
 from .exceptions import HobenProtocolError
 from .modbus import modbus_tcp_frame_size
+from .transport import TransportError
+
+DIAGNOSTIC_MESSAGES = {
+    "none": {"unclassified"},
+    "opening": {"unclassified"},
+    "scheduled_read": {"unclassified"},
+    "lifecycle_transition": {"unclassified"},
+    "teardown": {"unclassified"},
+    "tls_read": {"unclassified"},
+    "frame_boundary": {"unclassified", "ambiguous"},
+    "message_classification": {"unknown"},
+    "request_correlation": {"data_response"},
+    "response_validation": {"data_response"},
+    "pong_tx": {"ping"},
+}
 
 
 class Session300BudgetError(HobenProtocolError):
@@ -23,11 +38,12 @@ class Session300:
 
     def __init__(self, *, clock=time.monotonic):
         self.clock = clock
-        self.opens = self.rx_bytes = self.pings = self.pongs = 0
+        self.opens = self.rx_bytes = self.rx_chunks = self.pings = self.pongs = 0
         self.requests = self.responses = 0
         self.partial = False
         self.connected_generation = None
         self._last_read = None
+        self.failure = None
 
     def __repr__(self):
         return "Session300()"
@@ -36,6 +52,22 @@ class Session300:
         if self.opens >= 3:
             raise Session300BudgetError()
         self.opens += 1
+        self.failure = None  # A recovered transport cannot describe a later loss.
+
+    def note_failure(self, phase, category, message="unclassified"):
+        """Retain the first fixed diagnostic; teardown must not overwrite it.
+
+        These tokens describe the code path, never payload, a transaction ID or
+        a proven wire boundary. Only existing parser decisions call this hook.
+        """
+        if (
+            phase not in DIAGNOSTIC_MESSAGES
+            or category not in {"protocol", "transport", "budget"}
+            or message not in DIAGNOSTIC_MESSAGES[phase]
+        ):
+            raise ValueError("invalid_session_300_diagnostic")
+        if self.failure is None:
+            self.failure = (phase, category, message)
 
     @property
     def usable(self):
@@ -51,6 +83,7 @@ class Session300:
     def receive(self, data):
         if not isinstance(data, bytes) or len(data) > 4096:
             raise Session300BudgetError()
+        self.rx_chunks += bool(data)  # EOF is not a received data chunk.
         self.rx_bytes += len(data)
         if self.rx_bytes > 1048576:
             raise Session300BudgetError()
@@ -85,9 +118,15 @@ class ExperimentalV4Framer:
     if answering Ping yields and lets another caller register a new request.
     """
 
-    def __init__(self):
+    def __init__(self, *, diagnostic=None):
         self._buffer = bytearray()
         self._exchange = None
+        self._diagnostic = diagnostic
+
+    def _fail(self, phase, message):
+        if self._diagnostic is not None:
+            self._diagnostic.note_failure(phase, "protocol", message)
+        raise HobenProtocolError()
 
     def clear(self):
         self._buffer.clear()
@@ -99,7 +138,7 @@ class ExperimentalV4Framer:
 
     def feed(self, data: bytes, exchange: object):
         if not isinstance(data, bytes) or len(data) > 4096:
-            raise HobenProtocolError()
+            self._fail("frame_boundary", "unclassified")
         events = []
         for byte in data:
             if not self._buffer:
@@ -109,12 +148,13 @@ class ExperimentalV4Framer:
                 events.append(ExperimentalFrame(b"\x0a", self._exchange))
                 self._buffer.clear()
             elif self._buffer[0] != 14:
-                raise HobenProtocolError()  # Includes DataUpdated: no resync.
+                # Includes DataUpdated: no new interpretation or resync.
+                self._fail("message_classification", "unknown")
             elif len(self._buffer) >= 7:
                 try:
                     size = 1 + modbus_tcp_frame_size(bytes(self._buffer[1:7]))
                 except (TypeError, ValueError):
-                    raise HobenProtocolError() from None
+                    self._fail("frame_boundary", "ambiguous")
                 if len(self._buffer) == size:
                     events.append(
                         ExperimentalFrame(bytes(self._buffer), self._exchange)
@@ -134,8 +174,16 @@ class BudgetTransport:
         await self._transport.connect()
 
     async def read(self, max_bytes=4096, *, bounded=True):
-        data = await self._transport.read(min(max_bytes, 4096), bounded=bounded)
-        self._budget.receive(data)
+        try:
+            data = await self._transport.read(min(max_bytes, 4096), bounded=bounded)
+        except TransportError:
+            self._budget.note_failure("tls_read", "transport")
+            raise
+        try:
+            self._budget.receive(data)
+        except Session300BudgetError:
+            self._budget.note_failure("tls_read", "budget")
+            raise
         return data
 
     async def write(self, data):
