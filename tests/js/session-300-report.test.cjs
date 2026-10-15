@@ -60,3 +60,13 @@ test("collector export is fixed, bounded and independently checked",()=>{
     fs.rmSync(root,{recursive:true,force:true});
   }
 });
+
+test("second-slot failure is categorical and rejects payload leakage",()=>{
+  const failed={...good(),result:"inconclusive",terminal:"protocol",duration_ms:60091,
+    reads:2,reads_ok:1,reads_failed:1,responses:1,read_slot:2,
+    failure_phase:"scheduled_read",failure_category:"protocol"};
+  assert.equal(api.validate(failed,proof).failure_phase,"scheduled_read");
+  assert.throws(()=>api.validate({...failed,message_category:"private"},proof));
+  assert.throws(()=>api.validate({...failed,read_slot:3},proof));
+  assert.throws(()=>api.validate({...failed,rx_raw:"synthetic-private"},proof));
+});
