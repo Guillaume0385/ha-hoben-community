@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — recherche experimental
+
+- Issue #81, tranche 7/8-B : framing Ping/DataResponse opt-in sous hypothèse
+  `session-300`, avec sonde réutilisant le gestionnaire V4 partagé et voie GitHub
+  dédiée soumise aux gates MANAGER. Budgets 300 s utiles / 360 s globales,
+  trois ouvertures, 1 Mio RX et six lectures fixes au maximum.
+- Rapport à compteurs/catégories stricts, publication isolée et absence de replay.
+  Aucun changement du client HA, des voies H1/H2 ou HA parity ni des commandes.
+  Validation réelle 300 s : **NOT RUN** ; frontière OpenedClient non prouvée.
+
 ## v0.1.0-beta1 — First public beta
 
 First HACS-testable beta of the unofficial community Hoben integration.
