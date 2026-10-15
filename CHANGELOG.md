@@ -2,6 +2,11 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-C : correction de la création exclusive du rapport
+  `session-300` en mode 0600, avec nettoyage du fichier partiel et fermeture du
+  descripteur en cas d'erreur. Tests hors ligne du writer et de son appel réel
+  depuis `main()` ; aucun changement de protocole, budget, gate ou autorisation.
+  Le run 38729755965 reste **NOT RUN / résultat non vérifiable**.
 - Issue #81, tranche 7/8-B : framing Ping/DataResponse opt-in sous hypothèse
   `session-300`, avec sonde réutilisant le gestionnaire V4 partagé et voie GitHub
   dédiée soumise aux gates MANAGER. Budgets 300 s utiles / 360 s globales,
