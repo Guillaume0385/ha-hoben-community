@@ -11,21 +11,41 @@ from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
 from typing import Protocol
 
-from .client import DEFAULT_BUILD, DEFAULT_DEVICE_INFO, _validate_device_guid
+from .client import (
+    DEFAULT_BUILD,
+    DEFAULT_DEVICE_INFO,
+    _validate_delay,
+    _validate_device_guid,
+)
 from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
+    HobenClientClosedError,
     HobenClosedError,
     HobenError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
+    HobenModbusError,
     HobenProtocolError,
     HobenTimeoutError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
-from .modbus import ModbusReadResponse
-from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason, encode_open_client
+from .modbus import (
+    HOBEN_UNIT_ID,
+    READ_INPUT_REGISTERS,
+    ModbusExceptionResponse,
+    ModbusReadResponse,
+    build_read_input_registers,
+    decode_read_response,
+)
+from .myhoben import (
+    INITIAL_DEVICE_GUID,
+    CloseClientReason,
+    decode_data_response_client,
+    encode_data_request_client,
+    encode_open_client,
+)
 from .profiles import StoveProfile
 from .session import (
     _PING,
@@ -65,6 +85,26 @@ class DelimitedV4Message(Enum):
     """
 
     PING = _PING
+
+
+class DelimitedV4DataResponse:
+    """Private bytes of one complete response, bound to its originating exchange.
+
+    This contract is not a framer or a proof of wire freshness. A future proven
+    framer must preserve the originating exchange; it must not relabel old bytes
+    with the current waiter. The conservative RX owner never creates this object.
+    """
+
+    __slots__ = ("_frame", "_exchange")
+
+    def __init__(self, frame: bytes, *, exchange: object) -> None:
+        if not isinstance(frame, bytes):
+            raise HobenProtocolError()
+        self._frame = frame
+        self._exchange = exchange
+
+    def __repr__(self) -> str:
+        return "DelimitedV4DataResponse()"
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +200,8 @@ class V4Session:
         "_rx_task",
         "_rx_error",
         "_tx_lock",
+        "_pending_read",
+        "_read_sent",
     )
 
     def __init__(
@@ -181,6 +223,14 @@ class V4Session:
         self._rx_task: asyncio.Task[HobenError | None] | None = None
         self._rx_error: HobenError | None = None
         self._tx_lock = asyncio.Lock()
+        self._pending_read: asyncio.Future[ModbusReadResponse] | None = None
+        self._read_sent = False
+
+    def _fail_pending_read(self, error: HobenError) -> None:
+        """Complete the sole waiter at most once, without exposing its payload."""
+        pending = self._pending_read
+        if pending is not None and not pending.done():
+            pending.set_exception(error)
 
     def __repr__(self) -> str:
         return f"V4Session(state={self.state.value})"
@@ -255,6 +305,7 @@ class V4Session:
             if error is not None:
                 # Stop queued TX before releasing the lock for shutdown.
                 self._rx_error = self._rx_error or error
+                self._fail_pending_read(self._rx_error)
                 self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
                 if self.state is not SessionState.CLOSED:
                     self._transition(SessionState.CLOSED)
@@ -399,6 +450,8 @@ class V4Session:
         except Exception:
             self._rx_error = HobenProtocolError()
         finally:
+            if self._rx_error is not None:
+                self._fail_pending_read(self._rx_error)
             try:
                 await self._release_transport()
             except HobenTransportError:
@@ -428,16 +481,136 @@ class V4Session:
         if error is not None:
             raise error from None
 
-    async def request_v4_data(self) -> ModbusReadResponse:
-        """Future solicited read only; no request is emitted by this contract."""
+    async def _handle_delimited_data_response(
+        self, event: DelimitedV4DataResponse
+    ) -> None:
+        """Deliver one complete, exchange-bound response; never read the socket."""
+        pending = self._pending_read
+        error: HobenError | None = None
+        try:
+            if (
+                type(event) is not DelimitedV4DataResponse
+                or pending is None
+                or pending.done()
+                or event._exchange is not pending
+                or not self._read_sent
+            ):
+                raise HobenProtocolError()
+            response = decode_read_response(decode_data_response_client(event._frame))
+            if (
+                response.transaction_id != 0xFFFF
+                or response.unit_id != HOBEN_UNIT_ID
+                or response.function_code != READ_INPUT_REGISTERS
+                or isinstance(response, ModbusReadResponse)
+                and len(response.registers) != 20
+            ):
+                raise HobenProtocolError()
+            if isinstance(response, ModbusExceptionResponse):
+                pending.set_exception(HobenModbusError(response.exception_code))
+            else:
+                pending.set_result(response)
+            return
+        except Exception:
+            error = HobenProtocolError()
+        self._rx_error = self._rx_error or error
+        self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
+        if self.state is not SessionState.CLOSED:
+            self._transition(SessionState.CLOSED)
+        self._fail_pending_read(self._rx_error)
+        # An active request owns its TX/cleanup. Do not deadlock waiting for TX
+        # when a response arrives while write()/drain() is still in progress.
+        if pending is None:
+            try:
+                await self.close()
+            except HobenTransportError:
+                pass
+        raise error from None
+
+    async def request_v4_data(self, *, timeout: float = 30.0) -> ModbusReadResponse:
+        """Send the sole fixed V4 read and await a delimited contract response.
+
+        No live RX dispatch is installed. The total deadline covers TX queueing,
+        write and response. Abandoned requests close the session: fixed FFFF
+        cannot distinguish a late wire response on a reused transport.
+        """
+        _validate_delay(timeout)
         if self._rx_error is not None:
             raise self._rx_error from None
-        if self.state is not SessionState.CONNECTED:
+        if (
+            self.state is not SessionState.CONNECTED
+            or self._transport is None
+            or self._pending_read is not None
+        ):
             raise SessionStateError()
-        raise SessionNotImplementedError()
+        transport = self._transport
+        pending = asyncio.get_running_loop().create_future()
+        self._pending_read = pending
+        self._read_sent = False
+        error: HobenError | None = None
+        cancelled = False
+        try:
+            async with asyncio.timeout(timeout):
+                async with self._tx_lock:
+                    if pending.done():
+                        pending.result()
+                    if self._rx_error is not None:
+                        raise self._rx_error from None
+                    if (
+                        self.state is not SessionState.CONNECTED
+                        or self._transport is not transport
+                    ):
+                        raise HobenClientClosedError()
+                    request = encode_data_request_client(
+                        build_read_input_registers(
+                            0xFFFF, 1024, 20, unit_id=HOBEN_UNIT_ID
+                        )
+                    )
+                    self._read_sent = True
+                    await transport.write(request)
+                response = await asyncio.shield(pending)
+                if self._rx_error is not None:
+                    raise self._rx_error from None
+                return response
+        except asyncio.CancelledError:
+            cancelled = True
+            error = HobenTransportError()
+        except (TransportTimeout, TimeoutError):
+            error = HobenTimeoutError()
+        except TransportError:
+            error = HobenTransportError()
+        except HobenModbusError:
+            # A correlated exception is a consumed terminal response, not an
+            # abandoned read. Preserve the typed error without inventing meaning.
+            if self._rx_error is None:
+                raise
+            error = self._rx_error
+        except HobenError as failure:
+            error = failure
+        except Exception:
+            error = HobenProtocolError()
+        finally:
+            if not pending.done():
+                pending.cancel()
+            elif not pending.cancelled():
+                pending.exception()  # Also consume failures arriving during TX.
+            if self._pending_read is pending:
+                self._pending_read = None
+                self._read_sent = False
+        self._rx_error = self._rx_error or error
+        self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
+        if self.state is not SessionState.CLOSED:
+            self._transition(SessionState.CLOSED)
+        try:
+            await self.close()
+        except HobenTransportError:
+            pass
+        if cancelled:
+            raise asyncio.CancelledError()
+        raise error from None
 
     async def close(self) -> None:
         """Stop opening, await its cleanup, then close once; CLOSED is terminal."""
+        self._fail_pending_read(HobenClientClosedError())
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
         task = self._opening_task
