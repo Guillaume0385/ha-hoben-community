@@ -10,6 +10,9 @@
   workflow, gate, budget ou raccordement consommateur changé. L5 fusionnée par
   #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`, défaut-off ; verrou
   L2 maintenu. Aucun live ni résultat acquis, suite 7 non validée, étape 8 suspendue.
+  Correction de revue : EOF consommable strictement après l'entrée en quarantaine,
+  ordre quantifié égal refusé comme par la politique réelle ; fixtures communes
+  entrée−1/entrée/entrée+1 et vérification du statut final inchangé.
 
 - Issue #81, tranche 7/8-L5 (fusionnée par #103) : lifecycle privé livré, défaut-off, réservé aux
   tests du second scénario avec capacité à usage unique et deadlines L3.

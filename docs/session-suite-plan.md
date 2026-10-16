@@ -309,7 +309,11 @@ inhibition, pas pour un événement local. Un EOF sans quarantaine reste comptab
 mais non admissible pour récupération ; le compteur seul ne constitue pas une preuve.
 Un EOF transport de quarantaine exige ce compteur à1. Les compteurs peer_eofs restent des EOF transport seulement.
 `receipt=valid_at_consumption` et outcome=consumed équivalent à consumed_ms non
-null ; EOF transport <= consommation < min(240000,échéances), origine génération1.
+null ; entrée < EOF transport <= consommation < min(240000,échéances), origine génération1.
+L'EOF consommable est strictement postérieur à l'entrée : le même timestamp
+quantifié est ambigu et refusé par la politique L1/L3 et le pont L4. Les cas
+entrée−1 et entrée ne peuvent fournir un reçu valide ni un succès ; entrée+1
+reste admissible structurellement si toutes les autres preuves concordent.
 Le futur projecteur DOIT recevoir du propriétaire d'origine un reçu figé valide
 au moment exact de consommation ainsi que son premier arrêt public et le
 cleanup possédé. Ce reçu n'est pas encore produit publiquement par L5 ; L6 ne

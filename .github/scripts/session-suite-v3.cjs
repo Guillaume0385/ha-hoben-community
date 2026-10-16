@@ -78,7 +78,7 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
   if (r.eofs_after_suppression) need(!nil(inhibition));
   if (transportEof) need(r.eofs_after_suppression === 1);
   need(!nil(consumed) === (q.receipt === "valid_at_consumption") && !nil(consumed) === (q.outcome === "consumed"));
-  if (!nil(consumed)) need(transportEof && eof <= consumed && consumed < Math.min(240000,...deadlines) && consumed <= end);
+  if (!nil(consumed)) need(transportEof && entered < eof && eof <= consumed && consumed < Math.min(240000,...deadlines) && consumed <= end);
   if (["waiting","no_eof"].includes(q.outcome)) need(nil(eof) && q.receipt === "none" && q.stop === "none" && r.eofs_after_suppression === 0);
   if (q.outcome === "revoked") need(q.receipt === "revoked_before_consumption" && ["local_before_consumption","cancel_before_consumption"].includes(q.stop));
   if (q.receipt === "revoked_before_consumption") need(q.outcome === "revoked");

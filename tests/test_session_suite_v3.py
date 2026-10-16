@@ -185,7 +185,17 @@ process.stdout.write(JSON.stringify(Object.fromEntries(Object.entries(rs).map(([
 
 
 @pytest.mark.parametrize(
-    "name", ["success", "no_eof", "not_run", "second_loss", "opening_without_t0"]
+    "name",
+    [
+        "success",
+        "no_eof",
+        "not_run",
+        "second_loss",
+        "opening_without_t0",
+        "origin_eof_after_entry_-1",
+        "origin_eof_after_entry_0",
+        "origin_eof_after_entry_1",
+    ],
 )
 def test_unchanged_workflow_result_checks_v3_and_partial_job_results(name):
     workflow = yaml.load(
@@ -222,12 +232,36 @@ async function check(collection,publication,missing=false) {
  await check('success','success',true)
 ])))();
 """,
-        [script, CORPUS["reports"][name], PROOF],
+        [
+            script,
+            CORPUS["reports"][name]
+            if name in CORPUS["reports"]
+            else materialize(next(c for c in CORPUS["cases"] if c["name"] == name)),
+            PROOF,
+        ],
     )
     assert [r["state"] for r in result] == (
-        ["success"] if name == "success" else ["failure"]
+        ["success"] if name in {"success", "origin_eof_after_entry_1"} else ["failure"]
     ) + ["failure"] * 4
     assert "synthetic-private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("delta", [-1, 0, 1])
+def test_completed_requires_eof_strictly_after_origin_entry(delta):
+    case = next(
+        c for c in CORPUS["cases"] if c["name"] == f"origin_eof_after_entry_{delta}"
+    )
+    result = node(
+        """
+const [r,p]=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+const api=require('./.github/scripts/session-suite-report.cjs');
+let completed=false;
+try {completed=api.completed(r,p,'success','success');} catch(_) {}
+process.stdout.write(JSON.stringify(completed));
+""",
+        [materialize(case), PROOF],
+    )
+    assert result is (delta > 0)
 
 
 def test_v3_maximum_canonical_base64_and_encoded_overflow(tmp_path):

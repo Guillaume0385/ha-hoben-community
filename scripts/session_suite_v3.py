@@ -205,7 +205,8 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
     if consumed is not None:
         need(
             transport_eof
-            and eof
+            and entered
+            < eof
             <= consumed
             < min(240000, *(t[k] for k in t if k.endswith("deadline_ms")))
         )
