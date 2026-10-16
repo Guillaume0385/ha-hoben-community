@@ -229,7 +229,9 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
     if q["stop_ms"] is not None:
         need(entered is not None and entered <= q["stop_ms"] <= end)
         if q["stop"] in {"local_after_consumption", "cancel_after_consumption"}:
-            need(consumed is not None and consumed < q["stop_ms"])
+            # A historical owner receipt attests execution order; equal
+            # quantized times confer no current recovery permission.
+            need(consumed is not None and consumed <= q["stop_ms"])
         else:
             need(consumed is None)
     if q["cleanup_ms"] is not None:
@@ -250,13 +252,20 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
             <= min(360000, *(t[k] for k in t if k.endswith("deadline_ms")))
         )
         need(q["cleanup_ms"] is not None and q["cleanup_ms"] <= accepted)
-        need(q["stop_ms"] is None or accepted < q["stop_ms"])
+        need(q["stop_ms"] is None or accepted <= q["stop_ms"])
         need(s["start_ms"] == accepted and s["generation"] == q["accepted_generation"])
     else:
         need(
             all(s[k] is None for k in s if k != "interrupted")
             and s["interrupted"] is False
         )
+    if q["stop"] != "none":
+        need(r["result"] == "interrupted")
+        if accepted is None:
+            need(r["terminal"] == "closed")
+        else:
+            need(r["terminal"] == "stability_lost")
+            need(s["interrupted"] and s["end_ms"] is not None)
     if s["start_ms"] is not None:
         need(accepted is not None and accepted <= end)
         if s["end_ms"] is not None:

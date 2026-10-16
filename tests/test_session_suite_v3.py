@@ -195,7 +195,10 @@ process.stdout.write(JSON.stringify(Object.fromEntries(Object.entries(rs).map(([
         "origin_eof_after_entry_-1",
         "origin_eof_after_entry_0",
         "origin_eof_after_entry_1",
-    ],
+        "stopped_after_consumption",
+        "stopped_after_acceptance",
+    ]
+    + [c["name"] for c in CORPUS["cases"] if c["name"].startswith("stop_")],
 )
 def test_unchanged_workflow_result_checks_v3_and_partial_job_results(name):
     workflow = yaml.load(
