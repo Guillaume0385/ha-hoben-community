@@ -152,16 +152,23 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Installation de la suite session — accès réels verrouillés
+### Suite session installée — activation candidate 7/8-H
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
-spécifique `session-suite` de G1 est fusionné par la PR #94. La tranche G2
-raccorde ce gate, un launcher à plafonds externes et la publication de suite.
-Le verrou `suite-installation` conserve deux NOT RUN. Le [plan courant de suite](docs/session-suite-plan.md)
-distingue le raccordement installé sous verrou et l'activation finale séparée.
+spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
+la PR #95 après revue MANAGER et quatre checks réussis, raccorde ce gate, un
+launcher à plafonds externes et la publication sous verrou. La tranche H prépare
+seulement le retrait de `suite-installation` et du `needs` associé, sans changer
+les conditions push/acteurs/branche/tentative, gates, contrat ou runtime.
+Le [plan courant de suite](docs/session-suite-plan.md) précise la revue du HEAD
+candidat et de sa CI, puis la décision MANAGER unique et immuable requise avant
+fusion. DEV ne publie ni approbation ni claim réel, ne lance aucun run.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
-pas des entrées libres issues d'un commentaire. L'étape 8 reste suspendue.
+pas des entrées libres issues d'un commentaire. Suite/reconnexion restent NOT RUN
+sans run admis et rapport anonymisé vérifiés : premier scénario admissible et
+second `recovered_120s`, `boundary_proven=false`. La PR ne vaut pas validation ;
+l'étape 8 reste suspendue.
 Aucun développement du client HA, test hoben-live ou promotion main n'est autorisé
 par cette préparation. La validation historique 300 s ne valide pas la nouvelle
 suite ni une reconnexion réelle ; aucune frontière universelle n'est établie.

@@ -14,25 +14,7 @@ concurrency:
   queue: max
 
 jobs:
-  suite-installation:
-    # Structural phase 7/8-E: neither scenario may run independently. No
-    # approval (including an old session-300 v1) can override this barrier.
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    permissions: {}
-    steps:
-      - name: Refuse real access until the complete suite is reviewed and installed
-        shell: bash
-        run: |
-          printf '%s\n' \
-            'session-300: NOT RUN (suite_not_installed)' \
-            'session-reconnect-no-pong: NOT RUN (suite_not_installed)' \
-            >> "$GITHUB_STEP_SUMMARY"
-          echo '::error::NOT RUN: complete session suite is not installed.'
-          exit 1
-
   dry-run:
-    needs: suite-installation
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
       github.actor == 'Guillaume0385' &&
