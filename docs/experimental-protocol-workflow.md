@@ -210,6 +210,35 @@ d'EOF, scénario non exercé, résultat inconclusif ou échec bloquent l'étape 
 EOF après inhibition n'établit pas sa cause ; `boundary_proven=false` demeure.
 Aucune preuve de frontière OpenedClient ne découle des tests simulés du gate.
 
+## Conception 7/8-K : quarantaine proposée, non installée
+
+Le [bilan MANAGER J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)
+consigne le run #38839083483, tentative 1 sur le merge #97
+`991fbb8aefb3e3df9c38cd0eed38944a03e88cc7` : collecte/publication réussies,
+statut global failure ; 300 s continu, puis `inconclusive/protocol` à 181260 ms.
+Le diagnostic v2 `message_classification/protocol/close_client`, `read_slot=3`,
+identifie le refus d'un discriminant, pas un message complet ni un EOF ; aucun
+EOF/reconnexion/stabilité observé. Les deux tests ont tourné, ce n'est pas NOT RUN.
+Le rapport v1 précédent reste inchangé ; causalité serveur non démontrée.
+
+Le [contrat proposé](session-eof-quarantine-proposal.md) étudie une coupure TX
+atomique et une attente passive par le seul propriétaire RX, jusqu'à T0+300 s
+au maximum, uniquement dans le second scénario après T0+120 et inhibition
+effectivement exercée. Aucun Pong/lecture nouveau, aucune réinterprétation du
+suffixe, aucun retry sur le seul discriminant. Seul un EOF transport admissible
+avant arrêt local pourrait précéder une récupération par le lifecycle partagé.
+Courses/TX en vol, silence, TLS sans EOF, dépassement et annulation échouent
+fermés ; nettoyage local ne prouve jamais un EOF. Critères de succès et plafonds
+360/600/1020 s inchangés. **PROPOSÉ / NON INSTALLÉ** : le comportement actif
+reste le refus protocolaire et sa fermeture locale, sans retry protocolaire.
+
+K ne modifie que la documentation et spécifie une matrice offline future. Toute
+implémentation, adaptation de rapport/contrat/gate, installation et activation
+éventuelles exigent des tâches/décisions MANAGER distinctes et des revues/CI
+exactes. Aucun candidat ne s'autorise lui-même ; décisions immuables, approbations,
+anti-rejeu et publication isolée conservés. Aucun run/décision/claim/rerun par DEV,
+aucune réutilisation de l'ancien run/claim. Suite non validée, étape 8 suspendue.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`

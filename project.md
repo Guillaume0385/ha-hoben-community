@@ -154,7 +154,7 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite activée, diagnostic offline 7/8-I
+### Suite activée — conception documentaire 7/8-K, non installée
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
@@ -168,17 +168,35 @@ du run #38828423500 tentative 1 consigne `continuous_300s`, puis
 inhibés, aucun EOF/reconnexion. Suite `not_successful`, statut global failure ;
 les deux scénarios ont été exécutés, ce n'est pas NOT RUN. La cause précise
 reste inconnue, sans preuve de CloseClient ni causalité timeout Ping.
-I ajoute uniquement des diagnostics fermés du second scénario, schéma v2
+I a livré les diagnostics fermés du second scénario par la PR #97, schéma v2
 Python/Node explicite avec compatibilité historique v1 et sous-rapport 300 s
 inchangé ; le [plan](docs/session-suite-plan.md) décrit les critères. Un nom de
 discriminant rejeté ne signifie pas message complet ou frontière prouvée.
 Framing, retry, gates, contrat et budgets restent inchangés. Aucun run nouveau
 autorisé par cette tranche ; DEV ne publie ni approbation ni claim réel.
+Le [bilan J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)
+consigne ensuite le run #38839083483 tentative 1 sur le merge #97
+`991fbb8aefb3e3df9c38cd0eed38944a03e88cc7` : premier scénario continu 300 s,
+second `inconclusive/protocol` à 181260 ms, refus
+`message_classification/protocol/close_client`, lecture 3, aucun EOF/reconnexion.
+Le chemin de refus local est identifié ; message complet, sous-code, fermeture
+serveur et causalité timeout Ping restent non prouvés. Ne pas réinterpréter le
+rapport v1 antérieur. Les deux scénarios ont tourné, suite toujours non validée.
+
+K livre uniquement une [proposition documentaire de quarantaine](docs/session-eof-quarantine-proposal.md)
+**PROPOSÉE / NON INSTALLÉE** : second scénario opt-in, première génération après
+120 s et inhibition exercée, gel TX et attente passive EOF jusqu'à T0+300 au plus.
+Le propriétaire RX serait unique, les suffixes privés non interprétés, la
+reconnexion réservée au lifecycle après EOF admissible, jamais sur le seul refus.
+La portée active demeure Ping/DataResponse seulement, avec refus protocolaire
+des autres types ; cette proposition n'adopte aucune exception. Implémentation,
+contrat/gates et activation nécessiteraient des décisions MANAGER séparées.
+Aucun changement runtime, test exécutable ou nouveau live dans K.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion
 exige premier scénario admissible et second `recovered_120s`, avec rapport
-anonymisé vérifié et `boundary_proven=false`. Le run actuel ne les satisfait pas ;
+anonymisé vérifié et `boundary_proven=false`. Les runs observés ne les satisfont pas ;
 l'étape 8 reste suspendue.
 Aucun développement du client HA, test hoben-live ou promotion main n'est autorisé
 par cette préparation. La validation historique 300 s ne valide pas la nouvelle

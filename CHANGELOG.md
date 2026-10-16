@@ -2,6 +2,14 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-K documentaire : bilan sourcé du run #38839083483
+  (300 s continu puis refus message_classification/close_client, aucun EOF ni
+  reconnexion) et proposition de quarantaine bornée jusqu'à EOF, NON INSTALLÉE.
+  Coupure TX, lecture en vol, RX unique, suffixes privés, critères d'EOF/reprise,
+  arrêts sûrs, ordre de revue et matrice offline future décrits. Aucun changement
+  de code/test exécutable/protocole/budget/gate, aucune nouvelle observation réelle
+  ni activation automatique ; suite non validée, étape 8 suspendue.
+
 - Issue #81, tranche 7/8-I offline : diagnostic fermé phase/catégorie/message/
   lecture du scénario reconnexion, cause initiale conservée après nettoyage
   secondaire. Le framer reste en refus ; seul le discriminant déjà rejeté est
