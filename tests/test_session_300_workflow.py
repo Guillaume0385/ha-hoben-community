@@ -20,13 +20,14 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
     jobs = workflow["jobs"]
     assert set(jobs) == {
+        "quarantine-installation",
         "dry-run",
         "admission",
         "collect",
         "publish",
         "result",
     }
-    assert "needs" not in jobs["dry-run"]
+    assert jobs["dry-run"]["needs"] == "quarantine-installation"
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
@@ -73,7 +74,7 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert "steps.capture.outcome == 'success'" in jobs["collect"]["steps"][-1]["if"]
 
 
-def test_activatable_suite_keeps_preflight_admission_and_recheck_before_secrets():
+def test_locked_suite_keeps_preflight_admission_and_recheck_before_secrets():
     workflow = yaml.load(
         (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -84,12 +85,12 @@ def test_activatable_suite_keeps_preflight_admission_and_recheck_before_secrets(
         "github.actor == 'Guillaume0385' && "
         "github.triggering_actor == 'Guillaume0385' && github.run_attempt == 1"
     )
-    assert "needs" not in jobs["dry-run"]
+    assert jobs["dry-run"]["needs"] == "quarantine-installation"
     assert jobs["admission"]["needs"] == "dry-run"
     assert "if" not in jobs["admission"]  # Default success(), no failed-gate bypass.
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["if"] == "needs.admission.outputs.approved == 'true'"
-    for name in ("dry-run", "admission", "collect"):
+    for name in ("quarantine-installation", "dry-run", "admission", "collect"):
         assert "continue-on-error" not in json.dumps(jobs[name])
     preflight = jobs["dry-run"]["steps"][-1]["with"]["script"]
     admission = jobs["admission"]["steps"][-1]["with"]["script"]
@@ -110,6 +111,49 @@ def test_activatable_suite_keeps_preflight_admission_and_recheck_before_secrets(
         "steps.capture.outcome == 'success' }}"
     )
     assert jobs["result"]["needs"] == ["admission", "collect", "publish"]
+    # Downstream always() cannot bypass the absent admission proof/report.
+    assert jobs["result"]["if"] == (
+        "${{ always() && needs.admission.outputs.approved == 'true' }}"
+    )
+    assert jobs["publish"]["if"] == (
+        "${{ always() && needs.admission.outputs.approved == 'true' && "
+        "needs.collect.outputs.report_b64 != '' }}"
+    )
+
+
+def test_quarantine_barrier_is_unconditional_secretless_and_reports_both_not_run(
+    tmp_path,
+):
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["quarantine-installation"]
+    assert set(job) == {"runs-on", "timeout-minutes", "permissions", "steps"}
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["timeout-minutes"] == "1" and job["permissions"] == {}
+    assert len(job["steps"]) == 1
+    step = job["steps"][0]
+    assert set(step) == {"name", "shell", "run"} and step["shell"] == "bash"
+    assert "${{" not in json.dumps(job)
+    assert "continue-on-error" not in json.dumps(job)
+    summary = tmp_path / "summary"
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", step["run"]],
+        env={"GITHUB_STEP_SUMMARY": str(summary), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1 and result.stderr == ""
+    assert result.stdout == (
+        "::error::NOT RUN: EOF quarantine integration is not installed.\n"
+    )
+    assert summary.read_text().splitlines() == [
+        "session-300: NOT RUN (quarantine_not_installed)",
+        "session-reconnect-no-pong: NOT RUN (quarantine_not_installed)",
+    ]
 
 
 @pytest.mark.parametrize("suite", ["session-300-gate", "session-300-report"])

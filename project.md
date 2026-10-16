@@ -154,7 +154,7 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite activée — fondation pure 7/8-L1 non raccordée
+### Suite expérimentale — verrou candidat 7/8-L2, fondation non raccordée
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
@@ -192,13 +192,23 @@ La portée active demeure Ping/DataResponse seulement, avec refus protocolaire
 des autres types ; cette proposition n'adopte aucune exception. Implémentation,
 contrat/gates et activation nécessiteraient des décisions MANAGER séparées.
 Aucun changement runtime, test exécutable ou nouveau live dans K.
-La tranche L1 ajoute une politique d'état pure et ses seuls tests unitaires,
+L1 est fusionnée par la PR #99 au SHA
+`c220072d82ec9a34d178a3fa15406ea841ed527a`, quatre checks réussis et 3058 tests
+offline. Elle ajoute une politique d'état pure et ses seuls tests unitaires,
 sans import/appel depuis les chemins actifs. Timestamps et événements injectés,
 latch conservateur, échéance absolue et candidat EOF provisoire ne réalisent ni
 gel TX ni attente TLS ni reconnexion. La [limite de L1](docs/session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
 reste distincte du futur runtime de quarantaine, NON INSTALLÉ/NON ACTIVÉ.
 Le raccordement, l'évolution éventuelle des rapports/admissions et toute
 activation exigent d'autres décisions MANAGER ; aucune exception active ici.
+L2 prépare uniquement le préalable structurel `quarantine-installation`, en
+échec inconditionnel sans secret/permission/checkout/environnement, avec deux
+NOT RUN `quarantine_not_installed` et `dry-run` dépendant. **Verrou candidat,
+pas encore déclaré installé** : MANAGER confirmera fusion et run arrêté avant
+admission/réservation/collecte. Une décision de scénario ne contourne pas ce
+préalable. Les autres conditions/gates/contrats/budgets restent identiques.
+Aucun raccordement de L1 ; prochaine implémentation et retrait/activation du
+verrou seront spécifiés séparément, après installation/revue vérifiées.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion

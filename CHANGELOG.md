@@ -2,6 +2,14 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L2 : préalable structurel candidat
+  `quarantine-installation` en échec inconditionnel, deux NOT RUN fixes avant
+  admission/secrets, et dépendance de dry-run sans changement de ses conditions.
+  Tests locaux du script/graphe et régressions conservés. L1 est fusionnée mais
+  reste non raccordée ; L2 sera installé seulement après fusion/vérification.
+  Aucun runtime/gate/contrat/budget modifié, aucun nouveau live ; future
+  intégration et activation distinctes, suite non validée et étape 8 suspendue.
+
 - Issue #81, tranche 7/8-L1 : fondation pure de politique de quarantaine,
   sans I/O et NON RACCORDÉE aux chemins actifs. Éligibilité fixe, latch sans
   effet TX, échéances injectées réduisant T0+300, refus absorbants et candidat
