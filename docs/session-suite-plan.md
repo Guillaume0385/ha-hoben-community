@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — diagnostic offline 7/8-I
+# Suite « Tests expérimentaux session » — conception documentaire 7/8-K
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -46,6 +46,26 @@ nouveau 300 s est concluant comme l'historique, mais la suite/reconnexion ne son
 pas validées. La cause précise du refus protocolaire reste inconnue ; aucun
 CloseClient reçu, EOF serveur ou timeout Ping causal n'est établi. Le rapport
 v1 ne sera pas rétrocomplété. `boundary_proven=false` demeure, étape 8 suspendue.
+
+### Run J avec diagnostics : refus local identifié, aucun EOF prouvé
+
+Après revue/CI et décision MANAGER distincte, la PR #97 a été fusionnée au SHA
+`991fbb8aefb3e3df9c38cd0eed38944a03e88cc7`. Le
+[bilan J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)
+consigne le run #38839083483 tentative 1, artefact anonymisé #12020478846 :
+suite v2 `not_successful` (481995 ms), premier scénario `continuous_300s`, second
+`inconclusive/protocol` à 181260 ms, diagnostic
+`message_classification/protocol/close_client`, lecture 3. Trois lectures réussies,
+deux Pong inhibés, aucun EOF/reconnexion/stabilité ; les deux tests ont tourné.
+Le framer a rejeté un octet de tête, puis le code installé ferme localement.
+Aucun message CloseClient complet/sous-code, fermeture serveur ou timeout Ping
+causal n'est établi. Ne pas rétrocompléter le rapport v1 précédent.
+
+K propose seulement un [contrat de quarantaine jusqu'à EOF](session-eof-quarantine-proposal.md),
+**PROPOSÉ / NON INSTALLÉ**, opt-in limité au second scénario après inhibition
+exercée. Chronologie, coupure TX, lecture en vol, RX unique, suffixes privés,
+bornes/arrêts et matrice offline y sont spécifiés. Le refus installé reste actif ;
+aucune exception de portée ni implémentation n'est adoptée par cette PR.
 
 ## Politique de Pong testée hors ligne
 
@@ -268,7 +288,8 @@ reconstruction prouvée du run réel ; il ne résout pas sa cause inconnue.
 MANAGER doit relire le diff et les quatre checks sur le HEAD candidat exact.
 Une éventuelle décision de nouvelle validation réelle devra être distincte,
 unique, immuable et conforme au contrat installé (SHA, CI, scénarios et limites),
-avant la fusion au HEAD attendu. La tâche I n'autorise pas cette validation.
+avant la fusion au HEAD attendu. La tâche documentaire K n'autorise ni
+implémentation ni validation réelle ; MANAGER décidera séparément d'une suite.
 L'ancien run et son claim restent consommés. DEV ne publie ni
 décision ni claim réel et ne lance aucun run. Le push reste soumis aux gates et au
 recheck ; aucune ancienne décision/claim ni relance ne constitue un repli.
