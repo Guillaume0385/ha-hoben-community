@@ -6,6 +6,7 @@ about server behavior. A quiet RX owner has no application inactivity timer.
 """
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
@@ -19,7 +20,13 @@ from .exceptions import (
 )
 from .modbus import ModbusReadResponse
 from .myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
-from .v4_session import SessionState, SessionStateError, V4Session
+from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
+from .v4_session import (
+    SessionState,
+    SessionStateError,
+    V4Session,
+    _QuarantineCapability,
+)
 
 
 class LifecycleStoppedError(HobenClientClosedError):
@@ -32,6 +39,26 @@ class LifecycleExhaustedError(HobenError):
     """The finite lifetime connection budget was consumed."""
 
     code = "session_lifecycle_exhausted"
+
+
+class _LifecycleQuarantineCapability:
+    """Private, one-use second-scenario binding; no current consumer provides it.
+
+    The session capability validates exact owners, one common injected clock and
+    bounded integer deadlines before any I/O. L3 timing is bound to the first
+    actual strict acceptance, never to a caller-supplied acceptance timestamp.
+    """
+
+    __slots__ = ("_initial", "_claimed", "_timing", "_origin", "_permit", "_recovered")
+
+    def __init__(self, budget, no_pong, **deadlines):
+        self._initial = _QuarantineCapability(budget, no_pong, **deadlines)
+        self._claimed = False
+        self._timing = self._origin = self._permit = None
+        self._recovered = False
+
+    def __repr__(self):
+        return "_LifecycleQuarantineCapability()"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +98,7 @@ class V4Lifecycle:
         "_connected",
         "_failure",
         "_stopping",
+        "_quarantine",
     )
 
     def __init__(
@@ -81,6 +109,7 @@ class V4Lifecycle:
         retry_delays: tuple[float, ...] = (1.0, 2.0, 4.0),
         session_factory: Callable[..., V4Session] = V4Session,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
         try:
@@ -97,6 +126,15 @@ class V4Lifecycle:
                 _validate_delay(delay)
         except (TypeError, ValueError):
             raise HobenInvalidInputError() from None
+        if _quarantine is not None:
+            if (
+                type(_quarantine) is not _LifecycleQuarantineCapability
+                or _quarantine._claimed
+                or len(retry_delays) > 2
+            ):
+                raise HobenInvalidInputError()
+            _quarantine._claimed = True
+        self._quarantine = _quarantine
         self._user_guid = user_guid
         self._device_guid = device_guid
         self._factory = session_factory
@@ -116,12 +154,23 @@ class V4Lifecycle:
     @property
     def state(self) -> SessionState:
         """Return the controller state, not a claim about proven RX framing."""
+        if (
+            self._quarantine is not None
+            and self._session is not None
+            and self._snapshot.state is SessionState.CONNECTED
+            and self._session.state is not SessionState.CONNECTED
+        ):
+            return self._session.state
         return self._snapshot.state
 
     @property
     def snapshot(self) -> LifecycleSnapshot:
         """Return immutable categorical state and the lifetime attempt count."""
-        return self._snapshot
+        return (
+            replace(self._snapshot, state=self.state)
+            if self._quarantine
+            else self._snapshot
+        )
 
     @property
     def device_guid_for_persistence(self) -> str:
@@ -150,9 +199,16 @@ class V4Lifecycle:
             raise LifecycleStoppedError()
         if self._task is None:
             raise SessionStateError()
-        await self._connected.wait()
-        if self.state is not SessionState.CONNECTED:
-            raise self._failure or LifecycleStoppedError()
+        while True:
+            await self._connected.wait()
+            if self.state is SessionState.CONNECTED:
+                return
+            if not self._quarantine or self._task.done() or self._stopping:
+                raise self._failure or LifecycleStoppedError()
+            # A session can suspend synchronously before the owner task wakes.
+            # Clearing and rechecking involves no await and cannot lose a later
+            # recovery/terminal notification. This is not a polling loop.
+            self._connected.clear()
 
     async def wait_stopped(self) -> None:
         """Observe a typed terminal result; observer cancellation is harmless."""
@@ -181,11 +237,14 @@ class V4Lifecycle:
             raise self._failure or SessionStateError()
         return await session.request_v4_data(timeout=timeout)
 
-    async def _cleanup(self) -> None:
+    async def _cleanup(self, *, _quarantine_permit=None) -> None:
         session = self._session
         if session is not None:
             try:
-                await session.abort()
+                if _quarantine_permit is not None:
+                    await session._cleanup_quarantine(self, _quarantine_permit)
+                else:
+                    await session.abort()
             except asyncio.CancelledError:
                 raise  # Keep ownership so explicit close can finish cancellation.
             except Exception:
@@ -193,6 +252,119 @@ class V4Lifecycle:
                 raise
             else:
                 self._session = None
+
+    def _private_session(self, attempt):
+        cap = self._quarantine
+        kwargs = {"user_guid": self._user_guid, "device_guid": self._device_guid}
+        if cap is not None:
+            kwargs.update(
+                session_300=cap._initial._budget,
+                no_pong_after_120=cap._initial._no_pong,
+            )
+            if attempt == 1:
+                kwargs["_quarantine"] = cap._initial
+        session = self._factory(**kwargs)
+        if (
+            not isinstance(session, V4Session)
+            or session.state is not SessionState.DISCONNECTED
+        ):
+            raise HobenInvalidInputError()
+        if cap is not None:
+            if (
+                type(session) is not V4Session
+                or session._experiment is not cap._initial._budget
+                or session._no_pong is not cap._initial._no_pong
+                or session._experiment.opens != attempt - 1
+                or session._transport is not None
+                or session._rx_task is not None
+            ):
+                raise HobenInvalidInputError()
+            if attempt == 1:
+                session._bind_quarantine_owner(self)
+                cap._origin = session
+            else:
+                session._limit_recovery_acceptance(
+                    min(
+                        cap._timing.recovery_deadline_ms,
+                        cap._timing.functional_deadline_ms - STABLE_FOR_MS,
+                    )
+                )
+        return session
+
+    def _check_private_recovery(self, *, delay_ms=0, accepted_session=None):
+        cap = self._quarantine
+        if (
+            self._stopping
+            or asyncio.current_task().cancelling()
+            or cap._timing is None
+            or cap._origin is None
+            or not cap._origin._quarantine_permit_valid(self, cap._permit)
+        ):
+            raise HobenProtocolError()
+        now = cap._origin._quarantine_checked_at
+        timing = cap._timing
+        if (
+            now + delay_ms >= timing.recovery_deadline_ms
+            or now + delay_ms + STABLE_FOR_MS >= timing.functional_deadline_ms
+        ):
+            raise HobenProtocolError()
+        if accepted_session is not None:
+            accepted = V4Session._quarantine_time(
+                accepted_session._experiment.accepted_at
+            )
+            if (
+                accepted is None
+                or accepted <= cap._origin._quarantine_observation.at_ms
+                or accepted >= timing.recovery_deadline_ms
+                or accepted + STABLE_FOR_MS >= timing.functional_deadline_ms
+                or accepted_session.state is not SessionState.CONNECTED
+                or not accepted_session._experiment.usable
+            ):
+                raise HobenProtocolError()
+        return (
+            min(
+                timing.recovery_deadline_ms,
+                timing.functional_deadline_ms - STABLE_FOR_MS,
+            )
+            - now
+        ) / 1000
+
+    async def _claim_private_recovery(self, session):
+        cap = self._quarantine
+        if cap._recovered:
+            return False  # A second accepted generation's loss is terminal.
+        if cap._permit is None:
+            if session is not cap._origin:
+                return False
+            # Let queued explicit stops/cancellations win before consumption.
+            await asyncio.sleep(0)
+            if self._stopping or asyncio.current_task().cancelling():
+                return False
+            cap._permit = session._consume_quarantine(self, 1)
+        self._check_private_recovery()
+        return True
+
+    async def _wait_private_loss(self, session):
+        cap = self._quarantine
+        now = session._quarantine_now()
+        deadline = (
+            cap._timing.functional_deadline_ms
+            if cap._recovered
+            else min(
+                cap._timing.recovery_deadline_ms,
+                cap._timing.functional_deadline_ms - STABLE_FOR_MS,
+            )
+        )
+        if now is None or now >= deadline:
+            raise HobenProtocolError()
+        # This private lifecycle cannot outlive the fixed functional envelope,
+        # even without a collector. Expiry makes no claim of stable success.
+        async with asyncio.timeout((deadline - now) / 1000):
+            await session._wait_unavailable()
+            if session.state is SessionState.QUARANTINED:
+                self._snapshot = replace(self._snapshot, state=SessionState.QUARANTINED)
+                self._connected.clear()
+            await session.wait_lost()
 
     async def _run(self) -> HobenError:
         error: HobenError = LifecycleStoppedError()
@@ -207,16 +379,39 @@ class V4Lifecycle:
                 )
                 opened = False
                 try:
-                    session = self._factory(
-                        user_guid=self._user_guid, device_guid=self._device_guid
-                    )
-                    if not isinstance(session, V4Session) or (
-                        session.state is not SessionState.DISCONNECTED
-                    ):
-                        raise HobenInvalidInputError()
+                    if self._quarantine is not None and attempt > 1:
+                        await asyncio.sleep(0)
+                        self._check_private_recovery()
+                    session = self._private_session(attempt)
                     self._session = session
-                    await session.connect()
+                    if self._quarantine is not None and attempt > 1:
+                        async with asyncio.timeout(self._check_private_recovery()):
+                            await session.connect()
+                    else:
+                        await session.connect()
                     opened = True
+                    if self._quarantine is not None:
+                        if attempt > 1:
+                            # Strict acceptance consumes the sole stable phase,
+                            # even if RX fails before it can be published usable.
+                            self._quarantine._recovered = True
+                        if attempt == 1:
+                            cap = self._quarantine
+                            observation, process, suite = cap._initial._deadlines
+                            cap._timing = RecoveryTiming(
+                                accepted_generation=session._experiment_generation,
+                                accepted_at_ms=V4Session._quarantine_time(
+                                    session._experiment.accepted_at
+                                ),
+                                observation_deadline_ms=observation,
+                                process_deadline_ms=process,
+                                suite_deadline_ms=suite,
+                            )
+                        await asyncio.sleep(0)
+                        if self._stopping or asyncio.current_task().cancelling():
+                            raise LifecycleStoppedError()
+                        if attempt > 1:
+                            self._check_private_recovery(accepted_session=session)
                     self._device_guid = session.device_guid_for_persistence
                     self._snapshot = replace(
                         self._snapshot, state=SessionState.CONNECTED, failure=None
@@ -224,7 +419,10 @@ class V4Lifecycle:
                     self._connected.set()
                     if not self._ready.done():
                         self._ready.set_result(None)
-                    await session.wait_lost()
+                    if self._quarantine is None:
+                        await session.wait_lost()
+                    else:
+                        await self._wait_private_loss(session)
                 except HobenError as failure:
                     error = failure
                 except Exception:
@@ -235,6 +433,19 @@ class V4Lifecycle:
                 retryable = type(error) is HobenTransportError and (
                     not opened or session.loss_is_retryable
                 )
+                permit = None
+                if self._quarantine is not None:
+                    retryable = False
+                    try:
+                        if opened or (
+                            type(error) is HobenTransportError
+                            and self._quarantine._permit is not None
+                        ):
+                            retryable = await self._claim_private_recovery(session)
+                            if session is self._quarantine._origin:
+                                permit = self._quarantine._permit
+                    except HobenError:
+                        pass  # No admissible, current, unconsumed origin proof.
                 self._snapshot = replace(
                     self._snapshot,
                     failure=error.code,
@@ -243,20 +454,38 @@ class V4Lifecycle:
                     else SessionState.DISCONNECTED,
                 )
                 try:
-                    await self._cleanup()
+                    if permit is not None:
+                        async with asyncio.timeout(self._check_private_recovery()):
+                            await self._cleanup(_quarantine_permit=permit)
+                    else:
+                        await self._cleanup()
                 except HobenTransportError:
+                    if self._quarantine is not None:
+                        raise  # A private recovery requires successful cleanup.
                     pass  # Transport is detached; preserve the primary failure.
                 if not retryable:
                     break
                 if attempt == self.snapshot.max_attempts:
                     error = LifecycleExhaustedError()
                     break
-                await self._sleep(self._delays[attempt - 1])
+                if self._quarantine is not None:
+                    self._check_private_recovery(
+                        delay_ms=math.ceil(self._delays[attempt - 1] * 1000)
+                    )
+                if self._quarantine is not None:
+                    async with asyncio.timeout(self._check_private_recovery()):
+                        await self._sleep(self._delays[attempt - 1])
+                else:
+                    await self._sleep(self._delays[attempt - 1])
+                if self._quarantine is not None:
+                    self._check_private_recovery()
         except asyncio.CancelledError:
             error = LifecycleStoppedError()
         except Exception:
             error = HobenProtocolError()
         finally:
+            if self._quarantine is not None and self._quarantine._origin is not None:
+                self._quarantine._origin._quarantine_stop(Event.CANCEL)
             try:
                 await self._cleanup()
             except Exception:
@@ -279,6 +508,8 @@ class V4Lifecycle:
     async def close(self) -> None:
         """Permanently stop opening, TX, cleanup or backoff; never reconnect late."""
         self._stopping = True
+        if self._quarantine is not None and self._quarantine._origin is not None:
+            self._quarantine._origin._quarantine_stop(Event.CANCEL)
         self._snapshot = replace(self._snapshot, state=SessionState.CLOSED)
         task = self._task
         if task is not None:

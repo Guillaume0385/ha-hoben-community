@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — verrou L2 intact, pont L4 défaut-off
+# Suite « Tests expérimentaux session » — verrou L2 intact, lifecycle L5 défaut-off
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -24,13 +24,14 @@ réussis (3058 tests offline, dont 152 cas de politique). Elle ajoute seulement
 [EofQuarantinePolicy](../custom_components/hoben/v4_eof_quarantine.py),
 machine d'état pure sans I/O, horloge réelle, tâche, transport ou credentials.
 L4 autorise le seul import de politique par `V4Session` derrière une capacité
-privée activée par les tests uniquement. Aucun consommateur/lifecycle/factory
-ne la fournit ; le comportement par défaut reste identique. La [limite de cette fondation](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+privée activée par les tests uniquement. L5 ajoute le seul import de timing par
+V4Lifecycle, dont la capacité privée reste sans fournisseur consommateur/factory
+actif ; le comportement par défaut reste identique. La [limite de cette fondation](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
 est distincte du futur gel TX, de l'attente TLS et de la récupération.
 
 Les tests unitaires déterministes couvrent frontières/invalides/ordres/idempotence,
 snapshots scalaires bornés, import limité à dataclasses/enum et absence de
-références consommatrices (seul pont privé L4 autorisé). Ils ne réalisent pas la
+références consommatrices (seuls ponts privés L4/L5 revus autorisés). Ils ne réalisent pas la
 matrice complète d'intégration K et ne prouvent
 aucune action réelle. Une intégration/exception de portée, les évolutions de
 rapport/admission puis l'activation nécessitent des tâches MANAGER séparées,
@@ -103,13 +104,16 @@ Aucun RX/hex/base64 de trame, sous-code deviné, valeur domestique, GUID, except
 libre ou capture brute publique/privée autorisée. Verrou L2, runtime, gates,
 rapports v1/v2, budgets et publication inchangés ; étape 8 suspendue.
 
-## Pont L4 candidat — non raccordé aux consommateurs/lifecycle
+## Pont L4 livré — non raccordé aux consommateurs
 
 L3 est fusionnée par #101 (`11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`),
 quatre checks réussis/3220 tests offline, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800).
 Le run post-fusion #38862945022 s'arrête au verrou L2, tous les jobs aval skipped.
-Le [pont de session proposé](session-eof-quarantine-proposal.md#pont-de-session-l4-candidat-capacité-fermée-et-défaut-off)
-reste candidat jusqu'à revue/fusion puis livré désactivé : capacité interne
+Le [pont de session proposé](session-eof-quarantine-proposal.md#pont-de-session-l4-livré-capacité-fermée-et-défaut-off)
+est livré par #102, fusion `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`,
+[bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676),
+quatre checks/3294 tests offline réussis, run #38868819504 arrêté au verrou L2.
+Il reste désactivé chez les consommateurs : capacité interne
 à usage unique, liée aux deux propriétaires exacts SessionReconnect/NoPongAfter120,
 sans fournisseur actif ni flag env/input/commentaire. Première génération,
 inhibition positive et rejet close_client admissible seulement. Latch synchrone,
@@ -117,7 +121,7 @@ contrôle TX sous verrou, TX engagée distincte des files ; waiter privé sans
 close/replay, budget/session non utilisables sans notification terminale précoce.
 RX unique continue passivement jusqu'à l'échéance L3 sans framer, capture ou
 double comptage. Seul read EOF admissible donne un candidat privé révocable.
-Pas de retry/lifecycle/recovered_120s ; stop, course, délai, budget ou TLS sans
+Sans capacité lifecycle L5, pas de retry/recovered_120s ; stop, course, délai, budget ou TLS sans
 EOF restent refusés. Les tests TLS/horloge simulés couvrent ces effets et le
 nettoyage, en conservant les tests L1/L3/verrou et les régressions par défaut.
 
@@ -128,6 +132,43 @@ workflows et tous les budgets restent inchangés. Aucun diagnostic 150 s branch�
 Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée formeront
 une tranche MANAGER séparée, puis activation distincte revue. Aucun live/claim/
 décision/rerun par DEV ; suite non validée, étape 8 suspendue.
+
+## Lifecycle L5 candidat, récupération privée bornée sans collecteur
+
+Le [contrat L5](session-eof-quarantine-proposal.md#lifecycle-l5-candidat-consommation-liée-à-lorigine-et-récupération-bornée)
+ajoute une capacité fermée et à usage unique de V4Lifecycle, défaut-off,
+fournie par les tests/factories de test seulement. Les propriétaires exacts
+SessionReconnect/NoPongAfter120, T0 strict initial et les deadlines L3 restent
+liés. Seuls session/lifecycle peuvent porter les références privées revues ;
+aucun client/HA, collecteur, launcher ou workflow ne fournit la capacité.
+
+L'événement local de quarantaine suspend immédiatement état/snapshot et
+wait_connected ; requests échouent sans replay/close. Le waiter privé ne déclenche
+pas le cleanup. À la décision RX, consommation synchrone unique d'une observation
+EOF encore admissible liée à sa session/génération, avant nettoyage intentionnel.
+Un snapshot copié/révoqué/périmé/doublé n'est pas un permis. L'origine reste
+recontrôlée après cleanup et avant/après backoff/ouverture/acceptation ; arrêts,
+annulations et courses gagnent fermement. Le cleanup possédé reste distinct d'un
+stop public concurrent, qui révoque toujours. Toute fin du lifecycle scelle l'origine.
+
+Session fraîche, identité autorisée/budgets/cadence partagés, aucune réémission ou
+réponse tardive transférée. EOF ET acceptation avant T0+240, avec 120 s stables
+encore possibles sous min(T0+360, observation, process, suite) ; aucun reset ou
+prolongation. La session refuse la borne exacte avant adoption. Des timers privés
+bornent toutes les phases, sans modifier les plafonds externes. Au plus trois
+tentatives ; la première nouvelle acceptation ouvre la seule phase stable, dont
+toute perte est terminale même immédiatement après acceptation. Pong/lectures
+sur cette génération sont testés pendant 120 s synthétiques, sans rapport public.
+
+L5 est candidat jusqu'à revue/fusion puis livré hors ligne, défaut-off, sans
+fournisseur consommateur. Aucune validation globale/recovered_120s par cette
+tranche : collecteur et contrats diagnostic 150 s/rapport/admission versionnée
+restent séparés, puis activation/retrait du verrou après revue complète.
+Framer/protocole/ouverture/identité/TLS/profils, clients/HA, collecteurs,
+launchers/superviseurs, rapports v1/v2/validateurs/export, gates/contrats/workflows
+et budgets 360/600/1020, 350+10/590+10, 3 ouvertures/1 Mio, 6/10 lectures >= 60 s inchangés.
+Aucun diagnostic 150 s branché, brut, live/décision/claim/rerun. Deux NOT RUN avant
+secrets conservés ; suite 7 non validée et étape 8 suspendue.
 
 ## Activation H historique, suite fonctionnelle non validée
 

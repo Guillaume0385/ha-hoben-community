@@ -2,6 +2,21 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L5 : lifecycle privé candidat, défaut-off, réservé aux
+  tests du second scénario avec capacité à usage unique et deadlines L3.
+  Suspension immédiate/wait_connected, waiter sans cleanup précoce, consommation
+  unique d'EOF encore admissible avant nettoyage et recontrôle de son origine.
+  Cleanup possédé distinct des stops/annulations concurrents ; session fraîche,
+  backoff/tentatives bornés avant 240 avec 120 s encore possibles, maximum 360 et
+  budgets partagés. Deuxième perte terminale, aucun replay ou nouveau rapport/
+  recovered_120s. Tests de courses/timers/cleanup et comportements par défaut.
+  L4 fusionnée par #102 mais tous les consommateurs restent sans capacité ;
+  garde des seules références session/lifecycle et verrou L2 conservés. Clients/
+  HA, collecteurs/launchers/superviseurs, framer/protocole/ouverture/TLS/profils,
+  rapports/gates/contrats/workflows/budgets inchangés. Contrats150 s/rapports/
+  admission versionnée et collecteur, puis activation distincte à revoir séparément.
+  Aucun live/claim/décision/rerun/brut ; suite non validée et étape 8 suspendue.
+
 - Issue #81, tranche 7/8-L4 : pont privé candidat dans V4Session, défaut-off,
   activé uniquement par les tests offline pour SessionReconnect/NoPongAfter120.
   Rejet close_client typé sans nouveau framing, latch TX synchrone, distinction

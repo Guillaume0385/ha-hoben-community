@@ -627,6 +627,21 @@ def test_foundation_is_pure_and_only_session_can_reference_its_policy():
             }:
                 continue
             source = file.read_text()
+            if file == root / "custom_components/hoben/v4_lifecycle.py":
+                imports = [
+                    n
+                    for n in ast.walk(ast.parse(source))
+                    if isinstance(n, ast.ImportFrom) and n.module == "v4_eof_quarantine"
+                ]
+                assert len(imports) == 1
+                assert {n.name for n in imports[0].names} == {
+                    "STABLE_FOR_MS",
+                    "Event",
+                    "RecoveryTiming",
+                }
+                assert "EofQuarantinePolicy" not in source
+                assert "check_recovery_timing" not in source
+                continue  # L5 permits only the reviewed default-off lifecycle.
             if file == root / "custom_components/hoben/v4_session.py":
                 imports = [
                     n

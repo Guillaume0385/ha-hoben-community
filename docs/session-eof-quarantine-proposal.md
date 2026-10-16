@@ -1,12 +1,14 @@
-# Quarantaine jusqu'à EOF — pont privé candidat 7/8-L4, désactivé
+# Quarantaine jusqu'à EOF — lifecycle privé candidat 7/8-L5, défaut-off
 
-Cette conception répond à la [tâche MANAGER L4](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
+Cette conception répond à la [tâche MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
 L3 est fusionnée par la PR #101 au SHA
 `11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`, quatre checks réussis et 3220 tests
 offline ; voir le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800).
-L4 prépare seulement le pont privé de session, activé par les tests offline.
-La PR candidate ne signifie pas installation ; après revue/fusion, le pont
-livré restera **désactivé et non raccordé aux consommateurs/lifecycle**.
+L4 est fusionnée par #102 au SHA `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`,
+quatre checks/3294 tests offline réussis, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676).
+Le run de push #38868819504 s'arrête au verrou L2, tous les jobs aval skipped.
+L5 prépare uniquement le lifecycle privé, activé par les tests offline. Candidat
+jusqu'à revue/fusion, puis livré **défaut-off et sans fournisseur consommateur**.
 Le comportement par défaut
 reste le refus protocolaire suivi du nettoyage local, sans retry de ce refus.
 Le scénario 300 s, les sessions ordinaires et HA/hoben-live restent inchangés.
@@ -20,7 +22,9 @@ dataclasses/enum, ne lit aucune horloge, n'appelle aucun callback et n'acquiert
 aucun verrou. L4 autorise uniquement son import par `V4Session`, derrière une
 capacité privée défaut-off. Une garde structurelle couvre cet import exact et
 l'absence de toute fourniture de capacité par custom_components, scripts ou
-automatisations. `RecoveryTiming` et le calcul L3 restent non raccordés.
+automatisations. L5 autorise aussi le seul import de `RecoveryTiming` et des
+constantes/événements revus par V4Lifecycle, derrière sa capacité défaut-off.
+Le module pur reste sans I/O ; le calcul déclaratif L3 ne produit aucun succès.
 
 | API pure | Contrat local, sans effet réel |
 | --- | --- |
@@ -102,7 +106,10 @@ raccordée/non activée. Tests L3 synthétiques de calcul et invariants L1 seule
 sans exécution de la matrice complète future ci-dessous ni nouveau live. L4
 ajoute les tests de session détaillés ci-après ; aucune validation réelle.
 
-## Pont de session L4 candidat, capacité fermée et défaut-off
+## Pont de session L4 livré, capacité fermée et défaut-off
+
+L4 est fusionnée et reste désactivée chez tous les consommateurs. L5 ci-dessous
+nécessite une capacité de lifecycle distincte.
 
 La seule capacité `_QuarantineCapability` est liée une fois aux objets EXACTS
 `SessionReconnect` et `NoPongAfter120`, partageant la même horloge, avant toute
@@ -149,18 +156,88 @@ deadline peut produire `_QuarantineObservation`, figée, limitée à génératio
 date entière, origine/état/motif fermés. Le candidat est provisoire : stop peut
 le révoquer, notamment à timestamp égal. Cleanup/finally ne comptent aucun EOF.
 
-Même après ce candidat, la sortie reste un refus protocolaire **non réessayable**.
-L4 ne donne aucun droit au lifecycle et ne reconnecte pas. Les tests prouvent
+Avec la seule capacité de session L4, même après ce candidat, la sortie reste
+un refus protocolaire **non réessayable**. Sans capacité L5, le lifecycle ne
+reconnecte pas sur ce refus. Les tests prouvent
 RX unique, absence de TX après latch, waiter/timeout/annulation, bytes comptés
 une fois, limites et EOF vs nettoyage, annulation d'observateur sans tuer RX,
 close/abort idempotents sans tâches/waiter/lock résiduels. Ils ne prouvent ni
 causalité serveur ni recovered_120s. Protocol.md, profils, budgets, rapports
 v1/v2, gates, workflows et verrou L2 restent inchangés.
 
-La prochaine tranche MANAGER devra traiter séparément lifecycle/collecteur et
-contrats de diagnostic 150 s/rapport/admission versionnée. L'activation et le
+L5 prépare le seul lifecycle privé ; le raccordement collecteur et les contrats
+de diagnostic 150 s/rapport/admission versionnée restent séparés. L'activation et le
 retrait du verrou nécessitent encore une revue/décision distincte. Pas de live,
 claim, rerun, capture brute publique/privée ou anticipation de l'étape 8.
+
+## Lifecycle L5 candidat, consommation liée à l'origine et récupération bornée
+
+`_LifecycleQuarantineCapability` lie les mêmes propriétaires EXACTS
+SessionReconnect/NoPongAfter120 et leurs deadlines L3, à usage unique et avant
+I/O. Le paramètre privé vaut None par défaut ; seuls tests/factories de test le
+fournissent. Le lifecycle privé peut fournir en interne la capacité L4 au seul
+premier V4Session neuf. Aucun client/HA, collecteur, launcher ou workflow actuel
+ne fournit l'une de ces capacités ; aucun env/input/commentaire ne l'active.
+Les gardes autorisent seulement les imports/appels revus de session et lifecycle.
+
+L'entrée en quarantaine notifie le lifecycle par événement local, sans nouvelle
+tâche RX ni polling réseau. Son état/snapshot cesse immédiatement de présenter
+CONNECTED, même avant le réveil de sa tâche propriétaire. wait_connected reste
+en attente jusqu'à reprise validée ou fin ; requests sont refusées sans replay
+ou close. Un waiter déjà envoyé reçoit le signal privé L4, sans nettoyage précoce.
+Annuler un observateur ne cancelle pas les propriétaires.
+
+Pour une session liée au propriétaire L5, RX termine sa décision sans fermer
+intentionnellement le transport en quarantaine. Le lifecycle consomme ensuite
+synchronicement, **avant ce nettoyage**, l'observation courante de la session
+d'origine : premier numéro de génération, origine transport_read, état candidat
+encore valide, date identique à celle de la politique, échéance non atteinte,
+pas d'arrêt/annulation. RX doit avoir terminé et le transport être encore détenu.
+Une copie antérieure, autre session/génération, révocation ou consommation déjà
+effectuée échoue fermée. Le discriminant seul n'est jamais converti en perte TLS
+réessayable. Le diagnostic protocolaire et l'observation EOF restent distincts.
+
+Le permis privé à identité unique reste lié à cette origine. Sa validité est
+relue avant et après nettoyage, avant/après backoff, avant ouverture et après
+acceptation ; temps rétrograde ou invalide le scelle définitivement. Le nettoyage
+possédé appelle le chemin privé sans confondre cette action avec un arrêt du
+propriétaire. Tout close/abort public concurrent continue de révoquer la preuve,
+sans flag global de contournement. Des points de suspension avant consommation,
+ouverture et publication permettent aux arrêts/annulations déjà en file de gagner.
+Toute fin du lifecycle révoque encore l'origine ; aucun droit ne survit au terminal.
+
+Le même lifecycle garde cleanup, backoff et tentatives non reconstituées :
+au plus trois ouvertures, budget RX/lectures/cadence et identité autorisée partagés.
+Chaque remplacement est une V4Session fraîche, sans suffixe, transport, waiter
+ou future réutilisé. Les Pong sont rétablis sur sa nouvelle génération. Aucune
+lecture n'est rejouée. Un échec de réouverture peut consommer la dernière tentative
+restante ; une perte après une nouvelle acceptation stricte est terminale, même
+si elle arrive avant publication CONNECTED. Aucune accumulation de périodes.
+
+RecoveryTiming fixe T0 initial : normal 120/diagnostic futur 150, EOF ET acceptation
+strictement avant T0+240, puis 120 s possibles sur une même nouvelle génération,
+maximum fonctionnel T0+360. Les minima observation/process/suite et le budget
+nécessaire aux 120 s ne sont jamais prolongés. Les timers privés bornent attente,
+nettoyage, backoff, ouverture et phase après reprise ; la session elle-même refuse
+une acceptation à/après la borne, avant adoption d'identité/génération. Égalités,
+absence EOF, silence/TLS sans EOF, preuve révoquée ou budget insuffisant refusés.
+Le défaut sans capacité conserve ses comportements et budgets installés.
+
+Les tests offline utilisent réellement V4Session/V4Lifecycle avec TLS, horloge
+et backoff simulés : suspension/waiters, origine révoquée/doublée/périmée/fausse,
+courses EOF/stop/cleanup/backoff/acceptation, reprise avant/à/après 240, budget
+insuffisant, retour Pong/lecture, 120 s synthétiques sans rapport, deuxième perte,
+timers et arrêts de chaque phase, nettoyage sans tâche/socket/waiter/lock résiduel.
+Ils ne valident aucun serveur, causalité EOF ou frontière OpenedClient.
+
+L5 ne produit aucun rapport public ni nouveau recovered_120s. La validation
+Pong/lecture/stabilité par le collecteur, les contrats 150 s/rapport/admission
+versionnée et leur raccordement restent des tâches MANAGER séparées. Rapports
+v1/v2, validateurs/export, gates/workflows/superviseurs et plafonds360/600/1020,
+350+10/590+10, 3 ouvertures/1 Mio et 6/10 lectures >= 60 s restent inchangés. Aucun
+diagnostic 150 s branché, brut, live, claim, décision ou rerun. Le verrou L2 et
+ses deux NOT RUN avant secrets restent intacts ; activation distincte après
+revue complète seulement. Suite 7 non validée, étape 8 HA/hoben-live suspendue.
 
 ## Observation, explication locale et inconnues
 

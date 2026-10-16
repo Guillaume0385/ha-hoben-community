@@ -305,6 +305,12 @@ class V4Session:
         "_quarantine_observation",
         "_tx_in_flight",
         "_read_timeout",
+        "_unavailable",
+        "_quarantine_owner",
+        "_quarantine_owner_stopped",
+        "_quarantine_permit",
+        "_quarantine_checked_at",
+        "_recovery_deadline_ms",
     )
 
     def __init__(
@@ -347,6 +353,12 @@ class V4Session:
         self._quarantine_observation = None
         self._tx_in_flight = False
         self._read_timeout = None
+        self._unavailable = asyncio.Event()
+        self._quarantine_owner = None
+        self._quarantine_owner_stopped = False
+        self._quarantine_permit = None
+        self._quarantine_checked_at = None
+        self._recovery_deadline_ms = None
         self._no_pong = no_pong_after_120
         self._experiment = session_300
         self._experiment_generation = None
@@ -397,6 +409,116 @@ class V4Session:
         await self._loss_event.wait()
         raise self._rx_error or HobenClientClosedError()
 
+    def _signal_loss(self):
+        self._loss_event.set()
+        self._unavailable.set()
+
+    async def _wait_unavailable(self):
+        """Private notification from this owner, without another RX or polling."""
+        await self._unavailable.wait()
+
+    def _bind_quarantine_owner(self, owner):
+        if (
+            self._quarantine_capability is None
+            or self._quarantine_owner is not None
+            or self.state is not SessionState.DISCONNECTED
+            or self._rx_task is not None
+            or self._transport is not None
+        ):
+            raise HobenInvalidInputError()
+        self._quarantine_owner = owner
+
+    def _quarantine_candidate_valid(self, owner):
+        """Check the live origin, never a detached copy of an observation.
+
+        This validation is synchronous. Equal times here describe validation of
+        one event, not an invented ordering of two transport events. Explicit
+        stops still revoke the underlying pure policy, even after consumption.
+        """
+        policy, observed = self._quarantine_policy, self._quarantine_observation
+        now = self._quarantine_now()
+        valid = (
+            owner is self._quarantine_owner
+            and owner is not None
+            and not self._quarantine_owner_stopped
+            and self._quarantine_latched
+            and policy is not None
+            and observed is not None
+            and policy.snapshot.state is State.EOF_CANDIDATE
+            and observed.state is State.EOF_CANDIDATE
+            and observed.origin is _QuarantineOrigin.TRANSPORT_READ
+            and type(observed.at_ms) is int
+            and type(observed.generation) is int
+            and policy.snapshot.generation
+            == observed.generation
+            == self._experiment_generation
+            == 1
+            and observed.at_ms == policy.snapshot.candidate_at_ms
+            and now is not None
+            and observed.at_ms <= now < policy.snapshot.deadline_ms
+            and (
+                self._quarantine_checked_at is None
+                or now >= self._quarantine_checked_at
+            )
+            and self._rx_task is not None
+            and self._rx_task.done()
+            and not self._rx_task.cancelling()
+        )
+        if valid:
+            self._quarantine_checked_at = now
+        return valid
+
+    def _consume_quarantine(self, owner, generation):
+        """One-use live-origin claim BEFORE owned cleanup; conveys no success."""
+        if (
+            type(generation) is not int
+            or generation != self._experiment_generation
+            or self._quarantine_permit is not None
+            or self._transport is None
+            or self._experiment.opens != 1
+            or self._no_pong._current != 1
+            or not self._quarantine_candidate_valid(owner)
+        ):
+            raise HobenProtocolError()
+        self._quarantine_permit = object()
+        return self._quarantine_permit
+
+    def _quarantine_permit_valid(self, owner, permit):
+        valid = (
+            permit is not None
+            and permit is self._quarantine_permit
+            and self._quarantine_candidate_valid(owner)
+        )
+        if not valid:
+            self._quarantine_owner_stopped = True  # No rearming a stale lease.
+        return valid
+
+    async def _cleanup_quarantine(self, owner, permit):
+        """Intentional lifecycle cleanup, distinct from a caller's stop.
+
+        Concurrent public close/abort still revokes the proof; no global bypass
+        flag hides those stops during this await. The caller must recheck after.
+        """
+        if not self._quarantine_permit_valid(owner, permit):
+            raise HobenProtocolError()
+        await self._stop_operations()
+        await self._close()
+
+    def _limit_recovery_acceptance(self, deadline_ms):
+        """Private L5 bound, installed only on a fresh second-scenario session."""
+        if (
+            type(deadline_ms) is not int
+            or not 0 <= deadline_ms <= MAX_TIME_MS
+            or self.state is not SessionState.DISCONNECTED
+            or self._transport is not None
+            or self._rx_task is not None
+            or type(self._experiment) is not SessionReconnect
+            or type(self._no_pong) is not NoPongAfter120
+            or self._recovery_deadline_ms is not None
+        ):
+            raise HobenInvalidInputError()
+        self._recovery_deadline_ms = deadline_ms
+
     async def abort(self) -> None:
         """Stop owned TX/read operations, then finish the existing close path.
 
@@ -404,11 +526,15 @@ class V4Session:
         existing orderly-TX semantics. Never cancel the calling teardown task.
         """
         self._quarantine_stop(Event.CANCEL)
+        await self._stop_operations()
+        await self.close()
+
+    async def _stop_operations(self):
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
         if self._experiment is not None:
             self._experiment.lost(self._experiment_generation)
-        self._loss_event.set()
+        self._signal_loss()
         self._fail_pending_read(self._rx_error or HobenClientClosedError())
         operations = [
             (task, done)
@@ -425,7 +551,6 @@ class V4Session:
         # Wait for each operation's completion, never for its caller's whole
         # lifetime: the caller may immediately wait for this same recovery.
         await asyncio.gather(*(asyncio.shield(done) for _, done in operations))
-        await self.close()
 
     def _fail_pending_read(self, error: HobenError) -> None:
         """Complete the sole waiter at most once, without exposing its payload."""
@@ -528,7 +653,7 @@ class V4Session:
             if error is not None:
                 # Stop queued TX before releasing the lock for shutdown.
                 self._rx_error = self._rx_error or error
-                self._loss_event.set()
+                self._signal_loss()
                 self._fail_pending_read(self._rx_error)
                 self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
                 if self.state is not SessionState.CLOSED:
@@ -563,6 +688,7 @@ class V4Session:
         self._opening_buffer.clear()
         self._rx_error = None
         self._loss_event.clear()
+        self._unavailable.clear()
         self._retryable_loss = False
         self._rx_task = None
         self._transition(SessionState.CONNECTING)
@@ -623,6 +749,10 @@ class V4Session:
                     self._snapshot = replace(
                         self._snapshot, handoff=HandoffState.EXPERIMENTAL
                     )
+                if self._recovery_deadline_ms is not None:
+                    now = self._quarantine_now()
+                    if now is None or now >= self._recovery_deadline_ms:
+                        raise HobenProtocolError()
                 self._device_guid = assigned
                 if self._experiment is not None:
                     self._experiment.accepted(self._experiment_generation)
@@ -711,10 +841,15 @@ class V4Session:
             if self._rx_error is not None:
                 if self._experiment is not None:
                     self._experiment.lost(self._experiment_generation)
-                self._loss_event.set()
+                self._signal_loss()
                 self._fail_pending_read(self._rx_error)
             try:
-                await self._release_transport()
+                if not (
+                    self._quarantine_owner is not None
+                    and self._quarantine_latched
+                    and not self._quarantine_owner_stopped
+                ):
+                    await self._release_transport()
             except HobenTransportError:
                 if self._rx_error is None and self.state is not SessionState.CLOSED:
                     self._rx_error = HobenTransportError()
@@ -834,6 +969,7 @@ class V4Session:
 
     def _quarantine_stop(self, event):
         """Record explicit stops before their first await; cleanup is not EOF."""
+        self._quarantine_owner_stopped = True
         if self._quarantine_policy is not None:
             now = self._quarantine_now()
             snapshot = self._quarantine_policy.advance(
@@ -879,6 +1015,7 @@ class V4Session:
         if snapshot.state is not State.WAITING:
             return False
         self._transition(SessionState.QUARANTINED)
+        self._unavailable.set()
         self._fail_pending_read(_QuarantinedRead())
         return True
 
@@ -979,7 +1116,7 @@ class V4Session:
                 )
             error = HobenProtocolError()
         self._rx_error = self._rx_error or error
-        self._loss_event.set()
+        self._signal_loss()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
@@ -1093,7 +1230,7 @@ class V4Session:
                 self._pending_read = None
                 self._read_sent = False
         self._rx_error = self._rx_error or error
-        self._loss_event.set()
+        self._signal_loss()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
@@ -1108,9 +1245,12 @@ class V4Session:
     async def close(self) -> None:
         """Stop opening, await its cleanup, then close once; CLOSED is terminal."""
         self._quarantine_stop(Event.LOCAL_CLOSE)
+        await self._close()
+
+    async def _close(self):
         if self._experiment is not None:
             self._experiment.lost(self._experiment_generation)
-        self._loss_event.set()
+        self._signal_loss()
         self._fail_pending_read(HobenClientClosedError())
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
