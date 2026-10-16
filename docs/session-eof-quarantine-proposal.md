@@ -1,8 +1,13 @@
-# Quarantaine jusqu'à EOF — NON RACCORDÉE (fondation temporelle 7/8-L3)
+# Quarantaine jusqu'à EOF — pont privé candidat 7/8-L4, désactivé
 
-Cette conception répond à la [tâche MANAGER L3](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
-L3 autorise seulement la fondation temporelle pure décrite ici, sans observation
-réelle ni raccordement. Le comportement installé
+Cette conception répond à la [tâche MANAGER L4](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
+L3 est fusionnée par la PR #101 au SHA
+`11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`, quatre checks réussis et 3220 tests
+offline ; voir le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800).
+L4 prépare seulement le pont privé de session, activé par les tests offline.
+La PR candidate ne signifie pas installation ; après revue/fusion, le pont
+livré restera **désactivé et non raccordé aux consommateurs/lifecycle**.
+Le comportement par défaut
 reste le refus protocolaire suivi du nettoyage local, sans retry de ce refus.
 Le scénario 300 s, les sessions ordinaires et HA/hoben-live restent inchangés.
 
@@ -12,8 +17,10 @@ La décision MANAGER L1 autorise seulement un module pur non raccordé :
 `v4_eof_quarantine.py`. Cette fondation existe séparément de la proposition de
 réception ci-dessous, toujours **NON INSTALLÉE / NON ACTIVÉE**. Elle n'importe que
 dataclasses/enum, ne lit aucune horloge, n'appelle aucun callback et n'acquiert
-aucun verrou. Aucun chemin actif ne l'importe ou ne l'appelle ; un contrôle
-structurel couvre custom_components, scripts et les automatisations du dépôt.
+aucun verrou. L4 autorise uniquement son import par `V4Session`, derrière une
+capacité privée défaut-off. Une garde structurelle couvre cet import exact et
+l'absence de toute fourniture de capacité par custom_components, scripts ou
+automatisations. `RecoveryTiming` et le calcul L3 restent non raccordés.
 
 | API pure | Contrat local, sans effet réel |
 | --- | --- |
@@ -92,7 +99,68 @@ fusion #100 `ea08be522c73fcca742c4bacbeafa7df75e8b0c7`, run #38859779145
 tentative 1 en échec attendu au préalable, tous les jobs aval skipped, deux NOT RUN
 avant admission/claim/secrets. Ce verrou reste intact ; la quarantaine reste non
 raccordée/non activée. Tests L3 synthétiques de calcul et invariants L1 seulement,
-sans exécution de la matrice d'intégration future ci-dessous ni nouveau live.
+sans exécution de la matrice complète future ci-dessous ni nouveau live. L4
+ajoute les tests de session détaillés ci-après ; aucune validation réelle.
+
+## Pont de session L4 candidat, capacité fermée et défaut-off
+
+La seule capacité `_QuarantineCapability` est liée une fois aux objets EXACTS
+`SessionReconnect` et `NoPongAfter120`, partageant la même horloge, avant toute
+ouverture/acceptation. Les trois deadlines injectées sont des millisecondes
+entières bornées. `V4Session` revérifie les identités et l'usage unique ; son
+paramètre privé vaut `None` par défaut. Aucun client, factory, collecteur,
+launcher ou workflow ne fournit cette capacité ; seuls les tests l'activent.
+Aucun flag env/input/commentaire et aucune extension session-300/HA/ordinaire.
+
+Le framer produit une erreur privée typée uniquement au rejet existant du
+discriminant close_client, sans parser le sous-code/suffixe ni changer le
+découpage. La session utilise T0 et génération acceptés, compteurs réels
+d'inhibition et suivi des opérations propriétaires. L1/L3 conserve ses refus
+avant 120 s, à/après min(T0+240, observation, process, suite), génération périmée,
+inhibition nulle et ambiguïté. Aucune donnée du collecteur/exception libre ne
+fournit le contexte. Les autres rejets conservent leur arrêt protocolaire.
+
+Au point de rejet, le latch est posé sans await et jamais réarmé. Pong et lecture
+le vérifient sous le verrou TX avant write. La TX effectivement engagée est
+suivie séparément des tâches en file : en vol, elle rend l'observation refusée,
+sans prétendre retirer des octets déjà remis au transport. Une tâche en file ne
+consomme pas de nouvelle requête ; une lecture déjà envoyée conserve son slot.
+Le signal privé `_QuarantinedRead` termine le waiter une seule fois et son
+contexte retire timeout/suivi sans close, replay ni annulation RX. Une deadline
+ou annulation de lecture déjà gagnante impose au contraire l'arrêt sûr existant.
+Une réponse rendue avant coupure reste acquise ; les événements non retournés
+d'un chunk rejeté ne sont jamais livrés. Aucun caller ne réussit après le latch.
+
+`QUARANTINED` suspend l'état utilisable ; le budget devient non utilisable, sans
+perte terminale signalée avant décision. L'unique tâche RX poursuit passivement
+dans le même `BudgetTransport`, sans verrou TX retenu. Fragment rejeté/suffixe
+et tout événement non livré sont jetés avant l'attente, hors du handler
+d'exception pour ne pas retenir de traceback avec des octets. Les livraisons
+suivantes sont jetées sans framer/scan/décodage/capture. Ouverture et RX sont
+comptés une fois par le wrapper existant ; aucun budget n'est réinitialisé.
+
+La deadline absolue utilise l'horloge monotone existante, quantifiée vers le bas
+en millisecondes ; un timestamp égal reste ambigu. Un timeout asyncio borne
+l'attente silencieuse. Données sans EOF, silence/timeout, TLS sans EOF, plafond
+RX, stop/abort/annulation ou ordre ambigu : refus fermé. Un timeout sans EOF
+reste un refus non-EOF même si l'horloge quantifiée n'a pas avancé au seuil.
+Le seul EOF effectivement livré par read avant arrêt local et strictement avant
+deadline peut produire `_QuarantineObservation`, figée, limitée à génération,
+date entière, origine/état/motif fermés. Le candidat est provisoire : stop peut
+le révoquer, notamment à timestamp égal. Cleanup/finally ne comptent aucun EOF.
+
+Même après ce candidat, la sortie reste un refus protocolaire **non réessayable**.
+L4 ne donne aucun droit au lifecycle et ne reconnecte pas. Les tests prouvent
+RX unique, absence de TX après latch, waiter/timeout/annulation, bytes comptés
+une fois, limites et EOF vs nettoyage, annulation d'observateur sans tuer RX,
+close/abort idempotents sans tâches/waiter/lock résiduels. Ils ne prouvent ni
+causalité serveur ni recovered_120s. Protocol.md, profils, budgets, rapports
+v1/v2, gates, workflows et verrou L2 restent inchangés.
+
+La prochaine tranche MANAGER devra traiter séparément lifecycle/collecteur et
+contrats de diagnostic 150 s/rapport/admission versionnée. L'activation et le
+retrait du verrou nécessitent encore une revue/décision distincte. Pas de live,
+claim, rerun, capture brute publique/privée ou anticipation de l'étape 8.
 
 ## Observation, explication locale et inconnues
 
@@ -231,9 +299,10 @@ ultérieur n'établirait toujours pas la causalité d'un timeout Ping.
 1. Faire décider par MANAGER l'exception de portée, ses critères et le mécanisme
    d'opt-in fixe. Cette PR n'adopte pas l'exception dans `project.md` : elle la
    documente comme PROPOSÉE/NON INSTALLÉE, sans autoriser la tranche suivante.
-2. Une tâche d'implémentation offline distincte devrait ajouter le mode privé
-   de session, la coupure TX, le signal de lecture sans close, les notifications
-   de disponibilité/quarantaine et la preuve EOF au gestionnaire partagé.
+2. L4 prépare le seul pont privé de session : coupure TX, signal de lecture
+   sans close, disponibilité suspendue et observation EOF provisoire, défaut-off.
+   La prochaine tâche devra traiter séparément les consommateurs/lifecycle,
+   sans considérer le candidat L4 comme un droit de reconnexion.
    Le lifecycle attendrait sans déclarer cette quarantaine comme perte, puis
    consommerait uniquement la preuve EOF admissible avant sa politique existante.
    Le collecteur observerait ces états sans nouveau lecteur, protocole ou retry.

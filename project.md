@@ -154,7 +154,7 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite expérimentale — verrou L2 installé, fondation temporelle L3 non raccordée
+### Suite expérimentale — verrou L2 installé, pont privé L4 désactivé
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
@@ -226,9 +226,30 @@ bornés, états/motifs/catégories fermés au rejet et origine/absence EOF. Aucu
 brut public ou privé autorisé, aucune instrumentation branchée ; clés/version/
 cohérence Python/Node restent à spécifier. Avant usage, un contrat d'admission
 versionné doit lier ces constantes ; anciennes décisions/claims/rapports ne les
-valident pas. Runtime/gates/rapports/protocole inchangés, aucun raccordement L1/L3.
-Pont RX/TX/lifecycle et contrats, puis retrait/activation du verrou, seront
-spécifiés dans des tâches MANAGER distinctes après revue/CI complète.
+valident pas. L3 est fusionnée par #101 au SHA
+`11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`, CI quatre checks/3220 tests offline
+réussis ; le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800)
+consigne le run de push #38862945022 arrêté au verrou, sans collecte.
+
+L4 prépare uniquement un [pont privé de session](docs/session-eof-quarantine-proposal.md#pont-de-session-l4-candidat-capacité-fermée-et-défaut-off),
+candidat jusqu'à fusion/revue puis livré désactivé et non raccordé aux
+consommateurs/lifecycle. La capacité interne à usage unique exige les objets
+exacts SessionReconnect/NoPongAfter120 avant ouverture ; seuls tests offline
+la fournissent, aucun factory/client/collecteur/launcher/workflow/env/input.
+Le rejet close_client admissible déclenche sans await un latch irréversible,
+revérifié sous verrou par Pong/lecture ; une TX engagée rend l'observation
+non admissible. Signal privé au waiter sans close/replay, état/budget suspendus,
+seul RX passif sous échéances/budgets existants, sans framer ni capture/double
+comptage. EOF transport admissible seulement, candidat privé figé révocable ;
+aucun retry ni statut recovered_120s, aucune consommation par le lifecycle.
+La garde autorise uniquement l'import de politique par V4Session et interdit
+tout fournisseur consommateur. Régressions par défaut et tests de courses/
+cleanup sont offline. Aucun changement d'ouverture/identité/TLS/profil,
+V4Lifecycle, HobenClient/HA, collecteur, launcher/superviseur, rapport/validateur/
+export, gate/contrat, workflow/budget/verrou ni diagnostic 150 s actif.
+Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée restent
+des tâches MANAGER séparées, puis retrait/activation distincte après revue/CI.
+Aucune nouvelle observation réelle ou capture brute autorisée par L4.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion

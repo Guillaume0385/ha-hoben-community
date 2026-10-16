@@ -44,6 +44,10 @@ class Session300BudgetError(HobenProtocolError):
     code = "session_300_budget"
 
 
+class _RejectedCloseClient(HobenProtocolError):
+    """Private classification of the rejected head only, never a full frame."""
+
+
 class Session300:
     """One shared lifetime budget, explicitly named for the fixed experiment."""
 
@@ -184,6 +188,12 @@ class ExperimentalV4Framer:
     def _fail(self, phase, message):
         if self._diagnostic is not None:
             self._diagnostic.note_failure(phase, "protocol", message)
+        if (
+            type(self._diagnostic) is SessionReconnect
+            and phase == "message_classification"
+            and message == "close_client"
+        ):
+            raise _RejectedCloseClient()
         raise HobenProtocolError()
 
     def clear(self):

@@ -239,8 +239,9 @@ exactes. Aucun candidat ne s'autorise lui-même ; décisions immuables, approbat
 anti-rejeu et publication isolée conservés. Aucun run/décision/claim/rerun par DEV,
 aucune réutilisation de l'ancien run/claim. Suite non validée, étape 8 suspendue.
 
-L1 ne fournit qu'une fondation pure non raccordée et ses tests unitaires :
-aucun appel/import depuis les voies actives, aucun EOF réel ni gel TX attesté.
+L1 ne fournissait qu'une fondation pure non raccordée et ses tests unitaires.
+L4 autorise uniquement son import par le pont privé défaut-off de V4Session,
+jamais une activation par un consommateur ; aucun EOF réel ni gel TX live attesté.
 Son candidat interne provisoire n'autorise aucun retry. La [portée isolée de L1](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
 ne change ni les gates/rapports ni le comportement installé ; intégration et
 activation demeurent séparées, sans nouveau run/décision/claim par DEV.
@@ -290,8 +291,39 @@ bornés, état/motif/catégorie fermés au point de rejet et origine/absence EOF
 sans octets RX, hex/base64 de trame, sous-code deviné, données domestiques,
 GUID, exception libre ou capture brute publique/privée autorisée. Clés/version/
 matrice de cohérence Python/Node à spécifier avant toute instrumentation.
-Aucun pont RX/TX/lifecycle, diagnostic 150 s, rapport/validateur/gate ou runtime
-modifié ; l'activation reste une tâche ultérieure distincte. Suite7 non validée.
+L3 n'a modifié aucun pont RX/TX/lifecycle, diagnostic 150 s ou rapport/validateur/
+gate/runtime ; l'activation reste une tâche ultérieure distincte.
+
+## Pont L4 candidat, désactivé et sans raccordement consommateur
+
+La PR #101 est fusionnée au SHA `11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8` ;
+le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800)
+consigne quatre checks/3220 tests offline réussis et le run de push #38862945022
+en échec attendu au verrou L2, tous les jobs aval skipped. L4 ne change pas ce
+verrou ni son graphe, les deux NOT RUN avant secrets sont conservés.
+
+Le [pont privé V4Session](session-eof-quarantine-proposal.md#pont-de-session-l4-candidat-capacité-fermée-et-défaut-off)
+est candidat jusqu'à revue/fusion, puis livré défaut-off : capacité à usage
+unique liée aux propriétaires EXACTS SessionReconnect/NoPongAfter120, avant
+ouverture, deadlines scalaires bornées injectées. Seuls tests offline l'activent.
+Garde sur l'unique import de politique par session, absence de tout constructeur/
+appel consommateur fournissant la capacité ; aucun flag env/input/commentaire.
+Rejet typé du seul discriminant close_client, sans décodage ou frontière nouvelle ;
+latch sans await, gardes TX sous verrou et refus des TX engagées, signal waiter
+privé sans close/replay, budget/session suspendus sans perte terminale précoce.
+Le même RX poursuit TLS passivement sous la deadline L3, sans framer, capture,
+replay ou double comptage. L'observation privée figée ne devient candidate que
+sur vrai EOF avant arrêt local/deadline ; arrêt/courses/délai/budget/TLS sans
+EOF échouent fermés. Annuler un observateur ne tue pas RX ; close/abort restent
+idempotents. Même un candidat laisse le rejet protocolaire non réessayable :
+aucune preuve consommée par le lifecycle, reconnexion ou recovered_120s.
+
+Lifecycle, clients/HA, collecteurs/lanceurs/superviseurs, rapports v1/v2 et
+validateurs/export/publication, gates/contrats/workflows/budgets inchangés.
+Aucune instrumentation 150 s, nouvelle donnée exportée ou capture brute autorisée.
+Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée exigent une
+tranche séparée MANAGER, puis activation distincte revue. Aucun live/décision/
+claim/rerun par DEV ; suite 7 non validée, étape 8 suspendue.
 
 ## Admission : provenance, revue et CI exactes
 

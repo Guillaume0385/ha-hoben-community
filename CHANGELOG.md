@@ -2,6 +2,19 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L4 : pont privé candidat dans V4Session, défaut-off,
+  activé uniquement par les tests offline pour SessionReconnect/NoPongAfter120.
+  Rejet close_client typé sans nouveau framing, latch TX synchrone, distinction
+  TX en file/engagée, waiter privé sans close/replay et RX unique passif sous
+  les échéances L3/budgets existants, sans capture ni double comptage. Observation
+  EOF privée figée/provisoire et refus conservateurs de courses/arrêt/délai.
+  Aucun retry/lifecycle/recovered_120s ; garde du seul import session et de
+  l'absence de fournisseur consommateur, tests de courses/cleanup et régressions.
+  L3 fusionnée par #101, verrou L2 conservé. Après fusion, le pont livré restera
+  désactivé/non raccordé ; lifecycle/collecteur et contrats 150 s/rapports/admission
+  versionnée puis activation distincte à revoir séparément. Aucun live, brut,
+  workflow/gate/rapport/budget/HA modifié, suite non validée et étape 8 suspendue.
+
 - Issue #81, tranche 7/8-L3 : contrat temporel immuable et vérification pure de
   déclarations, NON RACCORDÉS. Repères 120/150/240/360 s, récupération totale 120 s
   (EOF et réouverture avant 240), puis 120 s stables ; fin précoce permise.

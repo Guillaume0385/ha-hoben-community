@@ -7,6 +7,7 @@ budget opts into the owner's local experimental handoff hypothesis.
 """
 
 import asyncio
+import math
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -59,11 +60,21 @@ from .session import (
     _open_session,
 )
 from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
+from .v4_eof_quarantine import (
+    MAX_TIME_MS,
+    EofQuarantinePolicy,
+    Event,
+    Reason,
+    Rejection,
+    Scenario,
+    State,
+)
 from .v4_experiment import (
     BudgetTransport,
     ExperimentalV4Framer,
     Session300,
     SessionReconnect,
+    _RejectedCloseClient,
 )
 from .v4_no_pong import NoPongAfter120
 
@@ -74,6 +85,7 @@ class SessionState(StrEnum):
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     CONNECTED = "connected"
+    QUARANTINED = "quarantined"
     RECONNECTING = "reconnecting"
     CLOSED = "closed"
 
@@ -173,6 +185,65 @@ class SessionNotImplementedError(NotImplementedError):
         super().__init__("session_operation_not_implemented")
 
 
+class _QuarantinedRead(HobenProtocolError):
+    """Private waiter completion; neither a retryable loss nor a close request."""
+
+    code = "session_quarantined"
+
+
+class _QuarantineOrigin(StrEnum):
+    NONE = "none"
+    TRANSPORT_READ = "transport_read"
+
+
+@dataclass(frozen=True, slots=True)
+class _QuarantineObservation:
+    """Private, provisional scalar observation; never a recovery result."""
+
+    generation: int | None
+    at_ms: int | None
+    origin: _QuarantineOrigin
+    state: State
+    reason: Reason
+
+
+class _QuarantineCapability:
+    """One-use internal binding, supplied by offline tests only in L4.
+
+    No environment/input factory exists. Bind exact owners before any opening;
+    V4Session rechecks their identity. Deadlines use the budget clock's monotonic
+    domain in integer milliseconds. They may shorten, never extend T0+240 s.
+    """
+
+    __slots__ = ("_budget", "_no_pong", "_deadlines", "_claimed")
+
+    def __init__(
+        self,
+        budget,
+        no_pong,
+        *,
+        observation_deadline_ms,
+        process_deadline_ms,
+        suite_deadline_ms,
+    ):
+        deadlines = (observation_deadline_ms, process_deadline_ms, suite_deadline_ms)
+        if (
+            type(budget) is not SessionReconnect
+            or type(no_pong) is not NoPongAfter120
+            or budget.opens != 0
+            or no_pong.first_generation is not None
+            or budget.clock is not no_pong._clock
+            or not all(type(t) is int and 0 <= t <= MAX_TIME_MS for t in deadlines)
+        ):
+            raise HobenInvalidInputError()
+        self._budget, self._no_pong = budget, no_pong
+        self._deadlines = deadlines
+        self._claimed = False
+
+    def __repr__(self):
+        return "_QuarantineCapability()"
+
+
 _TRANSITIONS = {
     SessionState.DISCONNECTED: frozenset(
         {SessionState.CONNECTING, SessionState.CLOSED}
@@ -181,7 +252,15 @@ _TRANSITIONS = {
         {SessionState.CONNECTED, SessionState.DISCONNECTED, SessionState.CLOSED}
     ),
     SessionState.CONNECTED: frozenset(
-        {SessionState.RECONNECTING, SessionState.DISCONNECTED, SessionState.CLOSED}
+        {
+            SessionState.RECONNECTING,
+            SessionState.DISCONNECTED,
+            SessionState.CLOSED,
+            SessionState.QUARANTINED,
+        }
+    ),
+    SessionState.QUARANTINED: frozenset(
+        {SessionState.DISCONNECTED, SessionState.CLOSED}
     ),
     SessionState.RECONNECTING: frozenset(
         {SessionState.CONNECTED, SessionState.DISCONNECTED, SessionState.CLOSED}
@@ -220,6 +299,12 @@ class V4Session:
         "_experiment_generation",
         "_framer",
         "_no_pong",
+        "_quarantine_capability",
+        "_quarantine_policy",
+        "_quarantine_latched",
+        "_quarantine_observation",
+        "_tx_in_flight",
+        "_read_timeout",
     )
 
     def __init__(
@@ -230,6 +315,7 @@ class V4Session:
         transport_factory: TransportFactory = AsyncTlsTransport,
         session_300: Session300 | None = None,
         no_pong_after_120: NoPongAfter120 | None = None,
+        _quarantine: _QuarantineCapability | None = None,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
@@ -242,6 +328,25 @@ class V4Session:
             type(no_pong_after_120) is not NoPongAfter120 or session_300 is None
         ):
             raise HobenInvalidInputError()
+        if _quarantine is not None:
+            if (
+                type(_quarantine) is not _QuarantineCapability
+                or _quarantine._budget is not session_300
+                or _quarantine._no_pong is not no_pong_after_120
+                or _quarantine._claimed
+                or type(session_300) is not SessionReconnect
+                or type(no_pong_after_120) is not NoPongAfter120
+                or session_300.opens != 0
+                or no_pong_after_120.first_generation is not None
+            ):
+                raise HobenInvalidInputError()
+            _quarantine._claimed = True
+        self._quarantine_capability = _quarantine
+        self._quarantine_policy = None
+        self._quarantine_latched = False
+        self._quarantine_observation = None
+        self._tx_in_flight = False
+        self._read_timeout = None
         self._no_pong = no_pong_after_120
         self._experiment = session_300
         self._experiment_generation = None
@@ -298,6 +403,7 @@ class V4Session:
         Lifecycle teardown uses this stronger stop; ordinary close retains its
         existing orderly-TX semantics. Never cancel the calling teardown task.
         """
+        self._quarantine_stop(Event.CANCEL)
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
         if self._experiment is not None:
@@ -389,6 +495,7 @@ class V4Session:
         error: HobenError | None = None
         cancelled = False
         async with self._transmitting():
+            self._require_tx_allowed()
             # Recheck under the lock: a queued Pong must not outlive RX failure
             # or close(), nor be sent on a replacement/absent transport.
             if self._rx_error is not None:
@@ -404,7 +511,11 @@ class V4Session:
             ):
                 return False
             try:
-                await transport.write(_PONG)
+                self._tx_in_flight = True
+                try:
+                    await transport.write(_PONG)
+                finally:
+                    self._tx_in_flight = False
             except asyncio.CancelledError:
                 cancelled = True
                 error = HobenTransportError()
@@ -439,7 +550,7 @@ class V4Session:
         suffixes remain private until explicit close or a fresh opening attempt.
         Their absence now says nothing about bytes that may arrive later.
         """
-        if self.state is not SessionState.DISCONNECTED:
+        if self.state is not SessionState.DISCONNECTED or self._quarantine_latched:
             raise SessionStateError()
         try:
             _validate_device_guid(self._device_guid)
@@ -517,6 +628,17 @@ class V4Session:
                     self._experiment.accepted(self._experiment_generation)
                 if self._no_pong is not None:
                     self._no_pong.accepted(self._experiment_generation)
+                if self._quarantine_capability is not None:
+                    observation, process, suite = self._quarantine_capability._deadlines
+                    self._quarantine_policy = EofQuarantinePolicy(
+                        accepted_generation=self._experiment_generation,
+                        accepted_at_ms=self._quarantine_time(
+                            self._experiment.accepted_at
+                        ),
+                        observation_deadline_ms=observation,
+                        process_deadline_ms=process,
+                        suite_deadline_ms=suite,
+                    )
                 self._transition(SessionState.CONNECTED)
                 # Handshake reads have finished before this sole RX task starts.
                 self._rx_task = asyncio.create_task(
@@ -617,7 +739,23 @@ class V4Session:
                 None if first else (self._pending_read if self._read_sent else None)
             )
             first = False
-            events = self._framer.feed(data, exchange)
+            events = []
+            rejected_close = False
+            try:
+                events = self._framer.feed(data, exchange)
+            except _RejectedCloseClient:
+                rejected_close = True
+            if rejected_close:
+                if self._quarantine_policy is None:
+                    raise HobenProtocolError()
+                # Discard all unreturned events/suffixes before awaiting, outside
+                # the exception handler so no traceback retains rejected bytes.
+                data = b""
+                self._framer.clear()
+                if self._begin_quarantine():
+                    await self._receive_quarantine(transport)
+                # L4 never lets the lifecycle consume EOF or retry this refusal.
+                raise HobenProtocolError()
             self._experiment.partial = self._framer.partial
             for event in events:
                 if event.payload == b"\x0a":
@@ -657,6 +795,138 @@ class V4Session:
                 self._experiment.note_failure("tls_read", "transport")
                 raise TransportEOF("eof")
 
+    @staticmethod
+    def _quarantine_time(seconds):
+        """Conservatively quantize the existing injected monotonic clock.
+
+        Equal millisecond timestamps remain ambiguous under the pure policy.
+        Never retain or echo an invalid clock value in a private observation.
+        """
+        if (
+            type(seconds) not in (int, float)
+            or not 0 <= seconds <= MAX_TIME_MS / 1000
+            or not math.isfinite(seconds)
+        ):
+            return None
+        value = int(seconds * 1000)
+        return value if 0 <= value <= MAX_TIME_MS else None
+
+    def _require_tx_allowed(self):
+        if self._quarantine_latched:
+            raise _QuarantinedRead()
+
+    def _quarantine_now(self):
+        try:
+            return self._quarantine_time(self._experiment.clock())
+        except Exception:
+            return None  # A failing injected clock must never prevent cleanup.
+
+    def _record_quarantine(self, snapshot, now_ms):
+        self._quarantine_observation = _QuarantineObservation(
+            snapshot.generation,
+            now_ms,
+            _QuarantineOrigin.TRANSPORT_READ
+            if snapshot.state is State.EOF_CANDIDATE
+            else _QuarantineOrigin.NONE,
+            snapshot.state,
+            snapshot.reason,
+        )
+
+    def _quarantine_stop(self, event):
+        """Record explicit stops before their first await; cleanup is not EOF."""
+        if self._quarantine_policy is not None:
+            now = self._quarantine_now()
+            snapshot = self._quarantine_policy.advance(
+                event, now_ms=now, generation=self._experiment_generation
+            )
+            self._record_quarantine(snapshot, now)
+
+    def _begin_quarantine(self):
+        """Synchronous cutoff at the typed rejection, never after acquiring TX.
+
+        Queued writers observe the latch under TX lock. Already-engaged writes
+        cannot be recalled, so they poison eligibility rather than claim a freeze.
+        The waiter signal leaves its slot consumed but does not close/cancel RX.
+        """
+        self._quarantine_latched = True
+        self._experiment.partial = True
+        now = self._quarantine_now()
+        stopped = (
+            self.state is not SessionState.CONNECTED
+            or self._loss_event.is_set()
+            or any(task.cancelling() for task in self._operations)
+            or self._read_timeout is not None
+            and self._read_timeout.expired()
+            or self._pending_read is not None
+            and self._pending_read.cancelled()
+        )
+        owners_match = (
+            type(self._experiment) is SessionReconnect
+            and type(self._no_pong) is NoPongAfter120
+            and self._no_pong.first_generation == self._experiment_generation == 1
+        )
+        snapshot = self._quarantine_policy.request(
+            now_ms=now,
+            generation=self._experiment_generation,
+            scenario=Scenario.RECONNECT if owners_match else Scenario.SESSION_300,
+            rejection=Rejection.CLOSE_CLIENT,
+            suppressed_pongs=self._no_pong.suppressed,
+            tx_in_flight=self._tx_in_flight,
+            local_stop=stopped,
+        )
+        self._record_quarantine(snapshot, now)
+        self._retryable_loss = False
+        if snapshot.state is not State.WAITING:
+            return False
+        self._transition(SessionState.QUARANTINED)
+        self._fail_pending_read(_QuarantinedRead())
+        return True
+
+    async def _receive_quarantine(self, transport):
+        """Continue within the SAME RX task, dropping already-budgeted data.
+
+        The rejected read (including coalesced suffix) was counted by
+        BudgetTransport exactly once. No suffix is fed again or copied here.
+        All subsequent deliveries use that same wrapper and remaining budgets.
+        Only actual read EOF can produce a provisional private candidate. No
+        terminal loss is announced until the decision; L4 never grants retry.
+        """
+        policy = self._quarantine_policy
+        try:
+            now = self._quarantine_now()
+            if now is None or now >= policy.snapshot.deadline_ms:
+                self._quarantine_stop(Event.TICK)
+                return
+            remaining = (policy.snapshot.deadline_ms - now) / 1000
+            async with asyncio.timeout(remaining):
+                while policy.snapshot.state is State.WAITING:
+                    try:
+                        data = await transport.read(4096, bounded=False)
+                    except TransportEOF:
+                        data = b""
+                    eof = not data
+                    data = b""  # No private capture or accumulation in this mode.
+                    now = self._quarantine_now()
+                    snapshot = policy.advance(
+                        Event.EOF if eof else Event.TICK,
+                        now_ms=now,
+                        generation=self._experiment_generation,
+                    )
+                    self._record_quarantine(snapshot, now)
+                    if snapshot.state is State.EOF_CANDIDATE:
+                        self._no_pong.peer_closed(self._experiment_generation)
+                        return
+        except asyncio.CancelledError:
+            self._quarantine_stop(Event.CANCEL)
+        except TimeoutError:
+            # A real asyncio deadline may win before the quantized clock has
+            # advanced. Never turn that timing race into an EOF candidate.
+            self._quarantine_stop(Event.TLS_FAILURE)
+        except (TransportError, HobenError):
+            self._quarantine_stop(Event.TLS_FAILURE)
+        except Exception:
+            self._quarantine_stop(Event.TLS_FAILURE)
+
     async def wait_rx_stopped(self) -> None:
         """Await the RX owner and report its fixed typed error, without reading.
 
@@ -674,6 +944,7 @@ class V4Session:
         self, event: DelimitedV4DataResponse
     ) -> None:
         """Deliver one complete, exchange-bound response; never read the socket."""
+        self._require_tx_allowed()
         pending = self._pending_read
         error: HobenError | None = None
         failure_phase = "request_correlation"
@@ -742,6 +1013,7 @@ class V4Session:
         cannot distinguish a late wire response on a reused transport.
         """
         _validate_delay(timeout)
+        self._require_tx_allowed()
         if self._rx_error is not None:
             raise self._rx_error from None
         if (
@@ -757,8 +1029,10 @@ class V4Session:
         error: HobenError | None = None
         cancelled = False
         try:
-            async with asyncio.timeout(timeout):
+            self._read_timeout = asyncio.timeout(timeout)
+            async with self._read_timeout:
                 async with self._transmitting():
+                    self._require_tx_allowed()
                     if pending.done():
                         pending.result()
                     if self._rx_error is not None:
@@ -776,15 +1050,24 @@ class V4Session:
                         )
                     )
                     self._read_sent = True
-                    await transport.write(request)
+                    self._tx_in_flight = True
+                    try:
+                        await transport.write(request)
+                    finally:
+                        self._tx_in_flight = False
                 response = await asyncio.shield(pending)
+                self._require_tx_allowed()
                 if self._rx_error is not None:
                     raise self._rx_error from None
                 return response
+        except _QuarantinedRead:
+            raise  # Dispose the waiter/timeout below without closing RX.
         except asyncio.CancelledError:
+            self._quarantine_stop(Event.CANCEL)
             cancelled = True
             error = HobenTransportError()
         except (TransportTimeout, TimeoutError):
+            self._quarantine_stop(Event.LOCAL_CLOSE)
             error = HobenTimeoutError()
         except TransportError:
             if self._rx_error is None:
@@ -801,6 +1084,7 @@ class V4Session:
         except Exception:
             error = HobenProtocolError()
         finally:
+            self._read_timeout = None
             if not pending.done():
                 pending.cancel()
             elif not pending.cancelled():
@@ -823,6 +1107,7 @@ class V4Session:
 
     async def close(self) -> None:
         """Stop opening, await its cleanup, then close once; CLOSED is terminal."""
+        self._quarantine_stop(Event.LOCAL_CLOSE)
         if self._experiment is not None:
             self._experiment.lost(self._experiment_generation)
         self._loss_event.set()
