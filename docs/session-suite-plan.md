@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — verrou structurel candidat 7/8-L2
+# Suite « Tests expérimentaux session » — verrou L2 installé, fondation pure L3
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -35,12 +35,13 @@ aucune action réelle. Une intégration/exception de portée, les évolutions de
 rapport/admission puis l'activation nécessitent des tâches MANAGER séparées,
 avec verrou structurel avant usage. Suite non validée, étape 8 suspendue.
 
-## Verrou L2 candidat — à confirmer installé après fusion seulement
+## Verrou L2 installé — quarantaine non raccordée
 
-Cette PR prépare un préalable `quarantine-installation` dans le workflow de
-suite existant ; son existence en branche de travail ne signifie pas que le
-verrou est installé sur `experimental`. Après fusion et vérification MANAGER,
-ce job initial échouera inconditionnellement : runner sans checkout/action,
+La PR #100 est fusionnée sur `experimental` au SHA
+`ea08be522c73fcca742c4bacbeafa7df75e8b0c7`. Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209326192)
+vérifie le run #38859779145 tentative 1 : `quarantine-installation` failure attendu,
+tous les jobs aval skipped, aucun accès Hoben. Ce job initial échoue
+inconditionnellement : runner sans checkout/action,
 environnement, secret ou permission (`permissions: {}`), timeout d'une minute,
 script local écrivant exactement les deux lignes ci-dessous, puis `exit 1` :
 
@@ -61,7 +62,7 @@ NOT RUN exacts ; les tests structurels couvrent l'absence de condition/action/
 environnement/secret/contournement et le graphe jusqu'au secret. Les régressions
 de gate, provenance, publication, supervision et absence de raccordement L1
 restent conservées. Ce test n'est ni un push réel ni une preuve d'installation.
-MANAGER devra vérifier après fusion le SHA et le run arrêté avant toute collecte.
+La preuve post-fusion ci-dessus est distincte des tests locaux.
 
 L2 ne raccorde pas la fondation et n'adopte pas l'exception de réception K.
 Un futur pont RX/TX/lifecycle/rapport exige une nouvelle tâche MANAGER après
@@ -70,7 +71,37 @@ après installation/revue complète de la quarantaine éventuelle et de ses
 contrats ; aucune activation automatique, décision live/claim/rerun par DEV.
 Anciens runs/claims consommés inchangés, suite non validée, étape 8 suspendue.
 
-## Activation fusionnée, suite fonctionnelle non validée
+## Fondation temporelle L3 NON RACCORDÉE
+
+Le [contrat proposé actualisé](session-eof-quarantine-proposal.md#contrat-temporel-l3-pur-sans-statut-de-réussite-réel)
+fixe T0 à l'acceptation stricte de la première génération du second scénario :
+Pong normaux avant 120 s, inhibition dès 120 s, futur diagnostic fermé dès 150 s,
+EOF admissible ET réouverture avant 240 s, puis 120 s stables sur la même nouvelle
+génération avec Pong/lecture corrélée. Maximum fonctionnel 360 s, fin précoce
+permise après stabilité ; égalités aux deadlines et courses ambiguës refusées.
+Un EOF seul avant 240 s ne suffit pas. Absence d'exercice/EOF, ouverture tardive,
+seconde perte ou budget restant insuffisant : aucun recovered_120s.
+
+L3 remplace dans la seule politique pure la borne T0+300 par T0+240 et ajoute
+`RecoveryTiming` immuable et `check_recovery_timing()`, calcul sans statut réel
+de succès. Aucun import/appel actif, aucun gel TX/attente TLS/retry implémenté.
+Les anciennes hypothèses proposées EOF T0+300/attente 180 sont remplacées par
+**récupération totale 120 s, EOF et ouverture avant 240 s**. Les valeurs du moteur
+et du contrat actif ci-dessous restent installées et inchangées sous verrou.
+Le premier scénario garde 300 s ; ouverture initiale/nettoyage sont hors de la
+fenêtre fonctionnelle du second mais sous les plafonds existants. Les deadlines
+observation/process/suite ne sont jamais prolongées. Avant usage, un contrat
+d'admission versionné devra lier ces constantes : aucune ancienne décision/claim
+ou rapport ne valide L3.
+
+Les observations renforcées proposées dès 150 s se limitent aux temps relatifs,
+compteurs/tailles/offsets bornés, état/motif/catégorie fermés au rejet, origine ou
+absence EOF. Clés/version/cohérence Python/Node à spécifier avant instrumentation.
+Aucun RX/hex/base64 de trame, sous-code deviné, valeur domestique, GUID, exception
+libre ou capture brute publique/privée autorisée. Verrou L2, runtime, gates,
+rapports v1/v2, budgets et publication inchangés ; étape 8 suspendue.
+
+## Activation H historique, suite fonctionnelle non validée
 
 La fondation 7/8-E livre
 la politique opt-in `NoPongAfter120`, son raccordement au vrai `V4Session`, et
@@ -85,7 +116,7 @@ modifier gates, budgets ou runtime. MANAGER l'a fusionnée le 16/10/2026 à
 00:15:13 UTC, après revue, quatre checks CI et décision immuable distincte :
 merge `d382540b056adf189bc7969b3d9905ab7dc8cd8f`.
 
-Le push `experimental` commence par le
+Avant installation du nouveau verrou L2, le push `experimental` commençait par le
 préflight sans secret, puis admission, environnement et recheck avant l'unique
 étape utilisant l'identité. Sans décision de suite valide, aucun scénario ne
 démarre ; une ancienne autorisation session-300 ne suffit jamais. Aucun Setting,
@@ -151,7 +182,7 @@ Le run décrit ci-dessus n'a pas validé la reconnexion.
 | --- | --- |
 | Scénario 1 | 300 s utiles ; plafond 360 s inchangé. |
 | Scénario 2 | Plafond dur 600 s, nettoyage inclus ; au plus trois ouvertures, 1 Mio RX cumulé et dix lectures fixes espacées d'au moins 60 s. |
-| Attente après inhibition | Au plus 180 s après T+120, puis `no_disconnect` ou `not_exercised`, sans forcer la fermeture serveur. |
+| Attente après inhibition du moteur/contrat actif, sous verrou | Historique inchangé : au plus 180 s après T+120 ; L3 ne le raccorde pas et propose une récupération totale de 120 s avec EOF ET ouverture avant 240. |
 | Après réouverture | 120 s stables, avec lecture corrélée et Pong rétablis ; aucune attribution causale automatique. |
 | Suite | Plafond dur 1020 s : 360 + 600 + 60 s de marge d'orchestration/nettoyage. |
 
@@ -178,7 +209,8 @@ Les observations monotones proviennent des callbacks d'ouverture/EOF du seul
 propriétaire RX, même si une perte et une reprise surviennent entre deux ticks.
 Un EOF après inhibition n'établit aucune causalité de timeout serveur.
 
-Sans Pong inhibé avant T+300 : `not_exercised`. Sans EOF admissible au plus
+Dans ce moteur actif historique, toujours sous verrou L2 et inchangé par L3 :
+sans Pong inhibé avant T+300 : `not_exercised`. Sans EOF admissible au plus
 180 s après T+120 : `no_disconnect`. Reconnexion épuisée : `reopen_failed`.
 Une nouvelle perte après la première génération donne `stability_lost`, même si
 le lifecycle se rétablit rapidement. Aucun cumul de fragments de sessions.

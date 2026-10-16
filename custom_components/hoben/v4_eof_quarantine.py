@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 MAX_TIME_MS = (1 << 53) - 1
+SUPPRESS_AFTER_MS = 120000
+DIAGNOSTIC_AFTER_MS = 150000
+RECOVER_BEFORE_MS = 240000
+FUNCTIONAL_MAX_MS = 360000
+STABLE_FOR_MS = 120000
 
 
 class State(StrEnum):
@@ -71,6 +76,139 @@ def _time(value):
     return type(value) is int and 0 <= value <= MAX_TIME_MS
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveryTiming:
+    """Unconnected experimental timing contract, not a protocol discovery.
+
+    T0 is the declared strict acceptance of the second scenario's first
+    generation. All deadlines use that same injected monotonic domain. Initial
+    opening and cleanup remain outside the functional interval and within the
+    unchanged external budgets. Construction cannot retain arbitrary objects.
+    """
+
+    accepted_generation: int
+    accepted_at_ms: int
+    observation_deadline_ms: int
+    process_deadline_ms: int
+    suite_deadline_ms: int
+
+    def __post_init__(self):
+        if (
+            type(self.accepted_generation) is not int
+            or self.accepted_generation != 1
+            or not all(
+                _time(t)
+                for t in (
+                    self.accepted_at_ms,
+                    self.observation_deadline_ms,
+                    self.process_deadline_ms,
+                    self.suite_deadline_ms,
+                )
+            )
+            or self.accepted_at_ms > MAX_TIME_MS - FUNCTIONAL_MAX_MS
+            or min(
+                self.observation_deadline_ms,
+                self.process_deadline_ms,
+                self.suite_deadline_ms,
+            )
+            <= self.accepted_at_ms
+        ):
+            raise ValueError("Invalid recovery timing")
+
+    @property
+    def suppress_at_ms(self):
+        return self.accepted_at_ms + SUPPRESS_AFTER_MS
+
+    @property
+    def diagnostic_at_ms(self):
+        return self.accepted_at_ms + DIAGNOSTIC_AFTER_MS
+
+    @property
+    def recovery_deadline_ms(self):
+        return min(
+            self.accepted_at_ms + RECOVER_BEFORE_MS,
+            self.observation_deadline_ms,
+            self.process_deadline_ms,
+            self.suite_deadline_ms,
+        )
+
+    @property
+    def functional_deadline_ms(self):
+        return min(
+            self.accepted_at_ms + FUNCTIONAL_MAX_MS,
+            self.observation_deadline_ms,
+            self.process_deadline_ms,
+            self.suite_deadline_ms,
+        )
+
+
+class TimingCheck(StrEnum):
+    INVALID = "invalid"
+    INCOMPATIBLE = "incompatible"
+    COMPATIBLE_CALCULATION_ONLY = "compatible_calculation_only"
+
+
+def check_recovery_timing(
+    timing,
+    *,
+    suppressed_at_ms,
+    eof_at_ms,
+    reopened_at_ms,
+    pong_at_ms,
+    read_at_ms,
+    stable_until_ms,
+    reopened_generation,
+    stable_generation,
+    loss_or_stop,
+    ambiguous_order,
+):
+    """Check declared arithmetic only; never emit a real recovery status.
+
+    These scalars cannot attest suppression, transport EOF origin, strict
+    opening, bounded cleanup/backoff, correlated reads or uninterrupted RX.
+    The future bridge must establish those facts. Stops/second loss, ambiguous
+    races and exact deadline ties fail closed. No remaining budget is extended.
+    """
+    if (
+        type(timing) is not RecoveryTiming
+        or not all(
+            _time(t)
+            for t in (
+                suppressed_at_ms,
+                eof_at_ms,
+                reopened_at_ms,
+                pong_at_ms,
+                read_at_ms,
+                stable_until_ms,
+            )
+        )
+        or type(reopened_generation) is not int
+        or type(stable_generation) is not int
+        or type(loss_or_stop) is not bool
+        or type(ambiguous_order) is not bool
+    ):
+        return TimingCheck.INVALID
+    if (
+        loss_or_stop
+        or ambiguous_order
+        or not 1 < reopened_generation <= 3
+        or stable_generation != reopened_generation
+        or not (
+            timing.suppress_at_ms
+            <= suppressed_at_ms
+            < eof_at_ms
+            < reopened_at_ms
+            < timing.recovery_deadline_ms
+        )
+        or not reopened_at_ms < pong_at_ms < stable_until_ms
+        or not reopened_at_ms < read_at_ms < stable_until_ms
+        or stable_until_ms - reopened_at_ms < STABLE_FOR_MS
+        or stable_until_ms >= timing.functional_deadline_ms
+    ):
+        return TimingCheck.INCOMPATIBLE
+    return TimingCheck.COMPATIBLE_CALCULATION_ONLY
+
+
 class EofQuarantinePolicy:
     """One first-generation policy, with no reset, I/O, clock or callback.
 
@@ -103,10 +241,10 @@ class EofQuarantinePolicy:
             type(accepted_generation) is not int
             or accepted_generation != 1
             or not all(_time(t) for t in times)
-            or accepted_at_ms > MAX_TIME_MS - 300000
+            or accepted_at_ms > MAX_TIME_MS - RECOVER_BEFORE_MS
         ):
             return  # Never retain invalid objects, text, bytes or non-finite time.
-        deadline = min(accepted_at_ms + 300000, *times[1:])
+        deadline = min(accepted_at_ms + RECOVER_BEFORE_MS, *times[1:])
         if deadline <= accepted_at_ms:
             return
         self._accepted = accepted_at_ms
@@ -158,7 +296,7 @@ class EofQuarantinePolicy:
         tx_in_flight,
         local_stop,
     ):
-        """Latch a request at fixed 120/300 s bounds; flags are declarations."""
+        """Latch a request at fixed 120/240 s bounds; flags are declarations."""
         s = self._snapshot
         if s.state is State.REFUSED:
             return s
@@ -186,7 +324,7 @@ class EofQuarantinePolicy:
             scenario is not Scenario.RECONNECT
             or rejection is not Rejection.CLOSE_CLIENT
             or suppressed_pongs == 0
-            or now_ms < self._accepted + 120000
+            or now_ms < self._accepted + SUPPRESS_AFTER_MS
         ):
             return self._refuse(Reason.INELIGIBLE)
         if s.state is State.READY:

@@ -222,8 +222,8 @@ EOF/reconnexion/stabilité observé. Les deux tests ont tourné, ce n'est pas NO
 Le rapport v1 précédent reste inchangé ; causalité serveur non démontrée.
 
 Le [contrat proposé](session-eof-quarantine-proposal.md) étudie une coupure TX
-atomique et une attente passive par le seul propriétaire RX, jusqu'à T0+300 s
-au maximum, uniquement dans le second scénario après T0+120 et inhibition
+atomique et une attente passive par le seul propriétaire RX, avec la borne L3
+EOF ET réouverture avant T0+240, uniquement dans le second scénario après T0+120 et inhibition
 effectivement exercée. Aucun Pong/lecture nouveau, aucune réinterprétation du
 suffixe, aucun retry sur le seul discriminant. Seul un EOF transport admissible
 avant arrêt local pourrait précéder une récupération par le lifecycle partagé.
@@ -245,10 +245,10 @@ Son candidat interne provisoire n'autorise aucun retry. La [portée isolée de L
 ne change ni les gates/rapports ni le comportement installé ; intégration et
 activation demeurent séparées, sans nouveau run/décision/claim par DEV.
 
-## Préalable structurel L2 candidat, sans raccordement
+## Préalable structurel L2 installé, fondation L3 sans raccordement
 
 L1 est fusionnée par la PR #99 (`c220072d82ec9a34d178a3fa15406ea841ed527a`),
-politique pure toujours non raccordée. L2 prépare dans le workflow de suite le
+politique pure toujours non raccordée. L2 installe dans le workflow de suite le
 job initial `quarantine-installation`, sans permission/checkout/action tierce/
 environnement/secret : deux NOT RUN fixes, raison `quarantine_not_installed`,
 puis échec inconditionnel (timeout du job : une minute). `dry-run` en dépend, avec ses
@@ -256,15 +256,42 @@ conditions et contrôles exacts conservés ; admission/réservation et accès au
 secrets restent inaccessibles après cet échec. Les deux scénarios sont bloqués
 ensemble et aucune décision/commentaire ne peut lever ce préalable.
 
-**Candidat seulement** : ne déclarer le verrou installé qu'après fusion et
-vérification MANAGER du SHA/run. Le [plan](session-suite-plan.md) précise tests
-locaux et vérification post-fusion. Déclencheur push, nom/mutex/non-annulation,
+La PR #100 est fusionnée au SHA `ea08be522c73fcca742c4bacbeafa7df75e8b0c7`.
+Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209326192)
+confirme le run #38859779145 tentative 1 : préalable failure attendu et tous les
+jobs aval skipped, aucune collecte. Le verrou est installé et reste intact.
+Le [plan](session-suite-plan.md) distingue tests locaux et preuve post-fusion.
+Déclencheur push, nom/mutex/non-annulation,
 autres jobs/conditions/permissions, gates/contrats, budgets, supervision et
 publication/statut restent identiques. Aucun nouveau flag/input/bypass.
 L2 ne modifie aucun runtime ni raccordement L1 ; le futur pont sera une tâche
 distincte après vérification du verrou. Son retrait demandera une activation
 séparée après installation/revue complète. Aucun nouveau résultat live acquis,
 aucune décision/claim/rerun par DEV ; étape 8 suspendue.
+
+L3 ajoute seulement la [fondation temporelle pure](session-eof-quarantine-proposal.md#contrat-temporel-l3-pur-sans-statut-de-réussite-réel)
+non raccordée : T0 à l'acceptation stricte de la première génération du second
+scénario, Pong normaux avant 120 s, inhibition dès 120, diagnostic futur dès 150,
+EOF admissible ET nouvelle ouverture avant 240, puis 120 s stables sur la même
+nouvelle génération avec Pong et lecture corrélée. Fin précoce permise ; 360 s
+est le maximum fonctionnel nominal. EOF seul/ouverture tardive/seconde perte/
+absence d'exercice/ambiguïté ou égalité de deadline ne donnent aucun succès.
+La politique pure borne désormais à min(T0+240, observation, process, suite),
+sans prolongation ni reset. Cette proposition remplace EOF T0+300/attente 180,
+sans réécrire les runs ni modifier moteur/contrat actif. Premier scénario 300 s,
+plafonds 360/600/1020, budgets 350+10/590+10, 3 ouvertures/1 Mio et 6/10 lectures >= 60 s
+restent installés. Ouverture initiale/nettoyage sont séparés du temps fonctionnel
+et sous ces bornes ; 120 s stables impossibles dans le budget => non concluant.
+Un futur contrat d'admission versionné doit lier ces constantes avant usage :
+anciennes approbations/claims/rapports ne valident pas ces sémantiques.
+
+Observation renforcée future dès 150 s : temps relatifs, compteurs/tailles/offsets
+bornés, état/motif/catégorie fermés au point de rejet et origine/absence EOF,
+sans octets RX, hex/base64 de trame, sous-code deviné, données domestiques,
+GUID, exception libre ou capture brute publique/privée autorisée. Clés/version/
+matrice de cohérence Python/Node à spécifier avant toute instrumentation.
+Aucun pont RX/TX/lifecycle, diagnostic 150 s, rapport/validateur/gate ou runtime
+modifié ; l'activation reste une tâche ultérieure distincte. Suite7 non validée.
 
 ## Admission : provenance, revue et CI exactes
 

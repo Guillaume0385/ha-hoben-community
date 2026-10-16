@@ -154,7 +154,7 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite expérimentale — verrou candidat 7/8-L2, fondation non raccordée
+### Suite expérimentale — verrou L2 installé, fondation temporelle L3 non raccordée
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
@@ -185,7 +185,8 @@ rapport v1 antérieur. Les deux scénarios ont tourné, suite toujours non valid
 
 K livre uniquement une [proposition documentaire de quarantaine](docs/session-eof-quarantine-proposal.md)
 **PROPOSÉE / NON INSTALLÉE** : second scénario opt-in, première génération après
-120 s et inhibition exercée, gel TX et attente passive EOF jusqu'à T0+300 au plus.
+120 s et inhibition exercée, gel TX et attente passive EOF. L3 remplace la borne
+proposée historique T0+300/attente 180 par EOF ET réouverture avant T0+240.
 Le propriétaire RX serait unique, les suffixes privés non interprétés, la
 reconnexion réservée au lifecycle après EOF admissible, jamais sur le seul refus.
 La portée active demeure Ping/DataResponse seulement, avec refus protocolaire
@@ -201,14 +202,33 @@ gel TX ni attente TLS ni reconnexion. La [limite de L1](docs/session-eof-quarant
 reste distincte du futur runtime de quarantaine, NON INSTALLÉ/NON ACTIVÉ.
 Le raccordement, l'évolution éventuelle des rapports/admissions et toute
 activation exigent d'autres décisions MANAGER ; aucune exception active ici.
-L2 prépare uniquement le préalable structurel `quarantine-installation`, en
-échec inconditionnel sans secret/permission/checkout/environnement, avec deux
-NOT RUN `quarantine_not_installed` et `dry-run` dépendant. **Verrou candidat,
-pas encore déclaré installé** : MANAGER confirmera fusion et run arrêté avant
-admission/réservation/collecte. Une décision de scénario ne contourne pas ce
-préalable. Les autres conditions/gates/contrats/budgets restent identiques.
-Aucun raccordement de L1 ; prochaine implémentation et retrait/activation du
-verrou seront spécifiés séparément, après installation/revue vérifiées.
+L2 est installé par la PR #100, fusion
+`ea08be522c73fcca742c4bacbeafa7df75e8b0c7`. Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209326192)
+vérifie le run #38859779145 tentative 1 : préalable `quarantine-installation`
+en échec attendu, deux NOT RUN `quarantine_not_installed`, tous les jobs aval
+skipped avant admission/claim/secrets. Ce verrou inconditionnel sans permission/
+checkout/environnement reste intact. Aucune décision de scénario ne le contourne.
+
+L3 fournit seulement un contrat temporel pur immuable et des calculs/tests
+non raccordés : T0 = première génération du second scénario strictement acceptée,
+Pong normaux avant 120 s, inhibition dès 120, futur diagnostic fermé dès 150,
+EOF admissible ET nouvelle ouverture avant 240, puis 120 s stables sur cette même
+génération avec Pong/lecture corrélée. Fenêtre de récupération totale 120 s,
+maximum fonctionnel 360 s, fin précoce permise ; égalités de deadline et courses
+ambiguës refusées. Un EOF seul/reprise tardive/seconde perte ne valide rien.
+Les minima observation/process/suite ne sont pas prolongés pour obtenir 120 s.
+Premier scénario toujours 300 s, plafonds 360/600/1020 et budgets 350+10/590+10,
+trois ouvertures/1 Mio, six/dix lectures >= 60 s inchangés ; ouverture initiale et
+nettoyage séparés du temps fonctionnel mais soumis à ces plafonds.
+Le [contrat proposé](docs/session-eof-quarantine-proposal.md#contrat-temporel-l3-pur-sans-statut-de-réussite-réel)
+limite les futures observations à des temps relatifs, compteurs/tailles/offsets
+bornés, états/motifs/catégories fermés au rejet et origine/absence EOF. Aucun
+brut public ou privé autorisé, aucune instrumentation branchée ; clés/version/
+cohérence Python/Node restent à spécifier. Avant usage, un contrat d'admission
+versionné doit lier ces constantes ; anciennes décisions/claims/rapports ne les
+valident pas. Runtime/gates/rapports/protocole inchangés, aucun raccordement L1/L3.
+Pont RX/TX/lifecycle et contrats, puis retrait/activation du verrou, seront
+spécifiés dans des tâches MANAGER distinctes après revue/CI complète.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion
