@@ -597,7 +597,7 @@ def test_time_domain_is_bounded_and_candidate_can_be_revoked_by_expiry():
     assert s.state is State.REFUSED and s.reason is Reason.EXPIRED
 
 
-def test_foundation_imports_only_pure_stdlib_and_has_no_active_references():
+def test_foundation_is_pure_and_only_session_can_reference_its_policy():
     root = Path(__file__).resolve().parents[1]
     module = root / "custom_components/hoben/v4_eof_quarantine.py"
     tree = ast.parse(module.read_text())
@@ -627,6 +627,25 @@ def test_foundation_imports_only_pure_stdlib_and_has_no_active_references():
             }:
                 continue
             source = file.read_text()
+            if file == root / "custom_components/hoben/v4_session.py":
+                imports = [
+                    n
+                    for n in ast.walk(ast.parse(source))
+                    if isinstance(n, ast.ImportFrom) and n.module == "v4_eof_quarantine"
+                ]
+                assert len(imports) == 1
+                assert {n.name for n in imports[0].names} == {
+                    "MAX_TIME_MS",
+                    "EofQuarantinePolicy",
+                    "Event",
+                    "Reason",
+                    "Rejection",
+                    "Scenario",
+                    "State",
+                }
+                assert "RecoveryTiming" not in source
+                assert "check_recovery_timing" not in source
+                continue  # L4 allows this one reviewed private bridge only.
             assert (
                 "v4_eof_quarantine" not in source
                 and "EofQuarantinePolicy" not in source

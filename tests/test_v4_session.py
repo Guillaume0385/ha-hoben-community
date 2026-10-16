@@ -45,10 +45,17 @@ def session_in(state):
         SessionState.CONNECTING,
         SessionState.CONNECTED,
         SessionState.RECONNECTING,
+        SessionState.QUARANTINED,
     ):
         session._transition(SessionState.CONNECTING)
-    if state in (SessionState.CONNECTED, SessionState.RECONNECTING):
+    if state in (
+        SessionState.CONNECTED,
+        SessionState.RECONNECTING,
+        SessionState.QUARANTINED,
+    ):
         session._transition(SessionState.CONNECTED)
+    if state is SessionState.QUARANTINED:
+        session._transition(SessionState.QUARANTINED)
     if state is SessionState.RECONNECTING:
         session._transition(SessionState.RECONNECTING)
     if state is SessionState.CLOSED:
@@ -84,7 +91,14 @@ def test_transition_guard(source, target):
         or source in (SessionState.CONNECTING, SessionState.RECONNECTING)
         and target in (SessionState.CONNECTED, SessionState.DISCONNECTED)
         or source is SessionState.CONNECTED
-        and target in (SessionState.RECONNECTING, SessionState.DISCONNECTED)
+        and target
+        in (
+            SessionState.RECONNECTING,
+            SessionState.DISCONNECTED,
+            SessionState.QUARANTINED,
+        )
+        or source is SessionState.QUARANTINED
+        and target is SessionState.DISCONNECTED
         or source is not SessionState.CLOSED
         and target is SessionState.CLOSED
     )

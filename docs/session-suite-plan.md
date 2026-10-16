@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — verrou L2 installé, fondation pure L3
+# Suite « Tests expérimentaux session » — verrou L2 intact, pont L4 défaut-off
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -23,14 +23,15 @@ L1 est fusionnée par la PR #99 au SHA
 réussis (3058 tests offline, dont 152 cas de politique). Elle ajoute seulement
 [EofQuarantinePolicy](../custom_components/hoben/v4_eof_quarantine.py),
 machine d'état pure sans I/O, horloge réelle, tâche, transport ou credentials.
-Seuls les tests l'instancient. Aucun import/appel depuis session, lifecycle,
-framer, collecteur, launcher, gate, workflow ou HA : réception et refus installés
-restent inchangés. La [limite de cette fondation](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+L4 autorise le seul import de politique par `V4Session` derrière une capacité
+privée activée par les tests uniquement. Aucun consommateur/lifecycle/factory
+ne la fournit ; le comportement par défaut reste identique. La [limite de cette fondation](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
 est distincte du futur gel TX, de l'attente TLS et de la récupération.
 
 Les tests unitaires déterministes couvrent frontières/invalides/ordres/idempotence,
 snapshots scalaires bornés, import limité à dataclasses/enum et absence de
-références actives. Ils ne réalisent pas la matrice d'intégration K et ne prouvent
+références consommatrices (seul pont privé L4 autorisé). Ils ne réalisent pas la
+matrice complète d'intégration K et ne prouvent
 aucune action réelle. Une intégration/exception de portée, les évolutions de
 rapport/admission puis l'activation nécessitent des tâches MANAGER séparées,
 avec verrou structurel avant usage. Suite non validée, étape 8 suspendue.
@@ -84,7 +85,8 @@ seconde perte ou budget restant insuffisant : aucun recovered_120s.
 
 L3 remplace dans la seule politique pure la borne T0+300 par T0+240 et ajoute
 `RecoveryTiming` immuable et `check_recovery_timing()`, calcul sans statut réel
-de succès. Aucun import/appel actif, aucun gel TX/attente TLS/retry implémenté.
+de succès. L3 fusionnée n'a ajouté aucun gel TX/attente TLS/retry ; L4 prépare
+seulement le pont privé désactivé décrit ci-dessous, sans consommateur.
 Les anciennes hypothèses proposées EOF T0+300/attente 180 sont remplacées par
 **récupération totale 120 s, EOF et ouverture avant 240 s**. Les valeurs du moteur
 et du contrat actif ci-dessous restent installées et inchangées sous verrou.
@@ -100,6 +102,32 @@ absence EOF. Clés/version/cohérence Python/Node à spécifier avant instrument
 Aucun RX/hex/base64 de trame, sous-code deviné, valeur domestique, GUID, exception
 libre ou capture brute publique/privée autorisée. Verrou L2, runtime, gates,
 rapports v1/v2, budgets et publication inchangés ; étape 8 suspendue.
+
+## Pont L4 candidat — non raccordé aux consommateurs/lifecycle
+
+L3 est fusionnée par #101 (`11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`),
+quatre checks réussis/3220 tests offline, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800).
+Le run post-fusion #38862945022 s'arrête au verrou L2, tous les jobs aval skipped.
+Le [pont de session proposé](session-eof-quarantine-proposal.md#pont-de-session-l4-candidat-capacité-fermée-et-défaut-off)
+reste candidat jusqu'à revue/fusion puis livré désactivé : capacité interne
+à usage unique, liée aux deux propriétaires exacts SessionReconnect/NoPongAfter120,
+sans fournisseur actif ni flag env/input/commentaire. Première génération,
+inhibition positive et rejet close_client admissible seulement. Latch synchrone,
+contrôle TX sous verrou, TX engagée distincte des files ; waiter privé sans
+close/replay, budget/session non utilisables sans notification terminale précoce.
+RX unique continue passivement jusqu'à l'échéance L3 sans framer, capture ou
+double comptage. Seul read EOF admissible donne un candidat privé révocable.
+Pas de retry/lifecycle/recovered_120s ; stop, course, délai, budget ou TLS sans
+EOF restent refusés. Les tests TLS/horloge simulés couvrent ces effets et le
+nettoyage, en conservant les tests L1/L3/verrou et les régressions par défaut.
+
+Garde structurelle : seul import approuvé par V4Session, aucun constructeur/appel
+consommateur ne fournit la capacité. Lifecycle, HobenClient/HA, collecteurs,
+launchers/superviseurs, rapports v1/v2, validateurs/publication, contrats/gates,
+workflows et tous les budgets restent inchangés. Aucun diagnostic 150 s branché.
+Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée formeront
+une tranche MANAGER séparée, puis activation distincte revue. Aucun live/claim/
+décision/rerun par DEV ; suite non validée, étape 8 suspendue.
 
 ## Activation H historique, suite fonctionnelle non validée
 
