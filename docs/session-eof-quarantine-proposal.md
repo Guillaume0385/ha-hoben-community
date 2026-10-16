@@ -5,6 +5,40 @@ Elle n'autorise ni implémentation, ni observation réelle. Le comportement inst
 reste le refus protocolaire suivi du nettoyage local, sans retry de ce refus.
 Le scénario 300 s, les sessions ordinaires et HA/hoben-live restent inchangés.
 
+## Fondation L1 isolée, API et limites
+
+La décision MANAGER L1 autorise seulement un module pur non raccordé :
+`v4_eof_quarantine.py`. Cette fondation existe séparément de la proposition de
+réception ci-dessous, toujours **NON INSTALLÉE / NON ACTIVÉE**. Elle n'importe que
+dataclasses/enum, ne lit aucune horloge, n'appelle aucun callback et n'acquiert
+aucun verrou. Aucun chemin actif ne l'importe ou ne l'appelle ; un contrôle
+structurel couvre custom_components, scripts et les automatisations du dépôt.
+
+| API pure | Contrat local, sans effet réel |
+| --- | --- |
+| Construction | Première génération acceptée déclarée `1`, T0 et échéances observation/process/suite injectés. Temps monotones en millisecondes entières entre 0 et 2^53−1, marge d'addition 300000 comprise ; booléens, flottants (dont NaN/infini), valeurs invalides ou génération inconnue refusés sans les conserver. |
+| `request()` | Scénario/rejet en enums fermés, génération, timestamp, nombre d'inhibitions borné, booléens TX engagée/arrêt local. Éligibilité après 120 s et avant la plus courte échéance, uniquement second scénario/close_client. Toute demande pose irréversiblement `block_tx`; ce drapeau **n'atteste pas** une coupure TX réalisée. |
+| `advance()` | Événement fermé EOF/tick/TLS sans EOF/close/annulation/TX engagée et génération/temps injectés. REQUEST est réservé à request(). Aucune réception/décodage d'octets ou sous-code. Aucun timer ne fait avancer cet état sans appel. |
+| `snapshot` / repr | Copie figée : état, motif fermé, block_tx, génération, deadline et date du candidat éventuel, scalaires bornés uniquement. Repr de politique constant ; aucun texte d'exception/payload/identité. |
+
+L'échéance est `min(T0+300000, observation, process, suite)` en ms ; aucune
+durée configurable ou remise à zéro. Le refus est absorbant, sans reset ni
+réarmement par génération tardive. Une répétition identique est idempotente.
+Des temps rétrogrades ou deux événements distincts au même timestamp sont
+refusés comme invalides/ambigus ; close/annulation/TX engagée restent prioritaires.
+EOF exactement à la deadline est refusé fermement : cette fondation ne tranche
+pas une course temporelle réelle à la limite ni un ordre sous la milliseconde.
+
+`EOF_CANDIDATE` est une indication **provisoire**, jamais preuve transport ou
+décision de retry. Arrêt, échéance, événement périmé/invalide ou ordre ambigu
+peuvent la révoquer vers un refus définitif ; aucun recovered_120s n'est produit.
+Le futur pont RX devra attester origine/génération/ordre avant toute décision
+réelle. Le futur propriétaire TX devra réaliser et prouver son gel. Ces limites
+conservatrices ne sont pas une implémentation de la quarantaine K ; aucun
+comportement, budget, rapport ou gate existant n'est changé par L1.
+Un EOF/tick avant la demande admissible est refusé ; les arrêts préalables
+scellent aussi le refus. Cette API ne remplace pas un ordonnanceur de session.
+
 ## Observation, explication locale et inconnues
 
 Le [bilan MANAGER J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)

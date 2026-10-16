@@ -2,6 +2,14 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L1 : fondation pure de politique de quarantaine,
+  sans I/O et NON RACCORDÉE aux chemins actifs. Éligibilité fixe, latch sans
+  effet TX, échéances injectées réduisant T0+300, refus absorbants et candidat
+  EOF provisoire sans preuve transport ni droit de retry. Tests unitaires
+  déterministes et garde structurelle d'absence de raccordement. Proposition K
+  inchangée dans sa portée : réception NON INSTALLÉE/NON ACTIVÉE, aucun nouveau
+  live, rapport/gate/budget/protocole inchangé et étape 8 suspendue.
+
 - Issue #81, tranche 7/8-K documentaire : bilan sourcé du run #38839083483
   (300 s continu puis refus message_classification/close_client, aucun EOF ni
   reconnexion) et proposition de quarantaine bornée jusqu'à EOF, NON INSTALLÉE.
