@@ -2,13 +2,25 @@
 
 ## Unreleased — recherche experimental
 
-- Issue #81, tranche 7/8-L6bis : correction contractuelle candidate du rapport
+- Issue #81, tranche 7/8-L6ter : correction contractuelle candidate séparant les
+  temps de livraison RX et de décision de parsing/validation, sans nouvelle
+  clé/version. Rejet possible après la dernière livraison ou sur des octets
+  d'avant150, avec offsets globaux bornés et sans double comptage ; refus ancien
+  distinct d'un nouveau rejet. Cadence des requêtes conservée sans inventer une
+  cadence des validations. Fixtures Python/Node communes et reproductions des
+  vrais propriétaires sous TLS/horloge simulés ; les rapports d'échec restent
+  non réussis dans completed et le script result inchangé. Aucun runtime,
+  producteur, hook, workflow, gate ou budget modifié. L6bis fusionnée par #105 ;
+  L7 locale préservée, suspendue jusqu'à fusion L6ter et réautorisation distincte.
+  Aucun test réel, donnée privée, commande, claim, décision live ou fusion DEV.
+
+- Issue #81, tranche 7/8-L6bis : correction contractuelle livrée par #105 du rapport
   v3 pour un reçu propriétaire historique suivi d'un arrêt public dans la même
   milliseconde, avant ou après acceptation attestée. Histoire interrupted
   uniquement, jamais reprise/succès ; ordre entrée/EOF et consommation/acceptation
   stricts conservés. Fixtures Python/Node communes et reproduction sur les vrais
   propriétaires avec TLS/horloge simulés, sans hook runtime. L6 fusionnée par
-  #104 ; L7 suspendue jusqu'à fusion L6bis et réautorisation distincte. Versions
+  #104 ; L7 reste soumise à une réautorisation distincte. Versions
   historiques, producteurs v2, capacités défaut-off, gates/verrou/budgets intacts.
   Aucun test réel, donnée privée, commande, claim, décision live ou fusion DEV.
 

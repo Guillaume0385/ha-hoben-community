@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — L5 livré défaut-off, contrat L6 candidat
+# Suite « Tests expérimentaux session » — L6bis livré, correction L6ter candidate
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -188,8 +188,11 @@ Les producteurs `second_empty`, `_observe_reconnect` et `observe_suite` continue
 d'émettre v2. Aucun collecteur, runtime, constructeur, gate, admission, YAML ou
 superviseur modifié. L6 est fusionnée par #104 au SHA
 `6cc17b9d380835fdb77cb9b671707eb469c79b4d`, contrat livré **sans producteur v3**.
-La correction L6bis ci-dessous est candidate jusqu'à revue/fusion, puis livrée.
-L7 reste suspendue jusqu'à cette fusion et à une réautorisation MANAGER distincte.
+L6bis est fusionnée par #105 au SHA
+`182daa62177c74bb14dc6412a166e95ad36c8350`. La correction contractuelle L6ter
+ci-dessous est candidate jusqu'à revue/fusion, puis livrée. Le travail local L7
+incomplet est préservé, non publié ; L7 reste suspendue jusqu'à fusion L6ter
+et réautorisation MANAGER distincte.
 Instrumentation 150 s/collecteur, admission versionnée puis
 activation/retrait du verrou exigent de nouvelles tâches MANAGER distinctes.
 
@@ -342,7 +345,7 @@ déjà attestée, uniquement pour cette histoire interrompue. Aucune acceptation
 après un arrêt réel n'est autorisée. L'ancien seuil EOF180s de v1/v2 n'intervient
 jamais ici.
 
-### Correction L6bis candidate — reçu historique et arrêt quantifié
+### Correction L6bis livrée — reçu historique et arrêt quantifié
 
 La [décision MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 résout le [blocage L7](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6216427042)
@@ -377,6 +380,37 @@ L6bis ne fournit pas L7 : producteur, instrumentation et raccordement restent
 suspendus jusqu'à nouvelle autorisation. Verrou, v1/v2, producteurs v2 et budgets
 inchangés ; aucune validation réelle ni nouvelle preuve de protocole.
 
+### Correction L6ter candidate — livraison et décision distinctes
+
+La [décision MANAGER L6ter](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+résout le [blocage livraison/parsing](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6219012693)
+sans nouvelle clé, enum ni version. Les règles d'agrégat ci-dessous séparent
+les livraisons non vides des décisions de parsing/validation. Aucun timestamp
+n'est déplacé et aucun compteur n'est gonflé pour les faire coïncider. Les seuls
+changements exécutables concernent les deux validateurs ; aucun propriétaire,
+producteur, collecteur, gate, workflow, budget ou politique de reprise ne change.
+Les wrappers de TEST relèvent les vrais points de livraison/décision sous TLS et
+horloge simulés. La reproduction 151000/151001, EOF admissible puis réouvertures
+échouées reste inconclusive/reopen_failed ; completed et le vrai script result
+restent en échec, même si collect/publication sont déclarés réussis.
+
+Deux anciens cas négatifs communs deviennent structurellement acceptables :
+`coherence_rx_diagnostic.rejection_offset_0` référence l'octet global 199 déjà
+reçu avant start_offset=200 ; il ne crée aucun octet après150.
+`cannot_fit_two_reads_in_zero_interval` ne permettait pas de déduire les temps
+des requêtes de celui de la première validation : le rapport ne contient pas
+ces temps individuels. Il demeure un rapport interrompu, jamais un succès.
+La nouvelle borne de nombre de lectures utilise le début réel de la génération
+et la durée de sa phase, pas un temps de dernière lecture inventé. Tous les
+autres anciens cas et rapports positifs sont conservés. Une projection acceptée
+reste structurelle : le futur propriétaire devra attester chaque événement,
+la cadence réelle et les octets disponibles lors de la décision.
+
+L6ter candidate puis livrée après revue/fusion MANAGER ne livre pas L7. Le
+producteur local L7 n'est ni inclus ni revu ici. Réautorisation L7, admission
+versionnée/routage fixe puis activation/retrait du verrou restent séparés.
+Étape7 non validée, étape8 suspendue ; aucune preuve protocolaire/live nouvelle.
+
 ### Stabilité et décision de suite
 
 Début stable = acceptation, génération stable = nouvelle génération du reçu,
@@ -387,8 +421,9 @@ jamais un cumul de fenêtres. Premier Pong et première lecture corrélée sur C
 génération sont présents exactement quand leur compteur de reprise est positif,
 entre début et fin stable (ou fin fonctionnelle si fenêtre encore incomplète).
 Le temps de lecture est celui de la réponse corrélée acceptée par RX. Le nombre
-minimal d’intervalles de60 s entre ces lectures doit tenir dans la fenêtre ;
-les totaux et le slot causal doivent aussi tenir sous cette cadence minimale.
+de lectures est borné par les créneaux de requêtes possibles depuis l'acceptation,
+pas par des intervalles fictifs entre validations. Les totaux et le slot causal
+doivent aussi tenir sous la cadence minimale des requêtes.
 Ces contrôles nécessaires ne prouvent pas la cadence réelle des événements.
 Un stop public pendant cette fenêtre impose interruption et fin stable au plus
 à son temps. stability_lost exige une acceptation et interrupted=true.
@@ -424,22 +459,41 @@ Les offsets sont positions dans les livraisons RX comptées une seule fois,
 ouverture incluse conformément au budget actuel. Chaque livraison est attribuée
 par son temps de livraison, pas une segmentation physique devinée ; aucune
 frontière de message n'est affirmée. Si bytes>0, first_rx<=last_rx dans la fenêtre.
-Une lecture corrélée post150 impose des livraisons RX concordantes (première
-réception au plus à la première lecture, dernière réception au moins au temps
-minimal de la dernière lecture). Un succès avec zéro RX malgré de telles
-lectures est donc refusé. Un rejet causal de parsing dans la fenêtre doit
+Une lecture corrélée peut être validée après sa dernière livraison. Aucune borne
+last_rx>=validation, ni dernière livraison extrapolée depuis un compteur de
+lectures, n'est exigée. Les requêtes sont espacées d'au moins60s par le vrai
+propriétaire ; leurs validations ne le sont pas nécessairement. Structurellement,
+recovery_reads_ok <= floor((fin_stabilité-acceptation)/60000)+1 ; les temps de
+validation restent dans la stabilité de la même génération. Si cette génération
+est acceptée après150, une validation dans la fenêtre exige des octets nouveaux
+et first_rx<=première_validation : aucun suffixe d'avant acceptation ne peut
+être transféré. Si acceptation est antérieure150, une réponse déjà livrée avant
+150 peut y être validée sans nouvelle livraison (sauf start_offset=0, qui
+exclut tout octet antérieur). Les preuves de chaque échange restent à obtenir
+du propriétaire. Un rejet causal de parsing dans la fenêtre doit
 correspondre au premier rejet RX résumé, pas être effacé ou renommé.
 Pas de liste de chunks, de chronologie libre ni d'entrées extensibles : un seul
 agrégat de taille fixe. Sans nouvelle réception, le framer peut conserver son
-état empty/prefix/ambiguous, sans faux rejet ajouté.
+état empty/prefix/ambiguous, sans faux rejet ajouté. Un état refused déjà acquis
+avant150 peut aussi être fidèlement observé : rejection_* restent tous nulls,
+phase/category/message de l'événement de fenêtre restent none/none/unclassified,
+et le premier causal antérieur150 doit être une phase de parsing fermée de
+catégorie protocol. Sans ce causal, refused sans événement reste interdit.
 
-Le premier rejet pertinent dans la fenêtre est le seul résumé : temps dans
-[first_rx,last_rx], offset dans [start_offset,end_offset[, taille positive
-bornée par end_offset-offset ; framer=refused, category=protocol et couple
+Le premier rejet pertinent dans la fenêtre est le seul résumé : temps réel de
+décision dans [150000,end_ms], même après last_rx ou avant first_rx si les octets
+concernés étaient déjà reçus avant150. Offset GLOBAL dans [0,end_offset[,
+taille positive bornée par end_offset-offset ; framer=refused, category=protocol et couple
 phase/message autorisé. Sans rejet dans la fenêtre, temps/offset/taille null,
 phase/category=none, message=unclassified. Un rejet causal AVANT150 reste dans
 les champs causaux ; il n'est jamais recopié comme rejet après150. Des livraisons
 ultérieures après150 sont comptées sans réinterpréter le suffixe de quarantaine.
+L'intervalle doit référencer des octets effectivement reçus avant la décision,
+ce que le futur propriétaire atteste sans payload. Si l'intervalle dépasse
+start_offset, first_rx doit exister et ne pas suivre la décision. Un intervalle
+entièrement antérieur peut être rejeté avec bytes=chunks=0, first/last_rx=null,
+start_offset=end_offset>0. Aucun octet référencé n'est alors recompté après150.
+Sans octet disponible (end_offset=0), aucun rejet référencé n'est admissible.
 `eof_ms` du diagnostic est un EOF transport dans la fenêtre, pas un compteur de
 chunk ni des octets ; il exige peer_eofs>0. Si l'EOF d'origine appartient à cette
 fenêtre, il doit y être concordant ; avec un seul EOF, aucun autre temps n'est

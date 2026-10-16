@@ -348,24 +348,41 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
             == (d["rejection_size"] is None)
         )
         if rejection is None:
-            need(d["framer"] in {"empty", "prefix", "ambiguous"})
+            prior_refusal = (
+                causal is not None
+                and causal < 150000
+                and phase
+                in {
+                    "frame_boundary",
+                    "message_classification",
+                    "request_correlation",
+                    "response_validation",
+                }
+                and category == "protocol"
+            )
+            need(
+                d["framer"] in {"empty", "prefix", "ambiguous"}
+                or d["framer"] == "refused"
+                and prior_refusal
+            )
             need(
                 (d["phase"], d["category"], d["message"])
                 == ("none", "none", "unclassified")
             )
         else:
-            need(
-                d["first_rx_ms"] is not None
-                and d["first_rx_ms"] <= rejection <= d["last_rx_ms"]
-            )
+            # Delivery and the existing parser's decision are separate events.
+            # Retained pre-window bytes may be rejected with zero new RX.
+            need(150000 <= rejection <= d["end_ms"])
             need(
                 d["framer"] == "refused"
                 and d["category"] == "protocol"
                 and d["phase"] != "none"
             )
             need(d["message"] in messages[d["phase"]])
-            need(d["start_offset"] <= d["rejection_offset"] < d["end_offset"])
+            need(d["rejection_offset"] < d["end_offset"])
             need(0 < d["rejection_size"] <= d["end_offset"] - d["rejection_offset"])
+            if d["rejection_offset"] + d["rejection_size"] > d["start_offset"]:
+                need(d["first_rx_ms"] is not None and d["first_rx_ms"] <= rejection)
         if d["eof_ms"] is not None:
             need(150000 <= d["eof_ms"] <= d["end_ms"])
             need(r["peer_eofs"] > 0)
@@ -388,10 +405,14 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
                 == (causal, phase, category, message)
             )
     if s["first_read_ok_ms"] is not None:
-        last_read_min = s["first_read_ok_ms"] + (r["recovery_reads_ok"] - 1) * 60000
-        need(last_read_min <= (s["end_ms"] if s["end_ms"] is not None else end))
-        if d["observed"] and 150000 <= last_read_min <= d["end_ms"]:
-            need(d["bytes"] > 0 and d["last_rx_ms"] >= last_read_min)
-        if d["observed"] and 150000 <= s["first_read_ok_ms"] <= d["end_ms"]:
+        # >=60 s separates requests, not response-validation times. Bound the
+        # count by the recovery phase; do not invent a last read/delivery time.
+        stable_end = s["end_ms"] if s["end_ms"] is not None else end
+        need(r["recovery_reads_ok"] <= (stable_end - accepted) // 60000 + 1)
+        if (
+            d["observed"]
+            and 150000 <= s["first_read_ok_ms"] <= d["end_ms"]
+            and (accepted >= 150000 or d["start_offset"] == 0)
+        ):
             need(d["bytes"] > 0 and d["first_rx_ms"] <= s["first_read_ok_ms"])
     return copy.deepcopy({k: r[k] for k in sorted(expected)})

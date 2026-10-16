@@ -141,12 +141,17 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
     if (d.bytes) need(150000 <= d.first_rx_ms && d.first_rx_ms <= d.last_rx_ms && d.last_rx_ms <= d.end_ms);
     need(nil(d.rejection_ms) === nil(d.rejection_offset) && nil(d.rejection_ms) === nil(d.rejection_size));
     if (nil(d.rejection_ms)) {
-      need(["empty","prefix","ambiguous"].includes(d.framer) && d.phase === "none" && d.category === "none" && d.message === "unclassified");
+      const priorRefusal=!nil(causal) && causal < 150000 && category === "protocol" &&
+        ["frame_boundary","message_classification","request_correlation","response_validation"].includes(phase);
+      need((["empty","prefix","ambiguous"].includes(d.framer) || (d.framer === "refused" && priorRefusal)) && d.phase === "none" && d.category === "none" && d.message === "unclassified");
     } else {
-      need(!nil(d.first_rx_ms) && d.first_rx_ms <= d.rejection_ms && d.rejection_ms <= d.last_rx_ms);
+      // Parsing may follow the last delivery, including retained pre150 bytes.
+      need(150000 <= d.rejection_ms && d.rejection_ms <= d.end_ms);
       need(d.framer === "refused" && d.category === "protocol" && d.phase !== "none" && messages.get(d.phase).includes(d.message));
-      need(d.start_offset <= d.rejection_offset && d.rejection_offset < d.end_offset);
+      need(d.rejection_offset < d.end_offset);
       need(d.rejection_size > 0 && d.rejection_size <= d.end_offset-d.rejection_offset);
+      if (d.rejection_offset+d.rejection_size > d.start_offset)
+        need(!nil(d.first_rx_ms) && d.first_rx_ms <= d.rejection_ms);
     }
     if (!nil(d.eof_ms)) {
       need(150000 <= d.eof_ms && d.eof_ms <= d.end_ms && r.peer_eofs > 0);
@@ -157,11 +162,11 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
       need(d.rejection_ms === causal && d.phase === phase && d.category === category && d.message === message);
   }
   if (!nil(s.first_read_ok_ms)) {
-    const lastReadMin=s.first_read_ok_ms+(r.recovery_reads_ok-1)*60000;
-    need(lastReadMin <= (nil(s.end_ms) ? end : s.end_ms));
-    if (d.observed && lastReadMin >= 150000 && lastReadMin <= d.end_ms)
-      need(d.bytes > 0 && d.last_rx_ms >= lastReadMin);
-    if (d.observed && s.first_read_ok_ms >= 150000 && s.first_read_ok_ms <= d.end_ms)
+    // Request cadence does not imply a cadence of response validations.
+    const stableEnd=nil(s.end_ms) ? end : s.end_ms;
+    need(r.recovery_reads_ok <= Math.floor((stableEnd-accepted)/60000)+1);
+    if (d.observed && s.first_read_ok_ms >= 150000 && s.first_read_ok_ms <= d.end_ms &&
+        (accepted >= 150000 || d.start_offset === 0))
       need(d.bytes > 0 && d.first_rx_ms <= s.first_read_ok_ms);
   }
   return JSON.parse(JSON.stringify(Object.fromEntries(expected.sort().map(k => [k,r[k]]))));
