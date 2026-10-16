@@ -24,6 +24,7 @@ from custom_components.hoben.v4_no_pong import NoPongAfter120
 from custom_components.hoben.v4_session import SessionState
 from scripts.run_session_300 import observe as observe_300
 from scripts.run_session_300 import validate_report as validate_300
+from scripts.session_suite_v3 import validate_v3
 
 PROVENANCE = {"merge_sha", "candidate_sha", "run_id", "run_attempt", "pr_number"}
 COUNTERS = {
@@ -114,6 +115,10 @@ def second_empty(proof):
 
 def validate_second(r, proof):
     """Closed scalar projection, independent from the engine's mutable state."""
+    if type(r) is dict and type(r.get("schema")) is int and r["schema"] == 3:
+        return validate_v3(
+            r, proof, PROVENANCE, COUNTERS, TERMINALS, RECONNECT_DIAGNOSTIC_MESSAGES
+        )
     need(type(r) is dict and type(r.get("schema")) is int and r["schema"] in {1, 2})
     keys = SECOND_KEYS | (SECOND_DIAGNOSTIC_KEYS if r["schema"] == 2 else set())
     need(set(r) == keys)
@@ -185,7 +190,7 @@ def validate_second(r, proof):
 def validate_suite(r, proof):
     """Validate both scenarios and derive a global result that cannot hide a KO."""
     need(type(r) is dict and set(r) == SUITE_KEYS)
-    need(type(r["schema"]) is int and r["schema"] in {1, 2})
+    need(type(r["schema"]) is int and r["schema"] in {1, 2, 3})
     need(r["scenario"] == "session-suite" and r["boundary_proven"] is False)
     for k in PROVENANCE:
         need(type(r[k]) is type(proof[k]) and r[k] == proof[k])

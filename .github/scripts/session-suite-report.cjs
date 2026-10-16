@@ -32,6 +32,7 @@ function keys(r, expected) {
     Object.keys(r).sort().join() === [...expected].sort().join());
 }
 function validateSecond(r,p) {
+  if (r && r.schema === 3) return require("./session-suite-v3.cjs").validateV3(r,p,provenance,limits,terminals,messages);
   need(r && [1,2].includes(r.schema));
   const expected = r.schema === 2 ? [...secondKeys,...diagnosticKeys] : secondKeys;
   keys(r,expected);
@@ -76,7 +77,7 @@ function validateSecond(r,p) {
 }
 function validate(r,p) {
   keys(r,suiteKeys);
-  need([1,2].includes(r.schema) && r.scenario === "session-suite" && r.boundary_proven === false);
+  need([1,2,3].includes(r.schema) && r.scenario === "session-suite" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
   need(Number.isSafeInteger(r.duration_ms) && r.duration_ms >= 0 && r.duration_ms <= 1020000);
   const first = firstApi.validate(r.session_300,p);

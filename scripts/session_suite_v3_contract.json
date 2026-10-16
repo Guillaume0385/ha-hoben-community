@@ -1,0 +1,51 @@
+{
+  "timing": {
+    "t0_observed": ["bool"],
+    "functional_end_ms": ["nullable_int", 360000],
+    "observation_deadline_ms": ["nullable_int", 600000],
+    "process_deadline_ms": ["nullable_int", 600000],
+    "suite_deadline_ms": ["nullable_int", 1020000],
+    "inhibition_ms": ["nullable_int", 360000]
+  },
+  "quarantine": {
+    "outcome": ["enum", ["not_entered", "waiting", "no_eof", "expired", "refused", "revoked", "consumed"]],
+    "entered_ms": ["nullable_int", 360000],
+    "eof_ms": ["nullable_int", 360000],
+    "consumed_ms": ["nullable_int", 360000],
+    "origin_generation": ["nullable_int", 1],
+    "eof_origin": ["enum", ["none", "transport_read", "local", "ambiguous"]],
+    "receipt": ["enum", ["none", "valid_at_consumption", "invalid", "revoked_before_consumption"]],
+    "cleanup_ms": ["nullable_int", 360000],
+    "stop": ["enum", ["none", "local_before_consumption", "cancel_before_consumption", "local_after_consumption", "cancel_after_consumption"]],
+    "stop_ms": ["nullable_int", 360000],
+    "accepted_ms": ["nullable_int", 360000],
+    "accepted_generation": ["nullable_int", 3]
+  },
+  "stability": {
+    "start_ms": ["nullable_int", 360000],
+    "end_ms": ["nullable_int", 360000],
+    "generation": ["nullable_int", 3],
+    "interrupted": ["bool"],
+    "first_pong_ms": ["nullable_int", 360000],
+    "first_read_ok_ms": ["nullable_int", 360000]
+  },
+  "rx_diagnostic": {
+    "observed": ["bool"],
+    "start_ms": ["nullable_int", 360000],
+    "end_ms": ["nullable_int", 360000],
+    "first_rx_ms": ["nullable_int", 360000],
+    "last_rx_ms": ["nullable_int", 360000],
+    "bytes": ["nullable_int", 1048576],
+    "chunks": ["nullable_int", 1048576],
+    "start_offset": ["nullable_int", 1048576],
+    "end_offset": ["nullable_int", 1048576],
+    "rejection_ms": ["nullable_int", 360000],
+    "rejection_offset": ["nullable_int", 1048576],
+    "rejection_size": ["nullable_int", 1048576],
+    "framer": ["enum", ["not_observed", "empty", "prefix", "ambiguous", "refused"]],
+    "phase": ["enum", ["none", "frame_boundary", "message_classification", "request_correlation", "response_validation"]],
+    "category": ["enum", ["none", "protocol"]],
+    "message": ["enum", ["unclassified", "ambiguous", "close_client", "data_updated", "other_known", "unknown", "data_response"]],
+    "eof_ms": ["nullable_int", 360000]
+  }
+}

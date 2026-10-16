@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — verrou L2 intact, lifecycle L5 défaut-off
+# Suite « Tests expérimentaux session » — L5 livré défaut-off, contrat L6 candidat
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -133,9 +133,9 @@ Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée formeront
 une tranche MANAGER séparée, puis activation distincte revue. Aucun live/claim/
 décision/rerun par DEV ; suite non validée, étape 8 suspendue.
 
-## Lifecycle L5 candidat, récupération privée bornée sans collecteur
+## Lifecycle L5 livré, récupération privée bornée sans collecteur
 
-Le [contrat L5](session-eof-quarantine-proposal.md#lifecycle-l5-candidat-consommation-liée-à-lorigine-et-récupération-bornée)
+Le [contrat L5](session-eof-quarantine-proposal.md#lifecycle-l5-livré-consommation-liée-à-lorigine-et-récupération-bornée)
 ajoute une capacité fermée et à usage unique de V4Lifecycle, défaut-off,
 fournie par les tests/factories de test seulement. Les propriétaires exacts
 SessionReconnect/NoPongAfter120, T0 strict initial et les deadlines L3 restent
@@ -160,7 +160,7 @@ tentatives ; la première nouvelle acceptation ouvre la seule phase stable, dont
 toute perte est terminale même immédiatement après acceptation. Pong/lectures
 sur cette génération sont testés pendant 120 s synthétiques, sans rapport public.
 
-L5 est candidat jusqu'à revue/fusion puis livré hors ligne, défaut-off, sans
+L5 est fusionnée par #103 (`49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`), livrée hors ligne, défaut-off, sans
 fournisseur consommateur. Aucune validation globale/recovered_120s par cette
 tranche : collecteur et contrats diagnostic 150 s/rapport/admission versionnée
 restent séparés, puis activation/retrait du verrou après revue complète.
@@ -169,6 +169,257 @@ launchers/superviseurs, rapports v1/v2/validateurs/export, gates/contrats/workfl
 et budgets 360/600/1020, 350+10/590+10, 3 ouvertures/1 Mio, 6/10 lectures >= 60 s inchangés.
 Aucun diagnostic 150 s branché, brut, live/décision/claim/rerun. Deux NOT RUN avant
 secrets conservés ; suite 7 non validée et étape 8 suspendue.
+
+## Contrat public v3 — 7/8-L6 candidat sans producteur
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`.
+[Revue/bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821) :
+Validate #38875547530, quatre checks, 3350 tests offline et 308 HA réussis ;
+run post-fusion #38889510562 arrêté au verrou L2, sans collecte.
+Le lifecycle et la session restent défaut-off, sans fournisseur consommateur.
+
+L6 ajoute seulement projection et validation de rapports synthétiques. Le couple
+**suite/schema3 + second/schema3** est explicite ; premier sous-rapport
+`session-300/schema1` strictement inchangé. Les couples historiques 1/1 et 2/2,
+leurs fixtures et toutes leurs règles sont conservés, y compris leur ancien
+`eof_after_threshold_ms` relatif au seuil 120 s et leur limite historique 180 s.
+Ce champ n'existe PAS en v3 ; aucun mélange, ajout implicite ni rétrocomplément.
+Les producteurs `second_empty`, `_observe_reconnect` et `observe_suite` continuent
+d'émettre v2. Aucun collecteur, runtime, constructeur, gate, admission, YAML ou
+superviseur modifié. Contrat candidat jusqu'à revue/fusion, puis livré **sans
+producteur v3**. Instrumentation 150 s/collecteur, admission versionnée puis
+activation/retrait du verrou exigent de nouvelles tâches MANAGER distinctes.
+
+### Clés héritées et nouvelles clés exactes
+
+Les clés de suite restent exactement : `schema`, `scenario`, `boundary_proven`,
+`result`, `duration_ms`, `session_300`, `session_reconnect_no_pong` et provenance
+`merge_sha`, `candidate_sha`, `run_id`, `run_attempt`, `pr_number`.
+Scénarios exacts `session-suite` et `session-reconnect-no-pong`,
+`boundary_proven=false`, SHA hex minuscules de 40 caractères, tentative 1,
+provenance identique au contexte attendu et aux deux sous-rapports. En v3,
+run/PR sont des entiers positifs sûrs <= 2^53-1, jamais booléens/flottants.
+La durée de suite reste bornée à 1020000 ms et au moins la somme des durées des
+sous-scénarios. Le premier conserve ses propres bornes, clés et conditions.
+
+Le second v3 reprend tous les compteurs bornés existants (durée processus
+600000 ms ; 3 ouvertures/2 réouvertures ; 1 Mio RX/chunks/Ping/Pong/suppressions ;
+10 lectures/réponses ; 3 EOF ; 1 EOF après inhibition ; stabilité <=120000 ms ;
+génération <=3). Les relations compteurs restent exigées : réouvertures =
+max(0,ouvertures-1), Pong+inhibitions <= Ping, succès+échecs = lectures,
+lectures réussies <= réponses <= lectures, chunks <= octets, compteurs de
+reprise inclus dans les totaux. Ces plafonds ne créent aucun droit d'émission.
+Budgets de cadence/runtime 6/10 lectures >=60 s, 360/600/1020 s et
+350+10/590+10 inchangés. Aucune clé libre, octet RX, sous-code, registre, valeur
+domestique, exception, horloge murale, GUID, secret ni capture brute autorisée.
+
+Le second conserve `read_slot`, `failure_phase`, `failure_category`,
+`message_category`, mais v3 définit ces quatre champs comme le **premier rejet
+causal**, distinct du terminal final et du nombre final de lectures. `read_slot`
+est entier 0..`reads` : 0 si aucune lecture engagée lors du rejet, sinon rang
+causal, jamais remplacé par le total après reprise. Les couples phase/message
+fermés sont ceux de v2 : none/opening/scheduled_read/lifecycle_transition/
+teardown/tls_read -> unclassified ; frame_boundary -> unclassified/ambiguous ;
+message_classification -> unclassified/close_client/data_updated/other_known/
+unknown ; request_correlation/response_validation -> data_response ; pong_tx ->
+ping. Les catégories restent les terminaux fermés historiques ; phases de
+parsing exigent protocol, tls_read exige transport/budget, pong_tx exige
+transport/protocol, teardown exige closed final. Sans causalité, phase none,
+catégorie verified ou first_not_admissible égale au terminal, read_slot=0.
+
+| Nouvelle clé scalaire | Type, unité et borne | Null / cohérence |
+| --- | --- | --- |
+| `causal_ms` | Entier relatif T0 en ms, 0..360000, ou null. | Null si phase none ; avant première acceptation, phase opening et null obligatoire. Sinon <= fin fonctionnelle ; égal à entered_ms pour la quarantaine. |
+
+Les quatre objets nouveaux suivants ont **exactement** les clés de la table
+ci-dessous, tirée du [contrat fermé commun](../scripts/session_suite_v3_contract.json).
+`I?` signifie entier 0..borne ou null (booléen/flottant/non fini refusé), unité ms
+pour les temps, octet pour bytes/offset/size, compteur pour chunks/generation.
+Les enums et booléens sont obligatoires et non null. Les règles de cohérence
+sous la table font partie du contrat autant que les types/bornes.
+
+| Objet.clé exact | Type / valeurs fermées | Borne |
+| --- | --- | --- |
+| `timing.t0_observed` | booléen | — |
+| `timing.functional_end_ms` | I? | 360000 |
+| `timing.observation_deadline_ms` | I? | 600000 |
+| `timing.process_deadline_ms` | I? | 600000 |
+| `timing.suite_deadline_ms` | I? | 1020000 |
+| `timing.inhibition_ms` | I? | 360000 |
+| `quarantine.outcome` | `not_entered`, `waiting`, `no_eof`, `expired`, `refused`, `revoked`, `consumed` | — |
+| `quarantine.entered_ms` | I? | 360000 |
+| `quarantine.eof_ms` | I? | 360000 |
+| `quarantine.consumed_ms` | I? | 360000 |
+| `quarantine.origin_generation` | I? | 1 |
+| `quarantine.eof_origin` | `none`, `transport_read`, `local`, `ambiguous` | — |
+| `quarantine.receipt` | `none`, `valid_at_consumption`, `invalid`, `revoked_before_consumption` | — |
+| `quarantine.cleanup_ms` | I? | 360000 |
+| `quarantine.stop` | `none`, `local_before_consumption`, `cancel_before_consumption`, `local_after_consumption`, `cancel_after_consumption` | — |
+| `quarantine.stop_ms` | I? | 360000 |
+| `quarantine.accepted_ms` | I? | 360000 |
+| `quarantine.accepted_generation` | I? | 3 |
+| `stability.start_ms` | I? | 360000 |
+| `stability.end_ms` | I? | 360000 |
+| `stability.generation` | I? | 3 |
+| `stability.interrupted` | booléen | — |
+| `stability.first_pong_ms` | I? | 360000 |
+| `stability.first_read_ok_ms` | I? | 360000 |
+| `rx_diagnostic.observed` | booléen | — |
+| `rx_diagnostic.start_ms` | I? | 360000 |
+| `rx_diagnostic.end_ms` | I? | 360000 |
+| `rx_diagnostic.first_rx_ms` | I? | 360000 |
+| `rx_diagnostic.last_rx_ms` | I? | 360000 |
+| `rx_diagnostic.bytes` | I? | 1048576 |
+| `rx_diagnostic.chunks` | I? | 1048576 |
+| `rx_diagnostic.start_offset` | I? | 1048576 |
+| `rx_diagnostic.end_offset` | I? | 1048576 |
+| `rx_diagnostic.rejection_ms` | I? | 360000 |
+| `rx_diagnostic.rejection_offset` | I? | 1048576 |
+| `rx_diagnostic.rejection_size` | I? | 1048576 |
+| `rx_diagnostic.framer` | `not_observed`, `empty`, `prefix`, `ambiguous`, `refused` | — |
+| `rx_diagnostic.phase` | `none`, `frame_boundary`, `message_classification`, `request_correlation`, `response_validation` | — |
+| `rx_diagnostic.category` | `none`, `protocol` | — |
+| `rx_diagnostic.message` | `unclassified`, `ambiguous`, `close_client`, `data_updated`, `other_known`, `unknown`, `data_response` | — |
+| `rx_diagnostic.eof_ms` | I? | 360000 |
+
+### T0 et chronologie de récupération
+
+`t0_observed=true` signifie première acceptation stricte de la génération 1 du
+second scénario ; toutes les dates sont relatives à CE T0, sans reset à la
+reconnexion. Sans T0, tous les nombres de timing restent null : un échec opening
+conserve seulement durée processus/tentatives/RX d'ouverture, diagnostic opening
+sans causal_ms et aucun effet post-ouverture. NOT RUN exige tous compteurs à0,
+aucun T0 et aucun diagnostic/événement. `null` n'est jamais un zéro observé.
+Après T0, fin fonctionnelle et les trois échéances sont présentes ; fin <=360000
+et <= chaque échéance, durée processus >= fin fonctionnelle. Durée processus
+inclut ouverture/nettoyage, contrairement à la fenêtre fonctionnelle ; ne pas
+les additionner comme deux fenêtres de mesure.
+
+Inhibition présente si et seulement si suppression effectivement comptée,
+à >=120000 ms et <= fin. Entrée de quarantaine après inhibition, avant min(240000,
+observation,process,suite), liée à génération1 et au rejet causal
+message_classification/protocol/close_client au même temps. Ce seul discriminant
+n'est ni message complet ni EOF. Sans entrée, tous champs temporels/génération
+de quarantaine sont null et outcome=not_entered, origine/reçu/stop=none.
+
+`eof_ms` peut décrire un événement refusé (origine local/ambiguous), jamais une
+preuve consommable. Origine transport_read après entrée seulement ; compteur
+`eofs_after_suppression` vaut1 pour un EOF transport de première génération après
+inhibition, pas pour un événement local. Un EOF sans quarantaine reste comptable
+mais non admissible pour récupération ; le compteur seul ne constitue pas une preuve.
+Un EOF transport de quarantaine exige ce compteur à1. Les compteurs peer_eofs restent des EOF transport seulement.
+`receipt=valid_at_consumption` et outcome=consumed équivalent à consumed_ms non
+null ; entrée < EOF transport <= consommation < min(240000,échéances), origine génération1.
+L'EOF consommable est strictement postérieur à l'entrée : le même timestamp
+quantifié est ambigu et refusé par la politique L1/L3 et le pont L4. Les cas
+entrée−1 et entrée ne peuvent fournir un reçu valide ni un succès ; entrée+1
+reste admissible structurellement si toutes les autres preuves concordent.
+Le futur projecteur DOIT recevoir du propriétaire d'origine un reçu figé valide
+au moment exact de consommation ainsi que son premier arrêt public et le
+cleanup possédé. Ce reçu n'est pas encore produit publiquement par L5 ; L6 ne
+le fabrique pas depuis son snapshot final. Validation structurelle n'authentifie
+ni ne démontre aucun effet réseau.
+
+L'issue est waiting/no_eof uniquement sans EOF/reçu/stop ; waiting reste avant
+la borne, expired exige fin à/après la borne ; invalid implique refused.
+revoked équivaut au reçu revoked_before_consumption et exige un stop local/cancel
+avant consommation. Ces issues n'ont jamais de consumed_ms. Le premier stop
+public est séparé du cleanup possédé : aucun stop -> stop_ms null ; stop avant
+consommation -> aucun reçu valide ; stop après consommation -> temps strictement
+supérieur à consumed_ms (égalité ambiguë refusée). cleanup_ms, s'il existe, est
+entre consommation et fin. Un cleanup intentionnel ne révoque pas rétroactivement
+le reçu, un arrêt public ne peut pas être caché derrière ce cleanup.
+
+Nouvelle acceptation uniquement avec reçu consommé et cleanup terminé,
+consommation < acceptation < min(240000,échéances). Génération 2..opens,
+acceptation+120000 <= min(360000,échéances), aucune prolongation. Le premier arrêt
+public post-consommation doit être strictement après acceptation, sinon celle-ci
+est refusée. L'ancien seuil EOF180s de v1/v2 n'intervient jamais ici.
+
+### Stabilité et décision de suite
+
+Début stable = acceptation, génération stable = nouvelle génération du reçu,
+recovery_generation identique. Sans nouvelle acceptation, stabilité entièrement
+null, interrupted=false et compteurs de reprise/stable_ms nuls. Fin stable, si
+présente, entre début et fin fonctionnelle ; stable_ms est exactement la différence,
+jamais un cumul de fenêtres. Premier Pong et première lecture corrélée sur CETTE
+génération sont présents exactement quand leur compteur de reprise est positif,
+entre début et fin stable (ou fin fonctionnelle si fenêtre encore incomplète).
+Le temps de lecture est celui de la réponse corrélée acceptée par RX. Le nombre
+minimal d’intervalles de60 s entre ces lectures doit tenir dans la fenêtre ;
+les totaux et le slot causal doivent aussi tenir sous cette cadence minimale.
+Ces contrôles nécessaires ne prouvent pas la cadence réelle des événements.
+Un stop public pendant cette fenêtre impose interruption et fin stable au plus
+à son temps. stability_lost exige une acceptation et interrupted=true.
+
+recovered_120s équivaut à terminal=verified et exige TOUS les éléments :
+inhibition exercée, quarantaine/EOF transport/reçu valide, cleanup possédé,
+acceptation stricte avant240, génération neuve, fin stable=acceptation+120000,
+Pong et lecture corrélée rétablis, aucune interruption/stop public, exactement un
+EOF et opens=génération acceptée. Fin stable <= fin fonctionnelle, strictement
+avant toutes échéances externes ; agrégat RX observé jusqu'à la fin. Une seconde
+perte ou une égalité/tardiveté de deadline interdit ce résultat. La fin précoce
+est permise ; aucun rapport synthétique n'atteste une réussite réelle.
+
+Suite success exactement si premier résultat continuous_300s/reconnected ET
+second recovered_120s validé ; sinon not_successful, jamais succès partiel.
+Premier non admissible impose second not_run. Le statut final existant exige
+encore collecte ET publication success ; skipped/cancelled/failure/absence
+restent en échec. NOT RUN, absence de rapport et PENDING APPROVAL ne deviennent
+jamais des preuves de stabilité.
+
+### Agrégat RX fixe à partir de T0+150000 ms
+
+`observed=true` atteste une fenêtre instrumentée commençant exactement à150000,
+fin entre150000 et la fin fonctionnelle. Les quatre compteurs/offsets sont alors
+présents : end_offset-start_offset=bytes, chunks<=bytes et <= totalchunks,
+bytes=0 équivaut à chunks=0 ; end_offset<=totalRX. La fenêtre peut s'armer au
+seuil exact sans recevoir d'octet : zéro explicite, first/last_rx null. Sans
+instrumentation (dont arrêt avant150 ou NOT RUN), observed=false, TOUS les nombres
+null et framer=not_observed, phase/category=none, message=unclassified. Un rapport
+incomplet peut rester nonobservé après150 ; il ne peut pas être un succès v3.
+
+Les offsets sont positions dans les livraisons RX comptées une seule fois,
+ouverture incluse conformément au budget actuel. Chaque livraison est attribuée
+par son temps de livraison, pas une segmentation physique devinée ; aucune
+frontière de message n'est affirmée. Si bytes>0, first_rx<=last_rx dans la fenêtre.
+Une lecture corrélée post150 impose des livraisons RX concordantes (première
+réception au plus à la première lecture, dernière réception au moins au temps
+minimal de la dernière lecture). Un succès avec zéro RX malgré de telles
+lectures est donc refusé. Un rejet causal de parsing dans la fenêtre doit
+correspondre au premier rejet RX résumé, pas être effacé ou renommé.
+Pas de liste de chunks, de chronologie libre ni d'entrées extensibles : un seul
+agrégat de taille fixe. Sans nouvelle réception, le framer peut conserver son
+état empty/prefix/ambiguous, sans faux rejet ajouté.
+
+Le premier rejet pertinent dans la fenêtre est le seul résumé : temps dans
+[first_rx,last_rx], offset dans [start_offset,end_offset[, taille positive
+bornée par end_offset-offset ; framer=refused, category=protocol et couple
+phase/message autorisé. Sans rejet dans la fenêtre, temps/offset/taille null,
+phase/category=none, message=unclassified. Un rejet causal AVANT150 reste dans
+les champs causaux ; il n'est jamais recopié comme rejet après150. Des livraisons
+ultérieures après150 sont comptées sans réinterpréter le suffixe de quarantaine.
+`eof_ms` du diagnostic est un EOF transport dans la fenêtre, pas un compteur de
+chunk ni des octets ; il exige peer_eofs>0. Si l'EOF d'origine appartient à cette
+fenêtre, il doit y être concordant ; avec un seul EOF, aucun autre temps n'est
+admis. Avant150 il reste seulement dans quarantine. Absence d'EOF instrumenté
+est null, pas une preuve de fermeture serveur.
+
+### Enveloppe et tests sans activation
+
+Clés et enums fermés, nombre fixe de champs, nombres bornés : toutes les
+fixtures admissibles restent sous8192octets. L'export refuse même un JSON valide
+paddé à8193octets ; 8192 reste admis. Base64 canonique <=10924, décodé <=8192,
+projection/revalidation Python puis Node à l'export/publication ; fichier0600,
+dossier0700 exclusifs, publication séparée sans secret et rétention7jours restent
+inchangés. Aucun octet privé ne figure dans le contrat ni dans les fixtures.
+Les fixtures partagées Python/Node couvrent succès structurel, échecs/snapshots,
+rejet causal puis reprise, races de stop, reçu invalide/révoqué, générations,
+120/150/240/360, stabilité119999/120000, absence/null/zéro, provenance, types,
+enums, champs superflus, sentinelles de payload et limites d'export/publication.
+Les tests historiques v1/v2, profils, L1–L5, verrou, gates et supervision restent
+requis. Aucun résultat réel nouveau ; suite7 non validée, étape8 suspendue.
+
 
 ## Activation H historique, suite fonctionnelle non validée
 
