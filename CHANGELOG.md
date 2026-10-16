@@ -2,6 +2,16 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L3 : contrat temporel immuable et vérification pure de
+  déclarations, NON RACCORDÉS. Repères 120/150/240/360 s, récupération totale 120 s
+  (EOF et réouverture avant 240), puis 120 s stables ; fin précoce permise.
+  Politique pure bornée à T0+240 au lieu de 300, refus/latch/courses conservés et
+  tests synthétiques étendus, aucun statut réel de succès produit. Verrou L2
+  installé par #100 et vérifié au run #38859779145, conservé intact. Contrats/
+  budgets actifs, runtime, rapports v1/v2 et protocol.md inchangés ; future
+  instrumentation fermée 150 s et admission versionnée à spécifier avant usage,
+  aucune capture brute autorisée. Aucun live, suite 7 non validée, étape 8 suspendue.
+
 - Issue #81, tranche 7/8-L2 : préalable structurel candidat
   `quarantine-installation` en échec inconditionnel, deux NOT RUN fixes avant
   admission/secrets, et dépendance de dry-run sans changement de ses conditions.
