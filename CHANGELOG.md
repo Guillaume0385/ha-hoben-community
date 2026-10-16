@@ -2,6 +2,16 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-I offline : diagnostic fermé phase/catégorie/message/
+  lecture du scénario reconnexion, cause initiale conservée après nettoyage
+  secondaire. Le framer reste en refus ; seul le discriminant déjà rejeté est
+  nommé sans payload ni preuve de message complet. Suite/second rapport v2,
+  lecteurs Python/Node compatibles v1 strict, sous-rapport 300 s inchangé.
+  PR #96 effectivement fusionnée ; bilan MANAGER du run #38828423500 :
+  continuous_300s puis inconclusive/protocol à 181042 ms sans EOF/reconnexion,
+  suite non validée (deux scénarios exécutés, pas NOT RUN), cause inconnue.
+  Tests synthétiques, aucune relance ni nouvelle autorisation live, étape 8 suspendue.
+
 - Issue #81, tranche 7/8-H : candidat d'activation limité au retrait du job
   `suite-installation` et de son `needs`. Conditions push, gates session-suite,
   contrat, runtime, budgets, publication et statut global conservés ; tests

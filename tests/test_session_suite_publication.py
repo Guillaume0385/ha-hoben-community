@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from tests.test_session_300_probe import PROOF
+from tests.test_session_reconnect_diagnostics import diagnostic_report, legacy
 from tests.test_session_suite import run_harness
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,9 +29,18 @@ def node(script, payload):
     return json.loads(r.stdout)
 
 
-@pytest.mark.parametrize("mode", ["recovered", "first_invalid", "no_disconnect"])
-def test_real_dual_report_export_publication_and_aggregate_result(tmp_path, mode):
-    _, report = asyncio.run(run_harness(mode))
+@pytest.mark.parametrize(
+    "mode", ["recovered", "first_invalid", "no_disconnect", "protocol"]
+)
+@pytest.mark.parametrize("historical", [False, True])
+def test_real_dual_report_export_publication_and_aggregate_result(
+    tmp_path, mode, historical
+):
+    _, report = asyncio.run(
+        diagnostic_report() if mode == "protocol" else run_harness(mode)
+    )
+    if historical:
+        report = legacy(report)
     out = tmp_path / "hoben-session-suite-exports"
     out.mkdir()
     (out / "report.json").write_text(json.dumps(report))
@@ -109,7 +119,7 @@ process.stdout.write(JSON.stringify({checks,publicExists:fs.existsSync(path.join
 
 
 @pytest.mark.parametrize(
-    "mode", ["recovered", "first_invalid", "no_disconnect", "missing"]
+    "mode", ["recovered", "first_invalid", "no_disconnect", "protocol", "missing"]
 )
 def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode):
     workflow = yaml.load(
@@ -117,7 +127,13 @@ def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode):
         Loader=yaml.BaseLoader,
     )
     script = workflow["jobs"]["result"]["steps"][-1]["with"]["script"]
-    report = None if mode == "missing" else asyncio.run(run_harness(mode))[1]
+    report = (
+        None
+        if mode == "missing"
+        else asyncio.run(
+            diagnostic_report() if mode == "protocol" else run_harness(mode)
+        )[1]
+    )
     result = node(
         """
 const [script,r,p]=JSON.parse(require('node:fs').readFileSync(0,'utf8'));

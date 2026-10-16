@@ -132,8 +132,10 @@ distinguent trois niveaux :
   gestionnaire pourra traiter les octets suivant le préfixe strictement accepté
   comme trafic post-ouverture. C'est une **hypothèse expérimentale autorisée**,
   sans nouvelle preuve locale ni généralisation aux autres profils.
-- **Validation fonctionnelle :** la session utile de 300 s reste **NOT RUN**.
-  Une décision de périmètre ne valide ni le futur code ni son résultat, et un
+- **Validation fonctionnelle :** les runs 300 s historique #38766830984 et
+  #38828423500 sont consignés `continuous_300s` par MANAGER ; le second scénario
+  de ce dernier reste `inconclusive/protocol`, donc la suite non validée.
+  Une décision de périmètre ne valide ni le code ni son résultat, et un
   résultat fonctionnel ne démontre pas une longueur totale universelle.
 
 Le futur framer de cette voie devra s'arrêter en cas d'ambiguïté : seuls Ping
@@ -152,22 +154,31 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite session installée — activation candidate 7/8-H
+### Suite activée, diagnostic offline 7/8-I
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
 la PR #95 après revue MANAGER et quatre checks réussis, raccorde ce gate, un
-launcher à plafonds externes et la publication sous verrou. La tranche H prépare
-seulement le retrait de `suite-installation` et du `needs` associé, sans changer
-les conditions push/acteurs/branche/tentative, gates, contrat ou runtime.
-Le [plan courant de suite](docs/session-suite-plan.md) précise la revue du HEAD
-candidat et de sa CI, puis la décision MANAGER unique et immuable requise avant
-fusion. DEV ne publie ni approbation ni claim réel, ne lance aucun run.
+launcher à plafonds externes et la publication sous verrou. H (PR #96) a fusionné
+le retrait isolé de `suite-installation` et du `needs`, après revue/CI et décision
+MANAGER distincte, au SHA `d382540b056adf189bc7969b3d9905ab7dc8cd8f`.
+Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6205715813)
+du run #38828423500 tentative 1 consigne `continuous_300s`, puis
+`inconclusive/protocol` après 181042 ms : trois lectures réussies, deux Pong
+inhibés, aucun EOF/reconnexion. Suite `not_successful`, statut global failure ;
+les deux scénarios ont été exécutés, ce n'est pas NOT RUN. La cause précise
+reste inconnue, sans preuve de CloseClient ni causalité timeout Ping.
+I ajoute uniquement des diagnostics fermés du second scénario, schéma v2
+Python/Node explicite avec compatibilité historique v1 et sous-rapport 300 s
+inchangé ; le [plan](docs/session-suite-plan.md) décrit les critères. Un nom de
+discriminant rejeté ne signifie pas message complet ou frontière prouvée.
+Framing, retry, gates, contrat et budgets restent inchangés. Aucun run nouveau
+autorisé par cette tranche ; DEV ne publie ni approbation ni claim réel.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
-pas des entrées libres issues d'un commentaire. Suite/reconnexion restent NOT RUN
-sans run admis et rapport anonymisé vérifiés : premier scénario admissible et
-second `recovered_120s`, `boundary_proven=false`. La PR ne vaut pas validation ;
+pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion
+exige premier scénario admissible et second `recovered_120s`, avec rapport
+anonymisé vérifié et `boundary_proven=false`. Le run actuel ne les satisfait pas ;
 l'étape 8 reste suspendue.
 Aucun développement du client HA, test hoben-live ou promotion main n'est autorisé
 par cette préparation. La validation historique 300 s ne valide pas la nouvelle

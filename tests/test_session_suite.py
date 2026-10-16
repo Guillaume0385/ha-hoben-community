@@ -174,6 +174,8 @@ def test_real_shared_engine_evidence_and_failure_classification(
     assert r["result"] == ("success" if mode == "recovered" else "not_successful")
     assert {d for d, _ in deadlines.contexts} >= {1020, 350, 590, 10}
     if mode == "recovered":
+        assert second["failure_phase"] == "none"
+        assert second["failure_category"] == "verified"
         assert second["stable_ms"] == 120000
         assert second["recovery_reads_ok"] > 0 and second["recovery_pongs"] > 0
         assert second["pongs_suppressed"] > 0
@@ -182,6 +184,7 @@ def test_real_shared_engine_evidence_and_failure_classification(
         assert second["eof_after_threshold_ms"] == 40000
     if mode == "tls":
         assert second["peer_eofs"] == 0 and second["opens"] == 2
+    assert second["read_slot"] == second["reads"]
     assert second["reads"] <= 10
 
 
@@ -267,6 +270,11 @@ def test_real_deadline_cancels_shared_owner_without_leaking(limit, deadlines):
             r = await operation
             assert r["result"] == "not_successful"
             assert r["session_reconnect_no_pong"]["terminal"] == "timeout"
+            assert (
+                r["session_reconnect_no_pong"]["failure_phase"]
+                == "lifecycle_transition"
+            )
+            assert r["session_reconnect_no_pong"]["failure_category"] == "timeout"
         h.assert_closed()
 
     asyncio.run(scenario())
@@ -295,6 +303,8 @@ def test_close_failure_cannot_leave_a_successful_suite(monkeypatch):
         r = await observe_suite(factory, PROOF, clock=h.clock, sleep=h.sleep)
         assert r["result"] == "not_successful"
         assert r["session_reconnect_no_pong"]["terminal"] == "closed"
+        assert r["session_reconnect_no_pong"]["failure_phase"] == "teardown"
+        assert r["session_reconnect_no_pong"]["failure_category"] == "closed"
         h.assert_closed()
 
     asyncio.run(scenario())
