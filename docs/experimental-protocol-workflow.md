@@ -245,6 +245,27 @@ Son candidat interne provisoire n'autorise aucun retry. La [portée isolée de L
 ne change ni les gates/rapports ni le comportement installé ; intégration et
 activation demeurent séparées, sans nouveau run/décision/claim par DEV.
 
+## Préalable structurel L2 candidat, sans raccordement
+
+L1 est fusionnée par la PR #99 (`c220072d82ec9a34d178a3fa15406ea841ed527a`),
+politique pure toujours non raccordée. L2 prépare dans le workflow de suite le
+job initial `quarantine-installation`, sans permission/checkout/action tierce/
+environnement/secret : deux NOT RUN fixes, raison `quarantine_not_installed`,
+puis échec inconditionnel (timeout du job : une minute). `dry-run` en dépend, avec ses
+conditions et contrôles exacts conservés ; admission/réservation et accès aux
+secrets restent inaccessibles après cet échec. Les deux scénarios sont bloqués
+ensemble et aucune décision/commentaire ne peut lever ce préalable.
+
+**Candidat seulement** : ne déclarer le verrou installé qu'après fusion et
+vérification MANAGER du SHA/run. Le [plan](session-suite-plan.md) précise tests
+locaux et vérification post-fusion. Déclencheur push, nom/mutex/non-annulation,
+autres jobs/conditions/permissions, gates/contrats, budgets, supervision et
+publication/statut restent identiques. Aucun nouveau flag/input/bypass.
+L2 ne modifie aucun runtime ni raccordement L1 ; le futur pont sera une tâche
+distincte après vérification du verrou. Son retrait demandera une activation
+séparée après installation/revue complète. Aucun nouveau résultat live acquis,
+aucune décision/claim/rerun par DEV ; étape 8 suspendue.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`

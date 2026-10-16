@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — fondation pure isolée 7/8-L1
+# Suite « Tests expérimentaux session » — verrou structurel candidat 7/8-L2
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -18,7 +18,10 @@ ne publie aucune décision live pour cette PR documentaire. Le run de push
 #38849433135 a été refusé à l'admission avant secrets (deux scénarios NOT RUN),
 sans nouvelle observation du poêle.
 
-L1 ajoute seulement [EofQuarantinePolicy](../custom_components/hoben/v4_eof_quarantine.py),
+L1 est fusionnée par la PR #99 au SHA
+`c220072d82ec9a34d178a3fa15406ea841ed527a`, après revue MANAGER et quatre checks
+réussis (3058 tests offline, dont 152 cas de politique). Elle ajoute seulement
+[EofQuarantinePolicy](../custom_components/hoben/v4_eof_quarantine.py),
 machine d'état pure sans I/O, horloge réelle, tâche, transport ou credentials.
 Seuls les tests l'instancient. Aucun import/appel depuis session, lifecycle,
 framer, collecteur, launcher, gate, workflow ou HA : réception et refus installés
@@ -31,6 +34,41 @@ références actives. Ils ne réalisent pas la matrice d'intégration K et ne pr
 aucune action réelle. Une intégration/exception de portée, les évolutions de
 rapport/admission puis l'activation nécessitent des tâches MANAGER séparées,
 avec verrou structurel avant usage. Suite non validée, étape 8 suspendue.
+
+## Verrou L2 candidat — à confirmer installé après fusion seulement
+
+Cette PR prépare un préalable `quarantine-installation` dans le workflow de
+suite existant ; son existence en branche de travail ne signifie pas que le
+verrou est installé sur `experimental`. Après fusion et vérification MANAGER,
+ce job initial échouera inconditionnellement : runner sans checkout/action,
+environnement, secret ou permission (`permissions: {}`), timeout d'une minute,
+script local écrivant exactement les deux lignes ci-dessous, puis `exit 1` :
+
+```text
+session-300: NOT RUN (quarantine_not_installed)
+session-reconnect-no-pong: NOT RUN (quarantine_not_installed)
+```
+
+`dry-run` dépend de ce préalable, avec ses conditions exactes inchangées. Son
+échec empêche préflight, admission/réservation, recheck et capture ; les conditions
+de publication/statut ne peuvent produire une approbation absente. Aucun
+commentaire/décision ancien ou nouveau ne peut contourner ce préalable. Nom,
+push `experimental`, mutex non annulable, gates, permissions et budgets restent
+inchangés. Les deux scénarios sont suspendus ensemble, sans voie autonome.
+
+Le test local exécute ce script sans identité/réseau et vérifie code 1 et deux
+NOT RUN exacts ; les tests structurels couvrent l'absence de condition/action/
+environnement/secret/contournement et le graphe jusqu'au secret. Les régressions
+de gate, provenance, publication, supervision et absence de raccordement L1
+restent conservées. Ce test n'est ni un push réel ni une preuve d'installation.
+MANAGER devra vérifier après fusion le SHA et le run arrêté avant toute collecte.
+
+L2 ne raccorde pas la fondation et n'adopte pas l'exception de réception K.
+Un futur pont RX/TX/lifecycle/rapport exige une nouvelle tâche MANAGER après
+installation vérifiée du verrou. Son retrait sera une activation distincte,
+après installation/revue complète de la quarantaine éventuelle et de ses
+contrats ; aucune activation automatique, décision live/claim/rerun par DEV.
+Anciens runs/claims consommés inchangés, suite non validée, étape 8 suspendue.
 
 ## Activation fusionnée, suite fonctionnelle non validée
 

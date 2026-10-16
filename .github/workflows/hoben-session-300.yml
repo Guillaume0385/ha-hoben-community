@@ -14,7 +14,24 @@ concurrency:
   queue: max
 
 jobs:
+  quarantine-installation:
+    # No decision can override this structural stop before integration review.
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - name: Refuse both scenarios until quarantine integration is installed
+        shell: bash
+        run: |
+          printf '%s\n' \
+            'session-300: NOT RUN (quarantine_not_installed)' \
+            'session-reconnect-no-pong: NOT RUN (quarantine_not_installed)' \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo '::error::NOT RUN: EOF quarantine integration is not installed.'
+          exit 1
+
   dry-run:
+    needs: quarantine-installation
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
       github.actor == 'Guillaume0385' &&
