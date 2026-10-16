@@ -2,6 +2,16 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #81, tranche 7/8-L6bis : correction contractuelle candidate du rapport
+  v3 pour un reçu propriétaire historique suivi d'un arrêt public dans la même
+  milliseconde, avant ou après acceptation attestée. Histoire interrupted
+  uniquement, jamais reprise/succès ; ordre entrée/EOF et consommation/acceptation
+  stricts conservés. Fixtures Python/Node communes et reproduction sur les vrais
+  propriétaires avec TLS/horloge simulés, sans hook runtime. L6 fusionnée par
+  #104 ; L7 suspendue jusqu'à fusion L6bis et réautorisation distincte. Versions
+  historiques, producteurs v2, capacités défaut-off, gates/verrou/budgets intacts.
+  Aucun test réel, donnée privée, commande, claim, décision live ou fusion DEV.
+
 - Issue #81, tranche 7/8-L6 : contrat suite/second v3 candidat, projection et
   validation Python/Node sur table et fixtures synthétiques communes. Preuve EOF
   consommée, historique d'arrêt, nouvelle génération et stabilité 120 s séparés

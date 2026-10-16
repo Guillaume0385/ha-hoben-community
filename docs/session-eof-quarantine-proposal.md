@@ -16,14 +16,16 @@ L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac` :
 Validate #38875547530, quatre checks, 3350 tests offline et 308 HA réussis.
 Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
 confirme le run post-fusion #38889510562 arrêté au verrou L2, sans collecte.
-L6 ne fournit que le [contrat public v3](session-suite-plan.md#contrat-public-v3--78-l6-candidat-sans-producteur).
+L6 ne fournit que le [contrat public v3](session-suite-plan.md#contrat-public-v3--78-l6-livré-sans-producteur).
 Python et Node valident la même projection fermée ; aucun producteur installé
 n'émet v3 et aucune observation à 150 s n'est encore branchée. La preuve reçue
 à la consommation et l'historique d'arrêt devront être fournis par l'origine
 lors d'une future tranche, jamais reconstruits depuis un snapshot final révoqué.
 Le raccordement collecteur/instrumentation, l'admission versionnée puis
 l'activation/retrait du verrou restent des tâches MANAGER séparées. L6 est
-candidat jusqu'à revue/fusion, puis contrat livré sans producteur v3. Aucune
+fusionnée par #104, contrat livré sans producteur v3. La correction L6bis du
+contrat est candidate jusqu'à revue/fusion ; L7 reste suspendue et devra être
+réautorisée séparément. Aucune
 validation réelle, aucun brut, claim, décision live ou rerun acquis ici.
 
 ## Fondation L1 isolée, API et limites

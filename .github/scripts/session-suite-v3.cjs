@@ -89,7 +89,8 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
   if (!nil(q.stop_ms)) {
     need(!nil(entered) && entered <= q.stop_ms && q.stop_ms <= end);
     if (["local_after_consumption","cancel_after_consumption"].includes(q.stop)) {
-      need(!nil(consumed) && consumed < q.stop_ms);
+      // Historical execution order comes from the owner receipt, not equality.
+      need(!nil(consumed) && consumed <= q.stop_ms);
     } else need(nil(consumed));
   }
   if (!nil(q.cleanup_ms)) need(!nil(consumed) && consumed <= q.cleanup_ms && q.cleanup_ms <= end);
@@ -100,9 +101,14 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
     need(q.accepted_generation >= 2 && q.accepted_generation <= r.opens);
     need(q.accepted_generation === r.opens);
     need(accepted+120000 <= Math.min(360000,...deadlines));
-    need(!nil(q.cleanup_ms) && q.cleanup_ms <= accepted && (nil(q.stop_ms) || accepted < q.stop_ms));
+    need(!nil(q.cleanup_ms) && q.cleanup_ms <= accepted && (nil(q.stop_ms) || accepted <= q.stop_ms));
     need(s.start_ms === accepted && s.generation === q.accepted_generation);
   } else need(Object.keys(s).filter(k => k !== "interrupted").every(k => nil(s[k])) && s.interrupted === false);
+  if (q.stop !== "none") {
+    need(r.result === "interrupted");
+    if (nil(accepted)) need(r.terminal === "closed");
+    else need(r.terminal === "stability_lost" && s.interrupted && !nil(s.end_ms));
+  }
   if (!nil(s.start_ms)) {
     need(!nil(accepted) && accepted <= end);
     if (!nil(s.end_ms)) need(accepted <= s.end_ms && s.end_ms <= end);

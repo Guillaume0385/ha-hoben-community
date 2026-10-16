@@ -170,7 +170,7 @@ et budgets 360/600/1020, 350+10/590+10, 3 ouvertures/1 Mio, 6/10 lectures >= 60 
 Aucun diagnostic 150 s branché, brut, live/décision/claim/rerun. Deux NOT RUN avant
 secrets conservés ; suite 7 non validée et étape 8 suspendue.
 
-## Contrat public v3 — 7/8-L6 candidat sans producteur
+## Contrat public v3 — 7/8-L6 livré sans producteur
 
 L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`.
 [Revue/bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821) :
@@ -186,8 +186,11 @@ leurs fixtures et toutes leurs règles sont conservés, y compris leur ancien
 Ce champ n'existe PAS en v3 ; aucun mélange, ajout implicite ni rétrocomplément.
 Les producteurs `second_empty`, `_observe_reconnect` et `observe_suite` continuent
 d'émettre v2. Aucun collecteur, runtime, constructeur, gate, admission, YAML ou
-superviseur modifié. Contrat candidat jusqu'à revue/fusion, puis livré **sans
-producteur v3**. Instrumentation 150 s/collecteur, admission versionnée puis
+superviseur modifié. L6 est fusionnée par #104 au SHA
+`6cc17b9d380835fdb77cb9b671707eb469c79b4d`, contrat livré **sans producteur v3**.
+La correction L6bis ci-dessous est candidate jusqu'à revue/fusion, puis livrée.
+L7 reste suspendue jusqu'à cette fusion et à une réautorisation MANAGER distincte.
+Instrumentation 150 s/collecteur, admission versionnée puis
 activation/retrait du verrou exigent de nouvelles tâches MANAGER distinctes.
 
 ### Clés héritées et nouvelles clés exactes
@@ -325,16 +328,54 @@ la borne, expired exige fin à/après la borne ; invalid implique refused.
 revoked équivaut au reçu revoked_before_consumption et exige un stop local/cancel
 avant consommation. Ces issues n'ont jamais de consumed_ms. Le premier stop
 public est séparé du cleanup possédé : aucun stop -> stop_ms null ; stop avant
-consommation -> aucun reçu valide ; stop après consommation -> temps strictement
-supérieur à consumed_ms (égalité ambiguë refusée). cleanup_ms, s'il existe, est
+consommation -> aucun reçu valide ; stop après consommation -> temps supérieur
+ou égal à consumed_ms, uniquement pour l'histoire interrompue décrite ci-dessous.
+cleanup_ms, s'il existe, est
 entre consommation et fin. Un cleanup intentionnel ne révoque pas rétroactivement
 le reçu, un arrêt public ne peut pas être caché derrière ce cleanup.
 
 Nouvelle acceptation uniquement avec reçu consommé et cleanup terminé,
 consommation < acceptation < min(240000,échéances). Génération 2..opens,
 acceptation+120000 <= min(360000,échéances), aucune prolongation. Le premier arrêt
-public post-consommation doit être strictement après acceptation, sinon celle-ci
-est refusée. L'ancien seuil EOF180s de v1/v2 n'intervient jamais ici.
+public post-consommation doit avoir un temps supérieur ou égal à l'acceptation
+déjà attestée, uniquement pour cette histoire interrompue. Aucune acceptation
+après un arrêt réel n'est autorisée. L'ancien seuil EOF180s de v1/v2 n'intervient
+jamais ici.
+
+### Correction L6bis candidate — reçu historique et arrêt quantifié
+
+La [décision MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+résout le [blocage L7](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6216427042)
+sans nouvelle clé, enum ni version. Pour local_after_consumption et
+cancel_after_consumption, le propriétaire doit attester un reçu valid_at_consumption
+effectivement acquis avant son premier stop public ; outcome=consumed conserve
+ce fait historique. consumed_ms <= stop_ms est alors admis, même si les deux
+événements se quantifient à la même milliseconde. Une égalité de nombres seule
+ne prouve jamais leur ordre d'exécution. Avant consommation, consumed_ms reste
+null ; aucun reçu ne peut être inventé ou obtenu depuis le snapshot final révoqué.
+
+Tout stop public pendant l'observation impose le résultat global du second
+scénario interrupted. Sans acceptation, terminal=closed, stabilité non commencée
+(dates/génération nulles, interrupted=false dans ce seul sous-objet). Après une
+acceptation réellement attestée, terminal=stability_lost, stabilité interrompue
+avec fin présente au plus au premier stop et durée exactement dérivée de cette
+fenêtre. accepted_ms <= stop_ms peut alors représenter l'égalité quantifiée ;
+accepted_ms > stop_ms reste interdit. Le reçu historique ne restitue aucune
+capacité courante ni droit de reprise/réussite après stop. Même au temps de fin
+fonctionnelle, aucun stop public ne peut accompagner recovered_120s/verified,
+suite success, completed ou un statut final réussi.
+
+entrée < EOF <= consommation, consommation < acceptation et les deadlines
+strictes restent inchangées. Aucun déplacement de timestamp, attente +1 ms,
+effacement d'arrêt, modification de politique ou généralisation d'admissibilité.
+Les validateurs restent structurels ; le futur producteur doit obtenir la
+preuve d'ordre auprès du propriétaire, ils ne l'authentifient pas. Les tests
+relèvent les scalaires après le vrai retour de consommation, avant révocation,
+puis ferment les vrais propriétaires sous TLS/horloge simulés, avec égalité et
+contrôle séparé +1 ms, avant/après acceptation. Aucun hook runtime ajouté.
+L6bis ne fournit pas L7 : producteur, instrumentation et raccordement restent
+suspendus jusqu'à nouvelle autorisation. Verrou, v1/v2, producteurs v2 et budgets
+inchangés ; aucune validation réelle ni nouvelle preuve de protocole.
 
 ### Stabilité et décision de suite
 
