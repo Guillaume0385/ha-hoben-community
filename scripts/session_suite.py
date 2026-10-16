@@ -2,7 +2,7 @@
 
 An admitted caller provides the shared V4Lifecycle/V4Session factory.
 Only this sequential entry point schedules the second collector. The installed
-suite-installation barrier is deliberately unchanged; these APIs grant no access.
+admission gates remain mandatory; these APIs grant no access.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ from custom_components.hoben.exceptions import (
     HobenTransportError,
 )
 from custom_components.hoben.v4_experiment import (
+    RECONNECT_DIAGNOSTIC_MESSAGES,
     Session300,
     Session300BudgetError,
     SessionReconnect,
@@ -71,6 +72,12 @@ SECOND_KEYS = (
         "eof_after_threshold_ms",
     }
 )
+SECOND_DIAGNOSTIC_KEYS = {
+    "read_slot",
+    "failure_phase",
+    "failure_category",
+    "message_category",
+}
 SUITE_KEYS = PROVENANCE | {
     "schema",
     "scenario",
@@ -92,19 +99,24 @@ def second_empty(proof):
     return {
         **proof,
         **dict.fromkeys(COUNTERS, 0),
-        "schema": 1,
+        "schema": 2,
         "scenario": "session-reconnect-no-pong",
         "boundary_proven": False,
         "result": "not_run",
         "terminal": "first_not_admissible",
         "eof_after_threshold_ms": None,
+        "read_slot": 0,
+        "failure_phase": "none",
+        "failure_category": "first_not_admissible",
+        "message_category": "unclassified",
     }
 
 
 def validate_second(r, proof):
     """Closed scalar projection, independent from the engine's mutable state."""
-    need(type(r) is dict and set(r) == SECOND_KEYS)
-    need(type(r["schema"]) is int and r["schema"] == 1)
+    need(type(r) is dict and type(r.get("schema")) is int and r["schema"] in {1, 2})
+    keys = SECOND_KEYS | (SECOND_DIAGNOSTIC_KEYS if r["schema"] == 2 else set())
+    need(set(r) == keys)
     need(r["scenario"] == "session-reconnect-no-pong")
     need(r["boundary_proven"] is False)
     for k in PROVENANCE:
@@ -141,19 +153,46 @@ def validate_second(r, proof):
         need(r["pongs_suppressed"] == 0 and eof is None)
     if r["terminal"] == "no_disconnect":
         need(r["pongs_suppressed"] > 0 and (eof is None or eof > 180000))
-    return {k: r[k] for k in sorted(SECOND_KEYS)}
+    if r["schema"] == 2:
+        phase, category, message = (
+            r["failure_phase"],
+            r["failure_category"],
+            r["message_category"],
+        )
+        need(type(phase) is str and phase in RECONNECT_DIAGNOSTIC_MESSAGES)
+        need(type(category) is str and category in TERMINALS)
+        need(type(message) is str and message in RECONNECT_DIAGNOSTIC_MESSAGES[phase])
+        need(type(r["read_slot"]) is int and r["read_slot"] == r["reads"])
+        need((phase == "none") == (category in {"verified", "first_not_admissible"}))
+        if phase == "none" or r["terminal"] in {"verified", "first_not_admissible"}:
+            need(category == r["terminal"])
+        if phase in {
+            "frame_boundary",
+            "message_classification",
+            "request_correlation",
+            "response_validation",
+        }:
+            need(category == "protocol")
+        if phase == "tls_read":
+            need(category in {"transport", "budget"})
+        if phase == "pong_tx":
+            need(category in {"transport", "protocol"})
+        if phase == "teardown":
+            need(category == r["terminal"] == "closed")
+    return {k: r[k] for k in sorted(keys)}
 
 
 def validate_suite(r, proof):
     """Validate both scenarios and derive a global result that cannot hide a KO."""
     need(type(r) is dict and set(r) == SUITE_KEYS)
-    need(type(r["schema"]) is int and r["schema"] == 1)
+    need(type(r["schema"]) is int and r["schema"] in {1, 2})
     need(r["scenario"] == "session-suite" and r["boundary_proven"] is False)
     for k in PROVENANCE:
         need(type(r[k]) is type(proof[k]) and r[k] == proof[k])
     need(type(r["duration_ms"]) is int and 0 <= r["duration_ms"] <= 1020000)
     first = validate_300(r["session_300"], proof)
     second = validate_second(r["session_reconnect_no_pong"], proof)
+    need(second["schema"] == r["schema"])
     admissible = first["result"] in {"continuous_300s", "reconnected"}
     need(admissible or second["result"] == "not_run")
     need(
@@ -184,10 +223,12 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
     terminal, result = "internal", "interrupted"
     reads_ok = recovery_reads = stable_ms = recovery_generation = 0
     recovery_pongs = 0
+    phase = "opening"
     try:
         # Leave ten seconds of the fixed 600 s cap for shared-owner teardown.
         async with asyncio.timeout(590):
             await life.connect()
+            phase = "lifecycle_transition"
             stop = asyncio.create_task(life.wait_stopped())
             while True:
                 now = clock()
@@ -236,6 +277,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                     read = asyncio.create_task(
                         life.request_v4_data(timeout=min(30, deadline - now))
                     )
+                    phase = "scheduled_read"
                     try:
                         await asyncio.wait(
                             {read, stop}, return_when=asyncio.FIRST_COMPLETED
@@ -256,6 +298,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                         if not read.done():
                             read.cancel()
                         await asyncio.gather(read, return_exceptions=True)
+                    phase = "lifecycle_transition"
                 # Poll observation state, never poll the transport. Cap each wait
                 # at the already fixed process deadline, including recovery.
                 await sleep(min(1, max(0, 590 - (clock() - started))))
@@ -281,6 +324,13 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
     except Exception:
         result, terminal = "interrupted", "internal"
     finally:
+        # Snapshot the causal diagnostic before teardown. A secondary close
+        # failure still changes the existing terminal, but cannot erase it.
+        diagnostic = (
+            ("none", terminal, "unclassified")
+            if terminal == "verified"
+            else budget.failure or (phase, terminal, "unclassified")
+        )
         if stop is not None:
             stop.cancel()
             await asyncio.gather(stop, return_exceptions=True)
@@ -289,6 +339,8 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                 await life.close()
         except Exception:
             result, terminal = "interrupted", "closed"
+            if diagnostic[0] == "none":
+                diagnostic = ("teardown", "closed", "unclassified")
     eof_at, first_at = policy.first_eof_after_suppression_at, policy.first_opened_at
     return validate_second(
         {
@@ -316,6 +368,10 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
             "recovery_generation": recovery_generation,
             "recovery_reads_ok": recovery_reads,
             "recovery_pongs": recovery_pongs,
+            "read_slot": budget.requests,
+            "failure_phase": diagnostic[0],
+            "failure_category": diagnostic[1],
+            "message_category": diagnostic[2],
         },
         proof,
     )
@@ -328,7 +384,7 @@ async def observe_suite(
 
     The factory takes (fixed_budget, optional_pong_policy); it must instantiate
     the existing shared lifecycle/session, with its bounded retry policy. This
-    runner entry point remains behind the suite-installation barrier.
+    runner entry point remains subject to the installed admission gates.
     Cancellation propagates after each collector has cleaned up its owner.
     A hard deadline refuses a report rather than inventing a completed scenario.
     """
@@ -353,7 +409,7 @@ async def observe_suite(
         return validate_suite(
             {
                 **proof,
-                "schema": 1,
+                "schema": 2,
                 "scenario": "session-suite",
                 "boundary_proven": False,
                 "session_300": first,

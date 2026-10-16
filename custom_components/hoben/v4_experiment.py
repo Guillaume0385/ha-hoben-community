@@ -25,6 +25,17 @@ DIAGNOSTIC_MESSAGES = {
     "response_validation": {"data_response"},
     "pong_tx": {"ping"},
 }
+RECONNECT_DIAGNOSTIC_MESSAGES = DIAGNOSTIC_MESSAGES | {
+    "message_classification": {
+        "close_client",
+        "data_updated",
+        "other_known",
+        "unknown",
+        "unclassified",
+    }
+}
+# Only the discriminator names listed in protocol.md §3, never message lengths.
+KNOWN_TYPE_DISCRIMINANTS = frozenset((*range(25), *range(26, 49), *range(80, 89), 96))
 
 
 class Session300BudgetError(HobenProtocolError):
@@ -37,6 +48,11 @@ class Session300:
     """One shared lifetime budget, explicitly named for the fixed experiment."""
 
     MAX_READS = 6
+    diagnostic_messages = DIAGNOSTIC_MESSAGES
+
+    def rejected_type_category(self, discriminator):
+        """Keep the historical session-300 diagnostic contract unchanged."""
+        return "unknown"
 
     def __init__(self, *, clock=time.monotonic):
         self.clock = clock
@@ -63,9 +79,9 @@ class Session300:
         a proven wire boundary. Only existing parser decisions call this hook.
         """
         if (
-            phase not in DIAGNOSTIC_MESSAGES
+            phase not in self.diagnostic_messages
             or category not in {"protocol", "transport", "budget"}
-            or message not in DIAGNOSTIC_MESSAGES[phase]
+            or message not in self.diagnostic_messages[phase]
         ):
             raise ValueError("invalid_session_300_diagnostic")
         if self.failure is None:
@@ -113,6 +129,15 @@ class SessionReconnect(Session300):
     """
 
     MAX_READS = 10
+    diagnostic_messages = RECONNECT_DIAGNOSTIC_MESSAGES
+
+    def rejected_type_category(self, discriminator):
+        """Name the rejected head byte only; no payload or boundary inference."""
+        if discriminator == 5:
+            return "close_client"
+        if discriminator == 27:
+            return "data_updated"
+        return "other_known" if discriminator in KNOWN_TYPE_DISCRIMINANTS else "unknown"
 
     def __init__(self, *, clock=time.monotonic):
         super().__init__(clock=clock)
@@ -182,7 +207,12 @@ class ExperimentalV4Framer:
                 self._buffer.clear()
             elif self._buffer[0] != 14:
                 # Includes DataUpdated: no new interpretation or resync.
-                self._fail("message_classification", "unknown")
+                message = (
+                    "unknown"
+                    if self._diagnostic is None
+                    else self._diagnostic.rejected_type_category(self._buffer[0])
+                )
+                self._fail("message_classification", message)
             elif len(self._buffer) >= 7:
                 try:
                     size = 1 + modbus_tcp_frame_size(bytes(self._buffer[1:7]))

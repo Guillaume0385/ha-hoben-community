@@ -12,6 +12,16 @@ const limits = {duration_ms:600000,opens:3,reconnections:2,pings:1048576,pongs:1
   stable_ms:120000,recovery_generation:3,recovery_reads_ok:10,recovery_pongs:1048576};
 const secondKeys = [...provenance,...Object.keys(limits),"schema","scenario",
   "boundary_proven","result","terminal","eof_after_threshold_ms"];
+const diagnosticKeys = ["read_slot","failure_phase","failure_category","message_category"];
+const messages = new Map([
+  ["none",["unclassified"]], ["opening",["unclassified"]],
+  ["scheduled_read",["unclassified"]], ["lifecycle_transition",["unclassified"]],
+  ["teardown",["unclassified"]], ["tls_read",["unclassified"]],
+  ["frame_boundary",["unclassified","ambiguous"]],
+  ["message_classification",["close_client","data_updated","other_known","unknown","unclassified"]],
+  ["request_correlation",["data_response"]], ["response_validation",["data_response"]],
+  ["pong_tx",["ping"]],
+]);
 const suiteKeys = [...provenance,"schema","scenario","boundary_proven","result",
   "duration_ms","session_300","session_reconnect_no_pong"];
 const terminals = new Set(["verified","not_exercised","no_disconnect","reopen_failed",
@@ -22,8 +32,10 @@ function keys(r, expected) {
     Object.keys(r).sort().join() === [...expected].sort().join());
 }
 function validateSecond(r,p) {
-  keys(r,secondKeys);
-  need(r.schema === 1 && r.scenario === "session-reconnect-no-pong" && r.boundary_proven === false);
+  need(r && [1,2].includes(r.schema));
+  const expected = r.schema === 2 ? [...secondKeys,...diagnosticKeys] : secondKeys;
+  keys(r,expected);
+  need(r.scenario === "session-reconnect-no-pong" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
   for (const [k,max] of Object.entries(limits))
     need(Number.isSafeInteger(r[k]) && r[k] >= 0 && r[k] <= max);
@@ -47,15 +59,29 @@ function validateSecond(r,p) {
     r.duration_ms >= 240000 && r.recovery_reads_ok > 0 && r.recovery_pongs > 0);
   if (r.terminal === "not_exercised") need(r.pongs_suppressed === 0 && eof === null);
   if (r.terminal === "no_disconnect") need(r.pongs_suppressed > 0 && (eof === null || eof > 180000));
-  return Object.fromEntries([...secondKeys].sort().map(k => [k,r[k]]));
+  if (r.schema === 2) {
+    need(messages.has(r.failure_phase) && terminals.has(r.failure_category) &&
+      messages.get(r.failure_phase).includes(r.message_category) &&
+      Number.isSafeInteger(r.read_slot) && r.read_slot === r.reads);
+    need((r.failure_phase === "none") === ["verified","first_not_admissible"].includes(r.failure_category));
+    if (r.failure_phase === "none" || ["verified","first_not_admissible"].includes(r.terminal))
+      need(r.failure_category === r.terminal);
+    if (["frame_boundary","message_classification","request_correlation","response_validation"].includes(r.failure_phase))
+      need(r.failure_category === "protocol");
+    if (r.failure_phase === "tls_read") need(["transport","budget"].includes(r.failure_category));
+    if (r.failure_phase === "pong_tx") need(["transport","protocol"].includes(r.failure_category));
+    if (r.failure_phase === "teardown") need(r.failure_category === "closed" && r.terminal === "closed");
+  }
+  return Object.fromEntries([...expected].sort().map(k => [k,r[k]]));
 }
 function validate(r,p) {
   keys(r,suiteKeys);
-  need(r.schema === 1 && r.scenario === "session-suite" && r.boundary_proven === false);
+  need([1,2].includes(r.schema) && r.scenario === "session-suite" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
   need(Number.isSafeInteger(r.duration_ms) && r.duration_ms >= 0 && r.duration_ms <= 1020000);
   const first = firstApi.validate(r.session_300,p);
   const second = validateSecond(r.session_reconnect_no_pong,p);
+  need(second.schema === r.schema);
   const admissible = ["continuous_300s","reconnected"].includes(first.result);
   need(admissible || second.result === "not_run");
   need(r.result === (admissible && second.result === "recovered_120s" ? "success" : "not_successful"));

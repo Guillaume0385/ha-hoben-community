@@ -70,11 +70,12 @@ ligne, sans identifiant Hoben ni accès au poêle.
 
 La [tranche structurelle 7/8-E](session-suite-plan.md) a suspendu cette voie avec
 un job en échec pendant l'installation de la suite complète à deux scénarios.
-G1/G2 sont fusionnées ; H prépare le seul retrait de ce préalable, après revue
-MANAGER du raccordement. Tous les gates ci-dessous restent conservés ; aucune
+G1/G2 sont fusionnées ; H (PR #96) a fusionné le seul retrait de ce préalable,
+après revue/CI et décision MANAGER distincte. Les gates sont conservés ; aucune
 ancienne autorisation session-300 n'admet la suite. Une PR candidate ne lance
-aucun test réel : suite/reconnexion restent NOT RUN. La validation historique
-300 s acquise ne vaut pas validation du nouveau scénario ni autorisation de 8.
+aucun test réel. Le run #38828423500 a ensuite exécuté les deux scénarios :
+300 s continu, puis reconnexion inconclusive/protocol ; suite non validée et
+étape 8 suspendue. Voir le [bilan sourcé](session-suite-plan.md).
 
 La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
 et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
@@ -84,8 +85,9 @@ avec le gestionnaire partagé. Après l'alignement documentaire 7/8-A, la tranch
 son [gate](../.github/scripts/session-300-gate.cjs), la
 [sonde](../scripts/run_session_300.py) et le
 [validateur d'export](../.github/scripts/session-300-report.cjs).
-Le code seul n'autorise aucun accès réel. Routage réel et validation 300 s :
-**NOT RUN** jusqu'à un run admis et un rapport effectivement vérifiés.
+Le code seul n'autorise aucun accès réel. MANAGER a consigné `continuous_300s`
+pour les runs #38766830984 et #38828423500 ; aucun des deux ne valide à lui seul
+une reconnexion réelle ni une frontière universelle.
 
 Pour ce seul scénario opt-in, borné, sur `experimental` et l'Osmose V4 de
 référence, les octets suivant le préfixe V4 de 48 octets strictement accepté
@@ -134,12 +136,12 @@ l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée co
 une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
 étape 7 réellement concluante ; aucune promotion automatique vers `main`.
 
-## Suite installée, activation candidate 7/8-H
+## Suite activée 7/8-H, diagnostics offline 7/8-I
 
 Le [sous-ensemble 7/8-G1](session-suite-plan.md#contrat-dadmission-spécifique--sous-ensemble-78-g1)
 installe `session-suite-gate.cjs` et son contrat fixe. G2 (PR #95) a branché ce gate
 dans le workflow push existant et ajouté le launcher/collecteur de suite sous
-verrou. H retire seulement `suite-installation` et son `needs` dans `dry-run` ;
+verrou. H a retiré seulement `suite-installation` et son `needs` dans `dry-run` ;
 conditions exactes push/branche/acteurs/tentative, permissions, gates, runtime,
 contrat et budgets restent identiques. Aucune ancienne décision ne peut activer
 un run partiel. Le préflight sans secret mène à l'admission, puis à
@@ -182,14 +184,28 @@ ou refusé reste en échec. Les refus pré-secrets annoncent les deux NOT RUN,
 sans fabriquer de rapport de collecte. Les scripts du workflow et cette
 chaîne d'export/publication sont testés hors ligne.
 
-Ce candidat d'activation doit être revu par MANAGER sur son SHA exact et ses
-quatre checks CI. MANAGER publie ensuite la décision unique immuable conforme au
-contrat installé avant la fusion au HEAD attendu. DEV ne publie aucune décision,
-ne réserve aucun claim réel et ne lance aucun run. Le push après fusion reste
+PR #96 est fusionnée au SHA `d382540b056adf189bc7969b3d9905ab7dc8cd8f`, après
+revue du HEAD/CI et décision MANAGER immuable avant merge. Le
+[bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6205715813)
+du run #38828423500 tentative 1 constate collecte/publication réussies, puis
+statut global en échec : `continuous_300s` et `inconclusive/protocol` après
+181042 ms sans EOF ni reconnexion. Les deux scénarios ont tourné ; ce n'est pas
+NOT RUN, et la cause précise reste inconnue. Le rapport v1 ne reçoit aucun
+diagnostic rétrospectif. DEV ne publie aucune décision, ne réserve aucun claim
+réel et ne lance aucun run. Le push après fusion reste
 soumis aux contrôles installés, dont recheck, politique et approbation fraîche
 si requise. La PR ouverte ou fusionnée ne prouve aucun résultat réel.
-Suite/reconnexion : NOT RUN tant qu'aucun run admis et rapport anonymisé ne sont
-vérifiés. Il faut le premier scénario admissible et `recovered_120s` ; absence
+La tranche I exporte les seuls phase/catégorie/message/read_slot fermés du second
+scénario : suite et second sous-rapport v2, premier sous-rapport v1 inchangé.
+Les lecteurs Python/Node acceptent aussi l'ancien couple suite/second v1, sans
+ajouter ni accepter silencieusement ces champs. Les catégories CloseClient/
+DataUpdated/autre connu/inconnu désignent le seul octet de tête déjà refusé,
+jamais un message complet ni un sous-code ; refus et retries restent identiques.
+Limites d'export/publication inchangées. Les tests à trois lectures puis refus
+vers 181 s sont synthétiques ; ils n'identifient pas la cause du run réel.
+Aucune nouvelle validation réelle n'est autorisée par la tâche I ; ancien run et
+claim restent consommés, sans rerun. Il faut le premier scénario admissible et
+`recovered_120s` ; absence
 d'EOF, scénario non exercé, résultat inconclusif ou échec bloquent l'étape 8.
 EOF après inhibition n'établit pas sa cause ; `boundary_proven=false` demeure.
 Aucune preuve de frontière OpenedClient ne découle des tests simulés du gate.

@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — activation candidate 7/8-H
+# Suite « Tests expérimentaux session » — diagnostic offline 7/8-I
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -9,7 +9,7 @@ SHA `4ea1c802155b95014d50c6a4aab8250621959466`, résultat vérifié par MANAGER
 `continuous_300s`, sans reconnexion. Elle ne valide pas le nouveau scénario ni
 la suite, et ne prouve aucune frontière universelle OpenedClient.
 
-## Installation revue, activation candidate sans résultat réel
+## Activation fusionnée, suite fonctionnelle non validée
 
 La fondation 7/8-E livre
 la politique opt-in `NoPongAfter120`, son raccordement au vrai `V4Session`, et
@@ -19,17 +19,33 @@ instancie cette politique uniquement pour le second scénario. Le scénario
 
 G2 (PR #95) a raccordé la suite complète derrière le job en échec inconditionnel
 `suite-installation`. MANAGER a revu son HEAD et ses quatre checks réussis avant
-fusion. La petite tranche H prépare uniquement le retrait de ce job et de son
-`needs` dans `dry-run` ; aucun gate, budget, collecteur ou runtime n'est modifié.
-Le candidat doit encore être revu sur son SHA exact et sa CI avant toute fusion
-par MANAGER. Une PR ouverte ne lance rien : la nouvelle suite et la reconnexion
-réelle restent **NOT RUN**, aucun nouveau rapport n'est acquis.
+fusion. H (PR #96) a retiré seulement ce job et son `needs` dans `dry-run`, sans
+modifier gates, budgets ou runtime. MANAGER l'a fusionnée le 16/10/2026 à
+00:15:13 UTC, après revue, quatre checks CI et décision immuable distincte :
+merge `d382540b056adf189bc7969b3d9905ab7dc8cd8f`.
 
-Après une éventuelle fusion autorisée, le push `experimental` commence par le
+Le push `experimental` commence par le
 préflight sans secret, puis admission, environnement et recheck avant l'unique
 étape utilisant l'identité. Sans décision de suite valide, aucun scénario ne
 démarre ; une ancienne autorisation session-300 ne suffit jamais. Aucun Setting,
 secret, claim réel, gate historique ou H1/H2 n'est modifié par DEV.
+
+Le [bilan MANAGER sourcé](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6205715813)
+consigne le [run #38828423500](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/38828423500),
+tentative 1 sur ce merge, et l'artefact anonymisé #12016098316 lu par MANAGER :
+
+| Observation du run | Résultat consigné |
+| --- | --- |
+| Premier scénario | `continuous_300s`, 300000 ms, une ouverture, aucune reconnexion, cinq lectures corrélées réussies et cinq Ping/Pong. |
+| Second scénario | `inconclusive/protocol`, 181042 ms, une ouverture, trois lectures réussies, cinq Ping, trois Pong et deux Pong inhibés. |
+| Reprise | Aucun EOF observé, aucune reconnexion ni stabilité de récupération. |
+| Suite | `not_successful`, 481714 ms ; collecte/publication réussies et statut global en échec. |
+
+Les deux scénarios ont été exécutés : ce résultat n'est **pas NOT RUN**. Le
+nouveau 300 s est concluant comme l'historique, mais la suite/reconnexion ne sont
+pas validées. La cause précise du refus protocolaire reste inconnue ; aucun
+CloseClient reçu, EOF serveur ou timeout Ping causal n'est établi. Le rapport
+v1 ne sera pas rétrocomplété. `boundary_proven=false` demeure, étape 8 suspendue.
 
 ## Politique de Pong testée hors ligne
 
@@ -45,12 +61,12 @@ secret, claim réel, gate historique ou H1/H2 n'est modifié par DEV.
   timeout Ping. Aucun payload, registre, identifiant ou exception n'est exporté.
 
 La tranche 7/8-F a livré le moteur partagé décrit ci-dessous. G2 a raccordé le
-point d'entrée et la publication sous verrou ; H prépare son retrait isolé.
-Aucun nouveau rapport réel ni résultat de reconnexion n'est acquis.
+point d'entrée et la publication sous verrou ; H a fusionné son retrait isolé.
+Le run décrit ci-dessus n'a pas validé la reconnexion.
 
-## Plafonds approuvés pour le moteur offline, sans autorisation live
+## Plafonds fixes du contrat, sans nouvelle autorisation live
 
-| Budget | Maximum fixe non activé en live |
+| Budget | Maximum fixe |
 | --- | --- |
 | Scénario 1 | 300 s utiles ; plafond 360 s inchangé. |
 | Scénario 2 | Plafond dur 600 s, nettoyage inclus ; au plus trois ouvertures, 1 Mio RX cumulé et dix lectures fixes espacées d'au moins 60 s. |
@@ -59,7 +75,8 @@ Aucun nouveau rapport réel ni résultat de reconnexion n'est acquis.
 | Suite | Plafond dur 1020 s : 360 + 600 + 60 s de marge d'orchestration/nettoyage. |
 
 Ces plafonds ont été acceptés dans la consigne MANAGER 7/8-F pour l'implémentation
-offline uniquement. Le budget historique de six lectures de `session-300` reste
+offline, puis liés à la décision distincte H pour le run consommé. Le budget
+historique de six lectures de `session-300` reste
 inchangé ; `SessionReconnect` est un type explicitement allowlisté avec dix
 lectures maximum, trois ouvertures et 1 Mio RX, sans réinitialisation à la reprise.
 
@@ -113,7 +130,7 @@ deadlines, nettoyage et refus des champs sensibles par les deux validateurs.
 
 La tranche G1 a installé le contrat et le gate de suite, testés hors ligne.
 G2 les a branchés au workflow existant avec launcher/collecteur/publication sous
-verrou. H retire seulement le préalable structurel, sans changer ce contrat ni
+verrou. H a retiré seulement le préalable structurel, sans changer ce contrat ni
 son implémentation. Aucun commentaire d'approbation réel n'est publié par DEV.
 
 Le point d'entrée fixe `.github/scripts/session-suite-gate.cjs` réutilise les
@@ -211,21 +228,49 @@ Les refus pré-secrets inscrivent séparément les deux NOT RUN. Tests Python/No
 et scripts réels du workflow exécutés hors ligne couvrent ces chemins, les
 plafonds d'export, les champs sensibles et les faux succès partiels.
 
-## Handoff d'activation au MANAGER
+## Diagnostics fermés du second scénario — 7/8-I
 
-Le candidat H retire seulement le job `suite-installation` et son `needs`.
-Le contrat, les gates, le superviseur, les collecteurs, les schémas et budgets
-installés restent identiques. Les tests structurels vérifient la chaîne
-préflight → admission → recheck → capture, l'unique étape avec secrets et
-l'export après succès ; les régressions offline conservent le refus des décisions
-absentes/anciennes/fausses, claims invalides et preuves CI/SHA/politique/revue
-incorrectes, ainsi que la publication isolée et le résultat global indivisible.
+I exporte uniquement le diagnostic déjà enregistré dans `SessionReconnect` :
+`failure_phase`, `failure_category`, `message_category`, et `read_slot` borné à
+dix et égal au nombre de lectures tentées. Le premier diagnostic de la génération
+en échec est conservé avant nettoyage ; un échec secondaire peut toujours donner
+le terminal existant `closed`, sans remplacer la cause initiale. Une nouvelle
+ouverture conserve la remise à zéro existante du diagnostic de transport rétabli.
+Sans diagnostic enregistré, phase fermée opening/read/lifecycle/teardown et
+catégorie terminale existante servent de repli. Aucun comportement n'est modifié.
 
-MANAGER doit relire le diff et les quatre checks sur le HEAD candidat exact,
-puis publier l'unique décision immuable du contrat installé, avec le bon SHA,
-le run CI exact, les deux scénarios et leurs limites fixes, **avant** la fusion
-au HEAD attendu. DEV ne publie ni cette décision ni un claim réel et ne lance
-aucun run. Après fusion, le push reste soumis à tous les gates installés et au
+Le framer refuse toujours tout type autre que Ping/DataResponse. Pour le seul
+second scénario, l'octet de tête **déjà rejeté** peut donner `close_client`,
+`data_updated`, `other_known` (table des discriminants de protocol.md §3),
+`unknown`, ou `unclassified` sans discriminant attribuable. Aucun sous-code,
+payload ou octet inconnu numérique n'est publié. Ces noms ne prouvent ni message
+complet, ni longueur, ni frontière ; aucun décodage, saut, consommation de suffixe,
+resynchronisation ou nouveau retry. Le diagnostic historique session-300 reste
+`unknown` pour ces refus et son contrat reste inchangé.
+
+Production et projection Python/Node émettent explicitement `schema=2` pour la
+suite et le second sous-rapport, avec les quatre champs exacts obligatoires.
+Le premier sous-rapport reste v1. La lecture des anciens rapports exige suite v1
+et second v1, sans ces champs : aucun ajout implicite ni mélange v1/v2. Les deux
+validateurs refusent clés/types/enums/provenance incorrects et toute donnée libre.
+Bornes 8192 octets/10924 caractères, publication isolée et succès global indivisible
+restent identiques. Les cas NOT RUN et recovered_120s gardent leurs critères.
+
+Les tests synthétiques utilisent le vrai V4Lifecycle/V4Session : Ping/Pong puis
+inhibition après 120 s, trois lectures corrélées et refus vers 181 s. Ils
+discriminent type rejeté, MBAP invalide, corrélation et validation, EOF délivré
+par le TLS simulé,
+timeout, budget et nettoyage secondaire. Ce scénario est synthétique, pas une
+reconstruction prouvée du run réel ; il ne résout pas sa cause inconnue.
+
+## Handoff au MANAGER, sans relance DEV
+
+MANAGER doit relire le diff et les quatre checks sur le HEAD candidat exact.
+Une éventuelle décision de nouvelle validation réelle devra être distincte,
+unique, immuable et conforme au contrat installé (SHA, CI, scénarios et limites),
+avant la fusion au HEAD attendu. La tâche I n'autorise pas cette validation.
+L'ancien run et son claim restent consommés. DEV ne publie ni
+décision ni claim réel et ne lance aucun run. Le push reste soumis aux gates et au
 recheck ; aucune ancienne décision/claim ni relance ne constitue un repli.
 
 La validation exige ensuite un run réellement admis et son rapport anonymisé
