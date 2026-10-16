@@ -2,7 +2,16 @@
 
 ## Unreleased — recherche experimental
 
-- Issue #81, tranche 7/8-L5 : lifecycle privé candidat, défaut-off, réservé aux
+- Issue #81, tranche 7/8-L6 : contrat suite/second v3 candidat, projection et
+  validation Python/Node sur table et fixtures synthétiques communes. Preuve EOF
+  consommée, historique d'arrêt, nouvelle génération et stabilité 120 s séparés
+  du diagnostic causal ; agrégat RX borné après 150 s, sans brut ni contenu libre.
+  Compatibilité stricte v1/v2 et producteurs v2 conservés ; aucun runtime,
+  workflow, gate, budget ou raccordement consommateur changé. L5 fusionnée par
+  #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`, défaut-off ; verrou
+  L2 maintenu. Aucun live ni résultat acquis, suite 7 non validée, étape 8 suspendue.
+
+- Issue #81, tranche 7/8-L5 (fusionnée par #103) : lifecycle privé livré, défaut-off, réservé aux
   tests du second scénario avec capacité à usage unique et deadlines L3.
   Suspension immédiate/wait_connected, waiter sans cleanup précoce, consommation
   unique d'EOF encore admissible avant nettoyage et recontrôle de son origine.

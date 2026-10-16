@@ -1,17 +1,30 @@
-# Quarantaine jusqu'à EOF — lifecycle privé candidat 7/8-L5, défaut-off
+# Quarantaine jusqu'à EOF — lifecycle L5 livré, contrat L6 candidat
 
-Cette conception répond à la [tâche MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
+Cette conception répond à la [tâche MANAGER L6](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612).
 L3 est fusionnée par la PR #101 au SHA
 `11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`, quatre checks réussis et 3220 tests
 offline ; voir le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800).
 L4 est fusionnée par #102 au SHA `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`,
 quatre checks/3294 tests offline réussis, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676).
 Le run de push #38868819504 s'arrête au verrou L2, tous les jobs aval skipped.
-L5 prépare uniquement le lifecycle privé, activé par les tests offline. Candidat
-jusqu'à revue/fusion, puis livré **défaut-off et sans fournisseur consommateur**.
+L5 livre uniquement le lifecycle privé, activé par les tests offline. Il reste **défaut-off et sans fournisseur consommateur**.
 Le comportement par défaut
 reste le refus protocolaire suivi du nettoyage local, sans retry de ce refus.
 Le scénario 300 s, les sessions ordinaires et HA/hoben-live restent inchangés.
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac` :
+Validate #38875547530, quatre checks, 3350 tests offline et 308 HA réussis.
+Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
+confirme le run post-fusion #38889510562 arrêté au verrou L2, sans collecte.
+L6 ne fournit que le [contrat public v3](session-suite-plan.md#contrat-public-v3--78-l6-candidat-sans-producteur).
+Python et Node valident la même projection fermée ; aucun producteur installé
+n'émet v3 et aucune observation à 150 s n'est encore branchée. La preuve reçue
+à la consommation et l'historique d'arrêt devront être fournis par l'origine
+lors d'une future tranche, jamais reconstruits depuis un snapshot final révoqué.
+Le raccordement collecteur/instrumentation, l'admission versionnée puis
+l'activation/retrait du verrou restent des tâches MANAGER séparées. L6 est
+candidat jusqu'à revue/fusion, puis contrat livré sans producteur v3. Aucune
+validation réelle, aucun brut, claim, décision live ou rerun acquis ici.
 
 ## Fondation L1 isolée, API et limites
 
@@ -165,12 +178,12 @@ close/abort idempotents sans tâches/waiter/lock résiduels. Ils ne prouvent ni
 causalité serveur ni recovered_120s. Protocol.md, profils, budgets, rapports
 v1/v2, gates, workflows et verrou L2 restent inchangés.
 
-L5 prépare le seul lifecycle privé ; le raccordement collecteur et les contrats
+L5 livre le seul lifecycle privé ; le raccordement collecteur et les contrats
 de diagnostic 150 s/rapport/admission versionnée restent séparés. L'activation et le
 retrait du verrou nécessitent encore une revue/décision distincte. Pas de live,
 claim, rerun, capture brute publique/privée ou anticipation de l'étape 8.
 
-## Lifecycle L5 candidat, consommation liée à l'origine et récupération bornée
+## Lifecycle L5 livré, consommation liée à l'origine et récupération bornée
 
 `_LifecycleQuarantineCapability` lie les mêmes propriétaires EXACTS
 SessionReconnect/NoPongAfter120 et leurs deadlines L3, à usage unique et avant

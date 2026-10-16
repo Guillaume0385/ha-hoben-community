@@ -253,8 +253,8 @@ Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée restent
 des tâches MANAGER séparées, puis retrait/activation distincte après revue/CI.
 Aucune nouvelle observation réelle ou capture brute autorisée par L4.
 
-L5 prépare uniquement le [lifecycle privé](docs/session-eof-quarantine-proposal.md#lifecycle-l5-candidat-consommation-liée-à-lorigine-et-récupération-bornée),
-candidat puis livré défaut-off après revue/fusion, sans fournisseur consommateur.
+L5 livre le [lifecycle privé](docs/session-eof-quarantine-proposal.md#lifecycle-l5-livré-consommation-liée-à-lorigine-et-récupération-bornée),
+fusionné par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`, défaut-off et sans fournisseur consommateur.
 Sa capacité à usage unique lie exactement les propriétaires du second scénario
 et les deadlines L3 ; seules factories de test la fournissent. Notification locale
 de suspension, wait_connected bloqué et requests sans replay/close. Consommation
@@ -496,6 +496,23 @@ Secondary V4 mapping (warnings/information bits, combustion-fault labels,
 date/time 1036–1038, practical meaning of 1033/1042) remains deferred behind
 session stability; these unknowns are not completed or discarded.
 
+
+### Contrat de rapport L6 candidat, sans producteur v3
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`,
+quatre checks/3350 tests offline/308 HA réussis. Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
+confirme le run #38889510562 arrêté au verrou L2, sans collecte ni décision live.
+L6 prépare le contrat de rapport suite/second v3, avec validation et projection
+Python/Node, fixtures communes, chronologie relative 120/150/240/360 et agrégat
+RX fermé. Les couples historiques 1/1 et 2/2 restent strictement inchangés ;
+les producteurs actifs continuent d'émettre v2. Premier sous-rapport v1,
+provenance, 8192 octets/10924 base64, revalidation et publication isolée restent
+requis. Candidat jusqu'à revue/fusion, puis contrat livré sans producteur v3 :
+aucune instrumentation 150 s ni capacité fournie à un consommateur. Le reçu
+valide à sa consommation ne vient jamais d'une copie finale révoquée. Collecteur,
+instrumentation et admission versionnée demandent de nouvelles tranches, puis
+activation distincte après revue/CI ; verrou et graphe inchangés. Suite 7 non
+validée, étape 8 suspendue, aucun live/claim/décision/rerun par DEV.
 
 ## Fonctionnalités futures
 

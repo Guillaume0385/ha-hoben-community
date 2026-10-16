@@ -328,9 +328,9 @@ Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée exigent un
 tranche séparée MANAGER, puis activation distincte revue. Aucun live/décision/
 claim/rerun par DEV ; suite 7 non validée, étape 8 suspendue.
 
-## Lifecycle L5 candidat, défaut-off et sans collecteur actif
+## Lifecycle L5 livré, défaut-off et sans collecteur actif
 
-Le [lifecycle privé proposé](session-eof-quarantine-proposal.md#lifecycle-l5-candidat-consommation-liée-à-lorigine-et-récupération-bornée)
+Le [lifecycle privé livré](session-eof-quarantine-proposal.md#lifecycle-l5-livré-consommation-liée-à-lorigine-et-récupération-bornée)
 lie les propriétaires exacts SessionReconnect/NoPongAfter120 et les deadlines
 L3 dans une capacité privée à usage unique. Seuls tests/factories de test la
 fournissent ; session/lifecycle seuls portent les références revues, jamais les
@@ -352,7 +352,7 @@ des phases, trois ouvertures au plus, Pong normaux rétablis ; toute perte aprè
 la première nouvelle acceptation est terminale, même avant publication CONNECTED.
 Sans capacité L5, comportements antérieurs inchangés et aucun retry protocolaire.
 
-Candidat jusqu'à revue/fusion puis livré défaut-off, sans consommateur actif.
+Fusionné par #103, livré défaut-off, sans consommateur actif.
 Les tests sont synthétiques ; aucun rapport public ou nouveau recovered_120s.
 Collecteur et contrats diagnostic 150 s/rapport/admission versionnée restent
 séparés, puis activation/retrait du verrou après revue complète. Framer, protocole,
@@ -360,6 +360,23 @@ ouverture/identité/TLS/profils, clients/HA, collecteurs/lanceurs/superviseurs,
 rapports v1/v2/validateurs/export, gates/contrats/workflows/budgets inchangés.
 Verrou L2/deux NOT RUN avant secrets conservés, aucun diagnostic 150 s actif,
 brut/live/décision/claim/rerun. Suite 7 non validée, étape 8 suspendue.
+
+## Contrat L6 candidat, sans producteur v3
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`,
+quatre checks/3350 tests offline/308 HA réussis. Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
+confirme le run #38889510562 arrêté au verrou L2, sans collecte ni décision live.
+L6 prépare le contrat de rapport suite/second v3, avec validation et projection
+Python/Node, fixtures communes, chronologie relative 120/150/240/360 et agrégat
+RX fermé. Les couples historiques 1/1 et 2/2 restent strictement inchangés ;
+les producteurs actifs continuent d'émettre v2. Premier sous-rapport v1,
+provenance, 8192 octets/10924 base64, revalidation et publication isolée restent
+requis. Candidat jusqu'à revue/fusion, puis contrat livré sans producteur v3 :
+aucune instrumentation 150 s ni capacité fournie à un consommateur. Le reçu
+valide à sa consommation ne vient jamais d'une copie finale révoquée. Collecteur,
+instrumentation et admission versionnée demandent de nouvelles tranches, puis
+activation distincte après revue/CI ; verrou et graphe inchangés. Suite 7 non
+validée, étape 8 suspendue, aucun live/claim/décision/rerun par DEV.
 
 ## Admission : provenance, revue et CI exactes
 
