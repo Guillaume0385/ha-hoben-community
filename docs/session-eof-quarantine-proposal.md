@@ -23,9 +23,18 @@ n'émet v3 et aucune observation à 150 s n'est encore branchée. La preuve reç
 lors d'une future tranche, jamais reconstruits depuis un snapshot final révoqué.
 Le raccordement collecteur/instrumentation, l'admission versionnée puis
 l'activation/retrait du verrou restent des tâches MANAGER séparées. L6 est
-fusionnée par #104, contrat livré sans producteur v3. La correction L6bis du
-contrat est candidate jusqu'à revue/fusion ; L7 reste suspendue et devra être
-réautorisée séparément. Aucune
+fusionnée par #104, contrat livré sans producteur v3 ; L6bis est fusionnée par
+#105 au SHA `182daa62177c74bb14dc6412a166e95ad36c8350`. L6ter est une correction
+contractuelle candidate, puis livrée après revue/fusion : temps de livraison RX
+et décisions réelles de rejet/validation sont distincts, sans déplacement de
+timestamp ni double comptage. Les offsets globaux peuvent référencer un préfixe
+livré avant150 et rejeté après150, y compris sans nouvelle réception. Un état
+refused antérieur n'invente aucun nouveau rejet. Voir les
+[règles normatives](session-suite-plan.md#agrégat-rx-fixe-à-partir-de-t0150000-ms).
+Les reproductions offline utilisent les vrais propriétaires avec wrappers de
+TEST seulement ; aucun hook/runtime/collecteur/activation n'est livré ici.
+Le travail local L7 incomplet est préservé, non publié ; L7 reste suspendue
+jusqu'à fusion L6ter et réautorisation distincte. Aucune
 validation réelle, aucun brut, claim, décision live ou rerun acquis ici.
 
 ## Fondation L1 isolée, API et limites

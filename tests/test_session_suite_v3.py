@@ -201,6 +201,20 @@ process.stdout.write(JSON.stringify(Object.fromEntries(Object.entries(rs).map(([
     + [c["name"] for c in CORPUS["cases"] if c["name"].startswith("stop_")],
 )
 def test_unchanged_workflow_result_checks_v3_and_partial_job_results(name):
+    report = (
+        CORPUS["reports"][name]
+        if name in CORPUS["reports"]
+        else materialize(next(c for c in CORPUS["cases"] if c["name"] == name))
+    )
+    result = workflow_result(report)
+    assert [r["state"] for r in result] == (
+        ["success"] if name in {"success", "origin_eof_after_entry_1"} else ["failure"]
+    ) + ["failure"] * 4
+    assert "synthetic-private" not in json.dumps(result)
+
+
+def workflow_result(report):
+    """Execute the installed, unchanged result script against a supplied report."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -237,16 +251,11 @@ async function check(collection,publication,missing=false) {
 """,
         [
             script,
-            CORPUS["reports"][name]
-            if name in CORPUS["reports"]
-            else materialize(next(c for c in CORPUS["cases"] if c["name"] == name)),
+            report,
             PROOF,
         ],
     )
-    assert [r["state"] for r in result] == (
-        ["success"] if name in {"success", "origin_eof_after_entry_1"} else ["failure"]
-    ) + ["failure"] * 4
-    assert "synthetic-private" not in json.dumps(result)
+    return result
 
 
 @pytest.mark.parametrize("delta", [-1, 0, 1])

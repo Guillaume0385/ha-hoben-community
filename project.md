@@ -497,22 +497,38 @@ date/time 1036–1038, practical meaning of 1033/1042) remains deferred behind
 session stability; these unknowns are not completed or discarded.
 
 
-### Contrat de rapport L6 candidat, sans producteur v3
+### Contrat v3 livré, correction L6ter candidate sans producteur
 
 L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`,
 quatre checks/3350 tests offline/308 HA réussis. Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
 confirme le run #38889510562 arrêté au verrou L2, sans collecte ni décision live.
-L6 prépare le contrat de rapport suite/second v3, avec validation et projection
+L6 est fusionnée par #104, L6bis par #105 au SHA
+`182daa62177c74bb14dc6412a166e95ad36c8350` : contrat de rapport suite/second v3,
+avec validation et projection
 Python/Node, fixtures communes, chronologie relative 120/150/240/360 et agrégat
 RX fermé. Les couples historiques 1/1 et 2/2 restent strictement inchangés ;
 les producteurs actifs continuent d'émettre v2. Premier sous-rapport v1,
 provenance, 8192 octets/10924 base64, revalidation et publication isolée restent
-requis. Candidat jusqu'à revue/fusion, puis contrat livré sans producteur v3 :
+requis. Contrat livré sans producteur v3 :
 aucune instrumentation 150 s ni capacité fournie à un consommateur. Le reçu
 valide à sa consommation ne vient jamais d'une copie finale révoquée. Collecteur,
 instrumentation et admission versionnée demandent de nouvelles tranches, puis
 activation distincte après revue/CI ; verrou et graphe inchangés. Suite 7 non
 validée, étape 8 suspendue, aucun live/claim/décision/rerun par DEV.
+
+La tranche L6ter est une correction contractuelle candidate, puis livrée après
+revue/fusion MANAGER. Elle distingue les livraisons non vides first/last_rx des
+décisions réelles de rejet/validation : le parsing peut suivre la dernière
+livraison et référencer des octets conservés avant150, sans les recompter après.
+Un refus antérieur150 peut être observé comme état, sans nouveau rejet inventé.
+La cadence >=60s reste celle des requêtes ; aucune dernière livraison n'est
+extrapolée de leur nombre. Offsets globaux bornés, génération/stabilité et tous
+les critères EOF/reprise/arrêts L6bis restent requis. Voir le
+[contrat normatif](docs/session-suite-plan.md#agrégat-rx-fixe-à-partir-de-t0150000-ms).
+Seuls validateurs/tests/docs changent ; aucun runtime, hook ou activation.
+Le travail local L7 incomplet est préservé, non publié, suspendu jusqu'à fusion
+L6ter et réautorisation distincte ; admission/routage fixe puis retrait du verrou
+restent séparés. Aucune nouvelle preuve réelle ou frontière protocolaire.
 
 ## Fonctionnalités futures
 
