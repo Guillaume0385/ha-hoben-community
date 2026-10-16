@@ -294,7 +294,7 @@ matrice de cohérence Python/Node à spécifier avant toute instrumentation.
 L3 n'a modifié aucun pont RX/TX/lifecycle, diagnostic 150 s ou rapport/validateur/
 gate/runtime ; l'activation reste une tâche ultérieure distincte.
 
-## Pont L4 candidat, désactivé et sans raccordement consommateur
+## Pont L4 livré, désactivé et sans raccordement consommateur
 
 La PR #101 est fusionnée au SHA `11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8` ;
 le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800)
@@ -302,8 +302,11 @@ consigne quatre checks/3220 tests offline réussis et le run de push #3886294502
 en échec attendu au verrou L2, tous les jobs aval skipped. L4 ne change pas ce
 verrou ni son graphe, les deux NOT RUN avant secrets sont conservés.
 
-Le [pont privé V4Session](session-eof-quarantine-proposal.md#pont-de-session-l4-candidat-capacité-fermée-et-défaut-off)
-est candidat jusqu'à revue/fusion, puis livré défaut-off : capacité à usage
+Le [pont privé V4Session](session-eof-quarantine-proposal.md#pont-de-session-l4-livré-capacité-fermée-et-défaut-off)
+est livré par #102 au SHA `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`,
+quatre checks/3294 tests offline réussis, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676).
+Le run #38868819504 s'arrête au verrou L2, tous les jobs aval skipped.
+Le pont reste défaut-off : capacité à usage
 unique liée aux propriétaires EXACTS SessionReconnect/NoPongAfter120, avant
 ouverture, deadlines scalaires bornées injectées. Seuls tests offline l'activent.
 Garde sur l'unique import de politique par session, absence de tout constructeur/
@@ -315,8 +318,8 @@ Le même RX poursuit TLS passivement sous la deadline L3, sans framer, capture,
 replay ou double comptage. L'observation privée figée ne devient candidate que
 sur vrai EOF avant arrêt local/deadline ; arrêt/courses/délai/budget/TLS sans
 EOF échouent fermés. Annuler un observateur ne tue pas RX ; close/abort restent
-idempotents. Même un candidat laisse le rejet protocolaire non réessayable :
-aucune preuve consommée par le lifecycle, reconnexion ou recovered_120s.
+idempotents. Sans capacité L5, même un candidat laisse le rejet protocolaire
+non réessayable, sans reconnexion ou recovered_120s.
 
 Lifecycle, clients/HA, collecteurs/lanceurs/superviseurs, rapports v1/v2 et
 validateurs/export/publication, gates/contrats/workflows/budgets inchangés.
@@ -324,6 +327,39 @@ Aucune instrumentation 150 s, nouvelle donnée exportée ou capture brute autori
 Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée exigent une
 tranche séparée MANAGER, puis activation distincte revue. Aucun live/décision/
 claim/rerun par DEV ; suite 7 non validée, étape 8 suspendue.
+
+## Lifecycle L5 candidat, défaut-off et sans collecteur actif
+
+Le [lifecycle privé proposé](session-eof-quarantine-proposal.md#lifecycle-l5-candidat-consommation-liée-à-lorigine-et-récupération-bornée)
+lie les propriétaires exacts SessionReconnect/NoPongAfter120 et les deadlines
+L3 dans une capacité privée à usage unique. Seuls tests/factories de test la
+fournissent ; session/lifecycle seuls portent les références revues, jamais les
+clients/HA, collecteurs/launchers/workflows. Aucun env/input/commentaire d'activation.
+
+Notification de quarantaine par événement local, sans autre lecteur ou polling
+réseau ; état/snapshot non CONNECTED, wait_connected suspendu, requests sans
+close/replay. Le lifecycle consomme une seule fois la preuve EOF courante liée à
+la session/génération d'origine, encore candidate avant cleanup. Une copie
+révoquée/périmée/doublée/fausse ne vaut pas preuve. L'origine et l'arrêt restent
+recontrôlés avant/après cleanup et backoff, avant ouverture et adoption/publication d'une nouvelle acceptation. Le cleanup intentionnel ne masque aucun stop
+public concurrent ; courses et annulations prioritaires, révocation au terminal.
+
+La session fraîche réutilise seulement l'identité autorisée et les budgets/
+compteurs/cadence partagés, jamais suffixe/waiter/future/transport ou lecture
+rejouée. EOF ET acceptation avant T0+240 et 120 s encore possibles sous T0+360 et
+observation/process/suite ; borne exacte refusée avant adoption. Timers privés
+des phases, trois ouvertures au plus, Pong normaux rétablis ; toute perte après
+la première nouvelle acceptation est terminale, même avant publication CONNECTED.
+Sans capacité L5, comportements antérieurs inchangés et aucun retry protocolaire.
+
+Candidat jusqu'à revue/fusion puis livré défaut-off, sans consommateur actif.
+Les tests sont synthétiques ; aucun rapport public ou nouveau recovered_120s.
+Collecteur et contrats diagnostic 150 s/rapport/admission versionnée restent
+séparés, puis activation/retrait du verrou après revue complète. Framer, protocole,
+ouverture/identité/TLS/profils, clients/HA, collecteurs/lanceurs/superviseurs,
+rapports v1/v2/validateurs/export, gates/contrats/workflows/budgets inchangés.
+Verrou L2/deux NOT RUN avant secrets conservés, aucun diagnostic 150 s actif,
+brut/live/décision/claim/rerun. Suite 7 non validée, étape 8 suspendue.
 
 ## Admission : provenance, revue et CI exactes
 

@@ -574,15 +574,17 @@ def test_capability_is_not_constructible_after_an_opening_or_policy_acceptance()
         capability(budget, pong)
 
 
-def test_only_session_imports_bridge_and_no_consumer_supplies_capability(monkeypatch):
+def test_only_session_lifecycle_reference_bridge_without_consumer_capability(
+    monkeypatch,
+):
     root = Path(__file__).resolve().parents[1]
     assert inspect.signature(V4Session).parameters["_quarantine"].default is None
     for folder in ("custom_components", "scripts", ".github"):
         for path in (root / folder).rglob("*"):
-            if (
-                path == root / "custom_components/hoben/v4_session.py"
-                or path.suffix not in {".py", ".js", ".cjs", ".yml", ".yaml"}
-            ):
+            if path in {
+                root / "custom_components/hoben/v4_session.py",
+                root / "custom_components/hoben/v4_lifecycle.py",
+            } or path.suffix not in {".py", ".js", ".cjs", ".yml", ".yaml"}:
                 continue
             source = path.read_text()
             assert (
