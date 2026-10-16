@@ -154,7 +154,7 @@ gates et à une décision MANAGER distincte avant merge ; voir le
 l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
 avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
 
-### Suite activée — conception documentaire 7/8-K, non installée
+### Suite activée — fondation pure 7/8-L1 non raccordée
 
 Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
 spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
@@ -192,6 +192,13 @@ La portée active demeure Ping/DataResponse seulement, avec refus protocolaire
 des autres types ; cette proposition n'adopte aucune exception. Implémentation,
 contrat/gates et activation nécessiteraient des décisions MANAGER séparées.
 Aucun changement runtime, test exécutable ou nouveau live dans K.
+La tranche L1 ajoute une politique d'état pure et ses seuls tests unitaires,
+sans import/appel depuis les chemins actifs. Timestamps et événements injectés,
+latch conservateur, échéance absolue et candidat EOF provisoire ne réalisent ni
+gel TX ni attente TLS ni reconnexion. La [limite de L1](docs/session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+reste distincte du futur runtime de quarantaine, NON INSTALLÉ/NON ACTIVÉ.
+Le raccordement, l'évolution éventuelle des rapports/admissions et toute
+activation exigent d'autres décisions MANAGER ; aucune exception active ici.
 Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
 et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
 pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion

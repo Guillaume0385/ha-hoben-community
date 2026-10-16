@@ -1,4 +1,4 @@
-# Suite « Tests expérimentaux session » — conception documentaire 7/8-K
+# Suite « Tests expérimentaux session » — fondation pure isolée 7/8-L1
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
@@ -8,6 +8,29 @@ La validation historique de la session continue reste acquise :
 SHA `4ea1c802155b95014d50c6a4aab8250621959466`, résultat vérifié par MANAGER
 `continuous_300s`, sans reconnexion. Elle ne valide pas le nouveau scénario ni
 la suite, et ne prouve aucune frontière universelle OpenedClient.
+
+## Fondation L1 isolée — réception NON INSTALLÉE / NON ACTIVÉE
+
+K est fusionnée par la PR #98 au SHA
+`2adb4d1c51a9341c41dc0d352bad0f222bb9db1e` ; la proposition reste non installée.
+Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207920402)
+ne publie aucune décision live pour cette PR documentaire. Le run de push
+#38849433135 a été refusé à l'admission avant secrets (deux scénarios NOT RUN),
+sans nouvelle observation du poêle.
+
+L1 ajoute seulement [EofQuarantinePolicy](../custom_components/hoben/v4_eof_quarantine.py),
+machine d'état pure sans I/O, horloge réelle, tâche, transport ou credentials.
+Seuls les tests l'instancient. Aucun import/appel depuis session, lifecycle,
+framer, collecteur, launcher, gate, workflow ou HA : réception et refus installés
+restent inchangés. La [limite de cette fondation](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+est distincte du futur gel TX, de l'attente TLS et de la récupération.
+
+Les tests unitaires déterministes couvrent frontières/invalides/ordres/idempotence,
+snapshots scalaires bornés, import limité à dataclasses/enum et absence de
+références actives. Ils ne réalisent pas la matrice d'intégration K et ne prouvent
+aucune action réelle. Une intégration/exception de portée, les évolutions de
+rapport/admission puis l'activation nécessitent des tâches MANAGER séparées,
+avec verrou structurel avant usage. Suite non validée, étape 8 suspendue.
 
 ## Activation fusionnée, suite fonctionnelle non validée
 

@@ -239,6 +239,12 @@ exactes. Aucun candidat ne s'autorise lui-même ; décisions immuables, approbat
 anti-rejeu et publication isolée conservés. Aucun run/décision/claim/rerun par DEV,
 aucune réutilisation de l'ancien run/claim. Suite non validée, étape 8 suspendue.
 
+L1 ne fournit qu'une fondation pure non raccordée et ses tests unitaires :
+aucun appel/import depuis les voies actives, aucun EOF réel ni gel TX attesté.
+Son candidat interne provisoire n'autorise aucun retry. La [portée isolée de L1](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+ne change ni les gates/rapports ni le comportement installé ; intégration et
+activation demeurent séparées, sans nouveau run/décision/claim par DEV.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`
