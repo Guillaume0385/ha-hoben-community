@@ -167,3 +167,131 @@ def test_node_safety_contracts(suite):
         check=False,
     )
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+
+
+def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
+    """H1/H2 admission and its collector are not a V4 lifecycle installation."""
+    import ast
+
+    legacy = yaml.load(
+        (ROOT / ".github/workflows/hoben-experimental.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    policy = json.loads(
+        (ROOT / ".github/config/hoben-experimental.json").read_text()
+    )
+    capture = next(
+        step
+        for step in legacy["jobs"]["collect"]["steps"]
+        if step.get("id") == "capture"
+    )
+    assert policy == {
+        "schema": 1,
+        "scenario": "h1h2",
+        "environment": "hoben-experimental",
+    }
+    assert capture["run"] == "python trusted/scripts/launch_experimental_boundary.py"
+    launcher = ast.parse((ROOT / "scripts/launch_experimental_boundary.py").read_text())
+    runner = ast.parse((ROOT / "scripts/run_experimental_boundary.py").read_text())
+    probe = ast.parse((ROOT / "scripts/probe_opened_client_boundary.py").read_text())
+    assert any(
+        isinstance(node, ast.Constant)
+        and node.value == "run_experimental_boundary.py"
+        for node in ast.walk(launcher)
+    )
+    collect = next(
+        node for node in runner.body
+        if isinstance(node, ast.FunctionDef) and node.name == "collect"
+    )
+    assert any(
+        isinstance(node, ast.Constant)
+        and node.value == "scripts.probe_opened_client_boundary"
+        for node in ast.walk(collect)
+    )
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "campaign_with_signals"
+        for node in ast.walk(collect)
+    )
+    assert any(
+        isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "campaign_with_signals"
+        for node in probe.body
+    )
+    assert not any(
+        isinstance(node, ast.Name) and node.id in {"V4Session", "V4Lifecycle"}
+        for node in ast.walk(collect)
+    )
+    assert "quarantine-installation" not in legacy["jobs"]
+
+
+def test_chat_wiring_002_suite_stays_locked_before_secrets_and_uses_shared_v4():
+    """A runnable import path is not authorization to invoke the live scenario."""
+    import ast
+
+    suite = yaml.load(
+        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    jobs = suite["jobs"]
+    barrier = jobs["quarantine-installation"]
+    assert jobs["dry-run"]["needs"] == "quarantine-installation"
+    assert barrier["permissions"] == {}
+    assert "environment" not in barrier
+    assert "continue-on-error" not in barrier
+    assert len(barrier["steps"]) == 1
+    script = barrier["steps"][0]["run"]
+    assert "exit 1" in script
+    assert "session-300: NOT RUN (quarantine_not_installed)" in script
+    assert "session-reconnect-no-pong: NOT RUN (quarantine_not_installed)" in script
+    assert jobs["collect"]["needs"] == "admission"
+    assert jobs["collect"]["environment"] == "hoben-experimental"
+    capture = next(
+        s for s in jobs["collect"]["steps"] if s.get("id") == "capture"
+    )
+    assert capture["run"] == "python trusted/scripts/launch_session_suite.py"
+    assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
+
+    launcher = ast.parse((ROOT / "scripts/launch_session_suite.py").read_text())
+    runner = ast.parse((ROOT / "scripts/run_session_suite.py").read_text())
+    engine = ast.parse((ROOT / "scripts/session_suite.py").read_text())
+    imports = {
+        alias.name
+        for node in runner.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert {"V4Session", "V4Lifecycle", "observe_suite"} <= imports
+    assert any(
+        isinstance(node, ast.Name) and node.id == "V4Session"
+        for node in ast.walk(runner)
+    )
+    assert any(
+        isinstance(node, ast.Name) and node.id == "V4Lifecycle"
+        for node in ast.walk(runner)
+    )
+    assert any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "run_session_suite.py"
+        for node in ast.walk(launcher)
+    ) is False  # The child path is a fixed literal, not a dynamic attribute.
+    assert any(
+        isinstance(node, ast.Constant)
+        and node.value == "run_session_suite.py"
+        for node in ast.walk(launcher)
+    )
+    observe = next(
+        node for node in engine.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "observe_suite"
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "observe_300"
+        for node in ast.walk(observe)
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_observe_reconnect"
+        for node in ast.walk(observe)
+    )
