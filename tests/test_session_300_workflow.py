@@ -270,11 +270,6 @@ def test_chat_wiring_002_suite_stays_locked_before_secrets_and_uses_shared_v4():
         for node in ast.walk(runner)
     )
     assert any(
-        isinstance(node, ast.Attribute)
-        and node.attr == "run_session_suite.py"
-        for node in ast.walk(launcher)
-    ) is False  # The child path is a fixed literal, not a dynamic attribute.
-    assert any(
         isinstance(node, ast.Constant)
         and node.value == "run_session_suite.py"
         for node in ast.walk(launcher)
