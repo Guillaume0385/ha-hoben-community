@@ -176,9 +176,7 @@ def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
         (ROOT / ".github/workflows/hoben-experimental.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    policy = json.loads(
-        (ROOT / ".github/config/hoben-experimental.json").read_text()
-    )
+    policy = json.loads((ROOT / ".github/config/hoben-experimental.json").read_text())
     capture = next(
         step
         for step in legacy["jobs"]["collect"]["steps"]
@@ -200,7 +198,8 @@ def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
         for node in ast.walk(launcher)
     )
     collect = next(
-        node for node in runner.body
+        node
+        for node in runner.body
         if isinstance(node, ast.FunctionDef) and node.name == "collect"
     )
     assert any(
@@ -213,8 +212,7 @@ def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
         for node in ast.walk(collect)
     )
     assert any(
-        isinstance(node, ast.AsyncFunctionDef)
-        and node.name == "campaign_with_signals"
+        isinstance(node, ast.AsyncFunctionDef) and node.name == "campaign_with_signals"
         for node in probe.body
     )
     assert not any(
@@ -245,9 +243,7 @@ def test_chat_wiring_002_suite_stays_locked_before_secrets_and_uses_shared_v4():
     assert "session-reconnect-no-pong: NOT RUN (quarantine_not_installed)" in script
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
-    capture = next(
-        s for s in jobs["collect"]["steps"] if s.get("id") == "capture"
-    )
+    capture = next(s for s in jobs["collect"]["steps"] if s.get("id") == "capture")
     assert capture["run"] == "python trusted/scripts/launch_session_suite.py"
     assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
 
@@ -276,7 +272,8 @@ def test_chat_wiring_002_suite_stays_locked_before_secrets_and_uses_shared_v4():
         for node in ast.walk(launcher)
     )
     observe = next(
-        node for node in engine.body
+        node
+        for node in engine.body
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "observe_suite"
     )
     assert any(
