@@ -271,6 +271,7 @@ def test_chat_wiring_002_suite_stays_locked_before_secrets_and_uses_shared_v4():
     )
     assert any(
         isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
         and "run_session_suite.py" in node.value
         for node in ast.walk(launcher)
     )
