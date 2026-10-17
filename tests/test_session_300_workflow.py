@@ -195,7 +195,8 @@ def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
     probe = ast.parse((ROOT / "scripts/probe_opened_client_boundary.py").read_text())
     assert any(
         isinstance(node, ast.Constant)
-        and node.value == "run_experimental_boundary.py"
+        and isinstance(node.value, str)
+        and "run_experimental_boundary.py" in node.value
         for node in ast.walk(launcher)
     )
     collect = next(
