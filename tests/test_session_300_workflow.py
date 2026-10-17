@@ -168,6 +168,7 @@ def test_node_safety_contracts(suite):
     )
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
 
+
 def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
     """H1/H2 admission and its collector are not a V4 lifecycle installation."""
     import ast
