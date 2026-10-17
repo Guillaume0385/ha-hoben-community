@@ -58,9 +58,7 @@ process.stdout.write(JSON.stringify(ok));
         (0, 1, True),
     ],
 )
-def test_published_v3_contract_causal_entry_and_eof(
-    entry_delta, eof_delta, accepted
-):
+def test_published_v3_contract_causal_entry_and_eof(entry_delta, eof_delta, accepted):
     """A real 1 ms owner gap is rejected by both installed validators."""
     report = _report(entry_delta=entry_delta, eof_delta=eof_delta)
     try:
