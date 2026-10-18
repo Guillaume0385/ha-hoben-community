@@ -43,7 +43,7 @@ def validate_natural(report):
         "correlated_recovery_reads"
     ] not in (0, 1):
         raise ValueError("invalid_natural_report")
-    if report["correlated_recovery_reads"] and (
+    if report["result"] == "reconnected" and report["initial_continuous"]:\n        raise ValueError("invalid_natural_report")\n    if report["correlated_recovery_reads"] and (
         report["result"] != "reconnected" or report["reconnect_attempts"] != 1
     ):
         raise ValueError("invalid_natural_report")
@@ -97,7 +97,7 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
                     if life.snapshot.attempts > 2:
                         result = "failed"
                         break
-                    # Recovery must finish within 60 seconds from first loss.
+                    # No public causal loss timestamp exists: never certify recovery.
                     async with asyncio.timeout(RECOVERY_SECONDS):
                         await life.wait_connected()
                         if (
@@ -109,8 +109,7 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
                         # Verified parser and transaction correlation are inside
                         # request_v4_data; discarded values never leave the owner.
                         await life.request_v4_data(timeout=min(30.0, RECOVERY_SECONDS))
-                        recovery_reads = 1
-                        result = "reconnected"
+                        # A correlated read alone does not attest the new generation.\n                        # Without both proofs, the only safe classification is inconclusive.\n                        result = "inconclusive"
                         break
                 if life.state is not SessionState.CONNECTED:
                     result = "failed"
