@@ -82,10 +82,7 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
             await life.connect()
             # A retry before first acceptance is not an admissible initial
             # opening, even if the lifecycle eventually reports CONNECTED.
-            if (
-                life.snapshot.attempts != 1
-                or life.state is not SessionState.CONNECTED
-            ):
+            if life.snapshot.attempts != 1 or life.state is not SessionState.CONNECTED:
                 result = "failed"
             else:
                 continuous = True
@@ -112,8 +109,8 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
                         continuous = False
                         result = (
                             "failed"
-                            if snapshot.failure and
-                            life.state is SessionState.DISCONNECTED
+                            if snapshot.failure
+                            and life.state is SessionState.DISCONNECTED
                             else "inconclusive"
                         )
                         break
