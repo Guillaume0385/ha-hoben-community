@@ -1153,9 +1153,7 @@ def test_verified_read_witness_rejects_uncorrelated_and_ping_only():
         assert session.verified_read_sequence == 0
         with pytest.raises(HobenProtocolError):
             await session._handle_delimited_data_response(
-                DelimitedV4DataResponse(
-                    synthetic_data_response(), exchange=object()
-                )
+                DelimitedV4DataResponse(synthetic_data_response(), exchange=object())
             )
         with pytest.raises(HobenProtocolError):
             await task
