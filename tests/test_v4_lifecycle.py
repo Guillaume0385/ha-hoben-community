@@ -740,7 +740,7 @@ def test_natural_witness_has_no_loss_on_local_shutdown_or_unproven_opening():
         other = V4Lifecycle(
             user_guid="b" * 32, session_factory=broken, retry_delays=()
         )
-        with pytest.raises(HobenTransportError):
+        with pytest.raises(LifecycleExhaustedError):
             await other.connect()
         assert other.witness.established_generation is None
         assert other.witness.loss_monotonic_ms is None
