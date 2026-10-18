@@ -6,8 +6,7 @@ disconnection or fabricated opening/EOF event is part of this scenario.
 import asyncio
 import time
 
-from custom_components.hoben.exceptions import HobenError, HobenTransportError
-from custom_components.hoben.v4_lifecycle import LifecycleExhaustedError
+from custom_components.hoben.exceptions import HobenError
 from custom_components.hoben.v4_session import SessionState
 
 MAX_SECONDS = 900
@@ -66,8 +65,15 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
             # strictly bounded delay and use the genuine shared V4 lifecycle.
             if life.snapshot.max_attempts != 2:
                 raise ValueError("natural_retry_budget")
-            # A failed initial opening must not trigger a second attempt.
-            await life.connect()
+            # Initial failure must never spend a recovery attempt.
+            async with asyncio.timeout(60):
+                opening = asyncio.create_task(life.connect())
+                done, _ = await asyncio.wait({opening}, timeout=60)
+                if not done:
+                    opening.cancel()
+                    await asyncio.gather(opening, return_exceptions=True)
+                    raise TimeoutError()
+                await opening
             continuous = True
             while True:
                 if life.snapshot.attempts > 1:
