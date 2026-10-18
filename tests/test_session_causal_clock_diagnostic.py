@@ -122,7 +122,9 @@ def test_clock_ordering_cannot_weaken_other_evidence(change, accepted):
     assert _node_accepts(report) is accepted
 
 
-@pytest.mark.parametrize("name", ["no_eof", "stopped_after_consumption", "stopped_after_acceptance"])
+@pytest.mark.parametrize(
+    "name", ["no_eof", "stopped_after_consumption", "stopped_after_acceptance"]
+)
 def test_clock_gap_never_upgrades_inconclusive_or_interrupted(name):
     report = copy.deepcopy(CORPUS["reports"][name])
     second = report["session_reconnect_no_pong"]
