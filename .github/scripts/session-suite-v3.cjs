@@ -70,7 +70,7 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
   } else {
     need(!nil(inhibition) && inhibition <= entered && entered <= end && q.origin_generation === 1);
     need(entered < Math.min(240000,...deadlines));
-    need(phase === "message_classification" && category === "protocol" && message === "close_client" && causal === entered);
+    need(phase === "message_classification" && category === "protocol" && message === "close_client" && !nil(causal) && causal <= entered);
   }
   need(nil(eof) === (q.eof_origin === "none"));
   if (!nil(eof)) need(!nil(entered) && entered <= eof && eof <= end);
