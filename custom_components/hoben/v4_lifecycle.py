@@ -479,8 +479,10 @@ class V4Lifecycle:
                     self._device_guid = session.device_guid_for_persistence
                     self._generation += 1
                     self._witness = replace(
-                        self._witness, established_generation=self._generation,
-                        verified_read_generation=None, verified_read_sequence=None,
+                        self._witness,
+                        established_generation=self._generation,
+                        verified_read_generation=None,
+                        verified_read_sequence=None,
                     )
                     self._snapshot = replace(
                         self._snapshot, state=SessionState.CONNECTED, failure=None
