@@ -23,13 +23,22 @@ def validate_natural(report):
         raise ValueError("invalid_natural_report")
     if report["scenario"] != "session-natural-900" or report["result"] not in RESULTS:
         raise ValueError("invalid_natural_report")
-    if type(report["duration_ms"]) is not int or not 0 <= report["duration_ms"] <= 900000:
+    if (
+        type(report["duration_ms"]) is not int or
+        not 0 <= report["duration_ms"] <= 900000
+    ):
         raise ValueError("invalid_natural_report")
     if type(report["initial_continuous"]) is not bool:
         raise ValueError("invalid_natural_report")
-    if type(report["reconnect_attempts"]) is not int or report["reconnect_attempts"] not in (0, 1):
+    if (
+        type(report["reconnect_attempts"]) is not int or
+        report["reconnect_attempts"] not in (0, 1)
+    ):
         raise ValueError("invalid_natural_report")
-    if type(report["correlated_recovery_reads"]) is not int or report["correlated_recovery_reads"] not in (0, 1):
+    if (
+        type(report["correlated_recovery_reads"]) is not int or
+        report["correlated_recovery_reads"] not in (0, 1)
+    ):
         raise ValueError("invalid_natural_report")
     if report["correlated_recovery_reads"] and (
         report["result"] != "reconnected" or report["reconnect_attempts"] != 1
@@ -85,7 +94,10 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
                     # Recovery must finish within 60 seconds from first loss.
                     async with asyncio.timeout(RECOVERY_SECONDS):
                         await life.wait_connected()
-                        if life.snapshot.attempts != 2 or life.state is not SessionState.CONNECTED:
+                        if (
+                            life.snapshot.attempts != 2 or
+                            life.state is not SessionState.CONNECTED
+                        ):
                             result = "failed"
                             break
                         # Verified parser and transaction correlation are inside
