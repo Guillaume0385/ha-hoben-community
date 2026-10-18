@@ -1,4 +1,5 @@
 """Synthetic unit tests for the natural 900-second scenario; no network."""
+
 from copy import deepcopy
 
 import pytest
