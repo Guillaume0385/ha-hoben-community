@@ -44,7 +44,7 @@ def validate_natural(report):
         report["result"] != "reconnected" or report["reconnect_attempts"] != 1
     ):
         raise ValueError("invalid_natural_report")
-    if (report["result"] == "reconnected") != (report["correlated_recovery_reads"] == 1):
+    if (report["result"] == "reconnected") != (\n        report["correlated_recovery_reads"] == 1\n    ):
         raise ValueError("invalid_natural_report")
     if report["result"] == "not_run" and (
         report["duration_ms"] or report["reconnect_attempts"]
