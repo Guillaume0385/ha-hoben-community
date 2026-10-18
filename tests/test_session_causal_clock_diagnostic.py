@@ -1,4 +1,4 @@
-"""Offline contract diagnostic for the causal/quarantine clock gap.
+"""Offline regression for the causal/quarantine clock contract.
 
 These tests do not pretend to execute the unpublished L7 v3 producer.
 """
@@ -51,7 +51,7 @@ process.stdout.write(JSON.stringify(ok));
     ("entry_delta", "eof_delta", "accepted"),
     [
         (0, 10000, True),
-        (1, 10000, False),
+        (1, 10000, True),
         (-1, 10000, False),
         (0, 0, False),
         (0, -1, False),
@@ -59,7 +59,7 @@ process.stdout.write(JSON.stringify(ok));
     ],
 )
 def test_published_v3_contract_causal_entry_and_eof(entry_delta, eof_delta, accepted):
-    """A real 1 ms owner gap is rejected by both installed validators."""
+    """Both validators preserve owner ordering, strict EOF and old success proof."""
     report = _report(entry_delta=entry_delta, eof_delta=eof_delta)
     try:
         validated = validate_suite(report, PROOF)
@@ -72,12 +72,61 @@ def test_published_v3_contract_causal_entry_and_eof(entry_delta, eof_delta, acce
 
 
 def test_reconnection_requires_real_post_entry_eof():
-    """Changing the entry time cannot fabricate a valid EOF/recovery."""
+    """Moving the entry cannot itself fabricate an EOF/recovery proof."""
     report = _report(entry_delta=1, eof_delta=10000)
     second = report["session_reconnect_no_pong"]
     assert second["quarantine"]["entered_ms"] == second["causal_ms"] + 1
     assert second["quarantine"]["eof_ms"] > second["quarantine"]["entered_ms"]
     assert second["quarantine"]["accepted_ms"] > second["quarantine"]["eof_ms"]
+    assert validate_suite(report, PROOF) == report
+    assert _node_accepts(report)
+    second["rx_diagnostic"]["eof_ms"] = None
     with pytest.raises((ValueError, TypeError)):
         validate_suite(report, PROOF)
     assert not _node_accepts(report)
+
+
+@pytest.mark.parametrize(
+    ("change", "accepted"),
+    [
+        ({"causal_ms": 159999}, False),
+        ({"rx_diagnostic.rejection_ms": 159999}, False),
+        ({"quarantine.entered_ms": 159999}, False),
+        ({"quarantine.entered_ms": 160000}, True),
+        ({"quarantine.entered_ms": 160001}, True),
+        ({"quarantine.entered_ms": 169999}, True),
+        ({"quarantine.entered_ms": 170000}, False),
+        ({"quarantine.entered_ms": 240000}, False),
+        ({"quarantine.entered_ms": 300001}, False),
+        ({"quarantine.eof_origin": "none"}, False),
+        ({"quarantine.receipt": "none"}, False),
+        ({"quarantine.accepted_ms": None}, False),
+        ({"stability.end_ms": None}, False),
+    ],
+)
+def test_clock_ordering_cannot_weaken_other_evidence(change, accepted):
+    """Changing an owner field is not permission to create a causal/EOF event."""
+    report = _report()
+    second = report["session_reconnect_no_pong"]
+    for path, value in change.items():
+        target = second
+        keys = path.split(".")
+        for key in keys[:-1]:
+            target = target[key]
+        target[keys[-1]] = value
+    try:
+        python_accepted = validate_suite(report, PROOF) == report
+    except (ValueError, TypeError):
+        python_accepted = False
+    assert python_accepted is accepted
+    assert _node_accepts(report) is accepted
+
+
+@pytest.mark.parametrize("name", ["no_eof", "stopped_after_consumption", "stopped_after_acceptance"])
+def test_clock_gap_never_upgrades_inconclusive_or_interrupted(name):
+    report = copy.deepcopy(CORPUS["reports"][name])
+    second = report["session_reconnect_no_pong"]
+    second["quarantine"]["entered_ms"] += 1
+    assert validate_suite(report, PROOF) == report
+    assert _node_accepts(report)
+    assert second["result"] != "recovered_120s"
