@@ -49,7 +49,11 @@ def test_allowlisted_outcomes(outcome):
         {"result": "not_run", "duration_ms": 1},
         {"result": "not_run", "reconnect_attempts": 1},
         {"result": "failed", "correlated_recovery_reads": 1},
-        {"result": "reconnected", "reconnect_attempts": 0, "correlated_recovery_reads": 1},
+        {
+            "result": "reconnected",
+            "reconnect_attempts": 0,
+            "correlated_recovery_reads": 1,
+        },
     ],
 )
 def test_invalid_evidence_fails_closed(changes):
