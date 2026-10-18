@@ -235,7 +235,7 @@ catégorie verified ou first_not_admissible égale au terminal, read_slot=0.
 
 | Nouvelle clé scalaire | Type, unité et borne | Null / cohérence |
 | --- | --- | --- |
-| `causal_ms` | Entier relatif T0 en ms, 0..360000, ou null. | Null si phase none ; avant première acceptation, phase opening et null obligatoire. Sinon <= fin fonctionnelle ; égal à entered_ms pour la quarantaine. |
+| `causal_ms` | Entier relatif T0 en ms, 0..360000, ou null. | Null si phase none ; avant première acceptation, phase opening et null obligatoire. Sinon <= fin fonctionnelle ; pour la quarantaine, `causal_ms <= quarantine.entered_ms` sous les bornes temporelles et preuves de provenance/EOF existantes, sans délai maximal supplémentaire inventé. |
 
 Les quatre objets nouveaux suivants ont **exactement** les clés de la table
 ci-dessous, tirée du [contrat fermé commun](../scripts/session_suite_v3_contract.json).
