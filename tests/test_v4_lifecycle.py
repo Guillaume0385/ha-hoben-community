@@ -640,3 +640,110 @@ def test_empty_rx_is_a_transport_loss_and_consumes_budget():
         await lifecycle.close()
 
     asyncio.run(scenario())
+
+
+def test_natural_witness_causality_generation_and_correlated_read():
+    """Real lifecycle/session owners, simulated EOF, and no reconstructed RX."""
+    async def scenario():
+        factory, backoff = Factory(), Backoff()
+        instant = [10.25]
+        lifecycle = V4Lifecycle(
+            user_guid="b" * 32,
+            session_factory=factory,
+            sleep=backoff,
+            clock=lambda: instant[0],
+        )
+        assert lifecycle.witness.established_generation is None
+        await lifecycle.connect()
+        first = lifecycle.witness
+        assert first.established_generation == 1
+        assert first.loss_monotonic_ms is None
+        assert first.verified_read_generation is None
+        with pytest.raises(FrozenInstanceError):
+            first.established_generation = 99
+
+        # A valid read must pass the real session's correlation owner.
+        old = factory.sessions[0]
+        transport = factory.transports[0]
+        await transport.rx_started.wait()
+        read = asyncio.create_task(lifecycle.request_v4_data())
+        await transport.data_sent.wait()
+        from tests.test_v4_session import synthetic_data_response
+
+        await old._handle_delimited_data_response(
+            DelimitedV4DataResponse(
+                synthetic_data_response(), exchange=old._pending_read
+            )
+        )
+        await read
+        assert lifecycle.witness.verified_read_generation == 1
+        assert lifecycle.witness.verified_read_sequence == 1
+        assert first.verified_read_generation is None
+
+        instant[0] = 11.5
+        transport.rx.set_exception(TransportEOF("synthetic-loss"))
+        assert await backoff.entered.get() == 1
+        lost = lifecycle.witness
+        assert lost.lost_generation == 1
+        assert lost.loss_monotonic_ms == 11500
+        assert lifecycle.state is SessionState.RECONNECTING
+
+        backoff.release.put_nowait(None)
+        await lifecycle.wait_connected()
+        second = lifecycle.witness
+        assert second.established_generation == 2
+        assert second.lost_generation == 1
+        assert second.loss_monotonic_ms == 11500
+        assert second.verified_read_generation is None
+        assert second.verified_read_sequence is None
+
+        # Old pending exchanges cannot be attributed to the new generation.
+        with pytest.raises(HobenProtocolError):
+            await old._handle_delimited_data_response(
+                DelimitedV4DataResponse(synthetic_data_response(), exchange=None)
+            )
+        assert lifecycle.witness.verified_read_generation is None
+
+        fresh = factory.sessions[1]
+        next_transport = factory.transports[1]
+        await next_transport.rx_started.wait()
+        new_read = asyncio.create_task(lifecycle.request_v4_data())
+        await next_transport.data_sent.wait()
+        await fresh._handle_delimited_data_response(
+            DelimitedV4DataResponse(
+                synthetic_data_response(), exchange=fresh._pending_read
+            )
+        )
+        await new_read
+        assert lifecycle.witness.verified_read_generation == 2
+        assert lifecycle.witness.verified_read_sequence == 1
+        await lifecycle.close()
+        assert lifecycle.witness == lifecycle.witness
+        assert_clean(factory)
+
+    asyncio.run(scenario())
+
+
+def test_natural_witness_has_no_loss_on_local_shutdown_or_unproven_opening():
+    async def scenario():
+        factory = Factory()
+        lifecycle = V4Lifecycle(user_guid="b" * 32, session_factory=factory)
+        await lifecycle.connect()
+        before = lifecycle.witness
+        assert before.established_generation == 1
+        assert before.loss_monotonic_ms is None
+        await lifecycle.close()
+        assert lifecycle.witness.loss_monotonic_ms is None
+        assert lifecycle.witness.verified_read_generation is None
+
+        broken = Factory(failures=[TransportTlsError("synthetic")])
+        other = V4Lifecycle(
+            user_guid="b" * 32, session_factory=broken, retry_delays=()
+        )
+        with pytest.raises(HobenTransportError):
+            await other.connect()
+        assert other.witness.established_generation is None
+        assert other.witness.loss_monotonic_ms is None
+        await other.close()
+
+    asyncio.run(scenario())
