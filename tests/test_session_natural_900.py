@@ -28,6 +28,7 @@ def report(**changes):
         report(
             result="reconnected",
             duration_ms=123000,
+            initial_continuous=False,
             reconnect_attempts=1,
             correlated_recovery_reads=1,
         ),
@@ -47,6 +48,7 @@ def test_allowlisted_outcomes(outcome):
         {"correlated_recovery_reads": 2},
         {"correlated_recovery_reads": True},
         {"result": "reconnected"},
+        {"result": "reconnected", "initial_continuous": True, "reconnect_attempts": 1, "correlated_recovery_reads": 1},
         {"result": "not_run", "duration_ms": 1},
         {"result": "not_run", "reconnect_attempts": 1},
         {"result": "failed", "correlated_recovery_reads": 1},
