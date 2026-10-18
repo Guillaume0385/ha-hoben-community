@@ -17,27 +17,31 @@ RESULTS = frozenset({"reconnected", "failed", "inconclusive", "not_run"})
 def validate_natural(report):
     """Closed allowlist; no identity, frames, or domestic register values."""
     if type(report) is not dict or set(report) != {
-        "scenario", "result", "duration_ms", "initial_continuous",
-        "reconnect_attempts", "correlated_recovery_reads",
+        "scenario",
+        "result",
+        "duration_ms",
+        "initial_continuous",
+        "reconnect_attempts",
+        "correlated_recovery_reads",
     }:
         raise ValueError("invalid_natural_report")
     if report["scenario"] != "session-natural-900" or report["result"] not in RESULTS:
         raise ValueError("invalid_natural_report")
     if (
-        type(report["duration_ms"]) is not int or
-        not 0 <= report["duration_ms"] <= 900000
+        type(report["duration_ms"]) is not int
+        or not 0 <= report["duration_ms"] <= 900000
     ):
         raise ValueError("invalid_natural_report")
     if type(report["initial_continuous"]) is not bool:
         raise ValueError("invalid_natural_report")
     if (
-        type(report["reconnect_attempts"]) is not int or
-        report["reconnect_attempts"] not in (0, 1)
+        type(report["reconnect_attempts"]) is not int
+        or report["reconnect_attempts"] not in (0, 1)
     ):
         raise ValueError("invalid_natural_report")
     if (
-        type(report["correlated_recovery_reads"]) is not int or
-        report["correlated_recovery_reads"] not in (0, 1)
+        type(report["correlated_recovery_reads"]) is not int
+        or report["correlated_recovery_reads"] not in (0, 1)
     ):
         raise ValueError("invalid_natural_report")
     if report["correlated_recovery_reads"] and (
@@ -49,7 +53,8 @@ def validate_natural(report):
     ):
         raise ValueError("invalid_natural_report")
     if report["result"] == "not_run" and (
-        report["duration_ms"] or report["reconnect_attempts"]
+        report["duration_ms"]
+        or report["reconnect_attempts"]
         or report["correlated_recovery_reads"]
     ):
         raise ValueError("invalid_natural_report")
@@ -97,8 +102,8 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
                     async with asyncio.timeout(RECOVERY_SECONDS):
                         await life.wait_connected()
                         if (
-                            life.snapshot.attempts != 2 or
-                            life.state is not SessionState.CONNECTED
+                            life.snapshot.attempts != 2
+                            or life.state is not SessionState.CONNECTED
                         ):
                             result = "failed"
                             break
@@ -124,11 +129,13 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
     finally:
         if life is not None:
             await life.close()
-    return validate_natural({
+    return validate_natural(
+        {
         "scenario": "session-natural-900",
         "result": result,
         "duration_ms": min(900000, max(0, int((clock() - started) * 1000))),
         "initial_continuous": continuous,
         "reconnect_attempts": attempts,
         "correlated_recovery_reads": recovery_reads,
-    })
+        }
+    )
