@@ -644,6 +644,7 @@ def test_empty_rx_is_a_transport_loss_and_consumes_budget():
 
 def test_natural_witness_causality_generation_and_correlated_read():
     """Real lifecycle/session owners, simulated EOF, and no reconstructed RX."""
+
     async def scenario():
         factory, backoff = Factory(), Backoff()
         instant = [10.25]
