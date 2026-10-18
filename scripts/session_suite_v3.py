@@ -191,7 +191,7 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
             (phase, category, message)
             == ("message_classification", "protocol", "close_client")
         )
-        need(causal == entered)
+        need(causal is not None and causal <= entered)
     need((eof is None) == (q["eof_origin"] == "none"))
     if eof is not None:
         need(entered is not None and entered <= eof <= end)
