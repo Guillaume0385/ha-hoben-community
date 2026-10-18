@@ -737,9 +737,7 @@ def test_natural_witness_has_no_loss_on_local_shutdown_or_unproven_opening():
         assert lifecycle.witness.verified_read_generation is None
 
         broken = Factory(failures=[TransportTlsError("synthetic")])
-        other = V4Lifecycle(
-            user_guid="b" * 32, session_factory=broken, retry_delays=()
-        )
+        other = V4Lifecycle(user_guid="b" * 32, session_factory=broken, retry_delays=())
         with pytest.raises(LifecycleExhaustedError):
             await other.connect()
         assert other.witness.established_generation is None
