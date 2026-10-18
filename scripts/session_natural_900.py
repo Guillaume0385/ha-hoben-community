@@ -34,15 +34,13 @@ def validate_natural(report):
         raise ValueError("invalid_natural_report")
     if type(report["initial_continuous"]) is not bool:
         raise ValueError("invalid_natural_report")
-    if (
-        type(report["reconnect_attempts"]) is not int
-        or report["reconnect_attempts"] not in (0, 1)
-    ):
+    if type(report["reconnect_attempts"]) is not int or report[
+        "reconnect_attempts"
+    ] not in (0, 1):
         raise ValueError("invalid_natural_report")
-    if (
-        type(report["correlated_recovery_reads"]) is not int
-        or report["correlated_recovery_reads"] not in (0, 1)
-    ):
+    if type(report["correlated_recovery_reads"]) is not int or report[
+        "correlated_recovery_reads"
+    ] not in (0, 1):
         raise ValueError("invalid_natural_report")
     if report["correlated_recovery_reads"] and (
         report["result"] != "reconnected" or report["reconnect_attempts"] != 1
@@ -131,11 +129,11 @@ async def observe_natural(make_lifecycle, *, clock=time.monotonic, sleep=asyncio
             await life.close()
     return validate_natural(
         {
-        "scenario": "session-natural-900",
-        "result": result,
-        "duration_ms": min(900000, max(0, int((clock() - started) * 1000))),
-        "initial_continuous": continuous,
-        "reconnect_attempts": attempts,
-        "correlated_recovery_reads": recovery_reads,
+            "scenario": "session-natural-900",
+            "result": result,
+            "duration_ms": min(900000, max(0, int((clock() - started) * 1000))),
+            "initial_continuous": continuous,
+            "reconnect_attempts": attempts,
+            "correlated_recovery_reads": recovery_reads,
         }
     )
