@@ -3,6 +3,7 @@
 The owner is the existing V4Lifecycle/V4Session. No Pong suppression, forced
 disconnection or fabricated opening/EOF event is part of this scenario.
 """
+
 import asyncio
 import time
 
