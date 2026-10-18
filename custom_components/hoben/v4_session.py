@@ -311,6 +311,7 @@ class V4Session:
         "_quarantine_permit",
         "_quarantine_checked_at",
         "_recovery_deadline_ms",
+        "_verified_read_sequence",
     )
 
     def __init__(
@@ -381,6 +382,7 @@ class V4Session:
         self._read_sent = False
         self._loss_event = asyncio.Event()
         self._retryable_loss = False
+        self._verified_read_sequence = 0
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
 
@@ -394,6 +396,16 @@ class V4Session:
                 yield
         finally:
             self._tx_operations.discard(task)
+
+    @property
+    def verified_read_sequence(self) -> int:
+        """Local count of correlated successful V4 reads, never their contents.
+
+        A new V4Session starts at zero. Only its RX owner may increment this
+        value after validating an exchange-bound response; a Pong, a rejected
+        response and a Modbus exception cannot increment it.
+        """
+        return self._verified_read_sequence
 
     @property
     def loss_is_retryable(self) -> bool:
@@ -1108,6 +1120,7 @@ class V4Session:
                 pending.set_exception(HobenModbusError(response.exception_code))
             else:
                 pending.set_result(response)
+                self._verified_read_sequence += 1
             return
         except Exception:
             if self._experiment is not None:
