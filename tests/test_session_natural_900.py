@@ -81,9 +81,7 @@ def test_quiet_actual_lifecycle_reaches_900_without_fake_reconnect():
             now += delay
             await asyncio.sleep(0)
 
-        result = await observe_natural(
-            lambda: life, clock=lambda: now, sleep=tick
-        )
+        result = await observe_natural(lambda: life, clock=lambda: now, sleep=tick)
         assert result == report(
             result="inconclusive",
             duration_ms=900000,
@@ -112,15 +110,11 @@ def test_actual_lifecycle_natural_loss_in_backoff_is_inconclusive():
             now += delay
             if not emitted:
                 emitted = True
-                factory.transports[0].rx.set_exception(
-                    TransportEOF("synthetic")
-                )
+                factory.transports[0].rx.set_exception(TransportEOF("synthetic"))
             for _ in range(40):
                 await asyncio.sleep(0)
 
-        result = await observe_natural(
-            lambda: life, clock=lambda: now, sleep=tick
-        )
+        result = await observe_natural(lambda: life, clock=lambda: now, sleep=tick)
         assert result["result"] == "inconclusive"
         assert result["initial_continuous"] is False
         assert result["correlated_recovery_reads"] == 0
@@ -148,15 +142,11 @@ def test_actual_lifecycle_reopened_transport_is_not_generation_proof():
             now += delay
             if not emitted:
                 emitted = True
-                factory.transports[0].rx.set_exception(
-                    TransportEOF("synthetic")
-                )
+                factory.transports[0].rx.set_exception(TransportEOF("synthetic"))
             for _ in range(100):
                 await asyncio.sleep(0)
 
-        result = await observe_natural(
-            lambda: life, clock=lambda: now, sleep=tick
-        )
+        result = await observe_natural(lambda: life, clock=lambda: now, sleep=tick)
         assert result["result"] == "inconclusive"
         assert result["reconnect_attempts"] == 1
         assert result["initial_continuous"] is False
@@ -200,9 +190,7 @@ def test_cancellation_propagates_after_closing_real_lifecycle():
             waiting.set()
             await gate.wait()
 
-        task = asyncio.create_task(
-            observe_natural(lambda: life, sleep=blocked_sleep)
-        )
+        task = asyncio.create_task(observe_natural(lambda: life, sleep=blocked_sleep))
         await waiting.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
