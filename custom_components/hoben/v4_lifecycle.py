@@ -329,7 +329,6 @@ class V4Lifecycle:
             or session.state is not SessionState.DISCONNECTED
         ):
             raise HobenInvalidInputError()
-        session._loss_clock = self._clock
         if cap is not None:
             if (
                 type(session) is not V4Session
@@ -350,6 +349,7 @@ class V4Lifecycle:
                         cap._timing.functional_deadline_ms - STABLE_FOR_MS,
                     )
                 )
+        session._loss_clock = self._clock
         return session
 
     def _check_private_recovery(self, *, delay_ms=0, accepted_session=None):
