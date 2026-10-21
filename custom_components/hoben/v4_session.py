@@ -312,6 +312,8 @@ class V4Session:
         "_quarantine_checked_at",
         "_recovery_deadline_ms",
         "_verified_read_sequence",
+        "_loss_clock",
+        "_loss_monotonic_ms",
     )
 
     def __init__(
@@ -383,6 +385,8 @@ class V4Session:
         self._loss_event = asyncio.Event()
         self._retryable_loss = False
         self._verified_read_sequence = 0
+        self._loss_clock = time.monotonic
+        self._loss_monotonic_ms: int | None = None
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
 
@@ -411,6 +415,11 @@ class V4Session:
     def loss_is_retryable(self) -> bool:
         """True only for an observed transport loss, never caller cancellation."""
         return self._retryable_loss
+
+    @property
+    def loss_monotonic_ms(self) -> int | None:
+        """Transport-owner timestamp; absent for unproven or local losses."""
+        return self._loss_monotonic_ms
 
     async def wait_lost(self) -> None:
         """Notify lifecycle ownership before RX cleanup waits for an active TX.
@@ -702,6 +711,7 @@ class V4Session:
         self._loss_event.clear()
         self._unavailable.clear()
         self._retryable_loss = False
+        self._loss_monotonic_ms = None
         self._rx_task = None
         self._transition(SessionState.CONNECTING)
         self._opening_task = asyncio.current_task()
@@ -844,6 +854,13 @@ class V4Session:
                 self._rx_error = HobenTransportError()
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
+            if self._retryable_loss:
+                try:
+                    instant = self._loss_clock()
+                    if math.isfinite(instant) and instant >= 0:
+                        self._loss_monotonic_ms = int(instant * 1000)
+                except (TypeError, ValueError, OverflowError):
+                    pass
             self._rx_error = HobenTransportError()
         except HobenError as failure:
             self._rx_error = failure
