@@ -814,6 +814,7 @@ def test_fixed_read_exact_tx_typed_result_and_single_waiter(caplog):
         event = DelimitedV4DataResponse(synthetic_data_response(), exchange=exchange)
         await session._handle_delimited_data_response(event)
         result = await task
+        assert session.verified_read_sequence == 1
         assert (result.transaction_id, result.unit_id, result.function_code) == (
             0xFFFF,
             1,
@@ -1137,6 +1138,26 @@ def test_read_and_pong_share_tx_lock_and_response_can_arrive_during_drain():
         assert transport.write.await_count == 2
         assert transport.read.await_count == 2
         assert session._pending_read is None
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_verified_read_witness_rejects_uncorrelated_and_ping_only():
+    async def scenario():
+        session, transport = await connected_ping_session()
+        assert session.verified_read_sequence == 0
+        await session._handle_delimited_ping(DelimitedV4Message.PING)
+        assert session.verified_read_sequence == 0
+        task, exchange = await start_synthetic_read(session, transport)
+        assert session.verified_read_sequence == 0
+        with pytest.raises(HobenProtocolError):
+            await session._handle_delimited_data_response(
+                DelimitedV4DataResponse(synthetic_data_response(), exchange=object())
+            )
+        with pytest.raises(HobenProtocolError):
+            await task
+        assert session.verified_read_sequence == 0
         await session.close()
 
     asyncio.run(scenario())

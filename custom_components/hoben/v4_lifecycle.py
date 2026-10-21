@@ -7,6 +7,7 @@ about server behavior. A quiet RX owner has no application inactivity timer.
 
 import asyncio
 import math
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
@@ -71,6 +72,17 @@ class LifecycleSnapshot:
     failure: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LifecycleWitness:
+    """Opaque local evidence only; no identity, frames, or household readings."""
+
+    established_generation: int | None = None
+    lost_generation: int | None = None
+    loss_monotonic_ms: int | None = None
+    verified_read_generation: int | None = None
+    verified_read_sequence: int | None = None
+
+
 class V4Lifecycle:
     """Own fresh V4Session attempts and a finite, non-resetting retry budget.
 
@@ -99,6 +111,9 @@ class V4Lifecycle:
         "_failure",
         "_stopping",
         "_quarantine",
+        "_clock",
+        "_witness",
+        "_generation",
     )
 
     def __init__(
@@ -109,6 +124,7 @@ class V4Lifecycle:
         retry_delays: tuple[float, ...] = (1.0, 2.0, 4.0),
         session_factory: Callable[..., V4Session] = V4Session,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
@@ -120,6 +136,7 @@ class V4Lifecycle:
                 or len(retry_delays) > 8
                 or not callable(session_factory)
                 or not callable(sleep)
+                or not callable(clock)
             ):
                 raise HobenInvalidInputError()
             for delay in retry_delays:
@@ -135,6 +152,9 @@ class V4Lifecycle:
                 raise HobenInvalidInputError()
             _quarantine._claimed = True
         self._quarantine = _quarantine
+        self._clock = clock
+        self._witness = LifecycleWitness()
+        self._generation = 0
         self._user_guid = user_guid
         self._device_guid = device_guid
         self._factory = session_factory
@@ -170,6 +190,31 @@ class V4Lifecycle:
             replace(self._snapshot, state=self.state)
             if self._quarantine
             else self._snapshot
+        )
+
+    @property
+    def witness(self) -> LifecycleWitness:
+        """Latest immutable owner-origin evidence, never a polling inference."""
+        return self._witness
+
+    def _note_natural_loss(self, session: V4Session, error: HobenError) -> None:
+        """Record a witnessed loss before cleanup, never a local close/timeout."""
+        if (
+            self._stopping
+            or self._quarantine is not None
+            or session is not self._session
+            or self._witness.established_generation is None
+            or type(error) is not HobenTransportError
+            or not session.loss_is_retryable
+        ):
+            return
+        at_ms = session.loss_monotonic_ms
+        if at_ms is None:
+            return
+        self._witness = replace(
+            self._witness,
+            lost_generation=self._witness.established_generation,
+            loss_monotonic_ms=at_ms,
         )
 
     @property
@@ -235,7 +280,22 @@ class V4Lifecycle:
         session = self._session
         if self.state is not SessionState.CONNECTED or session is None:
             raise self._failure or SessionStateError()
-        return await session.request_v4_data(timeout=timeout)
+        response = await session.request_v4_data(timeout=timeout)
+        # The checked owner and immutable generation must still match. A later
+        # session, an invalid result or a cancelled caller never claims a read.
+        if (
+            self._stopping
+            or session is not self._session
+            or self.state is not SessionState.CONNECTED
+            or session.verified_read_sequence <= 0
+        ):
+            return response
+        self._witness = replace(
+            self._witness,
+            verified_read_generation=self._witness.established_generation,
+            verified_read_sequence=session.verified_read_sequence,
+        )
+        return response
 
     async def _cleanup(self, *, _quarantine_permit=None) -> None:
         session = self._session
@@ -289,6 +349,7 @@ class V4Lifecycle:
                         cap._timing.functional_deadline_ms - STABLE_FOR_MS,
                     )
                 )
+        session._loss_clock = self._clock
         return session
 
     def _check_private_recovery(self, *, delay_ms=0, accepted_session=None):
@@ -413,6 +474,13 @@ class V4Lifecycle:
                         if attempt > 1:
                             self._check_private_recovery(accepted_session=session)
                     self._device_guid = session.device_guid_for_persistence
+                    self._generation += 1
+                    self._witness = replace(
+                        self._witness,
+                        established_generation=self._generation,
+                        verified_read_generation=None,
+                        verified_read_sequence=None,
+                    )
                     self._snapshot = replace(
                         self._snapshot, state=SessionState.CONNECTED, failure=None
                     )
@@ -428,6 +496,8 @@ class V4Lifecycle:
                 except Exception:
                     error = HobenProtocolError()
                 self._connected.clear()
+                if opened:
+                    self._note_natural_loss(session, error)
                 # Exact classification excludes application deadlines (including
                 # read timeouts), protocol ambiguity, auth and Modbus errors.
                 retryable = type(error) is HobenTransportError and (

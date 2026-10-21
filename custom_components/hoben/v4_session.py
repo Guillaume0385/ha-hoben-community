@@ -8,6 +8,7 @@ budget opts into the owner's local experimental handoff hypothesis.
 
 import asyncio
 import math
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -311,6 +312,9 @@ class V4Session:
         "_quarantine_permit",
         "_quarantine_checked_at",
         "_recovery_deadline_ms",
+        "_verified_read_sequence",
+        "_loss_clock",
+        "_loss_monotonic_ms",
     )
 
     def __init__(
@@ -381,6 +385,9 @@ class V4Session:
         self._read_sent = False
         self._loss_event = asyncio.Event()
         self._retryable_loss = False
+        self._verified_read_sequence = 0
+        self._loss_clock = time.monotonic
+        self._loss_monotonic_ms: int | None = None
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
 
@@ -396,9 +403,24 @@ class V4Session:
             self._tx_operations.discard(task)
 
     @property
+    def verified_read_sequence(self) -> int:
+        """Local count of correlated successful V4 reads, never their contents.
+
+        A new V4Session starts at zero. Only its RX owner may increment this
+        value after validating an exchange-bound response; a Pong, a rejected
+        response and a Modbus exception cannot increment it.
+        """
+        return self._verified_read_sequence
+
+    @property
     def loss_is_retryable(self) -> bool:
         """True only for an observed transport loss, never caller cancellation."""
         return self._retryable_loss
+
+    @property
+    def loss_monotonic_ms(self) -> int | None:
+        """Transport-owner timestamp; absent for unproven or local losses."""
+        return self._loss_monotonic_ms
 
     async def wait_lost(self) -> None:
         """Notify lifecycle ownership before RX cleanup waits for an active TX.
@@ -690,6 +712,7 @@ class V4Session:
         self._loss_event.clear()
         self._unavailable.clear()
         self._retryable_loss = False
+        self._loss_monotonic_ms = None
         self._rx_task = None
         self._transition(SessionState.CONNECTING)
         self._opening_task = asyncio.current_task()
@@ -832,6 +855,13 @@ class V4Session:
                 self._rx_error = HobenTransportError()
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
+            if self._retryable_loss:
+                try:
+                    instant = self._loss_clock()
+                    if math.isfinite(instant) and instant >= 0:
+                        self._loss_monotonic_ms = int(instant * 1000)
+                except (TypeError, ValueError, OverflowError):
+                    pass
             self._rx_error = HobenTransportError()
         except HobenError as failure:
             self._rx_error = failure
@@ -1108,6 +1138,7 @@ class V4Session:
                 pending.set_exception(HobenModbusError(response.exception_code))
             else:
                 pending.set_result(response)
+                self._verified_read_sequence += 1
             return
         except Exception:
             if self._experiment is not None:
