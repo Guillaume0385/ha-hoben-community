@@ -571,3 +571,7 @@ vers `main`. Cette future PR exige CODEX REVIEW, MANAGER, CI et les validations
 conditionnelles applicables au SHA exact. Un résultat expérimental ne remplace
 pas le gate stable ; ses anciennes politiques doivent être revalidées avant
 usage. Cette documentation ne prépare ni n'autorise cette promotion.
+
+## Modalités actuelles de lancement des agents
+
+Voir [le workflow de coordination](manager-dev-workflow.md). Les mentions historiques « CODEX DEV » dans les cycles de développement expérimental décrivent le rôle DEV ; elles n'imposent plus son déclenchement automatique. MANAGER attribue une seule tâche à CHAT DEV (lancement manuel avec prompt fourni au propriétaire) ou exceptionnellement à CODEX DEV pour une complexité élevée. Les règles de revue du HEAD, quatre checks CI, gates live et branche `experimental` restent inchangées. L'Issue #112 conserve la référence technique V4 ; l'Issue #81 est historique et ne doit pas être réactivée automatiquement.
