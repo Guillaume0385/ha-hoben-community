@@ -208,12 +208,8 @@ class V4Lifecycle:
             or not session.loss_is_retryable
         ):
             return
-        try:
-            instant = self._clock()
-            if not math.isfinite(instant) or instant < 0:
-                return
-            at_ms = int(instant * 1000)
-        except (TypeError, ValueError, OverflowError):
+        at_ms = session.loss_monotonic_ms
+        if at_ms is None:
             return
         self._witness = replace(
             self._witness,
@@ -333,6 +329,7 @@ class V4Lifecycle:
             or session.state is not SessionState.DISCONNECTED
         ):
             raise HobenInvalidInputError()
+        session._loss_clock = self._clock
         if cap is not None:
             if (
                 type(session) is not V4Session
