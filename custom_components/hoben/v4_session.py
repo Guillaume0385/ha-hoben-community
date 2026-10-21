@@ -8,6 +8,7 @@ budget opts into the owner's local experimental handoff hypothesis.
 
 import asyncio
 import math
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
