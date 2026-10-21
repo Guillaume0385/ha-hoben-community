@@ -793,3 +793,7 @@ A feature is complete only when:
 ### Changelog obligatoire
 
 Chaque PR met à jour [CHANGELOG.md](CHANGELOG.md) ou justifie l'absence d'impact livrable ; MANAGER vérifie ce point. Les entrées historiques non vérifiées ne doivent jamais être présentées comme des PR fusionnées.
+
+## Orchestration des agents — mode manuel CHAT DEV
+
+Pour le pilotage actuel, consulter [le workflow MANAGER / CHAT DEV / CODEX DEV](docs/manager-dev-workflow.md). MANAGER surveille automatiquement GitHub et fournit un prompt copiable ; CHAT DEV est lancé **manuellement** par le propriétaire, CODEX DEV est réservé aux tâches complexes. Aucune automatisation DEV ne doit être déclenchée par simple passage à `state:ready` ; CODEX DEV peut être activé explicitement par MANAGER uniquement après autorisation du propriétaire et attribution vérifiée d'une tâche complexe. Ces modalités de lancement ne modifient aucune règle de revue, sécurité, branche, CI ou validation réelle définie ailleurs dans ce fichier.
