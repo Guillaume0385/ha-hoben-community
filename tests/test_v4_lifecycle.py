@@ -746,3 +746,45 @@ def test_natural_witness_has_no_loss_on_local_shutdown_or_unproven_opening():
         await other.close()
 
     asyncio.run(scenario())
+
+
+def test_natural_loss_timestamp_survives_delayed_lifecycle_wakeup(monkeypatch):
+    """The RX owner timestamps EOF before a delayed lifecycle can observe it."""
+
+    async def scenario():
+        factory, backoff = Factory(), Backoff()
+        instant = [12.0]
+        reached = asyncio.Event()
+        release = asyncio.Event()
+        original = V4Session.wait_lost
+
+        async def delayed_wait(self):
+            try:
+                await original(self)
+            except HobenTransportError:
+                reached.set()
+                await release.wait()
+                raise
+
+        monkeypatch.setattr(V4Session, "wait_lost", delayed_wait)
+        lifecycle = V4Lifecycle(
+            user_guid="b" * 32,
+            session_factory=factory,
+            sleep=backoff,
+            clock=lambda: instant[0],
+        )
+        await lifecycle.connect()
+        transport = factory.transports[0]
+        await transport.rx_started.wait()
+        transport.rx.set_exception(TransportEOF("synthetic-loss"))
+        await reached.wait()
+        assert factory.sessions[0].loss_monotonic_ms == 12000
+        instant[0] = 91.0  # Lifecycle resumes long after owner-observed EOF.
+        release.set()
+        assert await backoff.entered.get() == 1
+        assert lifecycle.witness.loss_monotonic_ms == 12000
+        assert lifecycle.witness.lost_generation == 1
+        await lifecycle.close()
+        assert_clean(factory)
+
+    asyncio.run(scenario())
