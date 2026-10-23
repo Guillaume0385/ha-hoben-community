@@ -1,5 +1,25 @@
 # Suite « Tests expérimentaux session » — L6bis livré, correction L6ter candidate
 
+## Parcours minimal courant — Issue #112
+
+La [consigne NOPONG-MINIMAL-002](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6327710447)
+réutilise le collecteur et le gestionnaire partagés sans nouveau reçu ni schéma.
+Depuis l'acceptation initiale, les Pong sont normaux avant 120 s, puis inhibés
+sur cette seule génération. EOF effectivement observé et nouvelle ouverture
+doivent précéder 240 s ; 120 s avec Pong et lecture corrélée sur la même nouvelle
+génération sont nécessaires au succès. L'observation finit au plus à 360 s,
+ou plus tôt si le plafond de processus existant l'impose. Aucun temps n'est
+réinitialisé à la reprise. Ce chemin réduit remplace l'attente fonctionnelle
+historique de 180 s après inhibition décrite plus bas.
+
+Le rapport v2 et ses validateurs historiques restent inchangés. Type partiel,
+réponse invalide, perte supplémentaire ou preuve manquante ne donnent aucun
+succès ; aucun raccordement de quarantaine ou diagnostic v3 n'est ajouté.
+Les plafonds externes 360/600/1020 s, les budgets de lectures et H1/H2 restent
+inchangés. `quarantine-installation` bloque toujours le test réel : sa modification
+exige un arbitrage séparé. Tests réels NOT RUN ; étape 7 non validée, étape 8
+suspendue. Les sections suivantes conservent les contrats et l'historique.
+
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
 `session-300`, puis `session-reconnect-no-pong`. L'étape 8 est suspendue.

@@ -231,8 +231,17 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
     phase = "opening"
     try:
         # Leave ten seconds of the fixed 600 s cap for shared-owner teardown.
-        async with asyncio.timeout(590):
+        async with asyncio.timeout(590) as observation:
             await life.connect()
+            first_at = policy.first_opened_at
+            deadline = started + 590
+            if first_at is not None:
+                # Functional time starts at strict acceptance. Keep the existing
+                # process/cleanup caps; this narrower scenario cannot extend them.
+                deadline = min(deadline, first_at + 360)
+                observation.reschedule(
+                    asyncio.get_running_loop().time() + max(0, deadline - clock())
+                )
             phase = "lifecycle_transition"
             stop = asyncio.create_task(life.wait_stopped())
             while True:
@@ -240,13 +249,17 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                 first_at = policy.first_opened_at
                 eof_at = policy.first_eof_after_suppression_at
                 first_generation = policy.first_generation
+                recovered = (
+                    eof_at is not None
+                    and budget.usable
+                    and budget.connected_generation != first_generation
+                    and budget.accepted_at is not None
+                    and life.state is SessionState.CONNECTED
+                )
                 if budget.last_lost_generation not in {None, first_generation}:
                     result, terminal = "inconclusive", "stability_lost"
                     break
-                if first_at is not None and (
-                    (eof_at is None and now >= first_at + 300)
-                    or (eof_at is not None and eof_at > first_at + 300)
-                ):
+                if first_at is not None and eof_at is None and now >= first_at + 240:
                     result = "inconclusive"
                     terminal = (
                         "not_exercised" if not policy.suppressed else "no_disconnect"
@@ -254,17 +267,27 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                     break
                 if stop.done():
                     stop.result()
-                if now - started >= 590:
+                if (
+                    first_at is not None
+                    and eof_at is not None
+                    and (
+                        eof_at >= first_at + 240
+                        or (not recovered and now >= first_at + 240)
+                        or (recovered and budget.accepted_at >= first_at + 240)
+                    )
+                ):
+                    result, terminal = "inconclusive", "reopen_failed"
+                    break
+                if now >= deadline:
                     result, terminal = "interrupted", "timeout"
                     break
-                if (
-                    eof_at is not None
-                    and budget.usable
-                    and budget.connected_generation != first_generation
-                    and life.state is SessionState.CONNECTED
-                ):
+                if recovered:
                     recovery_generation = budget.connected_generation
-                    stable_ms = min(120000, int((now - budget.accepted_at) * 1000))
+                    stable_ms = (
+                        120000
+                        if now >= budget.accepted_at + 120
+                        else int((now - budget.accepted_at) * 1000)
+                    )
                     recovery_pongs = budget.pongs - budget.generation_pongs
                     if stable_ms == 120000 and recovery_reads and recovery_pongs:
                         result, terminal = "recovered_120s", "verified"
@@ -276,11 +299,11 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                     and now >= budget.next_read_at
                 ):
                     generation = budget.connected_generation
-                    deadline = started + 590
-                    if eof_at is None and first_at is not None:
-                        deadline = min(deadline, first_at + 300)
+                    read_deadline = deadline
+                    if not recovered and first_at is not None:
+                        read_deadline = min(read_deadline, first_at + 240)
                     read = asyncio.create_task(
-                        life.request_v4_data(timeout=min(30, deadline - now))
+                        life.request_v4_data(timeout=min(30, read_deadline - now))
                     )
                     phase = "scheduled_read"
                     try:
@@ -295,6 +318,8 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                             eof_at is not None
                             and generation != first_generation
                             and budget.connected_generation == generation
+                            and budget.usable
+                            and life.state is SessionState.CONNECTED
                         ):
                             recovery_reads += 1
                     except HobenTransportError:
@@ -304,16 +329,21 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                             read.cancel()
                         await asyncio.gather(read, return_exceptions=True)
                     phase = "lifecycle_transition"
-                # Poll observation state, never poll the transport. Cap each wait
-                # at the already fixed process deadline, including recovery.
-                await sleep(min(1, max(0, 590 - (clock() - started))))
+                # Observe owner callbacks, never poll TLS. Wake at the exact
+                # functional boundary or stability end, including fractional T0.
+                wake_at = deadline
+                if first_at is not None and not recovered:
+                    wake_at = min(wake_at, first_at + 240)
+                if recovered and stable_ms < 120000:
+                    wake_at = min(wake_at, budget.accepted_at + 120)
+                await sleep(min(1, max(0, wake_at - clock())))
     except asyncio.CancelledError:
         raise
     except (TimeoutError, HobenTimeoutError):
         result, terminal = "interrupted", "timeout"
         if (
             policy.first_opened_at is not None
-            and clock() >= policy.first_opened_at + 300
+            and clock() >= policy.first_opened_at + 240
             and policy.first_eof_after_suppression_at is None
         ):
             result = "inconclusive"
