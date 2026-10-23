@@ -2,6 +2,12 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #112, NOPONG-MINIMAL-002 : le collecteur de reconnexion existant exige
+  EOF et nouvelle ouverture avant T+240, puis 120 s sur la même génération,
+  avec fin fonctionnelle au plus T+360 depuis l'acceptation initiale. Tests
+  hors ligne du vrai gestionnaire, frontières, Pong, lectures et refus sûrs.
+  Rapport v2, budgets externes et verrou d'admission conservés ; aucun test réel.
+
 - Issue #81, tranche 7/8-L6ter : correction contractuelle candidate séparant les
   temps de livraison RX et de décision de parsing/validation, sans nouvelle
   clé/version. Rejet possible après la dernière livraison ou sur des octets
