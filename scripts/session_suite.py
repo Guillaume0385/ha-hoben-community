@@ -334,7 +334,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                 wake_at = deadline
                 if first_at is not None and not recovered:
                     wake_at = min(wake_at, first_at + 240)
-                if recovered and stable_ms < 120000:
+                if recovered and stable_ms < 120000 and budget.accepted_at is not None:
                     wake_at = min(wake_at, budget.accepted_at + 120)
                 await sleep(min(1, max(0, wake_at - clock())))
     except asyncio.CancelledError:

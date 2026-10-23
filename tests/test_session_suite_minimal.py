@@ -16,11 +16,18 @@ class TimedHarness(Harness):
     """Deliver synthetic events at exact times relative to strict acceptance."""
 
     def __init__(
-        self, events=(), *, mode="no_disconnect", opening_delay=0, bad_read=False
+        self,
+        events=(),
+        *,
+        mode="no_disconnect",
+        opening_delay=0,
+        bad_read=False,
+        eof_on_read=False,
     ):
         super().__init__(mode)
         self.events = list(events)
         self.opening_delay, self.bad_read = opening_delay, bad_read
+        self.eof_on_read = eof_on_read
         # The test owns the event schedule, not the inherited EOF at T+160.
         self.first_eof_sent = self.second_eof_sent = True
 
@@ -38,6 +45,8 @@ class TimedHarness(Harness):
                     data = bytearray(response())
                     data[1] = 0
                     self.second_streams[-1].chunks = (bytes(data),)
+                elif self.eof_on_read:
+                    self.second_streams[-1].chunks = (response(), b"")
             return session
 
         life._factory = timed_factory
@@ -139,6 +148,14 @@ def test_corrupted_response_on_recovered_session_is_not_a_valid_read():
     assert report["result"] == "not_successful" and second["terminal"] == "protocol"
     assert second["recovery_reads_ok"] == 0
     assert second["failure_phase"] == "response_validation"
+
+
+def test_recovery_loss_while_a_valid_read_returns_is_not_an_internal_error():
+    h = TimedHarness([(160, 0, b"")], eof_on_read=True)
+    report, second = asyncio.run(observe(h))
+    assert report["result"] == "not_successful"
+    assert second["terminal"] == "stability_lost"
+    assert second["recovery_reads_ok"] == 0
 
 
 @pytest.mark.parametrize(
