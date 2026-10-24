@@ -20,6 +20,13 @@ The README should contain a visible disclaimer:
 
 ## Goals
 
+L'[arbitrage propriétaire #119](https://github.com/Guillaume0385/ha-hoben-community/issues/119)
+du 24/10/2026 autorise une première PR d'infrastructure issue de `main` et ciblant
+`main`, sans promotion du runtime expérimental. Le [bouton manuel](docs/hoben-manual-workflow.md)
+reste NOT RUN sur main et sans collecteur en phase 1. Après fusion MANAGER,
+une seconde PR reportera l'interface et raccordera les scénarios sur experimental.
+Aucune activation réelle de main ni reprise de l'étape 8 HA par cette installation.
+
 The project aims to provide a stable Home Assistant integration for Hoben pellet stoves that communicates through the same remote service used by MyHOBEN, without requiring hardware modification or a contact relay.
 
 The project should:
@@ -424,7 +431,10 @@ and must not override current experimental environment policies.
 
 ### Historique : ancien gate main, non applicable aux PR experimental
 
-`.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
+Retiré en phase 1 de #119 ; définition figée dans
+`tests/fixtures/retired_workflows/manager-live-hoben.yml`. Le contrat suivant est
+historique et ne doit pas être réinstallé comme procédure courante.
+The former workflow required installation on protected `main`.
 Only `pull_request_target: labeled`, the exact label `manager-live-hoben`, exact
 actor `Guillaume0385`, a non-draft PR targeting `main` and the exact same head
 repository `Guillaume0385/ha-hoben-community` can authorize execution. Forks,

@@ -154,7 +154,9 @@ def test_api_error_is_sanitized_and_fail_closed(event):
 
 def test_workflow_has_manual_only_trigger_separate_gate_and_exact_exports():
     workflow = yaml.load(
-        (ROOT / ".github/workflows/opened-client-boundary.yml").read_text(),
+        (
+            ROOT / "tests/fixtures/retired_workflows/opened-client-boundary.yml"
+        ).read_text(),
         Loader=yaml.BaseLoader,
     )
     assert set(workflow["on"]) == {"workflow_dispatch"}

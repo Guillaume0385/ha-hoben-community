@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — infrastructure Actions (#119, phase 1)
+
+- Retrait des trois anciennes voies live main ; définitions figées conservées
+  hors d'Actions pour leurs régressions offline. Installation du bouton manuel
+  avec quatre scénarios, contrôles acteur/ref/SHA et refus des reruns. Aucun
+  runtime, secret Hoben ni test réel en phase 1 : les choix restent NOT RUN.
+  Report/raccordement experimental après validation/fusion MANAGER de cette PR ;
+  aucune promotion du protocole ni activation main.
+
 ## v0.1.0-beta1 — First public beta
 
 First HACS-testable beta of the unofficial community Hoben integration.

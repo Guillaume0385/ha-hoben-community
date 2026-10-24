@@ -1,5 +1,10 @@
 # Campagne exploratoire H1/H2 de #48 — GitHub Actions uniquement
 
+> **Retrait de la voie main, #119 phase 1 (24/10/2026).** Le workflow décrit ici
+> est retiré d'Actions ; sa copie figée est une fixture hors ligne. Aucune étape
+> ou commande ci-dessous n'autorise son lancement ou sa réinstallation. Voir le
+> [point d'entrée manuel et ses dépendances](hoben-manual-workflow.md).
+
 > **Portée historique mise à jour (décision propriétaire du 9 octobre 2026).**
 > Les sections ci-dessous décrivent les sondes H1/H2 et l'ancien mécanisme
 > `main` / `workflow_dispatch`. Elles **ne sont plus la procédure de

@@ -27,6 +27,13 @@ not authorize removing them.
 
 ## Repository and package architecture
 
+Exception propriétaire limitée à l'[Issue #119](https://github.com/Guillaume0385/ha-hoben-community/issues/119),
+arbitrage prioritaire du 24/10/2026 : première PR issue de `main` et ciblant `main`
+pour retirer les anciens workflows live et installer le bouton manuel sans
+runtime ni secret Hoben ; seconde PR sur `experimental` seulement après sa fusion
+par MANAGER. Voir [les limites de la phase 1](docs/hoben-manual-workflow.md).
+Cette exception ne promeut aucun protocole et n'autorise aucun test réel par DEV.
+
 Keep the Home Assistant integration under exactly one HACS integration directory:
 
 ```text
@@ -450,6 +457,10 @@ courant n'autorise jamais le téléversement de captures brutes. Voir le
 [contrat courant](docs/experimental-protocol-workflow.md).
 
 ### Validation expérimentale autonome
+
+Sur `main`, le [point d'entrée #119](docs/hoben-manual-workflow.md) reste NOT RUN.
+Le contrat suivant décrit les voies d'`experimental` avant leur report phase 2 ;
+il ne réactive aucun workflow retiré de `main`.
 
 MANAGER peut fusionner sur `experimental` après revue du SHA exact et CI, sous
 réserve des instructions explicites du propriétaire. Une fusion n'autorise pas
