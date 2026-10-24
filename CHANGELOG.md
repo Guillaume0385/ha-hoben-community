@@ -2,6 +2,12 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #112, ADMISSION-MINIMAL-003 : retrait du seul arrêt inconditionnel
+  `quarantine-installation` et de sa dépendance de préflight. Admission normale
+  conservée : décision MANAGER, provenance/CI exactes, claim anti-rejeu,
+  environnement et recheck avant secrets. Tests hors ligne ; aucun lancement
+  réel par DEV, aucun changement du scénario, des gates ou des budgets.
+
 - Issue #112, NOPONG-MINIMAL-002 : le collecteur de reconnexion existant exige
   EOF et nouvelle ouverture avant T+240, puis 120 s sur la même génération,
   avec fin fonctionnelle au plus T+360 depuis l'acceptation initiale. Tests

@@ -334,6 +334,20 @@ test("suite: fixed contract, independent claim and read-only recheck", async () 
   assert(Object.isFrozen(suiteGate.CONTRACT.scenarios));
 });
 
+test("suite stays PENDING APPROVAL until a fresh independent approval is verified", async () => {
+  const a = suiteSetup(); requireIndependentReviewer(a);
+  const fresh = structuredClone(a.history[0]);
+  assert.equal((await suiteGate.verify(a)).status, "PENDING APPROVAL");
+  assert.equal(a.writes, 1);
+  a.history.splice(0);
+  await assert.rejects(suiteGate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history.push({...fresh, created_at: "2026-10-09T08:00:00Z"});
+  await assert.rejects(suiteGate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history.splice(0, 1, fresh);
+  assert.equal((await suiteGate.verify({...a, recheck: true})).status, "approved");
+  assert.equal(a.writes, 1); // Waiting/recheck never create or release another claim.
+});
+
 for (const [name, modify] of Object.entries(refused)) {
   test("suite refuses before claim: " + name, async () => {
     const a = suiteSetup(); modify(a);
