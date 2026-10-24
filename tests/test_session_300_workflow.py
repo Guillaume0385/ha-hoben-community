@@ -34,7 +34,9 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
     assert jobs["admission"]["needs"] == "dry-run"
     assert jobs["collect"]["needs"] == "admission"
     assert jobs["collect"]["environment"] == "hoben-experimental"
-    assert "github.run_attempt == 1" in jobs["dry-run"]["if"]
+    assert (
+        "github.run_attempt >= 1 && github.run_attempt <= 50" in jobs["dry-run"]["if"]
+    )
     secret_steps = []
     for name, job in jobs.items():
         assert job["permissions"].get("id-token") != "write"
@@ -87,7 +89,8 @@ def test_suite_keeps_preflight_admission_and_recheck_before_secrets():
     assert " ".join(jobs["dry-run"]["if"].split()) == (
         "github.event_name == 'push' && github.ref == 'refs/heads/experimental' && "
         "github.actor == 'Guillaume0385' && "
-        "github.triggering_actor == 'Guillaume0385' && github.run_attempt == 1"
+        "github.triggering_actor == 'Guillaume0385' && "
+        "github.run_attempt >= 1 && github.run_attempt <= 50"
     )
     assert "needs" not in jobs["dry-run"]
     assert jobs["admission"]["needs"] == "dry-run"

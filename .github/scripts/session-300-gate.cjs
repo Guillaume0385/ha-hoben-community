@@ -63,11 +63,13 @@ function workflowPath(value, file, allowedRefs) {
   return name === file && (refs.length === 0 || refs.length === 1 && allowedRefs.includes(refs[0]));
 }
 
-async function mergedPush(github, context, env) {
+async function mergedPush(github, context, env, nativeRerun = false) {
   const p = context.payload || {};
   need(context.eventName === "push" && context.ref === "refs/heads/experimental" &&
     context.actor === "Guillaume0385" && env.GITHUB_ACTOR === context.actor &&
-    env.GITHUB_TRIGGERING_ACTOR === context.actor && env.GITHUB_RUN_ATTEMPT === "1" &&
+    env.GITHUB_TRIGGERING_ACTOR === context.actor &&
+    (env.GITHUB_RUN_ATTEMPT === "1" || nativeRerun &&
+      /^(?:[2-9]|[1-4][0-9]|50)$/.test(env.GITHUB_RUN_ATTEMPT || "")) &&
     env.GITHUB_WORKFLOW_REF === WORKFLOW && env.GITHUB_WORKFLOW_SHA === context.sha &&
     env.GITHUB_REPOSITORY === push.REPOSITORY && env.GITHUB_REF === context.ref &&
     env.GITHUB_SHA === context.sha && SHA.test(context.sha) && positive(context.runId) &&
@@ -92,12 +94,20 @@ async function dryRun({ github, context, env = process.env }) {
   return result; // Secret-free: no identity, certificate, transport or network I/O.
 }
 
-async function suiteDryRun(options) {
-  return {...await dryRun(options), scenario: "session-suite"};
+async function suiteDryRun({github, context, env = process.env}) {
+  return {...await mergedPush(github, context, env, true), scenario: "session-suite"};
 }
 
-async function successfulPreflight(github, context, env, recheck) {
+async function successfulPreflight(github, context, env, recheck, nativeRerun) {
   const {data: run} = await github.rest.actions.getWorkflowRun({...API, run_id: context.runId});
+  if (nativeRerun && env.GITHUB_RUN_ATTEMPT !== "1") {
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+      {...API, run_id: context.runId, filter: "latest", per_page: 100});
+    const previousJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
+      {...API, run_id: context.runId, attempt_number: Number(env.GITHUB_RUN_ATTEMPT) - 1, per_page: 100});
+    return rerun.authorizeAttempt({context, env, run, jobs, previousJobs, workflow: WORKFLOW,
+      phase: recheck ? "recheck" : "admission"});
+  }
   const manager = u => u?.id === MANAGER_ID && u.login === "Guillaume0385" && u.type === "User";
   need(run?.id === context.runId && run.run_attempt === 1 && run.event === "push" &&
     run.head_sha === context.sha && run.head_branch === "experimental" && manager(run.actor) &&
@@ -139,7 +149,13 @@ async function managerDecision(github, pr, context, proof, contract) {
     Number.isFinite(Date.parse(comment.created_at)) &&
     Date.parse(comment.created_at) < Date.parse(pr.merged_at),
   "manager_decision_unverified");
-  return {approval, comment};
+  if (proof.number === 1) return {approval, comment};
+  try {
+    return rerun.authorizeDecision({comments,
+      marker: contract.marker.replace(":v1", ":v2"), scenario: contract.scenario,
+      candidateSha: pr.head.sha, ciId: approval.ci_run_id,
+      pr, mergeSha: context.sha, runId: context.runId, proof});
+  } catch (_) { throw Error("manager_decision_unverified"); }
 }
 
 async function reviewsAndCI(github, pr, decision) {
@@ -285,8 +301,9 @@ async function actualApproval(github, context, environment, proof) {
 }
 
 async function verifyContract({ github, context, env = process.env, recheck = false }, contract) {
-  const merged = await mergedPush(github, context, env);
-  const proof = await successfulPreflight(github, context, env, recheck);
+  const nativeRerun = contract === suiteContract;
+  const merged = await mergedPush(github, context, env, nativeRerun);
+  const proof = await successfulPreflight(github, context, env, recheck, nativeRerun);
   const { data: pr } = await github.rest.pulls.get({ ...API, pull_number: merged.pr });
   need(pr.number === merged.pr && pr.draft === false && pr.merged === true && pr.state === "closed" &&
     Number.isFinite(Date.parse(pr.merged_at)) &&
@@ -302,10 +319,11 @@ async function verifyContract({ github, context, env = process.env, recheck = fa
   await reviewsAndCI(github, pr, decision);
   const environment = await environmentPolicy(github);
   await noOtherObservation(github, context);
-  const name = contract.claimPrefix + pr.head.sha;
-  const claim = { schema: 1, scenario: contract.scenario,
+  const name = proof.number === 1 ? contract.claimPrefix + pr.head.sha :
+    rerun.claimName(contract.scenario, context.sha, context.runId, proof.number);
+  const claim = { schema: proof.number === 1 ? 1 : 2, scenario: contract.scenario,
     sha: context.sha, run_id: context.runId,
-    run_attempt: 1,
+    run_attempt: proof.number,
     pr: pr.number, candidate_sha: pr.head.sha, decision_id: decision.comment.id,
     decision_digest: digest({ id: decision.comment.id, body: decision.comment.body,
       created_at: decision.comment.created_at, updated_at: decision.comment.updated_at,

@@ -33,12 +33,21 @@ def node(script, payload):
     "mode", ["recovered", "first_invalid", "no_disconnect", "protocol"]
 )
 @pytest.mark.parametrize("historical", [False, True])
+@pytest.mark.parametrize("attempt", [1, 2, 50])
 def test_real_dual_report_export_publication_and_aggregate_result(
-    tmp_path, mode, historical
+    tmp_path, mode, historical, attempt
 ):
+    proof = PROOF | {"run_attempt": attempt}
     _, report = asyncio.run(
-        diagnostic_report() if mode == "protocol" else run_harness(mode)
+        diagnostic_report() if mode == "protocol" else run_harness(mode, proof=proof)
     )
+    if mode == "protocol":
+        for header in (
+            report,
+            report["session_300"],
+            report["session_reconnect_no_pong"],
+        ):
+            header["run_attempt"] = attempt
     if historical:
         report = legacy(report)
     out = tmp_path / "hoben-session-suite-exports"
@@ -67,7 +76,7 @@ process.stdout.write(JSON.stringify({outputs,errors,success,failures,
   unchanged:before===fs.readFileSync(file,'utf8'),mode:fs.statSync(file).mode&0o777,
   bytes:Buffer.from(encoded,'base64').length}));
 """,
-        [str(tmp_path), report, PROOF],
+        [str(tmp_path), report, proof],
     )
     assert result["outputs"] == {"report": "true"}
     assert result["success"] == (mode == "recovered")
@@ -121,7 +130,9 @@ process.stdout.write(JSON.stringify({checks,publicExists:fs.existsSync(path.join
 @pytest.mark.parametrize(
     "mode", ["recovered", "first_invalid", "no_disconnect", "protocol", "missing"]
 )
-def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode):
+@pytest.mark.parametrize("attempt", [1, 2, 50])
+def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode, attempt):
+    proof = PROOF | {"run_attempt": attempt}
     workflow = yaml.load(
         (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -131,15 +142,24 @@ def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode):
         None
         if mode == "missing"
         else asyncio.run(
-            diagnostic_report() if mode == "protocol" else run_harness(mode)
+            diagnostic_report()
+            if mode == "protocol"
+            else run_harness(mode, proof=proof)
         )[1]
     )
+    if mode == "protocol":
+        for header in (
+            report,
+            report["session_300"],
+            report["session_reconnect_no_pong"],
+        ):
+            header["run_attempt"] = attempt
     result = node(
         """
 const [script,r,p]=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
 const api=require('./.github/scripts/session-suite-report.cjs');
 Object.assign(process.env,{APPROVED_PR:String(p.pr_number),APPROVED_CANDIDATE:p.candidate_sha,
-  GITHUB_RUN_ATTEMPT:'1',COLLECTION_RESULT:'success',PUBLICATION_RESULT:'success'});
+  GITHUB_RUN_ATTEMPT:String(p.run_attempt),COLLECTION_RESULT:'success',PUBLICATION_RESULT:'success'});
 const statuses=[],summaries=[],errors=[];
 const core={setFailed:s=>errors.push(s),summary:{addRaw:s=>{
   summaries.push(s);return {write:async()=>{}};
@@ -155,7 +175,7 @@ const execute=new AsyncFunction('require','core','github','context',script);
 execute(localRequire,core,github,context)
   .then(()=>process.stdout.write(JSON.stringify({statuses,summaries,errors})));
 """,
-        [script, report, PROOF],
+        [script, report, proof],
     )
     assert result["statuses"][0]["context"] == "hoben-experimental-session-suite"
     assert result["statuses"][0]["state"] == (

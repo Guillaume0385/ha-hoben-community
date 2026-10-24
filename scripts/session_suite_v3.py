@@ -46,7 +46,7 @@ def validate_v3(r, proof, provenance, counters, terminals, messages):
         need(type(r[k]) is type(proof[k]) and r[k] == proof[k])
     for k in ("merge_sha", "candidate_sha"):
         need(type(r[k]) is str and re.fullmatch(r"[0-9a-f]{40}", r[k]))
-    need(type(r["run_attempt"]) is int and r["run_attempt"] == 1)
+    need(type(r["run_attempt"]) is int and 1 <= r["run_attempt"] <= 50)
     for k in ("run_id", "pr_number"):
         need(type(r[k]) is int and 1 <= r[k] <= 2**53 - 1)
     for k, maximum in counters.items():

@@ -14,6 +14,7 @@ import pytest
 
 from scripts import launch_session_suite as launcher
 from scripts import run_session_suite as runner
+from scripts.run_session_300 import context_proof
 from scripts.session_suite import observe_suite
 from tests.test_session_300_probe import PROOF
 from tests.test_session_suite import Harness
@@ -43,6 +44,30 @@ def source(tmp_path):
         "HOBEN_DEVICE_GUID": "0" * 32,
         "RUNNER_TEMP": str(tmp_path),
     }
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 50])
+def test_suite_preserves_native_attempt_through_isolated_environment(tmp_path, attempt):
+    env = source(tmp_path) | {"GITHUB_RUN_ATTEMPT": str(attempt)}
+    safe = launcher.collector_environment(env)
+    assert safe["GITHUB_RUN_ATTEMPT"] == str(attempt)
+    assert runner.suite_proof(safe) == PROOF | {"run_attempt": attempt}
+    if attempt > 1:
+        legacy = safe | {
+            "SESSION300_PHASE": "live",
+            "SESSION300_APPROVED_SHA": PROOF["merge_sha"],
+            "SESSION300_CANDIDATE_SHA": PROOF["candidate_sha"],
+            "SESSION300_APPROVED_PR": str(PROOF["pr_number"]),
+        }
+        with pytest.raises(ValueError):
+            context_proof(legacy)  # Standalone session-300 does not opt into reruns.
+
+
+@pytest.mark.parametrize("attempt", ["0", "51", "02", "2.0", "-1", "", "true"])
+def test_suite_refuses_invalid_native_attempt_before_identity(tmp_path, attempt):
+    env = source(tmp_path) | {"GITHUB_RUN_ATTEMPT": attempt}
+    with pytest.raises(ValueError):
+        runner.suite_proof(env)
 
 
 def test_only_fixed_suite_context_and_no_runner_token_or_command_file(tmp_path):

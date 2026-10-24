@@ -177,6 +177,7 @@ for (const [name, modify] of Object.entries(refused)) {
   });
 }
 
+
 // Historical Hoben workflows lack the common mutex. The API status filter must
 // include pre-start runs, and admission AND pre-secret recheck must refuse them.
 for (const state of ["requested", "queued", "pending", "waiting", "in_progress"]) {
@@ -316,6 +317,115 @@ function suiteSetup() {
   a.decision();
   return a;
 }
+
+function suiteRepeatSetup(attempt = 2) {
+  const a = suiteSetup();
+  a.env.GITHUB_RUN_ATTEMPT = String(attempt);
+  a.run.run_attempt = attempt;
+  a.run.triggering_actor = {...user};
+  a.dry.run_attempt = attempt;
+  a.dry.started_at = "2026-10-09T08:20:00Z";
+  a.currentJobs = [a.dry,
+    {name: "admission", head_sha: sha, run_id: 123, run_attempt: attempt, status: "in_progress"},
+    {name: "collect", head_sha: sha, run_id: 123, run_attempt: attempt, status: "waiting"}];
+  a.previousJobs = [{...a.dry, run_attempt: attempt - 1}];
+  a.github.rest.actions.listJobsForWorkflowRun = async p =>
+    ({data: p.run_id === 123 ? a.currentJobs : a.jobs});
+  a.github.rest.actions.listJobsForWorkflowRunAttempt = async p => {
+    assert.equal(p.attempt_number, Number(a.env.GITHUB_RUN_ATTEMPT) - 1);
+    return {data: a.previousJobs};
+  };
+  a.repeatApproval = {schema: 2, scenario: "session-suite", candidate_sha: head,
+    ci_run_id: 456, pr_number: a.pr.number, merge_sha: sha, run_id: 123, run_attempt: attempt};
+  a.repeatComment = {...a.comment, id: 988,
+    created_at: "2026-10-09T08:15:00Z", updated_at: "2026-10-09T08:15:00Z"};
+  a.repeatDecision = () => {
+    a.repeatComment.body = suiteGate.MARKER_V2 + "\n" + JSON.stringify(a.repeatApproval);
+  };
+  a.repeatDecision(); a.comments.push(a.repeatComment);
+  return a;
+}
+
+function completedAdmission(a) {
+  Object.assign(a.currentJobs[1], {status: "completed", conclusion: "success"});
+}
+
+for (const attempt of [2, 3, 50]) {
+  test("suite native complete rerun with distinct claim and read-only recheck: " + attempt, async () => {
+    const a = suiteRepeatSetup(attempt);
+    assert.equal((await suiteGate.dryRun(a)).scenario, "session-suite");
+    assert.equal((await suiteGate.verify(a)).scenario, "session-suite");
+    const name = "hoben-session-suite-" + sha + "-run123-attempt" + attempt;
+    assert.deepEqual([...a.refs.keys()], ["refs/tags/" + name]);
+    const claim = JSON.parse(a.tags.get(a.refs.get("refs/tags/" + name).object.sha).message);
+    assert.equal(claim.schema, 2);
+    assert.equal(claim.run_attempt, attempt);
+    assert.deepEqual(claim.contract, suiteGate.CONTRACT);
+    completedAdmission(a);
+    assert.equal((await suiteGate.verify({...a, recheck: true})).status, "approved");
+    assert.equal(a.writes, 1);
+    await assert.rejects(gate.verify(a)); // Historical session-300 remains attempt-one-only.
+  });
+}
+
+for (const [name, modify] of Object.entries(refused).filter(([name]) => name !== "rerun")) {
+  test("suite native rerun retains original refusal: " + name, async () => {
+    const a = suiteRepeatSetup(); modify(a);
+    if (name === "CI after decision") a.ci.updated_at = "2026-10-09T08:16:00Z";
+    await assert.rejects(suiteGate.verify(a));
+    assert.equal(a.writes, 0);
+  });
+}
+
+for (const [name, modify] of Object.entries({
+  "missing original decision": a => {a.comments.shift();},
+  "invalid original contract": a => {a.approval.limits.suite_process_seconds++; a.decision();},
+  "missing v2 decision": a => {a.comments.pop();},
+  "edited v2 decision": a => {a.repeatComment.updated_at = "2026-10-09T08:16:00Z";},
+  "v2 before merge": a => {a.repeatComment.created_at = a.repeatComment.updated_at = "2026-10-09T08:09:00Z";},
+  "v2 after dry-run start": a => {a.repeatComment.created_at = a.repeatComment.updated_at = "2026-10-09T08:21:00Z";},
+  "wrong v2 run": a => {a.repeatApproval.run_id++; a.repeatDecision();},
+  "wrong v2 attempt": a => {a.repeatApproval.run_attempt++; a.repeatDecision();},
+  "wrong v2 PR": a => {a.repeatApproval.pr_number++; a.repeatDecision();},
+  "extra v2 fields": a => {a.repeatApproval.limits = a.approval.limits; a.repeatDecision();},
+  "missing triggering actor": a => {delete a.run.triggering_actor;},
+  "wrong triggering actor": a => {a.run.triggering_actor.id = 2;},
+  "previous dry-run failed": a => {a.previousJobs[0].conclusion = "failure";},
+  "previous dry-run absent": a => {a.previousJobs.splice(0);},
+  "stale dry-run": a => {a.dry.run_attempt--;},
+  "duplicate dry-run": a => {a.currentJobs.push({...a.dry});},
+  "wrong current run": a => {a.currentJobs[1].run_id++;},
+  "wrong CI HEAD": a => {a.ci.head_sha = sha;},
+})) {
+  test("suite native rerun refuses before claim: " + name, async () => {
+    const a = suiteRepeatSetup(); modify(a);
+    await assert.rejects(suiteGate.verify(a));
+    assert.equal(a.writes, 0);
+  });
+}
+
+test("suite native rerun claim cannot be replayed or omitted at recheck", async () => {
+  const a = suiteRepeatSetup(); await suiteGate.verify(a);
+  await assert.rejects(suiteGate.verify(a));
+  assert.equal(a.writes, 1);
+  completedAdmission(a);
+  a.refs.clear();
+  await assert.rejects(suiteGate.verify({...a, recheck: true}));
+  assert.equal(a.writes, 1);
+});
+
+test("suite native rerun requires current collect job and fresh independent approval", async () => {
+  const a = suiteRepeatSetup(); requireIndependentReviewer(a);
+  assert.equal((await suiteGate.verify(a)).status, "PENDING APPROVAL");
+  completedAdmission(a);
+  await assert.rejects(suiteGate.verify({...a, recheck: true}), /approval_unverified/);
+  a.history[0].created_at = "2026-10-09T08:21:00Z";
+  a.currentJobs[2].run_attempt = 1;
+  await assert.rejects(suiteGate.verify({...a, recheck: true}), /partial_rerun/);
+  a.currentJobs[2].run_attempt = 2;
+  assert.equal((await suiteGate.verify({...a, recheck: true})).status, "approved");
+  assert.equal(a.writes, 1);
+});
 
 test("suite: fixed contract, independent claim and read-only recheck", async () => {
   const a = suiteSetup();

@@ -46,6 +46,31 @@ def node(script, payload):
     return json.loads(result.stdout)
 
 
+@pytest.mark.parametrize("attempt", [2, 50, 0, 51, True, 2.5, "2"])
+def test_native_attempt_metadata_has_identical_python_node_bounds(attempt):
+    proof = PROOF | {"run_attempt": attempt}
+    report = copy.deepcopy(CORPUS["reports"]["success"])
+    for header in (report, report["session_300"], report["session_reconnect_no_pong"]):
+        header["run_attempt"] = attempt
+    expected = type(attempt) is int and 1 <= attempt <= 50
+    if expected:
+        assert validate_suite(report, proof) == report
+    else:
+        with pytest.raises((ValueError, TypeError)):
+            validate_suite(report, proof)
+    assert (
+        node(
+            """
+const [r,p]=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+try {require('./.github/scripts/session-suite-report.cjs').validate(r,p);
+  process.stdout.write('true');} catch (_) {process.stdout.write('false');}
+""",
+            [report, proof],
+        )
+        is expected
+    )
+
+
 @pytest.mark.parametrize("case", CORPUS["cases"], ids=lambda c: c["name"])
 def test_shared_closed_contract(case):
     report = materialize(case)

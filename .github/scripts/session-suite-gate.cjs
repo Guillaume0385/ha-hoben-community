@@ -9,5 +9,6 @@ module.exports = Object.freeze({
   refusalCategory: shared.refusalCategory,
   WORKFLOW: shared.WORKFLOW,
   MARKER: contract.MARKER,
+  MARKER_V2: contract.MARKER.replace(":v1", ":v2"),
   CONTRACT: contract.CONTRACT,
 });

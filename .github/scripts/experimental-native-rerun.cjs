@@ -77,7 +77,7 @@ function authorizeAttempt({context, env, run, jobs, previousJobs, workflow, phas
 function authorizeDecision({comments, marker, scenario, candidateSha, ciId,
   pr, mergeSha, runId, proof}) {
   need(Array.isArray(comments) && typeof marker === "string" &&
-    ["h1h2", "ha-parity"].includes(scenario) && shaPattern.test(candidateSha) &&
+    ["h1h2", "ha-parity", "session-suite"].includes(scenario) && shaPattern.test(candidateSha) &&
     shaPattern.test(mergeSha) && whole(ciId) && whole(pr.number) &&
     whole(runId) && whole(proof.number) && when(pr.merged_at) >= 0,
   "decision_unverified");
@@ -131,7 +131,7 @@ function freshEnvironmentApproval(history, environment, proof, name) {
 }
 
 function claimName(scenario, sha, runId, attempt) {
-  need(["h1h2", "ha-parity"].includes(scenario) &&
+  need(["h1h2", "ha-parity", "session-suite"].includes(scenario) &&
     shaPattern.test(sha) && whole(runId) &&
     whole(attempt) && attempt <= 50, "claim_unverified");
   return "hoben-" + scenario + "-" + sha + "-run" + runId + "-attempt" + attempt;

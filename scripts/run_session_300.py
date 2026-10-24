@@ -99,7 +99,7 @@ def validate_report(report, proof):
         require(type(report[key]) is str and re.fullmatch(r"[0-9a-f]{40}", report[key]))
     for key in ("merge_sha", "candidate_sha", "run_id", "run_attempt", "pr_number"):
         require(report[key] == proof[key] and type(report[key]) is type(proof[key]))
-    require(report["run_attempt"] == 1)
+    require(type(report["run_attempt"]) is int and 1 <= report["run_attempt"] <= 50)
     for key in ("run_id", "pr_number"):
         require(type(report[key]) is int and report[key] > 0)
     for key, limit in {
@@ -290,8 +290,12 @@ async def observe(
     )
 
 
-def context_proof(env):
-    """Refuse non-admitted execution before looking at any Hoben identity."""
+def context_proof(env, *, native_rerun=False):
+    """Refuse non-admitted execution before looking at any Hoben identity.
+
+    Only the fixed suite entry opts into native attempts; standalone defaults
+    remain attempt-one-only. This option is never read from the environment.
+    """
     require(
         env.get("GITHUB_ACTIONS") == "true" and env.get("GITHUB_REPOSITORY") == REPO
     )
@@ -303,7 +307,11 @@ def context_proof(env):
         env.get("GITHUB_ACTOR") == env.get("GITHUB_TRIGGERING_ACTOR") == "Guillaume0385"
     )
     require(
-        env.get("GITHUB_RUN_ATTEMPT") == "1" and env.get("SESSION300_PHASE") == "live"
+        re.fullmatch(
+            r"(?:[1-9]|[1-4][0-9]|50)" if native_rerun else "1",
+            env.get("GITHUB_RUN_ATTEMPT", ""),
+        )
+        and env.get("SESSION300_PHASE") == "live"
     )
     require(env.get("GITHUB_WORKFLOW_REF") == WORKFLOW)
     sha = env.get("GITHUB_SHA")
@@ -312,7 +320,7 @@ def context_proof(env):
     proof = {
         "merge_sha": sha,
         "candidate_sha": env.get("SESSION300_CANDIDATE_SHA"),
-        "run_attempt": 1,
+        "run_attempt": int(env["GITHUB_RUN_ATTEMPT"]),
     }
     require(
         isinstance(proof["candidate_sha"], str)
