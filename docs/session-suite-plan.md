@@ -16,9 +16,16 @@ Le rapport v2 et ses validateurs historiques restent inchangés. Type partiel,
 réponse invalide, perte supplémentaire ou preuve manquante ne donnent aucun
 succès ; aucun raccordement de quarantaine ou diagnostic v3 n'est ajouté.
 Les plafonds externes 360/600/1020 s, les budgets de lectures et H1/H2 restent
-inchangés. `quarantine-installation` bloque toujours le test réel : sa modification
-exige un arbitrage séparé. Tests réels NOT RUN ; étape 7 non validée, étape 8
-suspendue. Les sections suivantes conservent les contrats et l'historique.
+inchangés. La [consigne ADMISSION-MINIMAL-003](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6327710447)
+autorise le retrait du seul arrêt inconditionnel `quarantine-installation` et de
+son `needs` dans `dry-run`. Le parcours reste préflight sans secret → admission
+avec décision MANAGER/PR/CI/SHA exacts et claim anti-rejeu → environnement → recheck
+avant l'unique étape secrète. Approbation requise non attestée : PENDING APPROVAL
+puis refus avant collecte ; preuve absente ou changée : NOT RUN. Ce retrait
+n'active pas la quarantaine et ne constitue ni une décision de campagne ni une
+preuve des Settings effectifs. MANAGER doit vérifier séparément l'admission
+réelle et les approbations requises. Tests réels NOT RUN ; étape 7 non validée,
+étape 8 suspendue. Les sections suivantes conservent les contrats et l'historique.
 
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
