@@ -2,6 +2,38 @@
 
 ## Parcours minimal courant — Issue #112
 
+### Complément RX 07/1B — UNKNOWN-RX-CONTINUE-005
+
+La [demande propriétaire](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
+complète la tâche 005 : le framer expérimental ignore DataResponseServer (7) et
+DataUpdated (27) seulement après validation du protocole MBAP nul et de Length
+2–254. Longueurs totales `7 + Length` et `11 + Length`. En-têtes seuls conservés,
+corps consommé exactement sans décodage, réception et corrélation inchangées.
+CloseClient/quarantaine, EOF, TLS et budgets gardent leurs protections ; un type
+inconnu n'acquiert aucune frontière. Les autres types connus sont centralisés
+et refusés avec erreur typée portant leur seul numéro, avant analyse du payload.
+
+Les rapports session-300 et second scénario v1/v2 acceptent explicitement une
+extension fermée optionnelle `ignored_messages`. Ses **deux seules clés** sont
+`"7"` et `"27"`, chacune contenant 253 compteurs entiers : à l'indice i, nombre
+de messages entièrement consommés de longueur totale `9+i` ou `13+i`. La somme
+des bins donne le nombre d'occurrences du type ; zéro signifie absence de cette
+longueur. Les longueurs connues remplacent toute liste d'événements non bornée.
+La somme pondérée des longueurs ne peut dépasser les octets RX livrés, eux-mêmes
+bornés à 1 Mio. Aucun payload, métadonnée, identifiant privé ou transaction.
+
+Le producteur ajoute cette extension seulement après un message entièrement
+ignoré. Une trame partielle reste partielle et ne produit aucune occurrence
+complète ; les erreurs existantes restent possibles. Les lecteurs Python/Node
+acceptent soit la forme historique exacte, soit cette forme avec ce seul champ
+supplémentaire validé. Une ancienne absence n'est jamais rétrocomplétée ni prise
+pour preuve d'absence de trafic. Le contrat v3 sans producteur reste inchangé.
+Limites d'export/publication 4096 octets session-300, 8192 suite et rétention
+inchangées ; les histogrammes fixes sont testés sous ces plafonds. Aucun changement
+d'admission, workflow, scénario, sécurité ou budget ; aucune validation réelle
+revendiquée. Étape 7 non validée, étape 8 suspendue. Les refus DataUpdated décrits
+plus bas restent historiques, antérieurs à ce complément.
+
 La [consigne NOPONG-MINIMAL-002](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6327710447)
 réutilise le collecteur et le gestionnaire partagés sans nouveau reçu ni schéma.
 Depuis l'acceptation initiale, les Pong sont normaux avant 120 s, puis inhibés

@@ -18,9 +18,25 @@ const messages = new Map([
   ["request_correlation",["data_response"]], ["response_validation",["data_response"]],
   ["pong_tx",["ping"]],
 ]);
+function validIgnoredMessages(value, rxBytes) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).sort().join() !== "27,7") return false;
+  let total = 0;
+  for (const [key,minimum] of [["7",9],["27",13]]) {
+    const bins = value[key];
+    if (!Array.isArray(bins) || bins.length !== 253) return false;
+    for (let i=0; i<253; i++) {
+      const count = bins[i];
+      if (!Number.isSafeInteger(count) || count < 0 || count > 1048576) return false;
+      total += (minimum+i)*count;
+    }
+  }
+  return total <= rxBytes;
+}
 function validate(r, p) {
+  const expected = r && Object.hasOwn(r,"ignored_messages") ? [...keys,"ignored_messages"] : keys;
   need(r && typeof r === "object" && !Array.isArray(r) &&
-    Object.keys(r).sort().join() === [...keys].sort().join());
+    Object.keys(r).sort().join() === [...expected].sort().join());
   need(r.schema === 1 && r.scenario === "session-300" && r.boundary_proven === false);
   need(["merge_sha","candidate_sha"].every(k => /^[a-f0-9]{40}$/.test(r[k])));
   need(["merge_sha","candidate_sha","run_id","run_attempt","pr_number"].every(k => r[k] === p[k]));
@@ -41,12 +57,13 @@ function validate(r, p) {
     messages.get(r.failure_phase).includes(r.message_category) &&
     r.read_slot === r.reads && r.rx_chunks_total <= r.rx_bytes_total &&
     (r.failure_phase === "none") === ["completed","recovery_verified"].includes(r.terminal));
+  if (Object.hasOwn(r,"ignored_messages")) need(validIgnoredMessages(r.ignored_messages,r.rx_bytes_total));
   if (["continuous_300s","reconnected"].includes(r.result)) {
     need(r.duration_ms === 300000 && r.reads_ok > 0 && r.pings === r.pongs);
     need(r.result === "continuous_300s" ? r.opens === 1 && r.reads_failed === 0 &&
       r.terminal === "completed" : r.opens >= 2 && r.terminal === "recovery_verified");
   } else need(!["completed","recovery_verified"].includes(r.terminal));
-  return Object.fromEntries([...keys].sort().map(k => [k,r[k]]));
+  return Object.fromEntries([...expected].sort().map(k => [k,r[k]]));
 }
 function readReport(file, proof) {
   return validate(JSON.parse(safe.snapshot(file,4096).toString("utf8")),proof);
@@ -77,4 +94,4 @@ function publish({core,proof,encoded}) {
     core.setFailed("NOT RUN: session-300 publication refused.");
   }
 }
-module.exports = {validate,readReport,prepare,publish};
+module.exports = {validate,validIgnoredMessages,readReport,prepare,publish};

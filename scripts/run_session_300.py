@@ -86,9 +86,31 @@ def require(ok):
         raise ValueError("invalid_session_300_report")
 
 
+def valid_ignored_messages(value, rx_bytes):
+    """Closed length histograms for 07/1B; counts cannot exceed delivered RX.
+
+    Keys identify only public protocol types. Bin i denotes total length 9+i
+    for 07 and 13+i for 1B. No metadata, payload or transaction IDs are allowed.
+    """
+    if type(value) is not dict or set(value) != {"7", "27"}:
+        return False
+    total = 0
+    for key, minimum in (("7", 9), ("27", 13)):
+        bins = value[key]
+        if type(bins) is not list or len(bins) != 253:
+            return False
+        for index, count in enumerate(bins):
+            if type(count) is not int or not 0 <= count <= 1048576:
+                return False
+            total += (minimum + index) * count
+    return total <= rx_bytes
+
+
 def validate_report(report, proof):
     """Independent fixed projection: reject keys and values outside the schema."""
-    require(type(report) is dict and set(report) == KEYS)
+    require(type(report) is dict)
+    keys = KEYS | ({"ignored_messages"} if "ignored_messages" in report else set())
+    require(set(report) == keys)
     require(
         type(report["schema"]) is int
         and report["schema"] == 1
@@ -126,6 +148,10 @@ def validate_report(report, proof):
     require(report["failure_category"] == report["terminal"])
     require(report["read_slot"] == report["reads"])
     require(report["rx_chunks_total"] <= report["rx_bytes_total"])
+    if "ignored_messages" in report:
+        require(
+            valid_ignored_messages(report["ignored_messages"], report["rx_bytes_total"])
+        )
     require(
         (report["failure_phase"] == "none")
         == (report["terminal"] in {"completed", "recovery_verified"})
@@ -147,7 +173,7 @@ def validate_report(report, proof):
             require(report["opens"] >= 2 and report["terminal"] == "recovery_verified")
     else:
         require(report["terminal"] not in {"completed", "recovery_verified"})
-    return {key: report[key] for key in sorted(KEYS)}
+    return {key: report[key] for key in sorted(keys)}
 
 
 async def observe(
@@ -285,6 +311,7 @@ async def observe(
             "failure_phase": failure_phase,
             "failure_category": terminal,
             "message_category": message_category,
+            **budget.ignored_diagnostic(),
         },
         proof,
     )

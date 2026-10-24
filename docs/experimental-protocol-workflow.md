@@ -95,8 +95,10 @@ pourront être traités comme trafic post-ouverture. Cette **hypothèse
 expérimentale** ne prouve ni le handoff local ni une longueur totale universelle,
 et ne transforme aucune observation en fait `CONFIRMÉ`.
 Le [contrat de périmètre](../project.md#décision-de-périmètre--handoff-expérimental-session-300)
-limite le futur framer à Ping et DataResponse corrélée, avec arrêt sûr sur type
-inconnu, DataUpdated, MBAP invalide, suffixe indécidable ou dépassement de budget.
+limite le framer à Ping et DataResponse corrélée, avec l'exception propriétaire
+#112 pour ignorer exactement 07/1B après validation MBAP, sans interpréter le
+corps. Type inconnu/autre non pris en charge, MBAP invalide, suffixe indécidable
+ou dépassement de budget gardent l'arrêt sûr.
 
 La voie fixe vise 300 s utiles, avec plafond dur de processus 360 s, au plus
 trois ouvertures, 1 Mio RX cumulé et six lectures fixes espacées d'au moins 60 s.

@@ -34,7 +34,8 @@ function keys(r, expected) {
 function validateSecond(r,p) {
   if (r && r.schema === 3) return require("./session-suite-v3.cjs").validateV3(r,p,provenance,limits,terminals,messages);
   need(r && [1,2].includes(r.schema));
-  const expected = r.schema === 2 ? [...secondKeys,...diagnosticKeys] : secondKeys;
+  const expected = r.schema === 2 ? [...secondKeys,...diagnosticKeys] : [...secondKeys];
+  if (Object.hasOwn(r,"ignored_messages")) expected.push("ignored_messages");
   keys(r,expected);
   need(r.scenario === "session-reconnect-no-pong" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
@@ -48,6 +49,7 @@ function validateSecond(r,p) {
     r.rx_chunks_total <= r.rx_bytes_total && r.eofs_after_suppression <= r.peer_eofs &&
     r.peer_eofs <= r.opens && r.recovery_generation <= r.opens &&
     r.recovery_reads_ok <= r.reads_ok && r.recovery_pongs <= r.pongs);
+  if (Object.hasOwn(r,"ignored_messages")) need(firstApi.validIgnoredMessages(r.ignored_messages,r.rx_bytes_total));
   const eof = r.eof_after_threshold_ms;
   need(eof === null || (Number.isSafeInteger(eof) && eof >= 0 && eof <= 480000));
   need((eof !== null) === (r.eofs_after_suppression === 1));

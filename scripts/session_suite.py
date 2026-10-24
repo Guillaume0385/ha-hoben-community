@@ -23,6 +23,7 @@ from custom_components.hoben.v4_lifecycle import LifecycleExhaustedError
 from custom_components.hoben.v4_no_pong import NoPongAfter120
 from custom_components.hoben.v4_session import SessionState
 from scripts.run_session_300 import observe as observe_300
+from scripts.run_session_300 import valid_ignored_messages
 from scripts.run_session_300 import validate_report as validate_300
 from scripts.session_suite_v3 import validate_v3
 
@@ -121,6 +122,8 @@ def validate_second(r, proof):
         )
     need(type(r) is dict and type(r.get("schema")) is int and r["schema"] in {1, 2})
     keys = SECOND_KEYS | (SECOND_DIAGNOSTIC_KEYS if r["schema"] == 2 else set())
+    if "ignored_messages" in r:
+        keys |= {"ignored_messages"}
     need(set(r) == keys)
     need(r["scenario"] == "session-reconnect-no-pong")
     need(r["boundary_proven"] is False)
@@ -136,6 +139,8 @@ def validate_second(r, proof):
     need(r["reads_ok"] + r["reads_failed"] == r["reads"])
     need(r["reads_ok"] <= r["responses"] <= r["reads"])
     need(r["rx_chunks_total"] <= r["rx_bytes_total"])
+    if "ignored_messages" in r:
+        need(valid_ignored_messages(r["ignored_messages"], r["rx_bytes_total"]))
     need(r["eofs_after_suppression"] <= r["peer_eofs"] <= r["opens"])
     need(r["recovery_generation"] <= r["opens"])
     need(r["recovery_reads_ok"] <= r["reads_ok"])
@@ -407,6 +412,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
             "failure_phase": diagnostic[0],
             "failure_category": diagnostic[1],
             "message_category": diagnostic[2],
+            **budget.ignored_diagnostic(),
         },
         proof,
     )

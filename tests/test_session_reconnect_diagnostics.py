@@ -71,7 +71,11 @@ async def diagnostic_report(rejected=b"\xff"):
     "rejected,phase,message",
     [
         (b"\x05", "message_classification", "close_client"),
-        (b"\x1b", "message_classification", "data_updated"),
+        (
+            b"\x1b" + b"\x00" * 4 + bytes.fromhex("00010000ffff"),
+            "frame_boundary",
+            "ambiguous",
+        ),
         (b"\x00", "message_classification", "other_known"),
         (b"\xff", "message_classification", "unknown"),
         (b"\x19", "message_classification", "unknown"),
@@ -105,7 +109,7 @@ def test_real_shared_owners_report_existing_refusals_after_three_reads(
 
 def test_all_rejected_heads_keep_refusal_and_historical_diagnostics():
     known = set(range(25)) | set(range(26, 49)) | set(range(80, 89)) | {96}
-    for discriminator in set(range(256)) - {10, 14}:
+    for discriminator in set(range(256)) - {7, 10, 14, 27}:
         expected = (
             "close_client"
             if discriminator == 5

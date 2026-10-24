@@ -138,10 +138,13 @@ distinguent trois niveaux :
   Une décision de périmètre ne valide ni le code ni son résultat, et un
   résultat fonctionnel ne démontre pas une longueur totale universelle.
 
-Le futur framer de cette voie devra s'arrêter en cas d'ambiguïté : seuls Ping
-et DataResponse corrélée selon les types/longueurs documentés seront admis.
-Type inconnu, DataUpdated, MBAP invalide, suffixe indécidable ou dépassement
-de budget arrêtent la session, sans saut d'octets ni resynchronisation devinée.
+Le framer de cette voie s'arrête en cas d'ambiguïté. Ping et DataResponse corrélée
+gardent leurs traitements. Le [complément propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
+autorise seulement l'ignorance bornée de DataResponseServer et DataUpdated après
+validation de leur en-tête MBAP et calcul de leur longueur exacte, sans décodage
+de données ni mise à jour HA. Type inconnu, autre type non pris en charge, MBAP
+invalide, suffixe indécidable ou dépassement de budget arrêtent la session,
+sans saut d'octets ni resynchronisation devinée.
 Les lectures restent fixes et strictement en lecture seule, avec TLS vérifié
 vers `myhoben.fr:465` et un seul propriétaire RX.
 
@@ -353,7 +356,8 @@ includes Ping/Pong,
 `DataResponseClient (0x0E)`, `DataUpdated (0x1B)`, documented close/error
 conditions that are valid post-open, and fragmented/coalesced TLS reads.
 For `session-300`, the narrower scope above applies: Ping and correlated
-DataResponse only; DataUpdated stops the experiment and is never interpreted.
+DataResponse, plus exact header-validated discard of 07/1B under the owner's
+Issue #112 clarification. Their payload is never interpreted or merged.
 
 For `0x0E`, the MyHOBEN prefix is one byte and the embedded Modbus/TCP ADU size
 comes from the MBAP Length field. For `0x1B`, the prefix is five bytes and the

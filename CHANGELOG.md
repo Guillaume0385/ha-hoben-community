@@ -2,6 +2,14 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #112, UNKNOWN-RX-CONTINUE-005 : consommation exacte de 07/1B après
+  validation MBAP, sans décoder le corps ni interrompre la session expérimentale.
+  Histogrammes anonymisés bornés des types/longueurs dans les diagnostics, avec
+  validation indépendante Python/Node et lecture des anciens rapports conservée.
+  Erreur typée pour les autres types connus sans supposer leur longueur ; types
+  inconnus, CloseClient, EOF, corrélation et budgets restent protégés. Tests
+  synthétiques uniquement, aucune validation réelle ni modification HA.
+
 - Issue #112, SESSION-NATIVE-RERUN-004 : réutilisation du mécanisme natif H1/H2
   pour les tentatives 2–50 de la suite, avec décision MANAGER v2, preuves de
   relance complète, claim distinct et approbation fraîche avant secrets.
