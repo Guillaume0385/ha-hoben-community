@@ -36,6 +36,27 @@ RECONNECT_DIAGNOSTIC_MESSAGES = DIAGNOSTIC_MESSAGES | {
 }
 # Only the discriminator names listed in protocol.md §3, never message lengths.
 KNOWN_TYPE_DISCRIMINANTS = frozenset((*range(25), *range(26, 49), *range(80, 89), 96))
+# Post-open only: opening/authorization codecs and TX Pong remain unchanged.
+UNSUPPORTED_MESSAGE_TYPES = KNOWN_TYPE_DISCRIMINANTS - {5, 7, 10, 14, 27}
+IGNORED_PREFIXES = {7: 1, 27: 5}
+
+
+class UnsupportedMessageTypeError(HobenProtocolError):
+    """A known post-open type without a framing contract; no payload retained."""
+
+    code = "unsupported_message_type"
+
+    def __init__(self, message_type):
+        if (
+            type(message_type) is not int
+            or message_type not in UNSUPPORTED_MESSAGE_TYPES
+        ):
+            raise ValueError("invalid_unsupported_message_type")
+        self.message_type = message_type
+        super().__init__()
+
+    def safe_report(self):
+        return super().safe_report() | {"message_type": self.message_type}
 
 
 class Session300BudgetError(HobenProtocolError):
@@ -66,6 +87,23 @@ class Session300:
         self.connected_generation = None
         self._last_read = None
         self.failure = None
+        # Dense histograms bound storage independently of the number of events.
+        # Bin i means total length prefix + 6 + 2 + i (MBAP.length 2..254).
+        self.ignored_messages = {str(t): [0] * 253 for t in IGNORED_PREFIXES}
+
+    def note_ignored(self, message_type, total_length):
+        prefix = IGNORED_PREFIXES[message_type]
+        self.ignored_messages[str(message_type)][total_length - prefix - 8] += 1
+
+    def ignored_diagnostic(self):
+        """Optional closed extension; never backfill a historical observation."""
+        if not any(any(bins) for bins in self.ignored_messages.values()):
+            return {}
+        return {
+            "ignored_messages": {
+                t: bins.copy() for t, bins in self.ignored_messages.items()
+            }
+        }
 
     def __repr__(self):
         return "Session300()"
@@ -184,6 +222,8 @@ class ExperimentalV4Framer:
         self._buffer = bytearray()
         self._exchange = None
         self._diagnostic = diagnostic
+        self._remaining = 0
+        self._ignored_type = self._ignored_size = None
 
     def _fail(self, phase, message):
         if self._diagnostic is not None:
@@ -194,40 +234,65 @@ class ExperimentalV4Framer:
             and message == "close_client"
         ):
             raise _RejectedCloseClient()
+        if (
+            phase == "message_classification"
+            and self._buffer[0] in UNSUPPORTED_MESSAGE_TYPES
+        ):
+            raise UnsupportedMessageTypeError(self._buffer[0])
         raise HobenProtocolError()
 
     def clear(self):
         self._buffer.clear()
         self._exchange = None
+        self._remaining = 0
+        self._ignored_type = self._ignored_size = None
 
     @property
     def partial(self):
-        return bool(self._buffer)
+        return bool(self._buffer) or self._remaining > 0
 
     def feed(self, data: bytes, exchange: object):
         if not isinstance(data, bytes) or len(data) > 4096:
             self._fail("frame_boundary", "unclassified")
         events = []
         for byte in data:
+            if self._remaining:
+                # Consume exactly the validated body; never retain or decode it.
+                self._remaining -= 1
+                if not self._remaining and self._diagnostic is not None:
+                    self._diagnostic.note_ignored(
+                        self._ignored_type, self._ignored_size
+                    )
+                continue
             if not self._buffer:
                 self._exchange = exchange
             self._buffer.append(byte)
             if self._buffer[0] == 10:
                 events.append(ExperimentalFrame(b"\x0a", self._exchange))
                 self._buffer.clear()
-            elif self._buffer[0] != 14:
-                # Includes DataUpdated: no new interpretation or resync.
+            elif self._buffer[0] not in {7, 14, 27}:
                 message = (
                     "unknown"
                     if self._diagnostic is None
                     else self._diagnostic.rejected_type_category(self._buffer[0])
                 )
                 self._fail("message_classification", message)
-            elif len(self._buffer) >= 7:
+            else:
+                prefix = IGNORED_PREFIXES.get(self._buffer[0], 1)
+                if len(self._buffer) < prefix + 6:
+                    continue
                 try:
-                    size = 1 + modbus_tcp_frame_size(bytes(self._buffer[1:7]))
+                    size = prefix + modbus_tcp_frame_size(
+                        bytes(self._buffer[prefix : prefix + 6])
+                    )
                 except (TypeError, ValueError):
                     self._fail("frame_boundary", "ambiguous")
+                if self._buffer[0] in IGNORED_PREFIXES:
+                    self._ignored_type, self._ignored_size = self._buffer[0], size
+                    self._remaining = size - len(self._buffer)
+                    self._buffer.clear()
+                    self._exchange = None
+                    continue
                 if len(self._buffer) == size:
                     events.append(
                         ExperimentalFrame(bytes(self._buffer), self._exchange)

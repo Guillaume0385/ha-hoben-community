@@ -69,6 +69,26 @@ Le code de lecture reçoit les données directement depuis le flux TLS et examin
 - `DataUpdated = 27 (0x1B)` : le code saute **5 octets** avant le décodeur Modbus. Les quatre octets intermédiaires sont des métadonnées de notification serveur ; leur sémantique exacte reste **À VALIDER** par capture réelle.
 - `DataResponseServer = 7` est également traité comme une réponse contenant des registres.
 
+### Réception expérimentale 07/1B sans interprétation du corps — périmètre autorisé
+
+La [demande propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
+autorise le framer de session expérimentale à ignorer **exactement** ces deux
+enveloppes : préfixe de 1 octet pour `0x07`, de 5 pour `0x1B`, puis MBAP.
+La longueur totale est respectivement `7 + MBAP.length` ou `11 + MBAP.length`.
+L'identifiant de protocole doit être nul et Length entre 2 et 254 inclus :
+totaux 9–261 et 13–265 octets. Le framer conserve au plus les en-têtes nécessaires,
+puis compte les octets restants sans décoder Unit ID, fonction, registres ou
+métadonnées. Une fragmentation ne crée aucune nouvelle frontière ; un corps
+incomplet n'est jamais compté comme message entièrement ignoré.
+
+C'est une décision de traitement limitée au chemin expérimental, **pas une
+validation réelle**, une interprétation de notification ni une mise à jour HA.
+Ping et DataResponseClient corrélée gardent leurs traitements. Les autres types
+connus non pris en charge sont refusés après le seul discriminant, avec erreur
+typée et numéro public ; CloseClient garde son chemin spécifique. Un type inconnu,
+MBAP invalide ou suffixe ambigu ne permet jamais de saut ou resynchronisation.
+Cette règle ne prouve aucune longueur universelle d'OpenedClient.
+
 ---
 
 ## 3. Types de messages MyHOBEN

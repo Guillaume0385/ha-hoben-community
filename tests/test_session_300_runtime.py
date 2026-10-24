@@ -37,7 +37,7 @@ def test_byte_by_byte_framing_and_no_resynchronization():
         events.extend(framer.feed(bytes([byte]), exchange))
     assert len(events) == 1 and events[0].payload == response()
     for invalid in (
-        b"\x1b",
+        b"\x19",  # Not documented; no boundary or resynchronization.
         b"\xff",
         bytes.fromhex("0e000100010003"),
         bytes.fromhex("0e000100000001"),

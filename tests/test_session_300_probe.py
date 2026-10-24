@@ -355,7 +355,7 @@ def test_diagnostic_schema_rejects_unbounded_or_sensitive_values(key, value):
     "bad,phase,message",
     [
         (b"\xff", "message_classification", "unknown"),
-        (b"\x1b", "message_classification", "unknown"),
+        (b"\x00", "message_classification", "unknown"),
         (bytes.fromhex("0e00010000ffff"), "frame_boundary", "ambiguous"),
         ("truncated", "frame_boundary", "ambiguous"),
         ("duplicate", "request_correlation", "data_response"),
