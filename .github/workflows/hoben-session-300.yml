@@ -19,7 +19,7 @@ jobs:
       github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
       github.actor == 'Guillaume0385' &&
       github.triggering_actor == 'Guillaume0385' &&
-      github.run_attempt == 1
+      github.run_attempt >= 1 && github.run_attempt <= 50
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -237,7 +237,7 @@ jobs:
             success = success &&
               Number.isSafeInteger(publicPR) && publicPR > 0 &&
               Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
-              publicAttempt === 1;
+              publicAttempt <= 50;
             await github.rest.repos.createCommitStatus({
               ...context.repo, sha: context.sha, context: 'hoben-experimental-session-suite',
               state: success ? 'success' : 'failure',
@@ -249,7 +249,7 @@ jobs:
             const pr = Number(process.env.APPROVED_PR);
             const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
             if (!Number.isSafeInteger(pr) || pr <= 0 ||
-                !Number.isSafeInteger(attempt) || attempt < 1 || attempt !== 1) {
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
               core.setFailed('NOT RUN: missing public attempt correlation.');
             } else {
               await core.summary.addRaw(

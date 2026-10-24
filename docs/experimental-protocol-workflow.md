@@ -422,6 +422,16 @@ Un rerun de CI ordinaire ne remplace pas la tentative 1 exigée par ces gates.
 
 ## Décisions MANAGER et preuve de relance complète
 
+La suite `session-suite` réutilise désormais ce même mécanisme H1/H2 : tentative
+1 inchangée, décision v1 de suite avec ses scénarios/budgets fixes toujours
+requise ; pour N>1, marqueur `<!-- hoben-session-suite-approval:v2 -->` et les
+huit champs v2 du tableau ci-dessous, avec `scenario=session-suite`. Claims
+par tentative, jobs courants/précédents, acteur de relance, recheck et approbation
+fraîche restent identiques. Voir le [contrat de suite](session-suite-plan.md#relances-natives-de-la-suite--session-native-rerun-004).
+Un run antérieur à l'installation de ce code, dont #40091399093, conserve son
+ancien workflow lors d'un rerun ; aucune mise à niveau implicite ni nouvelle
+validation réelle n'en découle.
+
 Les commentaires de décision sont réels, authentifiés, uniques pour la cible,
 non modifiés (`created_at == updated_at`), avec uniquement les champs attendus :
 

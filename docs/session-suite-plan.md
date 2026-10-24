@@ -27,6 +27,32 @@ preuve des Settings effectifs. MANAGER doit vérifier séparément l'admission
 réelle et les approbations requises. Tests réels NOT RUN ; étape 7 non validée,
 étape 8 suspendue. Les sections suivantes conservent les contrats et l'historique.
 
+### Relances natives de la suite — SESSION-NATIVE-RERUN-004
+
+La suite réutilise `experimental-native-rerun.cjs`, comme H1/H2, sans nouvelle
+infrastructure. Tentative 1 : décision v1 et claim historique inchangés, contrat
+fixe de suite toujours vérifié. Tentatives 2 à 50 : uniquement **Re-run all jobs**
+du run d'origine, avec nouvelle décision MANAGER v2 unique et immuable, après
+fusion et avant le début du dry-run courant. Marqueur exact
+`<!-- hoben-session-suite-approval:v2 -->`, clés exactes `schema=2`,
+`scenario=session-suite`, `candidate_sha`, `ci_run_id`, `pr_number`, `merge_sha`,
+`run_id`, `run_attempt`. La v1 d'origine reste requise et lie les scénarios et
+budgets fixes ; la v2 ne les paramètre pas.
+
+Les mêmes contrôles H1/H2 vérifient les jobs de la tentative courante, le dry-run
+précédent réussi et l'identité API `triggering_actor`. Re-run failed jobs, job
+isolé ou preuve ambiguë : NOT RUN. Claim distinct
+`hoben-session-suite-<merge_sha>-run<run_id>-attempt<N>`, conservé même après échec
+ou annulation ; recheck complet et approbation indépendante fraîche si requise.
+Le champ existant `run_attempt` est borné à 1–50 dans le contexte et les rapports
+Python/Node ; artefact `session-suite-report-<SHA>-<run_id>-a<N>`, sans nouveau
+schéma ni diagnostic. L'ancienne voie autonome session-300 reste sans rerun.
+
+Le run historique **#40091399093 ne reçoit pas ces changements** : GitHub relance
+normalement le workflow et le code de son commit d'origine. Les preuves de
+relance ne remplacent pas la présence du nouveau code au SHA exécuté. Aucun run,
+claim réel ni décision de campagne par DEV ; MANAGER seul décide après revue/CI.
+
 La [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
 demande une suite unique, sur le workflow push `experimental` existant :
 `session-300`, puis `session-reconnect-no-pong`. L'étape 8 est suspendue.
@@ -229,7 +255,7 @@ Les clés de suite restent exactement : `schema`, `scenario`, `boundary_proven`,
 `result`, `duration_ms`, `session_300`, `session_reconnect_no_pong` et provenance
 `merge_sha`, `candidate_sha`, `run_id`, `run_attempt`, `pr_number`.
 Scénarios exacts `session-suite` et `session-reconnect-no-pong`,
-`boundary_proven=false`, SHA hex minuscules de 40 caractères, tentative 1,
+`boundary_proven=false`, SHA hex minuscules de 40 caractères, tentative entière 1–50,
 provenance identique au contexte attendu et aux deux sous-rapports. En v3,
 run/PR sont des entiers positifs sûrs <= 2^53-1, jamais booléens/flottants.
 La durée de suite reste bornée à 1020000 ms et au moins la somme des durées des
@@ -696,7 +722,7 @@ recheck et approbation indépendante fraîche si requise. Il ne permet pas de
 choisir un profil, des scénarios ou des budgets via des options ou l'environnement.
 Les wrappers historiques `session-300` conservent leur contrat à quatre champs.
 
-Le futur commentaire MANAGER doit commencer exactement par le marqueur
+Pour la tentative 1, le commentaire MANAGER doit commencer exactement par le marqueur
 `<!-- hoben-session-suite-approval:v1 -->`, suivi d'un unique objet JSON fermé :
 
 | Clé exacte | Valeur attendue |
@@ -720,14 +746,15 @@ Toutes les limites sont des entiers exacts ; aucune clé libre, valeur différen
 conversion de chaîne/booléen, sélection partielle ou permutation n'est acceptée.
 Ces valeurs attestent un contrat revu ; elles ne paramètrent aucun processus.
 
-La décision doit être unique, authentifiée MANAGER, non modifiée et antérieure
+La décision v1 doit être unique, authentifiée MANAGER, non modifiée et antérieure
 à la fusion. Les anciens marqueurs session-300/H1H2/ha-parity n'autorisent pas
 la suite, même avec des valeurs ressemblantes. La réservation atomique distincte
-est `refs/tags/hoben-session-suite-<candidate_sha>`. Son objet lie scénario,
-contrat fixe complet, SHA candidat/merge, PR, run/tentative 1, décision immuable
+de tentative 1 est `refs/tags/hoben-session-suite-<candidate_sha>`. Son objet lie scénario,
+contrat fixe complet, SHA candidat/merge, PR, run/tentative, décision immuable
 et empreinte de politique d'environnement. Le recheck exige cette référence
 exacte et ce contenu ; aucun repli vers un ancien claim, aucune suppression ou
-réécriture d'un claim consommé, aucun rerun. La création d'un claim n'est testée
+réécriture d'un claim consommé ; relances natives selon le contrat courant ci-dessus.
+La création d'un claim n'est testée
 qu'avec GitHub simulé dans cette tranche, sans réservation réelle.
 
 ## Launcher G2 : plafonds externes et nettoyage

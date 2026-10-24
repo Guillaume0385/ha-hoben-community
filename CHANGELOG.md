@@ -2,6 +2,13 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #112, SESSION-NATIVE-RERUN-004 : réutilisation du mécanisme natif H1/H2
+  pour les tentatives 2–50 de la suite, avec décision MANAGER v2, preuves de
+  relance complète, claim distinct et approbation fraîche avant secrets.
+  Tentative 1 et contrat de suite conservés ; seul le champ de tentative existant
+  est propagé aux rapports et artefacts. Aucun test réel ou rerun lancé par DEV ;
+  un ancien run conserve le code de son commit d'origine.
+
 - Issue #112, ADMISSION-MINIMAL-003 : retrait du seul arrêt inconditionnel
   `quarantine-installation` et de sa dépendance de préflight. Admission normale
   conservée : décision MANAGER, provenance/CI exactes, claim anti-rejeu,

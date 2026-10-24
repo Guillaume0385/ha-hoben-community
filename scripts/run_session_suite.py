@@ -36,7 +36,8 @@ def suite_proof(source):
             "SESSION300_APPROVED_SHA": source.get("SESSION_SUITE_APPROVED_SHA", ""),
             "SESSION300_CANDIDATE_SHA": source.get("SESSION_SUITE_CANDIDATE_SHA", ""),
             "SESSION300_APPROVED_PR": source.get("SESSION_SUITE_APPROVED_PR", ""),
-        }
+        },
+        native_rerun=True,
     )
 
 

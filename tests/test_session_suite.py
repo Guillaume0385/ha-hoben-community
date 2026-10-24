@@ -143,9 +143,9 @@ class Harness:
         assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
 
 
-async def run_harness(mode="recovered"):
+async def run_harness(mode="recovered", *, proof=PROOF):
     h = Harness(mode)
-    r = await observe_suite(h.make, PROOF, clock=h.clock, sleep=h.sleep)
+    r = await observe_suite(h.make, proof, clock=h.clock, sleep=h.sleep)
     h.assert_closed()
     assert r["boundary_proven"] is False
     assert "private" not in json.dumps(r)

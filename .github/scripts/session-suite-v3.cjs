@@ -15,7 +15,8 @@ function validateV3(r,p,provenance,limits,terminals,messages) {
   need(r.schema === 3 && r.scenario === "session-reconnect-no-pong" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
   need(["merge_sha","candidate_sha"].every(k => typeof r[k] === "string" && /^[0-9a-f]{40}$/.test(r[k])));
-  need(r.run_attempt === 1 && ["run_id","pr_number"].every(k => integer(r[k],Number.MAX_SAFE_INTEGER) && r[k] > 0));
+  need(integer(r.run_attempt,50) && r.run_attempt > 0 &&
+    ["run_id","pr_number"].every(k => integer(r[k],Number.MAX_SAFE_INTEGER) && r[k] > 0));
   for (const [k,max] of Object.entries(limits)) need(integer(r[k],max));
   need(terminals.has(r.terminal) && ["recovered_120s","inconclusive","interrupted","not_run"].includes(r.result));
   for (const [group,fields] of Object.entries(contract)) {

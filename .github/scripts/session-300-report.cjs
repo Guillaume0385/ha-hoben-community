@@ -24,7 +24,8 @@ function validate(r, p) {
   need(r.schema === 1 && r.scenario === "session-300" && r.boundary_proven === false);
   need(["merge_sha","candidate_sha"].every(k => /^[a-f0-9]{40}$/.test(r[k])));
   need(["merge_sha","candidate_sha","run_id","run_attempt","pr_number"].every(k => r[k] === p[k]));
-  need(r.run_attempt === 1 && Number.isSafeInteger(r.run_id) && r.run_id > 0 &&
+  need(Number.isSafeInteger(r.run_attempt) && r.run_attempt >= 1 && r.run_attempt <= 50 &&
+    Number.isSafeInteger(r.run_id) && r.run_id > 0 &&
     Number.isSafeInteger(r.pr_number) && r.pr_number > 0);
   for (const [k,max] of Object.entries({duration_ms:300000,opens:3,reconnections:2,
     pings:1048576,pongs:1048576,reads:6,reads_ok:6,reads_failed:6,responses:6,
