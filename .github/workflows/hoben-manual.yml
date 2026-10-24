@@ -1,0 +1,286 @@
+# Issue #119 phase 2: manual owner dispatch; main remains inactive.
+name: Tests Hoben manuels
+'on':
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scénario en lecture seule — experimental uniquement
+        required: true
+        type: choice
+        default: h1h2
+        options:
+        - h1h2
+        - session-300
+        - session-reconnect
+        - all
+permissions: {}
+concurrency:
+  group: hoben-read-only-observation
+  cancel-in-progress: false
+  queue: max
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    steps:
+    - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      with:
+        script: |
+          const repository = 'Guillaume0385/ha-hoben-community';
+          const owner = 'Guillaume0385';
+          const ownerId = 18246624;
+          const file = '.github/workflows/hoben-manual.yml';
+          const scenarios = ['h1h2', 'session-300', 'session-reconnect'];
+          const inputs = context.payload.inputs;
+          const selected = inputs?.scenario;
+          const choices = [...scenarios, 'all'];
+          const stop = async reason => {
+            const plan = choices.includes(selected)
+              ? (selected === 'all' ? scenarios : [selected]) : [];
+            await core.summary.addHeading('Tests Hoben manuels — préflight')
+              .addRaw('Aucun test réel exécuté. Motif: ' + reason + '.\n')
+              .addTable([
+                [{data: 'Scénario', header: true}, {data: 'État', header: true},
+                 {data: 'Sélection', header: true}],
+                ...scenarios.map(s => [s, 'NOT RUN', plan.includes(s) ? 'demandé' : 'non sélectionné'])
+              ]).write();
+            core.setFailed('NOT RUN: ' + reason);
+          };
+          if (context.eventName !== 'workflow_dispatch' ||
+              `${context.repo.owner}/${context.repo.repo}` !== repository ||
+              context.payload.repository?.full_name !== repository ||
+              context.payload.repository?.id !== 1401398724 ||
+              context.actor !== owner || context.payload.sender?.login !== owner ||
+              context.payload.sender?.id !== ownerId ||
+              context.payload.sender?.type !== 'User' ||
+              process.env.GITHUB_ACTOR !== owner ||
+              process.env.GITHUB_TRIGGERING_ACTOR !== owner ||
+              process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+              process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+              process.env.GITHUB_REPOSITORY !== repository ||
+              process.env.GITHUB_REF !== context.ref ||
+              process.env.GITHUB_SHA !== context.sha ||
+              process.env.GITHUB_WORKFLOW_SHA !== context.sha ||
+              process.env.GITHUB_RUN_ID !== String(context.runId) ||
+              !Number.isSafeInteger(context.runId) || context.runId <= 0 ||
+              !/^[a-f0-9]{40}$/.test(context.sha || '') ||
+              !inputs || Object.keys(inputs).join() !== 'scenario' ||
+              !choices.includes(selected)) {
+            return stop('invalid_dispatch');
+          }
+          // Use workflow from chooses the executed ref. Never substitute a
+          // checkout of experimental for a dispatch that selected main.
+          if (context.ref !== 'refs/heads/experimental') {
+            return stop('branch_not_activated');
+          }
+          if (process.env.GITHUB_WORKFLOW_REF !==
+              repository + '/' + file + '@refs/heads/experimental') {
+            return stop('workflow_ref_mismatch');
+          }
+          try {
+            const {data: branch} = await github.rest.repos.getBranch({
+              ...context.repo, branch: 'experimental'
+            });
+            const {data: run} = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId
+            });
+            if (branch.protected !== true || branch.commit?.sha !== context.sha ||
+                run.id !== context.runId || run.event !== 'workflow_dispatch' ||
+                run.run_attempt !== 1 || run.head_sha !== context.sha ||
+                run.head_branch !== 'experimental' ||
+                ![file, file + '@refs/heads/experimental'].includes(run.path) ||
+                run.repository?.id !== 1401398724 ||
+                run.repository?.full_name !== repository ||
+                run.actor?.login !== owner || run.actor?.id !== ownerId ||
+                run.triggering_actor?.login !== owner ||
+                run.triggering_actor?.id !== ownerId) {
+              return stop('provenance_unverified');
+            }
+          } catch (_) {
+            return stop('provenance_unavailable');
+          }
+          // This check grants no Hoben access; the reviewed gate runs next.
+          core.setOutput('eligible','true');
+      id: context
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+      if: steps.context.outputs.eligible == 'true'
+    - id: gate
+      if: steps.context.outputs.eligible == 'true'
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      with:
+        script: |
+          try {
+            const d=await require('./.github/scripts/manual-hoben-gate.cjs').verify({github,context});
+            core.setOutput('approved','true');core.setOutput('pr',String(d.pr));
+            core.setOutput('candidate',d.candidate_sha);core.setOutput('selection',d.selection);
+            await core.summary.addRaw(d.status + ': GitHub environment rules remain mandatory.').write();
+          }catch(_){core.setFailed('NOT RUN: manual provenance, review, CI, environment or claim refused.');}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
+      candidate: ${{ steps.gate.outputs.candidate }}
+      selection: ${{ steps.gate.outputs.selection }}
+  collect:
+    needs: preflight
+    if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/experimental'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    environment: hoben-experimental
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      report_0_b64: ${{ steps.exports.outputs.report_0_b64 }}
+      report_1_b64: ${{ steps.exports.outputs.report_1_b64 }}
+      report_2_b64: ${{ steps.exports.outputs.report_2_b64 }}
+      report_3_b64: ${{ steps.exports.outputs.report_3_b64 }}
+      admitted: ${{ steps.recheck.outputs.approved }}
+      capture_outcome: ${{ steps.capture.outcome }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        path: trusted
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        path: candidate
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - id: recheck
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      with:
+        script: |
+          try {
+            const d=await require('./trusted/.github/scripts/manual-hoben-gate.cjs').verify({github,context,recheck:true});
+            core.setOutput('approved','true');core.setOutput('pr',String(d.pr));
+            core.setOutput('candidate',d.candidate_sha);core.setOutput('selection',d.selection);
+          }catch(_){core.setFailed('NOT RUN: required approval, current SHA or reserved proof changed.');}
+    - id: capture
+      name: Fixed read-only scenarios in one isolated supervised group
+      if: steps.recheck.outputs.approved == 'true'
+      env:
+        MANUAL_HOBEN_SHA: ${{ github.sha }}
+        MANUAL_HOBEN_PR: ${{ steps.recheck.outputs.pr }}
+        MANUAL_HOBEN_CANDIDATE: ${{ steps.recheck.outputs.candidate }}
+        MANUAL_HOBEN_SCENARIO: ${{ steps.recheck.outputs.selection }}
+        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+      run: python trusted/scripts/launch_manual_hoben.py
+    - id: exports
+      if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.capture.outcome == 'success' }}
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ steps.recheck.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ steps.recheck.outputs.candidate }}
+        APPROVED_SELECTION: ${{ steps.recheck.outputs.selection }}
+      with:
+        script: |-
+          const proof={merge_sha:context.sha,candidate_sha:process.env.APPROVED_CANDIDATE,
+            run_id:context.runId,run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            pr_number:Number(process.env.APPROVED_PR),selection:process.env.APPROVED_SELECTION};
+          require('./trusted/.github/scripts/manual-hoben-report.cjs').prepare({core,proof});
+  publish:
+    needs:
+    - preflight
+    - collect
+    if: ${{ always() && needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && needs.collect.outputs.report_0_b64
+      != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - id: publish
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ needs.preflight.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ needs.preflight.outputs.candidate }}
+        APPROVED_SELECTION: ${{ needs.preflight.outputs.selection }}
+        PUBLIC_REPORT_0_B64: ${{ needs.collect.outputs.report_0_b64 }}
+        PUBLIC_REPORT_1_B64: ${{ needs.collect.outputs.report_1_b64 }}
+        PUBLIC_REPORT_2_B64: ${{ needs.collect.outputs.report_2_b64 }}
+        PUBLIC_REPORT_3_B64: ${{ needs.collect.outputs.report_3_b64 }}
+      with:
+        script: |-
+          const proof={merge_sha:context.sha,candidate_sha:process.env.APPROVED_CANDIDATE,
+            run_id:context.runId,run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            pr_number:Number(process.env.APPROVED_PR),selection:process.env.APPROVED_SELECTION};
+          const parts=[0,1,2,3].map(i=>process.env['PUBLIC_REPORT_'+i+'_B64']);
+          require('./.github/scripts/manual-hoben-report.cjs').publish({core,proof,parts});
+    - if: steps.publish.outputs.report == 'true'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: manual-hoben-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/hoben-manual-public/report.json
+        if-no-files-found: error
+        retention-days: 7
+  result:
+    needs:
+    - preflight
+    - collect
+    - publish
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+      if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+      if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && needs.publish.result == 'success'
+      continue-on-error: true
+      with:
+        name: manual-hoben-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: public-report
+    - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ needs.preflight.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ needs.preflight.outputs.candidate }}
+        APPROVED_SELECTION: ${{ needs.preflight.outputs.selection }}
+        APPROVED: ${{ needs.preflight.outputs.approved }}
+        COLLECTION_RESULT: ${{ needs.collect.result }}
+        PUBLICATION_RESULT: ${{ needs.publish.result }}
+        ADMITTED: ${{ needs.collect.outputs.admitted }}
+        CAPTURE_OUTCOME: ${{ needs.collect.outputs.capture_outcome }}
+      with:
+        script: |
+          const proof={merge_sha:context.sha,candidate_sha:process.env.APPROVED_CANDIDATE,
+            run_id:context.runId,run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            pr_number:Number(process.env.APPROVED_PR),selection:process.env.APPROVED_SELECTION};
+          let states={h1h2:'NOT RUN','session-300':'NOT RUN','session-reconnect':'NOT RUN'},complete=false;
+          if(process.env.APPROVED==='true'&&process.env.GITHUB_RUN_ATTEMPT==='1')try{
+            const api=require('./.github/scripts/manual-hoben-report.cjs');
+            const report=api.readReport('public-report/report.json',proof);
+            states=api.states(report);
+            complete=process.env.COLLECTION_RESULT==='success'&&process.env.PUBLICATION_RESULT==='success'&&api.completed(report,proof);
+          }catch(_){}
+          if(!complete&&process.env.GITHUB_RUN_ATTEMPT==='1'&&process.env.ADMITTED==='true'&&['failure','cancelled'].includes(process.env.CAPTURE_OUTCOME)){
+            const selected=proof.selection==='all'?Object.keys(states):[proof.selection];
+            for(const s of selected)if(Object.hasOwn(states,s))states[s]='INCONCLUSIVE';
+          }
+          await core.summary.addTable([
+            [{data:'Scénario',header:true},{data:'Résultat',header:true}],
+            ...Object.entries(states)
+          ]).addRaw('boundary_proven=false. H1/H2 INCONCLUSIVE remains a hypothesis, never protocol validation.').write();
+          if(!complete)core.setFailed('Manual scenarios incomplete, inconclusive, failed or NOT RUN.');

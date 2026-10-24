@@ -8,6 +8,15 @@ La branche de développement est exclusivement `experimental`. Avant toute actio
 
 **Références distinctes :** l'Issue #112 est la référence technique de la session V4 et de la reconnexion par inhibition des Pong. L'Issue #81 est un historique de développement ; ne pas la réactiver comme tâche active par déduction. L'Issue #112, même en `state:waiting`, ne porte pas de consigne active de développement par sa seule existence. MANAGER doit obtenir une autorisation explicite du propriétaire et identifier l'Issue de travail autorisée avant d'écrire ou d'attribuer une tâche. Une Issue de référence ne vaut jamais autorisation de développement ou de test live.
 
+## Campagnes Hoben manuelles — #119 phase 2
+
+Phase 1 fusionnée sur main par PR #120 ; main reste inactive pour les collectes.
+La [voie manuelle experimental](hoben-manual-workflow.md) est exclusivement
+workflow_dispatch du propriétaire. Aucun merge, label, commentaire MANAGER ou
+état d'Issue ne lance de test réel. Revues/CI/provenance, environnement et
+approbations effectives, claim et recheck sont conservés ; aucun test réel DEV.
+Le choix all est séquentiel et les résultats sont explicites par scénario.
+
 ## Responsabilités
 
 - **MANAGER (automatique)** : constate l'état réel de GitHub, prépare une petite tâche seulement après autorisation explicite du propriétaire, publie ou met à jour une consigne unique, vérifie les PR, demande les corrections et fusionne seulement les PR conformes sur `experimental`. Il ne lance ni ne reprogramme automatiquement CHAT DEV. Pour CODEX DEV uniquement, MANAGER peut activer ou reprogrammer explicitement l'automatisation existante lorsqu'une tâche complexe est autorisée par le propriétaire, attribuée à CODEX DEV et vérifiée sur GitHub ; il confirme alors l'état réel de l'automatisation. Ce mécanisme ne constitue pas une autorisation de développement implicite.

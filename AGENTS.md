@@ -449,22 +449,20 @@ concerne uniquement les anciennes voies chiffrées ; leur suppression du chemin
 courant n'autorise jamais le téléversement de captures brutes. Voir le
 [contrat courant](docs/experimental-protocol-workflow.md).
 
-### Validation expérimentale autonome
+### Validation expérimentale manuelle — Issue #119
 
-MANAGER peut fusionner sur `experimental` après revue du SHA exact et CI, sous
-réserve des instructions explicites du propriétaire. Une fusion n'autorise pas
-à elle seule un test réel : décision MANAGER propre au scénario, provenance de
-la PR/arbre/CI, acteur original et de relance, HEAD protégé exact, réservation
-anti-rejeu, politique d'environnement et approbations réelles restent requis.
-Le recheck précède l'unique étape secrète ; jetons GitHub et secrets Hoben sont
-séparés. Les deux voies partagent `hoben-read-only-observation` ; aucune sonde
-historique concurrente. Les reruns natifs complets exigent une nouvelle décision
-v2 et un claim par tentative ; aucune relance partielle ni réutilisation d'un
-succès. Preuve absente : `NOT RUN` / `PENDING APPROVAL`, jamais contournement de
-Settings. CODEX DEV et la CI restent hors ligne. Le
-[workflow courant](docs/experimental-protocol-workflow.md) détaille ces contrats,
-les limites des preuves de reviewers et des tags, et les chemins installés.
-Aucune promotion `main` sans nouvelle demande explicite du propriétaire.
+La voie courante est [Tests Hoben manuels](docs/hoben-manual-workflow.md),
+workflow_dispatch uniquement, propriétaire autorisé, ref/SHA exact experimental.
+Aucun test réel sur push/PR/merge et aucun commentaire MANAGER d'admission.
+La PR fusionnée/arbre/CI exacts, revue, environnement/politique/approbations
+réelles, claim par dispatch et recheck avant secrets restent obligatoires.
+Les reruns sont refusés ; nouveau dispatch explicite pour toute répétition.
+Le mutex partagé, les budgets et les projections anonymisées restent imposés.
+Main conserve le point d'entrée inactif installé en phase 1 ; aucun checkout
+implicite d'une autre branche ni activation par simple présence de fichiers.
+CODEX DEV et CI restent hors ligne. Anciennes voies/gates conservés en fixtures
+historiques seulement ; aucun repli, contournement ou autorisation fabriquée.
+Aucune promotion main sans nouvelle demande explicite du propriétaire.
 
 ## Version and feature discipline
 

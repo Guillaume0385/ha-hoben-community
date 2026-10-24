@@ -115,14 +115,14 @@ function authorizeDecision({comments, marker, scenario, candidateSha, ciId,
   return Object.freeze({approval: d, comment});
 }
 
-function freshEnvironmentApproval(history, environment, proof, name) {
+function freshEnvironmentApproval(history, environment, proof, name, requireFresh = false) {
   if (!Array.isArray(history) || !Array.isArray(environment?.reviewers) ||
       !whole(environment?.id) || !whole(proof?.number)) return false;
   const relevant = history.filter(h => h.environments?.some(e =>
     e.id === environment.id && e.name === name));
   // GitHub run approvals may include older attempts. Only *fresh* entries
   // from this attempt qualify; old approvals neither authorize nor veto it.
-  const current = proof.number === 1 ? relevant : relevant.filter(h =>
+  const current = proof.number === 1 && !requireFresh ? relevant : relevant.filter(h =>
     Number.isFinite(when(h.created_at)) && when(h.created_at) >= proof.beganAt);
   return current.length > 0 && current.every(h =>
     h.state === "approved" && h.user?.type === "User" &&

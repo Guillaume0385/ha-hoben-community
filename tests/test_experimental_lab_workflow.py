@@ -12,7 +12,7 @@ import yaml
 from scripts import launch_experimental_boundary as launcher
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/hoben-experimental.yml"
+WORKFLOW = ROOT / "tests/fixtures/retired_workflows/hoben-experimental.yml"
 
 
 def test_workflow_separates_admission_collection_and_publication():

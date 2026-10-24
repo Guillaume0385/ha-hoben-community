@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_dedicated_lane_has_exact_scope_and_one_secret_step():
-    file = ROOT / ".github/workflows/hoben-session-300.yml"
+    file = ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml"
     workflow = yaml.load(file.read_text(), Loader=yaml.BaseLoader)
     assert workflow["on"] == {"push": {"branches": ["experimental"]}}
     assert workflow["permissions"] == {}
@@ -82,7 +82,7 @@ def test_dedicated_lane_has_exact_scope_and_one_secret_step():
 
 def test_suite_keeps_preflight_admission_and_recheck_before_secrets():
     workflow = yaml.load(
-        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     jobs = workflow["jobs"]
@@ -146,7 +146,7 @@ def test_chat_wiring_002_legacy_lane_cannot_masquerade_as_session_300():
     import ast
 
     legacy = yaml.load(
-        (ROOT / ".github/workflows/hoben-experimental.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-experimental.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     policy = json.loads((ROOT / ".github/config/hoben-experimental.json").read_text())
@@ -200,7 +200,7 @@ def test_suite_admission_still_guards_secrets_and_uses_shared_v4():
     import ast
 
     suite = yaml.load(
-        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     jobs = suite["jobs"]

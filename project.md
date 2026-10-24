@@ -20,6 +20,15 @@ The README should contain a visible disclaimer:
 
 ## Goals
 
+La voie live courante de #119 est le [workflow manuel](docs/hoben-manual-workflow.md)
+sur experimental : sélection H1/H2, session-300, reconnexion autonome ou all.
+Le dispatch propriétaire remplace le commentaire d'admission pré-fusion ; revue,
+CI, provenance, environnement/approbations, anti-rejeu, budgets et confidentialité
+restent requis. Main reste inactive ; étape 8 HA suspendue. Les descriptions
+push/labels/commentaires d'admission plus bas sont historiques et ne réactivent
+aucune ancienne voie. La précondition du premier scénario reste imposée dans all.
+
+
 The project aims to provide a stable Home Assistant integration for Hoben pellet stoves that communicates through the same remote service used by MyHOBEN, without requiring hardware modification or a contact relay.
 
 The project should:

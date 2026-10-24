@@ -1,8 +1,8 @@
 """Shared suite engine. No CLI, credential lookup or live authorization.
 
 An admitted caller provides the shared V4Lifecycle/V4Session factory.
-Only this sequential entry point schedules the second collector. The installed
-admission gates remain mandatory; these APIs grant no access.
+The suite preserves its sequential gate; the #119 manual entry may also call
+the bounded reconnect collector alone. These APIs grant no live authorization.
 """
 
 import asyncio

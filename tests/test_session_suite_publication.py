@@ -134,7 +134,7 @@ process.stdout.write(JSON.stringify({checks,publicExists:fs.existsSync(path.join
 def test_actual_workflow_result_cannot_claim_partial_success(tmp_path, mode, attempt):
     proof = PROOF | {"run_attempt": attempt}
     workflow = yaml.load(
-        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     script = workflow["jobs"]["result"]["steps"][-1]["with"]["script"]
@@ -192,7 +192,7 @@ execute(localRequire,core,github,context)
 @pytest.mark.parametrize("job", ["dry-run", "admission", "collect"])
 def test_actual_pre_secret_refusal_reports_two_not_run_without_private_errors(job):
     workflow = yaml.load(
-        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     steps = workflow["jobs"][job]["steps"]
