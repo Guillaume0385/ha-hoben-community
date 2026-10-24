@@ -27,6 +27,33 @@ preuve des Settings effectifs. MANAGER doit vérifier séparément l'admission
 réelle et les approbations requises. Tests réels NOT RUN ; étape 7 non validée,
 étape 8 suspendue. Les sections suivantes conservent les contrats et l'historique.
 
+
+### Point d'avancement vérifié — 24 octobre 2026 (Issue #112)
+
+La PR #114 a livré le scénario minimal de reconnexion sur `experimental` ;
+la PR #115 a retiré uniquement le verrou d'admission inconditionnel ; la PR
+#116 a raccordé les relances natives complètes de la suite au mécanisme H1/H2
+(tentatives 1 à 50), sans modifier les budgets ni les scénarios. Son commit
+de fusion est `ba6318d261cb4ebad82886f3da15766d454183fb`.
+
+Le dernier essai réel vérifié avant cette note est le run GitHub Actions
+[#40091399093](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/40091399093)
+au SHA `a402c969d8e9f8f0b72a536cc97782afd8f79e7e` : admission,
+collecte et publication exécutées ; `session-300` inconclusif après 22,350 s
+(`protocol/message_classification/unknown`) ; `session-reconnect-no-pong`
+non exécuté (`first_not_admissible`). Aucun EOF/reconnexion ni stabilité de
+120 s n'est validé par ce run. La validation fonctionnelle de l'étape 7
+reste ouverte ; l'intégration réelle Home Assistant (étape 8) est suspendue.
+
+Cette mise à jour est **documentaire uniquement** : elle ne change ni le code
+V4, ni le workflow, ni les gates, ni les secrets, ni les plafonds. Elle ne
+constitue **pas** une autorisation d'exécution réelle. Pour un nouveau push
+admissible, MANAGER doit vérifier la PR et ses quatre checks CI, publier la
+décision immuable `hoben-session-suite-approval:v1` conforme au contrat
+**avant la fusion**, puis laisser le workflow GitHub appliquer les contrôles
+d'admission, les claims et les éventuelles approbations d'environnement.
+Le simple push ne prouve ni admission ni lancement du test.
+
 ### Relances natives de la suite — SESSION-NATIVE-RERUN-004
 
 La suite réutilise `experimental-native-rerun.cjs`, comme H1/H2, sans nouvelle
