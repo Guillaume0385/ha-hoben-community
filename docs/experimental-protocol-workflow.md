@@ -1,5 +1,17 @@
 # Workflow courant — développement experimental, validation et promotion
 
+## Installation manuelle #119 — priorité sur les procédures historiques de main
+
+L'arbitrage propriétaire du 24/10/2026 autorise une première PR issue de main
+et ciblant main, limitée à l'infrastructure Actions et ses tests/docs. Le
+[point d'entrée manuel](hoben-manual-workflow.md) installe les quatre choix,
+retire les anciennes voies live de main et refuse toute collecte (aucun secret,
+runtime ou activation main). Une seconde PR experimental est requise après
+fusion MANAGER. Les contrats ci-dessous décrivent encore les voies propres à
+experimental avant cette phase 2 ; ils ne permettent pas de réactiver les
+anciens labels/dispatch de main. Revue indépendante main, MANAGER et quatre CI
+conservés ; aucune promotion de protocole ni exécution réelle par DEV.
+
 ## Règles de branche et de revue
 
 Toute PR de développement contenant du code, des tests, des sondes ou des

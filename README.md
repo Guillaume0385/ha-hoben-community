@@ -475,7 +475,24 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
-### Procédures live historiques de `main` — non applicables au workflow courant
+### Tests Hoben manuels — phase 1 de #119
+
+Le [point d'entrée Actions](.github/workflows/hoben-manual.yml) installe le bouton
+**Run workflow**, avec `h1h2`, `session-300`, `session-reconnect` et `all`.
+Le sélecteur natif **Use workflow from** choisit le ref exécuté ; aucune branche
+n'est masquée et main n'est pas activée pour les tests réels.
+
+**Phase 1 : aucune collecte ni secret Hoben.** Tous les scénarios restent NOT RUN.
+Le raccordement et le report vers experimental attendent une seconde PR après
+validation/fusion MANAGER de la première. Voir la [procédure et ses limites](docs/hoben-manual-workflow.md).
+Les quatre checks CI hors ligne et le workflow de release sont conservés.
+
+### Procédures live historiques de `main` — retirées, ne pas exécuter
+
+> **Mise à jour #119, 24 octobre 2026 :** les trois définitions historiques
+> ci-dessous sont retirées d'Actions et conservées seulement comme fixtures de
+> tests. Leurs anciens labels et modes ne sont plus une procédure disponible
+> sur main. La procédure courante est le point d'entrée manuel décrit ci-dessus.
 
 > **AVERTISSEMENT (14 octobre 2026) :** les instructions de validation live
 > ci-dessous (labels `manager-live-hoben`, `live-validation`, dispatch
@@ -522,7 +539,7 @@ TLS ou une observation négative.
 
 ### Archive — validation authentifiée avant fusion (historique, ne pas exécuter)
 
-Le workflow [MANAGER authenticated Hoben validation](.github/workflows/manager-live-hoben.yml)
+L'ancien workflow [MANAGER authenticated Hoben validation](tests/fixtures/retired_workflows/manager-live-hoben.yml)
 utilise uniquement **`pull_request_target: labeled`**. Sa définition provient de
 `main` protégé, même s'il checkout ensuite le code candidat. Seul l'ajout du label
 exact **`manager-live-hoben`** par **`Guillaume0385`** peut autoriser une PR ouverte,
@@ -651,7 +668,7 @@ contrôle : une décision de sécurité distincte reste nécessaire.
 
 ### Smoke sans secret et exploration manuelle sur GitHub Actions
 
-Le workflow [Live Validation](.github/workflows/live-validation.yml) est
+L'ancien workflow [Live Validation](tests/fixtures/retired_workflows/live-validation.yml) est
 **opt-in**, avec les déclenchements explicites suivants, séparés du workflow MANAGER :
 
 - **TLS avant fusion :** ajouter le label exact `live-validation` à la PR.

@@ -1,4 +1,4 @@
-"""Execute the trusted workflow gates/status scripts with offline GitHub doubles."""
+"""Retired gate/status regressions, executed only with offline GitHub doubles."""
 
 import copy
 import json
@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_PATH = ROOT / ".github/workflows/manager-live-hoben.yml"
+WORKFLOW_PATH = ROOT / "tests/fixtures/retired_workflows/manager-live-hoben.yml"
 REPOSITORY = "Guillaume0385/ha-hoben-community"
 SHA = "a" * 40
 NEW_SHA = "b" * 40

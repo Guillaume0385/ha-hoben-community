@@ -1,4 +1,4 @@
-"""Offline checks of live-workflow isolation and the actual summary shell steps."""
+"""Frozen regressions of retired workflows; these fixtures cannot run in Actions."""
 
 import json
 import os
@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-LIVE_PATH = ROOT / ".github/workflows/live-validation.yml"
+LIVE_PATH = ROOT / "tests/fixtures/retired_workflows/live-validation.yml"
 
 
 @pytest.fixture

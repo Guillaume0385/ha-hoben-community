@@ -1,0 +1,109 @@
+name: Tests Hoben manuels
+
+# Issue #119, phase 1: register the UI on the default branch, without a runtime.
+# Phase 2 must be reviewed and merged separately on experimental before live use.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scénario demandé (NOT RUN tant que le runtime est absent)
+        required: true
+        type: choice
+        default: h1h2
+        options: [h1h2, session-300, session-reconnect, all]
+
+permissions: {}
+
+concurrency:
+  group: hoben-read-only-observation
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # No checkout, Python, environment, Hoben secret, artifact or collector.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const repository = 'Guillaume0385/ha-hoben-community';
+            const owner = 'Guillaume0385';
+            const ownerId = 18246624;
+            const file = '.github/workflows/hoben-manual.yml';
+            const scenarios = ['h1h2', 'session-300', 'session-reconnect'];
+            const inputs = context.payload.inputs;
+            const selected = inputs?.scenario;
+            const choices = [...scenarios, 'all'];
+            const stop = async reason => {
+              const plan = choices.includes(selected)
+                ? (selected === 'all' ? scenarios : [selected]) : [];
+              await core.summary.addHeading('Tests Hoben manuels — phase 1')
+                .addRaw('Aucun test réel exécuté. Motif: ' + reason + '.\n')
+                .addTable([
+                  [{data: 'Scénario', header: true}, {data: 'État', header: true},
+                   {data: 'Sélection', header: true}],
+                  ...scenarios.map(s => [s, 'NOT RUN', plan.includes(s) ? 'demandé' : 'non sélectionné'])
+                ]).write();
+              core.setFailed('NOT RUN: ' + reason);
+            };
+            if (context.eventName !== 'workflow_dispatch' ||
+                `${context.repo.owner}/${context.repo.repo}` !== repository ||
+                context.payload.repository?.full_name !== repository ||
+                context.payload.repository?.id !== 1401398724 ||
+                context.actor !== owner || context.payload.sender?.login !== owner ||
+                context.payload.sender?.id !== ownerId ||
+                context.payload.sender?.type !== 'User' ||
+                process.env.GITHUB_ACTOR !== owner ||
+                process.env.GITHUB_TRIGGERING_ACTOR !== owner ||
+                process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+                process.env.GITHUB_RUN_ATTEMPT !== '1' ||
+                process.env.GITHUB_REPOSITORY !== repository ||
+                process.env.GITHUB_REF !== context.ref ||
+                process.env.GITHUB_SHA !== context.sha ||
+                process.env.GITHUB_WORKFLOW_SHA !== context.sha ||
+                process.env.GITHUB_RUN_ID !== String(context.runId) ||
+                !Number.isSafeInteger(context.runId) || context.runId <= 0 ||
+                !/^[a-f0-9]{40}$/.test(context.sha || '') ||
+                !inputs || Object.keys(inputs).join() !== 'scenario' ||
+                !choices.includes(selected)) {
+              return stop('invalid_dispatch');
+            }
+            // Use workflow from chooses the executed ref. Never substitute a
+            // checkout of experimental for a dispatch that selected main.
+            if (context.ref !== 'refs/heads/experimental') {
+              return stop('branch_not_activated');
+            }
+            if (process.env.GITHUB_WORKFLOW_REF !==
+                repository + '/' + file + '@refs/heads/experimental') {
+              return stop('workflow_ref_mismatch');
+            }
+            try {
+              const {data: branch} = await github.rest.repos.getBranch({
+                ...context.repo, branch: 'experimental'
+              });
+              const {data: run} = await github.rest.actions.getWorkflowRun({
+                ...context.repo, run_id: context.runId
+              });
+              if (branch.protected !== true || branch.commit?.sha !== context.sha ||
+                  run.id !== context.runId || run.event !== 'workflow_dispatch' ||
+                  run.run_attempt !== 1 || run.head_sha !== context.sha ||
+                  run.head_branch !== 'experimental' ||
+                  ![file, file + '@refs/heads/experimental'].includes(run.path) ||
+                  run.repository?.id !== 1401398724 ||
+                  run.repository?.full_name !== repository ||
+                  run.actor?.login !== owner || run.actor?.id !== ownerId ||
+                  run.triggering_actor?.login !== owner ||
+                  run.triggering_actor?.id !== ownerId) {
+                return stop('provenance_unverified');
+              }
+            } catch (_) {
+              return stop('provenance_unavailable');
+            }
+            // Installation is not activation. No approval comment, rerun,
+            // fallback, missing-script import or secret-bearing job exists.
+            return stop('experimental_runtime_not_installed');
