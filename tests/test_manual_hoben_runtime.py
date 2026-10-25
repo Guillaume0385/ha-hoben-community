@@ -74,6 +74,111 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
     assert set(jobs["publish"]["permissions"]) == {"contents"}
 
 
+@pytest.mark.parametrize(
+    "progress", [0, 1, 2], ids=["before-first-ack", "after-h1h2", "during-session-300"]
+)
+@pytest.mark.parametrize("capture_outcome", ["failure", "cancelled"])
+@pytest.mark.parametrize("artifact", ["valid", "missing", "invalid"])
+def test_actual_result_step_requires_validated_start_evidence(
+    tmp_path, progress, capture_outcome, artifact
+):
+    from scripts import run_experimental_boundary as h1
+
+    selection = "all"
+    started = list(PLANS[selection][:progress])
+    control = tmp_path / "hoben-manual-control"
+    control.mkdir(mode=0o700)
+    parent.write_report(
+        control / "report.json",
+        {"schema": 1, "selection": selection, "started": started, "process_ok": False},
+    )
+    if progress:
+        folder = tmp_path / "hoben-experimental-exports"
+        folder.mkdir(mode=0o700)
+        parent.write_report(
+            folder / "report.json",
+            h1.safe_report(
+                {
+                    "boundary_proven": False,
+                    "sessions": [synthetic_h1_session(i) for i in range(12)],
+                },
+                interrupted=False,
+                provenance=PROOF | {"candidate_sha": PROOF["merge_sha"]},
+            ),
+        )
+    config = yaml.load(
+        (ROOT / ".github/workflows/hoben-manual.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    step = config["jobs"]["result"]["steps"][-1]
+    values = {
+        "APPROVED_PR": str(PROOF["pr_number"]),
+        "APPROVED_CANDIDATE": PROOF["candidate_sha"],
+        "APPROVED_SELECTION": selection,
+        "APPROVED": "true",
+        "COLLECTION_RESULT": capture_outcome,
+        "PUBLICATION_RESULT": "success" if artifact != "missing" else "failure",
+        "ADMITTED": "true",
+        "CAPTURE_OUTCOME": capture_outcome,
+    }
+    # Resolve the actual result step's environment, including legacy inputs if
+    # present, so the reviewed workflow's fallback fails this regression test.
+    environment = {k: values[k] for k in step["env"]}
+    environment["GITHUB_RUN_ATTEMPT"] = "1"
+    result = node(
+        """
+const payload=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+const [root,p,source,environment,artifact]=payload;
+const fs=require('node:fs'),path=require('node:path');
+const checkoutRequire=require('node:module').createRequire(
+  process.cwd()+'/result-step.cjs');
+process.env.RUNNER_TEMP=root;
+const api=checkoutRequire('./.github/scripts/manual-hoben-report.cjs');
+let outputs={},errors=[];
+const core={setOutput:(k,v)=>outputs[k]=v,setFailed:v=>errors.push(v)};
+api.prepare({core,proof:p});
+const parts=[0,1,2,3].map(i=>outputs['report_'+i+'_b64']);outputs={};
+api.publish({core,proof:p,parts});
+if(artifact!=='missing') {
+  const target=path.join(root,'public-report');fs.mkdirSync(target);
+  const r=api.readReport(path.join(root,'hoben-manual-public/report.json'),p);
+  if(artifact==='invalid')r.private='SYNTHETIC_UNVALIDATED_FIELD';
+  fs.writeFileSync(path.join(target,'report.json'),JSON.stringify(r),{mode:0o600});
+}
+Object.assign(process.env,environment);process.chdir(root);
+let table,summary='';const failures=[];
+const summaryApi={addTable:v=>{table=v;return summaryApi;},
+  addRaw:v=>{summary+=v;return summaryApi;},write:async()=>{}};
+const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+(async()=>{
+  await new AsyncFunction('core','context','require',source)(
+    {summary:summaryApi,setFailed:v=>failures.push(v)},
+    {sha:p.merge_sha,runId:p.run_id},checkoutRequire);
+  process.stdout.write(JSON.stringify({errors,failures,summary,
+    states:Object.fromEntries(table.slice(1))}));
+})();
+""",
+        [
+            str(tmp_path),
+            PROOF | {"selection": selection},
+            step["with"]["script"],
+            environment,
+            artifact,
+        ],
+    )
+    expected = dict.fromkeys(PLANS[selection], "NOT RUN")
+    if artifact == "valid":
+        if progress == 1:
+            expected["h1h2"] = "FAILURE"
+        elif progress == 2:
+            expected.update({"h1h2": "INCONCLUSIVE", "session-300": "FAILURE"})
+    assert result["errors"] == []
+    assert result["states"] == expected
+    assert result["failures"]
+    assert "Résultat global : FAILURE" in result["summary"]
+    assert "SYNTHETIC_UNVALIDATED_FIELD" not in json.dumps(result)
+
+
 @pytest.mark.parametrize("selection", ["session-300", "session-reconnect", "all"])
 @pytest.mark.parametrize("mode", ["recovered", "no_disconnect"])
 def test_manual_session_choices_use_real_owners_and_preserve_outcomes(

@@ -79,9 +79,12 @@ critères, sans fabriquer un premier scénario réussi.
 
 SUCCESS signifie une session fonctionnelle vérifiée ; FAILURE une interruption,
 un processus ou un nettoyage en échec ; INCONCLUSIVE une observation non concluante ;
-NOT RUN un scénario non sélectionné ou non commencé selon les preuves disponibles.
-Sans rapport vérifiable après un échec de capture, les scénarios demandés restent
-INCONCLUSIVE et le workflow échoue : aucune absence de connexion n'est inventée.
+NOT RUN un scénario non sélectionné, non commencé ou dont le démarrage n'est
+pas attesté par un rapport validé. Sans rapport vérifiable après un échec ou une
+annulation de capture, les scénarios restent NOT RUN et le résultat global est
+explicitement FAILURE. Ce statut ne prouve aucune absence de connexion.
+L'échec ou l'annulation d'un job ne transforme jamais les étapes sélectionnées
+en observations INCONCLUSIVE ; seuls les résultats validés font foi.
 H1/H2 reste INCONCLUSIVE même quand la collecte se termine correctement : cela
 ne démontre jamais une frontière OpenedClient. Le workflow peut terminer sa collecte
 avec ce résultat scientifique, tandis que les sessions exigent leur vrai SUCCESS.

@@ -2,6 +2,11 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #119, correction de revue #121 : résultat global explicite et états
+  par scénario issus uniquement du rapport validé. Les étapes non démarrées ou
+  non attestées restent NOT RUN après échec/annulation de capture. Régressions
+  hors ligne aux trois points d'interruption de all, sans changement de collecte.
+
 - Issue #119 phase 2 : workflow manuel unique, scénarios H1/H2, session-300,
   reconnexion et all séquentiel. Retrait des voies automatiques, contrôle manuel
   propriétaire sans commentaire d'admission, provenance/revue/CI, environnement,

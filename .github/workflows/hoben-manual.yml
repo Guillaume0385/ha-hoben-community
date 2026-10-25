@@ -143,8 +143,6 @@ jobs:
       report_1_b64: ${{ steps.exports.outputs.report_1_b64 }}
       report_2_b64: ${{ steps.exports.outputs.report_2_b64 }}
       report_3_b64: ${{ steps.exports.outputs.report_3_b64 }}
-      admitted: ${{ steps.recheck.outputs.approved }}
-      capture_outcome: ${{ steps.capture.outcome }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -261,8 +259,6 @@ jobs:
         APPROVED: ${{ needs.preflight.outputs.approved }}
         COLLECTION_RESULT: ${{ needs.collect.result }}
         PUBLICATION_RESULT: ${{ needs.publish.result }}
-        ADMITTED: ${{ needs.collect.outputs.admitted }}
-        CAPTURE_OUTCOME: ${{ needs.collect.outputs.capture_outcome }}
       with:
         script: |
           const proof={merge_sha:context.sha,candidate_sha:process.env.APPROVED_CANDIDATE,
@@ -275,12 +271,11 @@ jobs:
             states=api.states(report);
             complete=process.env.COLLECTION_RESULT==='success'&&process.env.PUBLICATION_RESULT==='success'&&api.completed(report,proof);
           }catch(_){}
-          if(!complete&&process.env.GITHUB_RUN_ATTEMPT==='1'&&process.env.ADMITTED==='true'&&['failure','cancelled'].includes(process.env.CAPTURE_OUTCOME)){
-            const selected=proof.selection==='all'?Object.keys(states):[proof.selection];
-            for(const s of selected)if(Object.hasOwn(states,s))states[s]='INCONCLUSIVE';
-          }
-          await core.summary.addTable([
+          // Only the validated report attests scenario starts and results.
+          // Capture failure/cancellation alone does not attest any stage start.
+          await core.summary.addRaw('Résultat global : '+(complete?'SUCCESS':'FAILURE')+'.\n')
+          .addTable([
             [{data:'Scénario',header:true},{data:'Résultat',header:true}],
             ...Object.entries(states)
-          ]).addRaw('boundary_proven=false. H1/H2 INCONCLUSIVE remains a hypothesis, never protocol validation.').write();
+          ]).addRaw('NOT RUN: not started or start not attested by a validated report. boundary_proven=false. H1/H2 INCONCLUSIVE remains a hypothesis, never protocol validation.').write();
           if(!complete)core.setFailed('Manual scenarios incomplete, inconclusive, failed or NOT RUN.');
