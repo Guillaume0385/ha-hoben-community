@@ -1,4 +1,18 @@
-# Workflow courant — développement experimental, validation et promotion
+# Workflow courant — voie manuelle #119 et historique
+
+## Voie courante : dispatch manuel sur experimental
+
+La [procédure #119](hoben-manual-workflow.md) prévaut pour toute nouvelle campagne :
+workflow_dispatch du propriétaire, sélecteur natif Use workflow from, experimental
+seule active, SHA/provenance/revue/CI exacts, claim anti-rejeu et recheck après
+approbations d'environnement. Aucun commentaire MANAGER pré-fusion ni lancement
+sur push/PR/merge ; reruns refusés, nouveau dispatch explicite requis.
+H1/H2, session-300, reconnexion seule et all réutilisent les vrais collecteurs et
+leurs plafonds. Le reste de ce document conserve les contrats et observations
+historiques des anciennes voies : leurs décisions/claims ne sont jamais un repli.
+Les règles de revue/branche restent applicables, aucun test réel par DEV.
+
+
 
 ## Règles de branche et de revue
 

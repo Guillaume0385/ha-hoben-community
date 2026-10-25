@@ -323,7 +323,7 @@ def category(value, allowed):
     return value
 
 
-def safe_report(report: dict, *, interrupted: bool) -> dict:
+def safe_report(report: dict, *, interrupted: bool, provenance=None) -> dict:
     """Project only fixed numeric/categorical fields; never publish free text."""
     # The CLI is launched with python -I: repository imports are possible only
     # after context() accepted the checkout and collect() installed its path.
@@ -405,17 +405,26 @@ def safe_report(report: dict, *, interrupted: bool) -> dict:
             )
         public.append(item)
     interrupted = interrupted or len(public) != 12
+    if provenance is None:
+        provenance = {
+            "merge_sha": os.environ["GITHUB_SHA"],
+            "candidate_sha": os.environ["EXPERIMENTAL_APPROVED_SHA"],
+            "run_id": int(os.environ["GITHUB_RUN_ID"]),
+            "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+            "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
+        }
+    require(
+        type(provenance) is dict
+        and set(provenance)
+        == {"merge_sha", "candidate_sha", "run_id", "run_attempt", "pr_number"}
+    )
     return {
         "schema": 1,
         "scenario": "h1h2",
         "phase": "live",
         "observation_seconds": 90,
-        "experimental_sha": os.environ["GITHUB_SHA"],
-        "merge_sha": os.environ["GITHUB_SHA"],
-        "candidate_sha": os.environ["EXPERIMENTAL_APPROVED_SHA"],
-        "run_id": int(os.environ["GITHUB_RUN_ID"]),
-        "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-        "pr_number": int(os.environ["EXPERIMENTAL_APPROVED_PR"]),
+        "experimental_sha": provenance["merge_sha"],
+        **provenance,
         "boundary_proven": False,
         "result": "failure" if interrupted else "inconclusive",
         "reason": "collection_interrupted" if interrupted else "hypotheses_unproven",

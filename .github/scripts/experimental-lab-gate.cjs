@@ -136,6 +136,10 @@ async function managerDecision(github, pr, context, proof) {
 }
 
 async function reviewsAndCI(github, pr, decision) {
+  return reviewedCI(github,pr,{ciRunId:decision.approval.ci_run_id,
+    notAfter:decision.comment.created_at});
+}
+async function reviewedCI(github, pr, {ciRunId,notAfter}) {
   const reviews = await github.paginate(github.rest.pulls.listReviews,
     { ...API, pull_number: pr.number, per_page: 100 });
   const active = new Map();
@@ -156,19 +160,19 @@ async function reviewsAndCI(github, pr, decision) {
       "review_unverified");
     seen.add(cursor);
   } while (cursor);
-  const { data: ci } = await github.rest.actions.getWorkflowRun({ ...API, run_id: decision.approval.ci_run_id });
-  need(ci.id === decision.approval.ci_run_id && ci.head_sha === pr.head.sha &&
+  const { data: ci } = await github.rest.actions.getWorkflowRun({ ...API, run_id: ciRunId });
+  need(ci.id === ciRunId && ci.head_sha === pr.head.sha &&
     ci.head_branch === pr.head.ref && ci.event === "pull_request" && ci.run_attempt === 1 &&
     ci.status === "completed" && ci.conclusion === "success" &&
     sameRepo(ci.repository) && sameRepo(ci.head_repository) &&
     workflowPath(ci.path, ".github/workflows/validate.yml",
       ["refs/pull/" + pr.number + "/merge", pr.head.ref, "refs/heads/" + pr.head.ref]) &&
     Number.isFinite(Date.parse(ci.updated_at)) &&
-    Date.parse(ci.updated_at) <= Date.parse(decision.comment.created_at) &&
+    Date.parse(ci.updated_at) <= Date.parse(notAfter) &&
     Array.isArray(ci.pull_requests), "ci_unverified");
-  // After merge GitHub may clear pull_requests. The authenticated, immutable
-  // MANAGER decision explicitly binds this CI run to this PR/HEAD; the SHA alone
-  // is never sufficient. Any remaining conflicting association still refuses.
+  // After merge GitHub may clear pull_requests. The verified caller must bind
+  // this CI run to the reviewed PR/HEAD and its immutable claim; SHA alone is
+  // insufficient. Any remaining conflicting association still refuses.
   need(ci.pull_requests.length <= 1 && ci.pull_requests.every(r =>
     r.number === pr.number && r.head?.sha === pr.head.sha && r.base?.ref === "experimental"), "ci_unverified");
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
@@ -267,11 +271,11 @@ async function noOtherObservation(github, context) {
   }
 }
 
-async function actualApproval(github, context, environment, proof) {
+async function actualApproval(github, context, environment, proof, requireFresh = false) {
   const { data: history } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
     { ...API, run_id: context.runId });
   need(Array.isArray(history), "approval_unverified");
-  need(rerun.freshEnvironmentApproval(history, environment, proof, policy.environment),
+  need(rerun.freshEnvironmentApproval(history, environment, proof, policy.environment, requireFresh),
     "approval_unverified");
 }
 
@@ -321,4 +325,5 @@ async function verify({ github, context, env = process.env, recheck = false }) {
 }
 
 module.exports = { dryRun, verify, refusalCategory,
+  environmentPolicy, reviewedCI, actualApproval, noOtherObservation,
   WORKFLOW: push.LAB_WORKFLOW, MARKER, MARKER_V2, workflowPath };

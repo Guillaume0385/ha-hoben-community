@@ -475,7 +475,18 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
-### Procédures live historiques de `main` — non applicables au workflow courant
+### Tests Hoben manuels — Issue #119
+
+Après revue et fusion, ouvrir **Actions → Tests Hoben manuels → Run workflow**,
+choisir **experimental** dans **Use workflow from**, puis h1h2, session-300,
+session-reconnect ou all. Attendre les approbations d'environnement si requises.
+Main reste inactive ; aucun test automatique sur push/PR/merge, aucun rerun.
+Les scénarios réutilisent les collecteurs et budgets existants, avec résultats
+SUCCESS / FAILURE / INCONCLUSIVE / NOT RUN et rapports strictement anonymisés.
+Voir [la procédure, les gates et les limites](docs/hoben-manual-workflow.md).
+DEV ne lance aucun test réel. Les quatre checks CI hors ligne sont conservés.
+
+### Procédures live historiques de `main` — retirées, ne pas exécuter
 
 > **AVERTISSEMENT (14 octobre 2026) :** les instructions de validation live
 > ci-dessous (labels `manager-live-hoben`, `live-validation`, dispatch
@@ -522,7 +533,7 @@ TLS ou une observation négative.
 
 ### Archive — validation authentifiée avant fusion (historique, ne pas exécuter)
 
-Le workflow [MANAGER authenticated Hoben validation](.github/workflows/manager-live-hoben.yml)
+Le workflow [MANAGER authenticated Hoben validation](tests/fixtures/retired_workflows/manager-live-hoben.yml)
 utilise uniquement **`pull_request_target: labeled`**. Sa définition provient de
 `main` protégé, même s'il checkout ensuite le code candidat. Seul l'ajout du label
 exact **`manager-live-hoben`** par **`Guillaume0385`** peut autoriser une PR ouverte,
@@ -651,7 +662,7 @@ contrôle : une décision de sécurité distincte reste nécessaire.
 
 ### Smoke sans secret et exploration manuelle sur GitHub Actions
 
-Le workflow [Live Validation](.github/workflows/live-validation.yml) est
+Le workflow [Live Validation](tests/fixtures/retired_workflows/live-validation.yml) est
 **opt-in**, avec les déclenchements explicites suivants, séparés du workflow MANAGER :
 
 - **TLS avant fusion :** ajouter le label exact `live-validation` à la PR.

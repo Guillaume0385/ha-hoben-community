@@ -6,8 +6,11 @@ const fsSafe = require('./experimental-report-file.cjs');
 const timeline = require('./experimental-timeline.cjs');
 const requireFact = fact => { if (!fact) throw Error('invalid_public_report'); };
 function readReport(file, context) {
-  const phase = 'live';
   const r = JSON.parse(fsSafe.snapshot(file,2097152).toString('utf8'));
+  return validate(r,context);
+}
+function validate(r, context) {
+  const phase = 'live';
   requireFact(r.schema === 1 && r.scenario === 'h1h2' && r.phase === phase &&
     r.experimental_sha === context.sha && r.merge_sha === context.sha &&
     r.candidate_sha === context.sha &&
@@ -126,4 +129,4 @@ function publish({core,context,encoded}) {
     core.setFailed('NOT RUN: isolated public report rejected.');
   }
 }
-module.exports = {readReport,prepare,publish};
+module.exports = {readReport,validate,prepare,publish};

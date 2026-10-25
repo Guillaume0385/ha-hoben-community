@@ -1,5 +1,18 @@
 # Suite « Tests expérimentaux session » — L6bis livré, correction L6ter candidate
 
+## Orchestration manuelle #119 — état courant
+
+La [voie manuelle](hoben-manual-workflow.md) réutilise observe() et observe_suite()
+et le collecteur de reconnexion existant. all garde l'ordre et la précondition du
+premier scénario ; session-reconnect peut aussi être choisi seul, selon #119.
+Budgets fonctionnels, processus 360/600/1020 s, EOF, génération, Pong et lectures
+corrélées restent inchangés. Aucun producteur v3 ni activation de quarantaine.
+Le dispatch propriétaire remplace l'ancienne admission par commentaire, avec
+contrôles techniques, CI, politique/approbations d'environnement, claim et recheck.
+Les mentions push/commentaires/reruns ci-dessous sont historiques. Étape 8 suspendue.
+
+
+
 ## Parcours minimal courant — Issue #112
 
 ### Complément RX 07/1B — UNKNOWN-RX-CONTINUE-005

@@ -241,7 +241,7 @@ def test_unchanged_workflow_result_checks_v3_and_partial_job_results(name):
 def workflow_result(report):
     """Execute the installed, unchanged result script against a supplied report."""
     workflow = yaml.load(
-        (ROOT / ".github/workflows/hoben-session-300.yml").read_text(),
+        (ROOT / "tests/fixtures/retired_workflows/hoben-session-300.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     script = workflow["jobs"]["result"]["steps"][-1]["with"]["script"]

@@ -25,7 +25,9 @@ def test_both_secret_bearing_workflows_still_fail_closed_on_rerun():
         ("hoben-experimental.yml", "hoben-experimental"),
         ("hoben-live-experimental.yml", "hoben-live"),
     ):
-        data = yaml.safe_load((WORKFLOWS / filename).read_text())
+        data = yaml.safe_load(
+            (ROOT / "tests/fixtures/retired_workflows" / filename).read_text()
+        )
         assert data.get("on", data.get(True)) == {
             "push": {"branches": ["experimental"]}
         }

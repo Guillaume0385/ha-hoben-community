@@ -18,7 +18,7 @@ from scripts import launch_live_ha_parity as launcher
 from scripts import run_live_ha_parity as live
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/hoben-live-experimental.yml"
+WORKFLOW = ROOT / "tests/fixtures/retired_workflows/hoben-live-experimental.yml"
 
 
 def test_exact_live_workflow_permissions_and_secret_lifecycle():
