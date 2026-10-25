@@ -235,6 +235,14 @@ class V4Lifecycle:
             generation=witness.established_generation,
             read_generation=witness.verified_read_generation,
             read_sequence=witness.verified_read_sequence,
+            active=(
+                not self._stopping
+                and self._failure is None
+                and self._session is not None
+                and self._session.state is SessionState.CONNECTED
+                and self._task is not None
+                and not self._task.done()
+            ),
             stopped=(
                 self._stopping
                 and self._session is None

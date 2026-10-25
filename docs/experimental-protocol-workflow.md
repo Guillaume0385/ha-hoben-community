@@ -2,6 +2,12 @@
 
 ## Voie courante : dispatch manuel sur experimental
 
+Étape 8 C2a : [superviseur et preuve HA inactifs](ha-session-runtime-c2a.md),
+uniquement hors ligne, réseau interdit et sans entrée Actions. La décision
+propriétaire du 25/10 retire le quota RX hoben-live seulement ; délais,
+mémoire/processus et confidentialité restent imposés. Aucun budget RX H1/H2
+ou session-300 n'est changé. L'admission et la publication C2b restent séparées.
+
 Étape 8 C1 : [contrat de preuve HA exclusivement offline](ha-session-proof-c1.md),
 collecteur de fixtures et double validation sans CLI ni workflow. Les limites
 système ne sont pas appliquées ; admission/supervision/publication live C2

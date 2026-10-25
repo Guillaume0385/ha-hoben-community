@@ -674,6 +674,26 @@ system_enforcement=NOT RUN et boundary_proven=false. Aucun workflow/admission,
 secret, réseau réel ou changement de comportement B. Les limites système et
 le raccord manuel hoben-live relèvent de C2, après revue/fusion et attribution.
 
+## Étape 8, tranche C2a — fondation inactive du test HA
+
+La décision propriétaire du 25/10 supprime le plafond RX uniquement pour
+hoben-live C2a/C2b ; aucun compteur ou proxy réseau n'est ajouté. Les budgets
+H1/H2 et session-300 demeurent inchangés. Le [superviseur C2a](docs/ha-session-runtime-c2a.md)
+borne le namespace contenant gardien, vrai client/coordinator et descendants :
+300 s utiles, 360 s maximum, mémoire agrégée 1 Gio, 128 processus/threads,
+six refreshs et deux tentatives. Le gardien termine le namespace même si la
+boucle HA ne coopère pas ; les refus et arrêts locaux ne prouvent pas une perte
+naturelle. Image/dépendances figées, réseau interdit, aucun secret chargé.
+L'achèvement attend 300 s monotones après le premier témoin et projette la
+session encore active/perte à cette borne ; la sixième lecture à 250 s ne suffit
+pas. Le cleanup est séparé, dans l'échéance externe originale de 360 s.
+
+Le rapport schéma 2 est distinct de C1 et toujours offline, admission NOT RUN,
+boundary_proven=false ; validation indépendante Python/Node. La planification
+virtuelle et les transports synthétiques des tests ne valent aucun live.
+C2b et #126 restent séparées : aucune entrée Actions, gate, publication ou
+modification main dans cette fondation.
+
 ## High-level architecture
 
 ```text
