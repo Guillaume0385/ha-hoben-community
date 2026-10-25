@@ -2,6 +2,11 @@
 
 ## Voie courante : dispatch manuel sur experimental
 
+Étape 8 C1 : [contrat de preuve HA exclusivement offline](ha-session-proof-c1.md),
+collecteur de fixtures et double validation sans CLI ni workflow. Les limites
+système ne sont pas appliquées ; admission/supervision/publication live C2
+restent différées jusqu'à revue/fusion et attribution distincte.
+
 Étape 8, tranche B de #112 : le véritable client HA utilise le mode persistant
 partagé préparé par A. Ses tests sont exclusivement hors ligne ; B ne modifie
 aucun workflow/gate. Le futur test manuel hoben-live et son admission relèvent

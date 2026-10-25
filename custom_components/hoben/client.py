@@ -44,6 +44,7 @@ from .session import (
     SessionTimeout,
     _open_session,
 )
+from .session_observation import SessionObservation
 from .transport import AsyncTlsTransport, TransportError, TransportTimeout
 
 if TYPE_CHECKING:
@@ -229,6 +230,13 @@ class HobenClient:
     def last_snapshot(self) -> RawStoveSnapshot | None:
         """Last complete successful refresh; failures never replace this snapshot."""
         return self._last_snapshot
+
+    @property
+    def session_observation(self) -> SessionObservation:
+        """Immutable owner evidence; never creates a session or adopts identity."""
+        if self._lifecycle is None:
+            return SessionObservation(stopped=self._closed)
+        return self._lifecycle.session_observation
 
     def safe_report(self) -> dict[str, str | bool | int]:
         """Allowlisted diagnostics; no dataclass/session or generic identity export."""

@@ -562,6 +562,13 @@ leur comportement exact sur le serveur actuel reste à valider.
 
 ### Contrat expérimental CloseClient post-open — décision propriétaire, pas fait confirmé
 
+La tranche E8-C1 ajoute des témoins publics locaux de génération/lecture/perte
+et cleanup, avec [contrat offline fermé](docs/ha-session-proof-c1.md). Ce sont
+des preuves de tests synthétiques du client/coordinator, sans nouveau fait
+protocolaire : `transport` n'affirme aucun EOF TLS, `close_client` reste distinct,
+et `boundary_proven=false` reste obligatoire. Framing, codec et comportement
+partagé inchangés ; aucune observation réelle C1.
+
 L'arbitrage E8 tranche A du même commentaire autorise désormais le mode typé
 `V4SessionMode.PERSISTENT` à réutiliser le framer et ces contrats post-open,
 indépendamment des budgets Session300/SessionReconnect. Ce préalable partagé
