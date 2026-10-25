@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche C2a
+
+- Fondation HA inactive : superviseur externe cgroup/PID namespace, gardien
+  indépendant, délais absolus et cleanup des descendants ; tests sans réseau.
+- Observer du vrai client/coordinator, schéma distinct et validation Python/Node.
+  Aucun quota RX hoben-live, suivant la décision propriétaire du 25/10 ; budgets
+  H1/H2 et session-300 conservés. Aucun workflow, admission ou test réel activé.
+
 ## En cours — #112, étape 8 tranche C1
 
 - Observation publique typée et sans I/O du vrai client/lifecycle, témoins de

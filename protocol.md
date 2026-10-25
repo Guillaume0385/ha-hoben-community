@@ -562,6 +562,11 @@ leur comportement exact sur le serveur actuel reste à valider.
 
 ### Contrat expérimental CloseClient post-open — décision propriétaire, pas fait confirmé
 
+La décision propriétaire E8-C2a du 25/10 retire le quota RX du futur test
+hoben-live, sans modifier les faits de protocole, le framing ou les budgets
+H1/H2/session-300. Sa [fondation inactive](docs/ha-session-runtime-c2a.md)
+n'apporte aucune observation réelle ni preuve de frontière.
+
 La tranche E8-C1 ajoute des témoins publics locaux de génération/lecture/perte
 et cleanup, avec [contrat offline fermé](docs/ha-session-proof-c1.md). Ce sont
 des preuves de tests synthétiques du client/coordinator, sans nouveau fait

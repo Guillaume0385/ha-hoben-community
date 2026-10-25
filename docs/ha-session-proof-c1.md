@@ -1,6 +1,11 @@
 # Étape 8 C1 — preuve HA exclusivement hors ligne
 
 Consigne : [#112, première section MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200).
+**Actualisation propriétaire du 25/10 :** C2a/C2b hoben-live n'exigent plus de
+quota RX. Le [contrat C2a](ha-session-runtime-c2a.md) prévaut pour cette fondation ;
+les valeurs RX de ce document/schéma C1 restent historiques, sans application
+à hoben-live. H1/H2 et session-300 conservent leurs budgets.
+
 A (#123) et B (#124) sont fusionnées ; base C1
 `35e8bf96a6c9223706a0741344f7add7aed222ce`. C1 prépare un contrat et un
 collecteur de fixtures, sans point d'entrée live. C2 reste une attribution
