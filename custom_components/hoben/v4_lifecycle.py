@@ -25,9 +25,12 @@ from .myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
 from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
 from .v4_experiment import ExperimentalCloseClientError
 from .v4_session import (
+    OpeningMetadata,
     SessionState,
     SessionStateError,
+    V4OpeningOptions,
     V4Session,
+    V4SessionMode,
     _QuarantineCapability,
 )
 
@@ -72,6 +75,7 @@ class LifecycleSnapshot:
     attempts: int = 0
     max_attempts: int = 1
     failure: str | None = None
+    close_client_subcode: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +120,10 @@ class V4Lifecycle:
         "_clock",
         "_witness",
         "_generation",
+        "_mode",
+        "_opening_options",
+        "_opening_metadata",
+        "_accepted_device_guid",
     )
 
     def __init__(
@@ -123,6 +131,8 @@ class V4Lifecycle:
         *,
         user_guid: str,
         device_guid: str = INITIAL_DEVICE_GUID,
+        mode: V4SessionMode = V4SessionMode.CONSERVATIVE,
+        opening_options: V4OpeningOptions | None = None,
         retry_delays: tuple[float, ...] = (1.0, 2.0, 4.0),
         session_factory: Callable[..., V4Session] = V4Session,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -133,6 +143,11 @@ class V4Lifecycle:
         try:
             user_guid = normalize_user_guid(user_guid)
             _validate_device_guid(device_guid)
+            if type(mode) is not V4SessionMode or (
+                opening_options is not None
+                and type(opening_options) is not V4OpeningOptions
+            ):
+                raise HobenInvalidInputError()
             if (
                 not isinstance(retry_delays, tuple)
                 or len(retry_delays) > 8
@@ -142,7 +157,9 @@ class V4Lifecycle:
             ):
                 raise HobenInvalidInputError()
             for delay in retry_delays:
-                _validate_delay(delay)
+                _validate_delay(delay, allow_zero=mode is V4SessionMode.PERSISTENT)
+                if mode is V4SessionMode.PERSISTENT and delay > 30:
+                    raise HobenInvalidInputError()
         except (TypeError, ValueError):
             raise HobenInvalidInputError() from None
         if _quarantine is not None:
@@ -150,10 +167,14 @@ class V4Lifecycle:
                 type(_quarantine) is not _LifecycleQuarantineCapability
                 or _quarantine._claimed
                 or len(retry_delays) > 2
+                or mode is V4SessionMode.PERSISTENT
             ):
                 raise HobenInvalidInputError()
             _quarantine._claimed = True
         self._quarantine = _quarantine
+        self._mode, self._opening_options = mode, opening_options
+        self._opening_metadata: OpeningMetadata | None = None
+        self._accepted_device_guid: str | None = None
         self._clock = clock
         self._witness = LifecycleWitness()
         self._generation = 0
@@ -223,6 +244,21 @@ class V4Lifecycle:
     def device_guid_for_persistence(self) -> str:
         """Sensitive identity access, never suitable for logs or diagnostics."""
         return self._device_guid
+
+    @property
+    def opening_metadata(self) -> OpeningMetadata | None:
+        """Last accepted V4 metadata, retained across loss; never credentials."""
+        return self._opening_metadata
+
+    @property
+    def accepted_device_guid_for_persistence(self) -> str | None:
+        """Sensitive: retrieve before explicit close, NEVER log or export.
+
+        The accepted identity survives terminal read/reconnect failure so an
+        adapter can persist it even when no snapshot was returned. Explicit
+        close erases it. A failed/unsupported opening never updates this cache.
+        """
+        return self._accepted_device_guid
 
     async def connect(self) -> None:
         """Start once and await the first opening; cancellation stops ownership."""
@@ -318,6 +354,11 @@ class V4Lifecycle:
     def _private_session(self, attempt):
         cap = self._quarantine
         kwargs = {"user_guid": self._user_guid, "device_guid": self._device_guid}
+        # Omit new options for existing injected factories and campaign paths.
+        if self._mode is V4SessionMode.PERSISTENT:
+            kwargs["mode"] = self._mode
+        if self._opening_options is not None:
+            kwargs["opening_options"] = self._opening_options
         if cap is not None:
             kwargs.update(
                 session_300=cap._initial._budget,
@@ -329,6 +370,10 @@ class V4Lifecycle:
         if (
             not isinstance(session, V4Session)
             or session.state is not SessionState.DISCONNECTED
+            or (
+                self._mode is V4SessionMode.PERSISTENT
+                and session.mode is not V4SessionMode.PERSISTENT
+            )
         ):
             raise HobenInvalidInputError()
         if cap is not None:
@@ -442,6 +487,7 @@ class V4Lifecycle:
                     else SessionState.RECONNECTING,
                 )
                 opened = False
+                session = None
                 try:
                     if self._quarantine is not None and attempt > 1:
                         await asyncio.sleep(0)
@@ -477,6 +523,8 @@ class V4Lifecycle:
                         if attempt > 1:
                             self._check_private_recovery(accepted_session=session)
                     self._device_guid = session.device_guid_for_persistence
+                    self._accepted_device_guid = self._device_guid
+                    self._opening_metadata = session.snapshot.opening
                     self._generation += 1
                     self._witness = replace(
                         self._witness,
@@ -530,6 +578,12 @@ class V4Lifecycle:
                 self._snapshot = replace(
                     self._snapshot,
                     failure=error.code,
+                    close_client_subcode=(
+                        session.snapshot.close_client_subcode
+                        if session is not None
+                        and session.snapshot.close_client_subcode is not None
+                        else self._snapshot.close_client_subcode
+                    ),
                     state=SessionState.RECONNECTING
                     if retryable
                     else SessionState.DISCONNECTED,
@@ -546,6 +600,10 @@ class V4Lifecycle:
                     pass  # Transport is detached; preserve the primary failure.
                 if type(error) is ExperimentalCloseClientError:
                     retryable = retryable and session.close_client_cleanup_succeeded
+                if self._mode is V4SessionMode.PERSISTENT and session is not None:
+                    # Production never reopens after an unconfirmed cleanup,
+                    # including a close error already caught by the RX owner.
+                    retryable = retryable and session.cleanup_succeeded
                 if not retryable:
                     break
                 if attempt == self.snapshot.max_attempts:
@@ -612,6 +670,7 @@ class V4Lifecycle:
                     pass
                 self._user_guid = None
                 self._device_guid = INITIAL_DEVICE_GUID
+                self._accepted_device_guid = None
                 self._failure = LifecycleStoppedError()
                 self._snapshot = replace(
                     self._snapshot,
@@ -627,3 +686,4 @@ class V4Lifecycle:
             self._connected.set()
             self._user_guid = None
             self._device_guid = INITIAL_DEVICE_GUID
+            self._accepted_device_guid = None
