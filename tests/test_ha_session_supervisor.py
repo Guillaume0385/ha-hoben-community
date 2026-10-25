@@ -73,7 +73,9 @@ class Engine:
                 "reason": self.reason,
                 "oom_killed": False,
                 "pids_limited": False,
-                "evidence": {k: r[k] for k in ("completed", "samples", "cleanup")},
+                "evidence": {
+                    k: r[k] for k in ("completed", "samples", "window", "cleanup")
+                },
             }
             raw = json.dumps(data, separators=(",", ":")).encode()
             buf = io.BytesIO()
@@ -91,7 +93,10 @@ class Engine:
 def test_actual_path_verifies_before_start_and_reaps_before_receipt():
     engine = Engine()
     result = supervise(OfflineCase.HEALTHY, IMAGE, PROVENANCE, engine=engine)
-    assert result["outcome"] == "SUCCESS" and result["supervisor"]["reaped"]
+    assert (
+        result["criteria"]["reconnection"] == "SUCCESS"
+        and result["supervisor"]["reaped"]
+    )
     assert engine.started and engine.deleted
     assert engine.config["Env"] == [] and engine.config["NetworkDisabled"]
     assert engine.config["HostConfig"]["LogConfig"] == {"Type": "none"}
@@ -274,3 +279,38 @@ def test_guardian_missing_metrics_refuses_before_worker(monkeypatch):
 def test_limits_cannot_be_enlarged(field, value):
     with pytest.raises(ValueError):
         Limits(**{field: value})
+
+
+def test_guardian_allows_final_proof_and_cleanup_after_300_not_after_360():
+    from scripts.ha_session_guard import worker_deadline
+
+    limits = {"useful_ms": 300000, "process_ms": 360000}
+    end = worker_deadline(limits, 360_000_000_000, 0)
+    assert 300_000_000_000 < end == 340_000_000_000
+    # A delayed bootstrap cannot move the original final margin.
+    assert worker_deadline(limits, 360_000_000_000, 30_000_000_000) == end
+    assert end + 10_000_000_000 < 360_000_000_000  # terminate + reaping margin
+
+
+@pytest.mark.parametrize("at", [300, 359.999, 360])
+def test_cancellation_and_cleanup_never_reset_original_360_deadline(at):
+    engine = Engine()
+    engine.forever = True
+    now = 0.0
+
+    def sleep(delay):
+        nonlocal now
+        now = at  # clock jumps while the controller is waiting, never sleeping live
+
+    r = supervise(
+        OfflineCase.RESISTANT,
+        IMAGE,
+        PROVENANCE,
+        engine=engine,
+        clock=lambda: now,
+        sleep=sleep,
+        cancelled=lambda: now >= at,
+    )
+    assert r["supervisor"]["elapsed_ms"] <= 360000
+    assert r["outcome"] == "FAILURE"
+    assert r["criteria"]["continuous_300s"] != "SUCCESS"

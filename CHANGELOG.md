@@ -7,6 +7,9 @@
 - Observer du vrai client/coordinator, schéma distinct et validation Python/Node.
   Aucun quota RX hoben-live, suivant la décision propriétaire du 25/10 ; budgets
   H1/H2 et session-300 conservés. Aucun workflow, admission ou test réel activé.
+- Correction de revue : achèvement seulement après 300 s monotones et témoin
+  final de session, perte tardive séparée de la continuité, horloges synthétiques
+  identifiées ; marge de cleanup/reaping conservée sous l'échéance de 360 s.
 
 ## En cours — #112, étape 8 tranche C1
 

@@ -16,6 +16,7 @@ from scripts.ha_session_evidence import (
 MEMORY_BYTES = 1024**3
 PIDS = 128
 USEFUL_MS = 300_000
+COLLECTION_MS = USEFUL_MS + 30_000  # startup + useful; cleanup remains separate
 PROCESS_MS = 360_000
 REPORT_BYTES = 8192
 REFRESH_AT_MS = (0, 50_000, 100_000, 150_000, 200_000, 250_000)
@@ -44,6 +45,7 @@ def validate_report(report):
             "supervisor",
             "completed",
             "samples",
+            "window",
             "cleanup",
             "criteria",
             "outcome",
@@ -116,8 +118,12 @@ def validate_report(report):
     require(r["started"] or not samples)
     previous = None
     for ordinal, sample in enumerate(samples, 1):
-        keys(sample, {"ordinal", "decoded", "observation"})
+        keys(sample, {"ordinal", "at_ms", "decoded", "observation"})
         require(type(sample["ordinal"]) is int and sample["ordinal"] == ordinal)
+        require(integer(sample["at_ms"], REFRESH_AT_MS[ordinal - 1], USEFUL_MS - 1))
+        require(ordinal != 1 or sample["at_ms"] == 0)
+        if ordinal > 1:
+            require(sample["at_ms"] >= samples[ordinal - 2]["at_ms"])
         require(type(sample["decoded"]) is bool)
         o = sample["observation"]
         observation(o)
@@ -135,6 +141,27 @@ def validate_report(report):
                 or o["read_sequence"] > previous["read_sequence"]
             )
         previous = o
+    window = report["window"]
+    keys(window, {"clock", "elapsed_ms", "observation", "active"})
+    require(type(window["active"]) is bool)
+    require(window["observation"] is not None or not window["active"])
+    require(window["clock"] in {"unattested", "monotonic", "synthetic"})
+    require(integer(window["elapsed_ms"], 0, PROCESS_MS))
+    if window["observation"] is not None:
+        observation(window["observation"])
+        require(window["clock"] != "unattested" and r["started"])
+        if previous is not None:
+            progress(previous, window["observation"])
+            require(window["elapsed_ms"] >= samples[-1]["at_ms"])
+        previous = window["observation"]
+    if report["completed"]:
+        require(USEFUL_MS <= window["elapsed_ms"] < COLLECTION_MS)
+        require(r["useful_ms"] == USEFUL_MS and previous is not None)
+        require(window["observation"] is not None)
+    if window["clock"] == "monotonic":
+        require(window["elapsed_ms"] <= r["elapsed_ms"])
+    if window["clock"] == "unattested":
+        require(not samples and window["elapsed_ms"] == 0)
     keys(report["cleanup"], {"completed", "observation"})
     require(type(report["cleanup"]["completed"]) is bool)
     observation(report["cleanup"]["observation"])
@@ -155,6 +182,21 @@ def results(report):
     """A local resource stop never validates a natural recovery or TLS loss."""
     result = criteria(report)
     receipt = report["supervisor"]
+    o = report["window"]["observation"]
+    continuous = (
+        report["completed"]
+        and all(s["decoded"] for s in report["samples"])
+        and o is not None
+        and o["loss_generation"] is None
+        and o["generation"] == report["samples"][0]["observation"]["read_generation"]
+        and o["read_generation"] == o["generation"]
+        and report["window"]["active"]
+        and not o["stopped"]
+        and not o["cleanup_failed"]
+    )
+    result["continuous_300s"] = (
+        "SUCCESS" if continuous else "FAILURE" if report["samples"] else "NOT RUN"
+    )
     if not receipt["started"]:
         result = dict.fromkeys((*result, "supervision"), "NOT RUN")
         if receipt["reason"] != "unavailable":
@@ -166,11 +208,12 @@ def results(report):
     )
     if not safe:
         result["reconnection"] = "INCONCLUSIVE" if report["samples"] else "NOT RUN"
+        result["continuous_300s"] = "FAILURE" if report["samples"] else "NOT RUN"
     return result
 
 
 def build_report(provenance, receipt, evidence):
-    keys(evidence, {"completed", "samples", "cleanup"})
+    keys(evidence, {"completed", "samples", "window", "cleanup"})
     report = {
         "schema": 2,
         "scenario": "ha-persistent-live",
@@ -191,6 +234,12 @@ def empty_evidence():
     return {
         "completed": False,
         "samples": [],
+        "window": {
+            "clock": "unattested",
+            "elapsed_ms": 0,
+            "observation": None,
+            "active": False,
+        },
         "cleanup": {
             "completed": False,
             "observation": {

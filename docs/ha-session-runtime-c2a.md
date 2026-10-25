@@ -24,8 +24,17 @@ Hoben réelle ni instance domestique. L'observer réutilisable
 et projette seulement SessionObservation. Il n'accède pas au lifecycle privé,
 ne modifie pas handshake, codec, stratégie de retry, TLS ou destination.
 Le client persistant garde son budget de deux tentatives ; six refreshs fixes
-à 0/50/100/150/200/250 s au plus. Les tests accélèrent cette planification avec
-une horloge virtuelle ; ce n'est pas une observation réelle de 300 s.
+à 0/50/100/150/200/250 s au plus. Le premier témoin termine la préparation et
+ancre la fenêtre ; le lecteur persistant reste actif jusqu'à **300 s après ce
+témoin**, sans septième refresh. Un réveil à 299,999 s impose une nouvelle attente.
+Les tests accélèrent cette planification avec une horloge virtuelle explicitement
+marquée `synthetic` ; ce n'est pas une observation réelle de 300 s.
+
+Le témoin final précède le cleanup et conserve les pertes apparues après le
+dernier refresh. `SessionObservation.active` est un booléen public sans I/O,
+calculé par le propriétaire V4 : une fermeture protocolaire sans perte naturelle
+ne doit pas passer pour une session encore active. Aucun codec, retry, lecteur
+ou flux HA n'est modifié ; le projecteur et le format C1 restent inchangés.
 
 ## Ressources et arrêt
 
@@ -33,7 +42,7 @@ une horloge virtuelle ; ce n'est pas une observation réelle de 300 s.
 | --- | --- |
 | Mémoire | cgroup `memory.max` <=1 Gio pour gardien, HA, threads et descendants ; swap désactivé |
 | Processus/threads | cgroup `pids.max` <=128, sans possibilité de migration pour le worker |
-| Fenêtre utile | <=300 s, gardien PID 1 indépendant de la boucle asyncio du client |
+| Fenêtre utile | 300 s monotones nécessaires à completed ; horloge accélérée distinguée |
 | Exécution/nettoyage | échéance absolue <=360 s armée sur l'hôte avant start, transmise au gardien sans reset |
 | Rapport | JSON canonique <=8192 octets ; aucune publication C2a |
 
@@ -41,6 +50,11 @@ La préparation de l'image et du conteneur **arrêté, sans secret** précède
 l'exécution bornée. L'échéance est armée avant le start, incluant le démarrage
 du gardien et du worker. Les tests peuvent resserrer les plafonds, jamais les
 augmenter. L'observer borne aussi ses attentes et appelle async_close.
+La préparation et la collecte disposent ensemble de 330 s au plus, le cleanup
+HA de 10 s ; le gardien accepte le reçu après 300 s et arrête l'attente worker
+au plus tard à T+340 s nominal. Les 20 s restants couvrent terminaison, reaping et
+contrôle externe, toujours sur l'échéance originale T+360 s. Si le démarrage
+consomme cette marge, la collecte échoue ; aucun timer n'est réarmé.
 À l'arrêt externe, SIGTERM donne une chance bornée au cleanup HA, puis SIGKILL
 arrête le groupe du worker. La sortie de PID 1 termine aussi les descendants
 qui ont créé leur propre session Unix. Une marge reste réservée au kill/reaping.
@@ -90,6 +104,15 @@ Le reçu porte les plafonds effectifs, l'état démarré/attesté, le motif loca
 OOM/PID et le reaping. Les critères et l'issue globale sont recalculés par Python
 et par un validateur Node indépendant. Les seules aides partagées avec C1 sont
 la validation des témoins, pas les budgets ou les schémas.
+
+Les six samples portent des temps relatifs monotones. `window` porte le type
+d'horloge, la durée écoulée et le témoin final actif/perte. Python et Node refusent
+completed à 250 s ou 299,999 s, un témoin régressif et une durée monotone supérieure
+au reçu externe. `continuous_300s` exige six lectures décodées, la même génération
+sans perte et un témoin final actif à la borne. Une perte tardive ou un arrêt
+protocolaire rend ce critère FAILURE, même si une reconnexion antérieure reste
+prouvée ; collection, continuité, reconnexion et cleanup sont des critères distincts.
+Une annulation de cleanup conserve le témoin de fenêtre, sans succès global.
 
 Deux lectures décodées/corrélées de même génération prouvent la réutilisation.
 Une perte observée, cleanup, nouvelle génération et nouvelle lecture corrélée

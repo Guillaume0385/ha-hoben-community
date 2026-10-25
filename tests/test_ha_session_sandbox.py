@@ -116,7 +116,8 @@ def test_real_ha_path_inside_resource_bounded_namespace(sandbox_image, case):
     elif case is OfflineCase.HEALTHY:
         assert r["outcome"] == "INCONCLUSIVE"
     else:
-        assert r["outcome"] == "SUCCESS"
+        assert r["criteria"]["reconnection"] == "SUCCESS"
+        assert r["criteria"]["continuous_300s"] == "FAILURE"
     encoded = encode_report(r)
     assert node_accepts(encoded)
     for value in ("D" * 32, "12345678123456781234567812345678", "synthetic-private"):

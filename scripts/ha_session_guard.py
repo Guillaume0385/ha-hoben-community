@@ -62,6 +62,21 @@ def metrics():
     }
 
 
+def worker_deadline(limits, hard_deadline_ns, now_ns):
+    """Allow startup/final proof/HA close, keeping independent hard-stop margin.
+
+    With nominal bounds, the worker can return its proof after 300 s and clean
+    up until 340 s. The last 20 s remain for termination/reaping/controller.
+    Tightened offline limits scale the margins down, never extend 360 s.
+    """
+    grace_ms = min(40_000, limits["process_ms"] // 6)
+    reserve_ms = min(20_000, limits["process_ms"] // 4)
+    return min(
+        now_ns + (limits["useful_ms"] + grace_ms) * 1_000_000,
+        hard_deadline_ns - reserve_ms * 1_000_000,
+    )
+
+
 def run(case, limits, deadline_ns):
     """Attest cgroup bounds before the unprivileged worker can execute."""
     global worker_started
@@ -91,7 +106,8 @@ def run(case, limits, deadline_ns):
             "evidence": empty_evidence(),
         }
     # The outer deadline was armed before Docker start. Never reset it here.
-    end = min(time.monotonic() + limits["useful_ms"] / 1000, deadline_ns / 1e9 - 1)
+    started_ns = time.monotonic_ns()
+    end = worker_deadline(limits, deadline_ns, started_ns) / 1e9
     require(end > time.monotonic())
     evidence, reason, output = empty_evidence(), "worker_failure", bytearray()
     read_fd, write_fd = os.pipe()
@@ -157,7 +173,8 @@ def run(case, limits, deadline_ns):
                             "started": True,
                             "reason": "completed",
                             **limits,
-                            "elapsed_ms": 0,
+                            "elapsed_ms": (time.monotonic_ns() - started_ns)
+                            // 1_000_000,
                             "oom_killed": False,
                             "pids_limited": False,
                             "reaped": True,

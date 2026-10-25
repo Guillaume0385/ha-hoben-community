@@ -684,6 +684,9 @@ borne le namespace contenant gardien, vrai client/coordinator et descendants :
 six refreshs et deux tentatives. Le gardien termine le namespace même si la
 boucle HA ne coopère pas ; les refus et arrêts locaux ne prouvent pas une perte
 naturelle. Image/dépendances figées, réseau interdit, aucun secret chargé.
+L'achèvement attend 300 s monotones après le premier témoin et projette la
+session encore active/perte à cette borne ; la sixième lecture à 250 s ne suffit
+pas. Le cleanup est séparé, dans l'échéance externe originale de 360 s.
 
 Le rapport schéma 2 est distinct de C1 et toujours offline, admission NOT RUN,
 boundary_proven=false ; validation indépendante Python/Node. La planification

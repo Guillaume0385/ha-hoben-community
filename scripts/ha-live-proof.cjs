@@ -5,7 +5,7 @@ const reasons=['completed','unavailable','cancelled','timeout','memory','process
 
 function validateReport(r) {
   object(r,['schema','scenario','execution','admission','boundary_proven','provenance',
-    'supervisor','completed','samples','cleanup','criteria','outcome']);
+    'supervisor','completed','samples','window','cleanup','criteria','outcome']);
   check(r.schema===2 && r.scenario==='ha-persistent-live' && r.execution==='offline' &&
     r.admission==='NOT RUN' && r.boundary_proven===false);
   const p=r.provenance;
@@ -26,7 +26,9 @@ function validateReport(r) {
     (!r.completed || r.samples.length===6) && (g.started || r.samples.length===0));
   let previous=null, reuse=false, recovered=false;
   for(const [i,s] of r.samples.entries()) {
-    object(s,['ordinal','decoded','observation']);
+    object(s,['ordinal','at_ms','decoded','observation']);
+    check(int(s.at_ms,i*50000,299999) && (i!==0 || s.at_ms===0));
+    if(i) check(s.at_ms>=r.samples[i-1].at_ms);
     check(s.ordinal===i+1 && typeof s.decoded==='boolean');
     const o=s.observation;
     inspect(o);
@@ -44,11 +46,27 @@ function validateReport(r) {
     }
     previous=s;
   }
+  const w=r.window;
+  object(w,['clock','elapsed_ms','observation','active']);
+  check(typeof w.active==='boolean' && (w.observation!==null || !w.active));
+  check(['unattested','monotonic','synthetic'].includes(w.clock) && int(w.elapsed_ms,0,360000));
+  if(w.observation!==null) {
+    inspect(w.observation);
+    check(w.clock!=='unattested' && g.started);
+    if(previous) {
+      progress(previous.observation,w.observation);
+      check(w.elapsed_ms>=previous.at_ms);
+    }
+  }
+  if(r.completed) check(w.elapsed_ms>=300000 && w.elapsed_ms<330000 && w.observation!==null && g.useful_ms===300000);
+  if(w.clock==='monotonic') check(w.elapsed_ms<=g.elapsed_ms);
+  if(w.clock==='unattested') check(!r.samples.length && w.elapsed_ms===0);
   object(r.cleanup,['completed','observation']);
   check(typeof r.cleanup.completed==='boolean');
   const final=r.cleanup.observation;
   inspect(final);
-  if(previous) progress(previous.observation,final);
+  if(w.observation!==null) progress(w.observation,final);
+  else if(previous) progress(previous.observation,final);
   const safe=g.reason==='completed' && g.reaped;
   let expected={
     collection:r.samples.length ? r.completed ? 'SUCCESS':'FAILURE':'NOT RUN',
@@ -56,6 +74,11 @@ function validateReport(r) {
     reconnection:recovered && safe ? 'SUCCESS':r.samples.length ? 'INCONCLUSIVE':'NOT RUN',
     cleanup:r.cleanup.completed && final.stopped && !final.cleanup_failed &&
       final.cleaned_generation===final.generation ? 'SUCCESS':'FAILURE',
+    continuous_300s:r.completed && safe && r.samples.every(s=>s.decoded) &&
+      w.observation!==null && w.observation.loss_generation===null &&
+      w.observation.generation===r.samples[0].observation.read_generation &&
+      w.observation.read_generation===w.observation.generation && w.active &&
+      !w.observation.stopped && !w.observation.cleanup_failed ? 'SUCCESS':r.samples.length ? 'FAILURE':'NOT RUN',
     supervision:safe ? 'SUCCESS':g.started ? 'FAILURE':'NOT RUN',
   };
   if(!g.started) {

@@ -38,6 +38,14 @@ def receipt(**updates):
 def report(recovered=False, **updates):
     old = proof(recovered=recovered)
     evidence = {k: old[k] for k in ("completed", "samples", "cleanup")}
+    for index, sample in enumerate(evidence["samples"]):
+        sample["at_ms"] = index * 50000
+    evidence["window"] = {
+        "clock": "synthetic",
+        "active": True,
+        "elapsed_ms": 300000,
+        "observation": copy.deepcopy(evidence["samples"][-1]["observation"]),
+    }
     return build_report(PROVENANCE, receipt(**updates), evidence)
 
 
@@ -67,7 +75,7 @@ def test_actual_evidence_contract_is_distinct_from_c1_and_never_admitted(recover
     r = report(recovered)
     text = encode_report(r)
     assert parse_report(text) == r and node_accepts(text)
-    assert r["outcome"] == ("SUCCESS" if recovered else "INCONCLUSIVE")
+    assert r["outcome"] == ("FAILURE" if recovered else "INCONCLUSIVE")
     with pytest.raises(ValueError):
         parse_c1(text)
     with pytest.raises(ValueError):
@@ -127,7 +135,7 @@ BAD = [
     (("samples", 2, "observation"), "close_client_subcode", 256),
     (("criteria",), "supervision", "NOT RUN"),
     (("criteria",), "reconnection", "INCONCLUSIVE"),
-    ((), "outcome", "FAILURE"),
+    ((), "outcome", "SUCCESS"),
 ]
 
 
@@ -161,3 +169,46 @@ def test_canonical_encoding_and_evidence_cannot_override_parent_receipt():
     bad["supervisor"] = receipt()
     with pytest.raises(ValueError):
         build_report(PROVENANCE, receipt(), bad)
+
+
+@pytest.mark.parametrize("elapsed", [250000, 299999, 330000, 360000])
+def test_final_timestamp_cannot_forge_completion(elapsed):
+    r = report()
+    r["window"]["elapsed_ms"] = elapsed
+    raw = json.dumps(r, separators=(",", ":"))
+    with pytest.raises(ValueError):
+        parse_report(raw)
+    assert not node_accepts(raw)
+
+
+@pytest.mark.parametrize(
+    "path,key,value",
+    [
+        (("window",), "clock", "live"),
+        (("window",), "clock", "monotonic"),  # parent elapsed only 1 s
+        (("window",), "elapsed_ms", True),
+        (("window",), "observation", None),
+        (("window",), "active", False),
+        (("samples", 5), "at_ms", 249999),
+        (("samples", 0), "at_ms", 1),
+        (("window", "observation"), "read_sequence", 5),
+    ],
+)
+def test_final_witness_and_clock_are_independently_validated(path, key, value):
+    r = report()
+    target = r
+    for part in path:
+        target = target[part]
+    target[key] = value
+    raw = json.dumps(r, separators=(",", ":"))
+    with pytest.raises(ValueError):
+        parse_report(raw)
+    assert not node_accepts(raw)
+
+
+def test_monotonic_window_needs_corresponding_parent_duration():
+    r = report()
+    r["window"]["clock"] = "monotonic"
+    r["supervisor"]["elapsed_ms"] = 309000
+    assert parse_report(encode_report(r)) == r
+    assert node_accepts(encode_report(r))
