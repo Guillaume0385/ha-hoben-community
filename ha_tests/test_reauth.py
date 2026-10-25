@@ -297,6 +297,8 @@ async def test_real_client_reauth_rejection_never_sends_pairing(
     """Exercise real protocol code over a scripted transport with no sockets."""
     transport = Mock(
         spec=AsyncTlsTransport,
+        host="myhoben.fr",
+        port=465,
         connect=AsyncMock(),
         write=AsyncMock(),
         read=AsyncMock(return_value=response),

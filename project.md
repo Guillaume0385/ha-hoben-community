@@ -25,8 +25,9 @@ sur experimental : sélection H1/H2, session-300, reconnexion autonome ou all.
 Le dispatch propriétaire remplace le commentaire d'admission pré-fusion ; revue,
 CI, provenance, environnement/approbations, anti-rejeu, budgets et confidentialité
 restent requis. Main reste inactive. L'étape 8 avance par tranches A/B/C selon
-l'arbitrage actuel de #112 ; A prépare le contrat partagé hors ligne, sans
-raccordement du client HA ni nouvelle voie live. Les descriptions
+l'arbitrage actuel de #112 ; A fournit le contrat partagé et B raccorde le vrai
+client HA avec tests hors ligne. Le test hoben-live reste réservé à C, sans
+nouvelle voie live dans B. Les descriptions
 push/labels/commentaires d'admission plus bas sont historiques et ne réactivent
 aucune ancienne voie. La précondition du premier scénario reste imposée dans all.
 
@@ -612,6 +613,54 @@ rapport fermé SUCCESS/FAILURE/INCONCLUSIVE/NOT RUN et admission manuelle hoben-
 sur SHA exact devront être préparés/revus. Aucun ancien rapport one-shot,
 collecteur renommé, workflow historique retiré ou succès de A ne valide ce test.
 DEV et CI ordinaires restent hors ligne ; aucun live ni promotion main implicite.
+
+## Étape 8, tranche B — véritable client Home Assistant
+
+La consigne active de #112 autorise B après fusion de A par #123 au SHA
+`98d87336c31ab64751f5dd9bfbb7cec5682dfcae`. `HobenClient.async_refresh()` utilise
+désormais directement `V4Lifecycle(mode=PERSISTENT)` et les API publiques de A.
+Un seul lifecycle est construit au premier refresh, puis conservé entre les
+rafraîchissements. Le coordinator planifie toujours à 60 s et convertit les
+snapshots ; il n'accède ni au transport ni au framer. Le gestionnaire partagé,
+les codecs et les budgets de campagnes restent inchangés dans B.
+
+L'API constructeur, RawStoveSnapshot immuable, dernier snapshot réussi,
+profil et accès de persistance sont conservés. Build, DeviceInfo et délai
+d'ouverture passent par V4OpeningOptions ; le délai de lecture borne la demande
+partagée. `max_attempts` (1–2, défaut 2) et `retry_delay` (0–30 s, défaut 1)
+définissent maintenant le budget **de durée de vie** du client : aucun reset
+au refresh ou après succès. Pas de replay d'une lecture échouée, retry de timeout
+applicatif ou recréation de lifecycle masquant son épuisement. Une erreur terminale
+reste en échec jusqu'à création explicite d'un nouveau client/rechargement HA.
+
+Après CloseClient complet, EOF ou perte TLS, le refresh en échec rend HA
+indisponible. Le suivant peut attendre la reconnexion bornée, mais ne rend un
+nouveau snapshot qu'après une nouvelle réponse V4 corrélée et un témoin de lecture
+de la même génération. Une ouverture seule ne rétablit pas la disponibilité.
+Le DeviceGuid accepté est conservé même si cette lecture échoue ; HA persiste
+l'identité acceptée et non nulle aussi sur ce chemin d'erreur, sans remplacer
+l'erreur causale par un éventuel échec de stockage. Les refus d'ouverture ne
+modifient pas l'identité. Annulation, setup échoué et unload ferment les propriétaires
+RX/TX/waiters ; reload crée un client propre avec l'identité persistée.
+
+L'association explicite initiale conserve son handshake ponctuel et son unique
+soumission, sans nouvelle fonction ni appel automatique depuis refresh. Si un
+appelant demande explicitement une association après des lectures sur le même
+objet, la session persistante est fermée d'abord et son budget n'est pas réarmé ;
+les futures lectures nécessitent un nouveau client. Le config-flow existant
+emploie déjà un client frais par soumission et reste inchangé.
+
+Les diagnostics ajoutent seulement le dernier sous-code CloseClient UInt8,
+et les erreurs post-open conservent catégorie/raison/phase/sous-code fermés.
+Les snapshots de registres, identités, DeviceInfo, exceptions arbitraires et RX
+bruts restent privés. `safe_report.state=ready` désigne l'API non fermée,
+pas une preuve de connexion ; la disponibilité HA dépend du refresh réussi.
+
+Validation B uniquement déterministe, dont HA réel sous transport synthétique.
+La préparation du scénario manuel hoben-live et de son admission est **C, non
+réalisée par B**. Les anciens scripts/rapports one-shot conservés ne prouvent
+plus une seconde ouverture ni la validation live de la session persistante.
+Aucun workflow, gate, lancement réel ou promotion main dans cette tranche.
 
 ## High-level architecture
 

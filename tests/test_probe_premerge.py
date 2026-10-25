@@ -2,12 +2,12 @@
 
 import json
 import ssl
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from scripts import probe_hoben_connection as probe
+from tests.tls_script import script_tls
 
 USER_GUID = "01234567-89AB-CDEF-0123-456789ABCDEF"
 OPENED = (
@@ -48,7 +48,10 @@ def synthetic_environment(monkeypatch):
 def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
     streams, monkeypatch, capsys, caplog, registers, major
 ):
-    """Two fresh TLS sessions reuse assignment, with changing UInt16 metadata/data."""
+    """Historical CLI output, now over the real client's single shared session.
+
+    This retired path's report is not admission or persistent HA live evidence.
+    """
 
     class OnlyCredentialEnvironment(dict):
         def __getitem__(self, key):
@@ -63,27 +66,11 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         probe.os, "environ", OnlyCredentialEnvironment(HOBEN_USER_GUID=USER_GUID)
     )
     opened = OPENED[:10] + bytes([major]) + OPENED[11:]
-    streams.reader.read.side_effect = [b"\x0a" + opened, b"\x0a" + response(registers)]
-    second = SimpleNamespace(
-        reader=SimpleNamespace(
-            read=AsyncMock(side_effect=[opened, response(list(reversed(registers)))])
-        ),
-        writer=SimpleNamespace(
-            write=Mock(),
-            drain=AsyncMock(),
-            close=Mock(),
-            wait_closed=AsyncMock(),
-            transport=SimpleNamespace(abort=Mock()),
-        ),
+    script_tls(
+        streams,
+        openings=[[b"\x0a" + opened]],
+        reads=[[b"\x0a" + response(registers)], [response(list(reversed(registers)))]],
     )
-
-    async def connect(*args, **kwargs):
-        if streams.connect.await_count == 1:
-            return streams.reader, streams.writer
-        streams.writer.wait_closed.assert_awaited_once_with()
-        return second.reader, second.writer
-
-    streams.connect.side_effect = connect
     client_factory = Mock(wraps=probe.HobenClient)
     monkeypatch.setattr(probe, "HobenClient", client_factory)
     decoder = Mock(wraps=probe.decode_v4_snapshot)
@@ -116,9 +103,6 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
         b"\x0b",
         READ_REQUEST,
         b"\x0b",
-    ]
-    assert [c.args[0] for c in second.writer.write.call_args_list] == [
-        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
         READ_REQUEST,
     ]
     client_factory.assert_called_once_with(
@@ -128,14 +112,13 @@ def test_current_suite_refreshes_same_client_twice_and_does_not_freeze_values(
     assert decoder.call_count == 2
     assert decoder.call_args_list[0].args[0].registers == tuple(registers)
     assert decoder.call_args_list[1].args[0].registers == tuple(reversed(registers))
-    assert streams.connect.await_count == 2
+    assert streams.connect.await_count == 1
     for call in streams.connect.call_args_list:
         assert call.args == ("myhoben.fr", 465)
         assert call.kwargs["server_hostname"] == "myhoben.fr"
         assert call.kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED
         assert call.kwargs["ssl"].check_hostname is True
     streams.writer.wait_closed.assert_awaited_once_with()
-    second.writer.wait_closed.assert_awaited_once_with()
     for sensitive in (
         USER_GUID,
         USER_GUID.replace("-", "").lower(),
@@ -153,12 +136,11 @@ def test_live_premerge_uses_client_defaults_without_probe_overrides(
     monkeypatch.setattr(probe, "DEFAULT_BUILD", 1)
     client_factory = Mock(wraps=probe.HobenClient)
     monkeypatch.setattr(probe, "HobenClient", client_factory)
-    streams.reader.read.side_effect = [
-        OPENED,
-        response([0] * 20),
-        OPENED,
-        response([65535] * 20),
-    ]
+    script_tls(
+        streams,
+        openings=[[OPENED]],
+        reads=[[response([0] * 20)], [response([65535] * 20)]],
+    )
     assert probe.main(["--live-premerge"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["state"] == "client_refresh_validated"
@@ -168,10 +150,9 @@ def test_live_premerge_uses_client_defaults_without_probe_overrides(
     assert [c.args[0] for c in streams.writer.write.call_args_list] == [
         OPEN_REQUEST,
         READ_REQUEST,
-        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
         READ_REQUEST,
     ]
-    assert streams.connect.await_count == streams.writer.wait_closed.await_count == 2
+    assert streams.connect.await_count == streams.writer.wait_closed.await_count == 1
 
 
 @pytest.mark.parametrize(
@@ -184,7 +165,7 @@ def test_live_premerge_uses_client_defaults_without_probe_overrides(
     ],
 )
 def test_unsuccessful_or_unsupported_session_never_reads(streams, capsys, opening):
-    streams.reader.read.side_effect = [opening, response([0] * 20)]
+    script_tls(streams, openings=[[opening]], reads=[[response([0] * 20)]])
     assert probe.main(["--live-premerge"]) == 1
     output = capsys.readouterr()
     assert "register_count" not in json.loads(output.out)
@@ -213,7 +194,7 @@ def test_mismatch_or_exception_fails_with_only_the_allowed_request(
     streams, capsys, reply
 ):
     """Wrong count, function, transaction or unit cannot produce a passed gate."""
-    streams.reader.read.side_effect = [OPENED, reply]
+    script_tls(streams, openings=[[OPENED]], reads=[[reply]])
     assert probe.main(["--live-premerge"]) == 1
     output = capsys.readouterr()
     assert json.loads(output.out)["state"] != "read"
@@ -240,25 +221,28 @@ def test_mismatch_or_exception_fails_with_only_the_allowed_request(
 def test_second_refresh_failure_never_reports_validated_reuse(
     streams, capsys, second_response
 ):
-    streams.reader.read.side_effect = [OPENED, response([0] * 20), second_response]
+    script_tls(
+        streams, openings=[[OPENED]], reads=[[response([0] * 20)], [second_response]]
+    )
     assert probe.main(["--live-premerge"]) == 1
     output = capsys.readouterr()
     report = json.loads(output.out)
-    assert report["state"] == "error"
+    closed = isinstance(second_response, bytes) and second_response[:1] == b"\x05"
+    assert report["state"] == ("closed" if closed else "error")
     assert "device_guid_reuse" not in report
     assert "PRIVATE" not in output.out + output.err
     assert [c.args[0] for c in streams.writer.write.call_args_list] == [
         OPEN_REQUEST,
         READ_REQUEST,
-        OPEN_REQUEST[:37] + OPENED[14:46] + OPEN_REQUEST[69:],
+        READ_REQUEST,
     ]
-    assert streams.connect.await_count == 2
-    assert streams.writer.wait_closed.await_count == 2
+    assert streams.connect.await_count == 1
+    assert streams.writer.wait_closed.await_count == 1
 
 
 def test_zero_returned_identity_cannot_validate_assigned_reuse(streams, capsys):
     opened = OPENED[:14] + b"0" * 32 + OPENED[46:]
-    streams.reader.read.side_effect = [opened, response([0] * 20)]
+    script_tls(streams, openings=[[opened]], reads=[[response([0] * 20)]])
     assert probe.main(["--live-premerge"]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "malformed_response"
     streams.connect.assert_awaited_once()
@@ -319,20 +303,19 @@ def test_decoder_failure_cannot_pass_gate_or_publish_household_values(
 
     decoder = Mock(side_effect=decode)
     monkeypatch.setattr(probe, "decode_v4_snapshot", decoder)
-    streams.reader.read.side_effect = [
-        OPENED,
-        response([0] * 20),
-        OPENED,
-        response([65535] * 20),
-    ]
+    script_tls(
+        streams,
+        openings=[[OPENED]],
+        reads=[[response([0] * 20)], [response([65535] * 20)]],
+    )
     assert probe.main(["--live-premerge"]) == 1
     output = capsys.readouterr()
     assert json.loads(output.out)["state"] == "error"
     assert "PRIVATE" not in output.out + output.err + caplog.text
     assert "v4_decode_count" not in json.loads(output.out)
     assert decoder.call_count == failed_decode
-    assert streams.connect.await_count == failed_decode
-    assert streams.writer.wait_closed.await_count == failed_decode
+    assert streams.connect.await_count == 1
+    assert streams.writer.wait_closed.await_count == 1
 
 
 @pytest.mark.parametrize(

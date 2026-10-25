@@ -1,7 +1,8 @@
 """Stateful identity, explicit association and read-only refresh, without HA.
 
-OpenedClient's complete boundary remains unknown. Each refresh therefore opens
-and closes its own verified connection; no receive worker or polling task exists.
+Refreshes reuse the shared persistent V4 lifecycle. Scheduling stays with HA;
+the shared runtime owns framing, RX/TX, finite recovery and terminal cleanup.
+OpenedClient's complete boundary remains unproven on this experimental branch.
 """
 
 import asyncio
@@ -9,6 +10,8 @@ import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
+from typing import TYPE_CHECKING
 
 from .exceptions import (
     HobenAmbiguousSessionError,
@@ -18,14 +21,12 @@ from .exceptions import (
     HobenClosedError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
-    HobenModbusError,
     HobenProtocolError,
     HobenRefreshExhaustedError,
     HobenTimeoutError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
-from .modbus import ModbusExceptionResponse
 from .myhoben import (
     INITIAL_DEVICE_GUID,
     CloseClientReason,
@@ -44,7 +45,9 @@ from .session import (
     _open_session,
 )
 from .transport import AsyncTlsTransport, TransportError, TransportTimeout
-from .v4_read import V4ReadProtocolError, V4ReadTimeout, _read_v4
+
+if TYPE_CHECKING:
+    from .v4_lifecycle import V4Lifecycle
 
 # protocol.md §4 confirms the analyzed Android build.
 DEFAULT_BUILD = 34
@@ -138,13 +141,16 @@ class HobenClient:
     from INITIAL_DEVICE_GUID. Adopt the returned 32-byte ASCII identity after a
     valid, unambiguous V4 opening, BEFORE reading: a later transport/read failure
     must not discard the assigned identity. Unsupported/ambiguous openings never
-    update it. Every attempt uses a fresh verified myhoben.fr:465 transport.
+    update it. Healthy refreshes share one verified myhoben.fr:465 transport.
 
     Refreshes are serialized, including backoff and identity changes. Default:
-    two total attempts with one 1-second async delay, configurable to 1..2 total
-    attempts and 0..30 seconds. Only transport failures/timeouts permit retry.
+    two lifetime opening attempts with one 1-second async delay, configurable to
+    1..2 attempts and 0..30 seconds. Success never resets that finite budget.
+    Failed reads return to their caller without replay; later refreshes can use
+    a recovered generation only after a new correlated response. Terminal
+    failure requires an explicit new client/config-entry reload.
     Explicit association uses the same lock and handshake, with one attempt and
-    no Modbus read. No control, permanent socket, background task or polling.
+    no Modbus read. No control or client-owned polling task.
     """
 
     def __init__(
@@ -191,6 +197,7 @@ class HobenClient:
         self._lock = asyncio.Lock()
         self._active_operation: asyncio.Task | None = None
         self._closed = False
+        self._lifecycle: V4Lifecycle | None = None
 
     def __repr__(self) -> str:
         """Do not expose either identity or caller-supplied DeviceInfo."""
@@ -200,20 +207,22 @@ class HobenClient:
     def device_guid_for_persistence(self) -> str:
         """Sensitive: explicitly retrieve for secure storage, NEVER logs/diagnostics.
 
-        Returns the initial zero value until a supported unambiguous opening.
-        A future HA integration may persist this in ConfigEntry storage and pass
-        it to a new client. This client never writes files or external storage.
+        Returns the initial value until the shared owner accepts a V4 opening.
+        HA persists it in ConfigEntry storage and seeds later clients from it.
+        This client never writes files or external storage.
         """
+        self._adopt_persistent_identity()
         return self._device_guid
 
     @property
     def has_assigned_device_guid(self) -> bool:
         """Non-sensitive indication that the current identity differs from zero."""
-        return self._device_guid != INITIAL_DEVICE_GUID
+        return self.device_guid_for_persistence != INITIAL_DEVICE_GUID
 
     @property
     def profile(self) -> StoveProfile | None:
         """Last successfully accepted profile, even if its following read failed."""
+        self._adopt_persistent_identity()
         return self._profile
 
     @property
@@ -221,34 +230,45 @@ class HobenClient:
         """Last complete successful refresh; failures never replace this snapshot."""
         return self._last_snapshot
 
-    def safe_report(self) -> dict[str, str | bool]:
+    def safe_report(self) -> dict[str, str | bool | int]:
         """Allowlisted diagnostics; no dataclass/session or generic identity export."""
-        return {
+        self._adopt_persistent_identity()
+        report = {
             "state": "closed" if self._closed else "ready",
             "profile": self._profile.value if self._profile is not None else "unknown",
             "has_assigned_device_guid": self.has_assigned_device_guid,
         }
+        if self._lifecycle is not None:
+            subcode = self._lifecycle.snapshot.close_client_subcode
+            if subcode is not None:
+                report["close_client_subcode"] = subcode
+        return report
+
+    def _adopt_persistent_identity(self) -> None:
+        """Cache only the shared owner's accepted identity, including on failure."""
+        if self._lifecycle is not None:
+            assigned = self._lifecycle.accepted_device_guid_for_persistence
+            if assigned is not None:
+                self._device_guid = assigned
+                self._profile = StoveProfile.V4
 
     async def async_refresh(self) -> RawStoveSnapshot:
-        """Refresh with finite transport retries; always propagate cancellation."""
+        """Read once on the shared lifecycle; never reset it or replay a read."""
         async with self._lock:
             if self._closed:
                 raise HobenClientClosedError()
             self._active_operation = asyncio.current_task()
             try:
-                for attempt in range(1, self._max_attempts + 1):
-                    try:
-                        snapshot = await self._refresh_once()
-                    except HobenTransportError as error:
-                        if attempt == self._max_attempts:
-                            raise HobenRefreshExhaustedError(attempt, error) from None
-                        # _refresh_once has already closed/discarded its transport.
-                        # Keep the lock across this yield and retain any new identity.
-                        await asyncio.sleep(self._retry_delay)
-                    else:
-                        self._last_snapshot = snapshot
-                        return snapshot
+                snapshot = await self._refresh_once()
+                self._last_snapshot = snapshot
+                return snapshot
+            except asyncio.CancelledError:
+                self._adopt_persistent_identity()
+                if self._lifecycle is not None:
+                    await self._lifecycle.close()
+                raise
             finally:
+                self._adopt_persistent_identity()
                 self._active_operation = None
 
     async def async_associate(
@@ -278,6 +298,12 @@ class HobenClient:
                 raise HobenInvalidInputError()
             self._active_operation = asyncio.current_task()
             try:
+                # Explicit association retains its existing one-shot contract.
+                # Stop any earlier persistent owner first, without rearming its
+                # finite budget; config-flow already uses a fresh client here.
+                if self._lifecycle is not None:
+                    self._adopt_persistent_identity()
+                    await self._lifecycle.close()
                 async with self._session_once(
                     authorization_code_provider=authorization_code_provider
                 ) as (_, session):
@@ -296,25 +322,72 @@ class HobenClient:
     async def async_close(self) -> None:
         """Permanently close, cancel an active operation, and await TLS cleanup.
 
-        Idempotent, including during code input/backoff. Queued/new calls fail with a
-        typed closed-client error. The recorded task is the caller's task, not
-        a background worker; callers should expect its cancellation on unload.
+        Idempotent, including during code input/backoff. Queued/new calls fail
+        with a typed closed-client error. Cancel the active caller, then stop
+        all shared background ownership; unload awaits both cleanup paths.
         """
         self._closed = True
+        self._adopt_persistent_identity()
         if self._active_operation is not None:
             self._active_operation.cancel()
         async with self._lock:
-            pass
+            if self._lifecycle is not None:
+                self._adopt_persistent_identity()
+                await self._lifecycle.close()
 
     async def _refresh_once(self) -> RawStoveSnapshot:
-        """One raw refresh; observation-only handshake never sends a code."""
-        async with self._session_once() as (transport, session):
-            response = await _read_v4(transport, read_timeout=self._read_timeout)
-            if isinstance(response, ModbusExceptionResponse):
-                raise HobenModbusError(response.exception_code)
-            opened = session.opened_client
+        """Adapt only public shared APIs; no framing or recovery policy here."""
+        # The shared modules use this module's frozen identity/options helpers.
+        # Import after module initialization rather than introducing a cycle.
+        from .v4_lifecycle import (
+            LifecycleExhaustedError,
+            LifecycleStoppedError,
+            V4Lifecycle,
+        )
+        from .v4_session import (
+            SessionStateError,
+            V4OpeningOptions,
+            V4Session,
+            V4SessionMode,
+        )
+
+        try:
+            if self._lifecycle is None:
+                self._lifecycle = V4Lifecycle(
+                    user_guid=self._user_guid,
+                    device_guid=self._device_guid,
+                    mode=V4SessionMode.PERSISTENT,
+                    opening_options=V4OpeningOptions(
+                        build=self._build,
+                        device_info=self._device_info,
+                        handshake_timeout=self._handshake_timeout,
+                    ),
+                    retry_delays=(self._retry_delay,) * (self._max_attempts - 1),
+                    session_factory=partial(
+                        V4Session, transport_factory=AsyncTlsTransport
+                    ),
+                    sleep=asyncio.sleep,
+                )
+                await self._lifecycle.connect()
+            else:
+                await self._lifecycle.wait_connected()
+            self._adopt_persistent_identity()
+            before = self._lifecycle.witness
+            response = await self._lifecycle.request_v4_data(timeout=self._read_timeout)
+            after = self._lifecycle.witness
+            opened = self._lifecycle.opening_metadata
+            if (
+                opened is None
+                or after.verified_read_generation != before.established_generation
+                or after.established_generation != before.established_generation
+                or after.verified_read_sequence is None
+                or after.verified_read_sequence <= (before.verified_read_sequence or 0)
+            ):
+                self._adopt_persistent_identity()
+                await self._lifecycle.close()
+                raise HobenProtocolError()
             return RawStoveSnapshot(
-                profile=session.profile,
+                profile=StoveProfile.V4,
                 registers=response.registers,
                 product_type=opened.product_type,
                 product_revision=opened.product_revision,
@@ -322,6 +395,16 @@ class HobenClient:
                 software_minor=opened.software_minor,
                 application_version=opened.application_version,
             )
+        except LifecycleExhaustedError:
+            raise HobenRefreshExhaustedError(
+                self._lifecycle.snapshot.attempts, HobenTransportError()
+            ) from None
+        except LifecycleStoppedError:
+            raise HobenClientClosedError() from None
+        except SessionStateError:
+            # A loss between wait_connected and request registration is still a
+            # failed refresh. Do not retry it or claim a recovered snapshot.
+            raise HobenTransportError() from None
 
     @asynccontextmanager
     async def _session_once(
@@ -370,11 +453,11 @@ class HobenClient:
                     # failure and thereby accidentally make it retryable.
                     if not failed:
                         raise
-        except (TransportTimeout, SessionTimeout, V4ReadTimeout):
+        except (TransportTimeout, SessionTimeout):
             raise HobenTimeoutError() from None
         except TransportError:
             raise HobenTransportError() from None
-        except (SessionProtocolError, V4ReadProtocolError):
+        except SessionProtocolError:
             raise HobenProtocolError() from None
         except SessionAuthorizationCodeError:
             raise HobenAuthorizationCodeError() from None

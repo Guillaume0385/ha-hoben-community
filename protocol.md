@@ -565,7 +565,10 @@ leur comportement exact sur le serveur actuel reste à valider.
 L'arbitrage E8 tranche A du même commentaire autorise désormais le mode typé
 `V4SessionMode.PERSISTENT` à réutiliser le framer et ces contrats post-open,
 indépendamment des budgets Session300/SessionReconnect. Ce préalable partagé
-ne raccorde pas encore le client HA. Les hypothèses OpenedClient/préfixe 48
+ne raccordait pas encore le client HA. La tranche B réutilise maintenant ce
+mode dans le véritable HobenClient, avec validation déterministe seulement ;
+le test manuel hoben-live reste une tranche distincte non exécutée.
+Les hypothèses OpenedClient/préfixe 48
 octets et CloseClient/deux octets restent explicitement non universelles ; les
 succès fonctionnels E7 sur le SHA fusionné de #122 ne changent pas cette preuve.
 Voir le [contrat de ressources et API](project.md#étape-8-tranche-a--contrat-persistant-partagé).

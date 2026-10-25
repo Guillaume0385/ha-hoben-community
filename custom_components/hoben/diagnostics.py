@@ -55,6 +55,7 @@ async def async_get_config_entry_diagnostics(
     result["client"] = select_report(
         runtime.client,
         {"state": frozenset({"ready", "closed"}), "profile": PROFILES},
+        {"close_client_subcode": 255},
         boolean_fields=("has_assigned_device_guid",),
     )
     result["coordinator"] = {
