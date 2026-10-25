@@ -312,7 +312,11 @@ def test_ineligible_rejections_preserve_normal_protocol_failure(case):
             now[0] = 250 if case == "at240" else 251
         if case == "generation2":
             s._experiment_generation = 2  # Stale owner declaration, fail closed.
-        stream.queue.put_nowait(b"\x00" if case == "type_other" else b"\x05")
+        # Without the private capability, a lone 05 now awaits its subcode.
+        # Exercise ordinary fail-closed rejection with another known type.
+        stream.queue.put_nowait(
+            b"\x00" if case in {"type_other", "default_off"} else b"\x05"
+        )
         await stopped(s)
         assert s.state is not SessionState.QUARANTINED
         assert pong.peer_eofs == 0 and budget.opens == 1

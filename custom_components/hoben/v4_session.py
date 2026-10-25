@@ -72,6 +72,7 @@ from .v4_eof_quarantine import (
 )
 from .v4_experiment import (
     BudgetTransport,
+    ExperimentalCloseClientError,
     ExperimentalV4Framer,
     Session300,
     SessionReconnect,
@@ -367,7 +368,9 @@ class V4Session:
         self._experiment = session_300
         self._experiment_generation = None
         self._framer = (
-            ExperimentalV4Framer(diagnostic=session_300)
+            ExperimentalV4Framer(
+                diagnostic=session_300, _reject_close_client=_quarantine is not None
+            )
             if session_300 is not None
             else None
         )
@@ -416,6 +419,21 @@ class V4Session:
     def loss_is_retryable(self) -> bool:
         """True only for an observed transport loss, never caller cancellation."""
         return self._retryable_loss
+
+    @property
+    def close_client_received(self) -> bool:
+        """Sole RX owner's complete experimental close, distinct from TLS loss."""
+        return type(self._rx_error) is ExperimentalCloseClientError
+
+    @property
+    def close_client_cleanup_succeeded(self) -> bool:
+        """Used only after lifecycle cleanup; no retry after a failed close."""
+        return (
+            self.close_client_received
+            and not self._rx_error._cleanup_failed
+            and self._transport is None
+            and self._rx_task.done()
+        )
 
     @property
     def loss_monotonic_ms(self) -> int | None:
@@ -615,6 +633,8 @@ class V4Session:
                 try:
                     await transport.close()
                 except Exception:
+                    if self.close_client_received:
+                        self._rx_error._cleanup_failed = True
                     raise HobenTransportError() from None
 
     async def _handle_delimited_ping(self, message: DelimitedV4Message) -> bool:
@@ -708,6 +728,9 @@ class V4Session:
             raise HobenInvalidInputError() from None
         self._snapshot = SessionSnapshot(SessionState.DISCONNECTED)
         self._opening_buffer.clear()
+        if self._framer is not None:
+            self._framer.clear()  # A fresh transport never inherits terminal RX.
+            self._experiment.partial = False
         self._rx_error = None
         self._loss_event.clear()
         self._unavailable.clear()
@@ -923,7 +946,13 @@ class V4Session:
                 raise HobenProtocolError()
             self._experiment.partial = self._framer.partial
             for event in events:
-                if event.payload == b"\x0a":
+                if event.payload[:1] == b"\x05":
+                    subcode = event.payload[1]
+                    self._experiment.note_close_client(subcode)
+                    if self._no_pong is not None:
+                        self._no_pong.client_closed(self._experiment_generation)
+                    raise ExperimentalCloseClientError(subcode)
+                elif event.payload == b"\x0a":
                     self._experiment.pings += 1
                     try:
                         sent = await self._handle_delimited_ping(

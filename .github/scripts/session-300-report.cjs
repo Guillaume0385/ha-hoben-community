@@ -17,6 +17,7 @@ const messages = new Map([
   ["frame_boundary",["unclassified","ambiguous"]], ["message_classification",["unknown"]],
   ["request_correlation",["data_response"]], ["response_validation",["data_response"]],
   ["pong_tx",["ping"]],
+  ["close_client",["close_client"]],
 ]);
 function validIgnoredMessages(value, rxBytes) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
@@ -33,8 +34,19 @@ function validIgnoredMessages(value, rxBytes) {
   }
   return total <= rxBytes;
 }
+function validCloseClient(value, opens, rxBytes, reconnect=false) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).sort().join() !== "after_threshold_ms,phase,subcodes") return false;
+  const codes=value.subcodes,after=value.after_threshold_ms;
+  return value.phase==="post_open" && Array.isArray(codes) && codes.length>=1 &&
+    codes.length<=Math.min(3,opens) && codes.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=255) &&
+    2*codes.length<=rxBytes && (after===null ||
+      reconnect&&Number.isSafeInteger(after)&&after>=0&&after<=480000);
+}
 function validate(r, p) {
-  const expected = r && Object.hasOwn(r,"ignored_messages") ? [...keys,"ignored_messages"] : keys;
+  const expected = [...keys];
+  if (r && Object.hasOwn(r,"ignored_messages")) expected.push("ignored_messages");
+  if (r && Object.hasOwn(r,"close_client")) expected.push("close_client");
   need(r && typeof r === "object" && !Array.isArray(r) &&
     Object.keys(r).sort().join() === [...expected].sort().join());
   need(r.schema === 1 && r.scenario === "session-300" && r.boundary_proven === false);
@@ -58,6 +70,8 @@ function validate(r, p) {
     r.read_slot === r.reads && r.rx_chunks_total <= r.rx_bytes_total &&
     (r.failure_phase === "none") === ["completed","recovery_verified"].includes(r.terminal));
   if (Object.hasOwn(r,"ignored_messages")) need(validIgnoredMessages(r.ignored_messages,r.rx_bytes_total));
+  if (Object.hasOwn(r,"close_client")) need(validCloseClient(r.close_client,r.opens,r.rx_bytes_total));
+  if (r.failure_phase==="close_client") need(Object.hasOwn(r,"close_client")&&r.terminal==="closed");
   if (["continuous_300s","reconnected"].includes(r.result)) {
     need(r.duration_ms === 300000 && r.reads_ok > 0 && r.pings === r.pongs);
     need(r.result === "continuous_300s" ? r.opens === 1 && r.reads_failed === 0 &&
@@ -94,4 +108,4 @@ function publish({core,proof,encoded}) {
     core.setFailed("NOT RUN: session-300 publication refused.");
   }
 }
-module.exports = {validate,validIgnoredMessages,readReport,prepare,publish};
+module.exports = {validate,validIgnoredMessages,validCloseClient,readReport,prepare,publish};

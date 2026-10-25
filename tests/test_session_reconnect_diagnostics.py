@@ -70,7 +70,6 @@ async def diagnostic_report(rejected=b"\xff"):
 @pytest.mark.parametrize(
     "rejected,phase,message",
     [
-        (b"\x05", "message_classification", "close_client"),
         (
             b"\x1b" + b"\x00" * 4 + bytes.fromhex("00010000ffff"),
             "frame_boundary",
@@ -109,7 +108,7 @@ def test_real_shared_owners_report_existing_refusals_after_three_reads(
 
 def test_all_rejected_heads_keep_refusal_and_historical_diagnostics():
     known = set(range(25)) | set(range(26, 49)) | set(range(80, 89)) | {96}
-    for discriminator in set(range(256)) - {7, 10, 14, 27}:
+    for discriminator in set(range(256)) - {5, 7, 10, 14, 27}:
         expected = (
             "close_client"
             if discriminator == 5
@@ -174,7 +173,7 @@ def test_secondary_teardown_cannot_replace_causal_protocol_diagnostic(monkeypatc
             h.budget.note_failure("tls_read", "transport")
             raise RuntimeError("synthetic-private-exception")
 
-    h = DiagnosticHarness(b"\x05")
+    h = DiagnosticHarness(b"\x00")
     monkeypatch.setattr(V4Lifecycle, "close", secondary_failure)
 
     async def scenario():
@@ -185,7 +184,7 @@ def test_secondary_teardown_cannot_replace_causal_protocol_diagnostic(monkeypatc
         assert (s["failure_phase"], s["failure_category"], s["message_category"]) == (
             "message_classification",
             "protocol",
-            "close_client",
+            "other_known",
         )
         assert "synthetic-private" not in json.dumps(r)
 
@@ -257,7 +256,7 @@ def test_python_node_versioned_diagnostics_are_closed_and_legacy_not_backfilled(
             changed = copy.deepcopy(bad)
             category = (
                 "closed"
-                if phase == "teardown"
+                if phase in {"teardown", "close_client"}
                 else "transport"
                 if phase == "tls_read"
                 else "protocol"
@@ -269,6 +268,12 @@ def test_python_node_versioned_diagnostics_are_closed_and_legacy_not_backfilled(
                 changed["session_reconnect_no_pong"].update(
                     terminal="closed", result="interrupted"
                 )
+            if phase == "close_client":
+                changed["session_reconnect_no_pong"]["close_client"] = {
+                    "phase": "post_open",
+                    "subcodes": [255],
+                    "after_threshold_ms": None,
+                }
             valid.append(changed)
     cases = copy.deepcopy(valid)
     for source in (good, bad, skipped, legacy(bad)):

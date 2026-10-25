@@ -1,6 +1,7 @@
 """Bounded V4 lifecycle ownership, independent of HA and real stream routing.
 
-Local recovery policy only: a sanitized transport loss can consume one retry.
+Local recovery policy only: a sanitized transport loss or complete experimental
+post-open CloseClient can consume one retry under the same finite budget.
 Protocol/identity failures and application deadlines stop rather than speculate
 about server behavior. A quiet RX owner has no application inactivity timer.
 """
@@ -22,6 +23,7 @@ from .exceptions import (
 from .modbus import ModbusReadResponse
 from .myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
 from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
+from .v4_experiment import ExperimentalCloseClientError
 from .v4_session import (
     SessionState,
     SessionStateError,
@@ -339,6 +341,7 @@ class V4Lifecycle:
                 or session._rx_task is not None
             ):
                 raise HobenInvalidInputError()
+            session._framer._reject_close_client = True
             if attempt == 1:
                 session._bind_quarantine_owner(self)
                 cap._origin = session
@@ -503,6 +506,14 @@ class V4Lifecycle:
                 retryable = type(error) is HobenTransportError and (
                     not opened or session.loss_is_retryable
                 )
+                # Only a complete post-open experimental CloseClient may also
+                # consume this same finite retry budget. Never replay a read or
+                # record this local terminal transition as a natural TLS EOF.
+                retryable = retryable or (
+                    type(error) is ExperimentalCloseClientError
+                    and opened
+                    and session.close_client_received
+                )
                 permit = None
                 if self._quarantine is not None:
                     retryable = False
@@ -533,6 +544,8 @@ class V4Lifecycle:
                     if self._quarantine is not None:
                         raise  # A private recovery requires successful cleanup.
                     pass  # Transport is detached; preserve the primary failure.
+                if type(error) is ExperimentalCloseClientError:
+                    retryable = retryable and session.close_client_cleanup_succeeded
                 if not retryable:
                     break
                 if attempt == self.snapshot.max_attempts:

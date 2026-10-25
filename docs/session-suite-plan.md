@@ -15,6 +15,43 @@ Les mentions push/commentaires/reruns ci-dessous sont historiques. Étape 8 susp
 
 ## Parcours minimal courant — Issue #112
 
+### CloseClient expérimental — CLOSECLIENT-SESSION-CLOSE-006
+
+L'[arbitrage propriétaire #6395141200](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+remplace le blocage de cadrage pour cette implémentation : hypothèse de **deux
+octets exactement**, `05` puis sous-code UInt8. Ce n'est pas une longueur
+universelle confirmée. Le framer attend le sous-code et conserve le reste du
+chunk avec son échange d'origine, sans scan ni traitement après le terminal.
+Le résidu reste privé jusqu'au nettoyage ; il ne traverse jamais un transport
+ou une génération. Un 05 isolé ne produit ni événement complet ni sous-code.
+
+Sur événement complet, V4Session termine les waiters, ferme le transport et
+expose `experimental_close_client`, distinct de perte TLS, EOF et refus de
+protocole. V4Lifecycle peut consommer le même budget fini de trois ouvertures
+et les délais existants, sans rejouer une requête. Une erreur de fermeture
+empêche une nouvelle ouverture. Le témoin de perte naturelle
+et les compteurs EOF ne sont pas alimentés par cette fermeture. La capacité
+privée de quarantaine EOF, inerte et non activée par les collecteurs courants,
+conserve son ancien rejet de discriminant et ses exigences de preuve d'EOF.
+
+Extension optionnelle fermée `close_client` des rapports session-300 et second
+scénario v1/v2, absente des anciens rapports et du contrat v3 inchangé :
+
+| Champ | Sens / borne |
+| --- | --- |
+| phase | `post_open` uniquement. |
+| subcodes | Liste de 1 à 3 UInt8 (0–255), au plus une réception par ouverture. Sa longueur donne le nombre d'occurrences. Aucune signification inventée pour un code inconnu. |
+| after_threshold_ms | `null`, ou délai depuis T0+120 s du premier CloseClient complet de la génération initiale après inhibition réellement exercée. Session-300 impose `null`. |
+
+Les validateurs Python/Node vérifient forme exacte, bornes et cohérence avec
+ouvertures, RX et inhibition. Le second collecteur admet cet événement distinct
+comme perte après inhibition, sans remplir `eof_after_threshold_ms` ni les
+compteurs EOF. Les contraintes existantes restent : réouverture avant T0+240 s,
+120 s stables, nouvelle génération, Pong et lecture V4 corrélée sur celle-ci,
+maximum fonctionnel 360 s ; plafonds processus 360/600/1020 s inchangés.
+Une fermeture avant inhibition, une stabilité perdue, un budget épuisé ou une
+réponse invalide restent inconclusifs/en échec. Aucun résultat réel revendiqué.
+
 ### Complément RX 07/1B — UNKNOWN-RX-CONTINUE-005
 
 La [demande propriétaire](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
