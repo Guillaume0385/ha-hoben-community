@@ -11,6 +11,7 @@ import pytest
 from custom_components.hoben.client import RawStoveSnapshot
 from custom_components.hoben.profiles import StoveProfile
 from scripts import probe_hoben_connection as probe
+from tests.tls_script import script_tls
 
 # Invented identities and household values; no production capture is used.
 USER_GUID = "01234567-89AB-CDEF-0123-456789ABCDEF"
@@ -96,7 +97,7 @@ def manual_environment(monkeypatch):
 
 def capture(streams, capsys, words=WORDS):
     """Run the actual CLI/client/decoder, replacing only the TLS connection."""
-    streams.reader.read.side_effect = [OPENED, response(words)]
+    script_tls(streams, openings=[[OPENED]], reads=[[response(words)]])
     assert probe.main([MODE]) == 0
     output = capsys.readouterr()
     assert len(output.out.splitlines()) == 1
@@ -296,7 +297,7 @@ def test_authorization_rejection_closes_without_read_pairing_or_values(
 def test_failure_has_one_sanitized_json_no_partial_household_values_or_traceback(
     streams, monkeypatch, capsys, caplog, failure
 ):
-    streams.reader.read.side_effect = [OPENED, response(WORDS)]
+    script_tls(streams, openings=[[OPENED]], reads=[[response(WORDS)]])
     if failure == "decoder":
         monkeypatch.setattr(
             probe, "build_private_v4_report", Mock(side_effect=RuntimeError("PRIVATE"))
@@ -337,12 +338,11 @@ def test_live_premerge_still_exports_only_existing_public_metadata_in_actions(
         side_effect=AssertionError("Public gate cannot capture values")
     )
     monkeypatch.setattr(probe, "_capture_private_v4_values", private_capture)
-    streams.reader.read.side_effect = [
-        OPENED,
-        response(WORDS),
-        OPENED,
-        response(list(reversed(WORDS))),
-    ]
+    script_tls(
+        streams,
+        openings=[[OPENED]],
+        reads=[[response(WORDS)], [response(list(reversed(WORDS)))]],
+    )
     assert probe.main(["--live-premerge"]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "host": "myhoben.fr",
@@ -364,7 +364,6 @@ def test_live_premerge_still_exports_only_existing_public_metadata_in_actions(
     assert [call.args[0] for call in streams.writer.write.call_args_list] == [
         OPEN_REQUEST,
         READ_REQUEST,
-        OPEN_REQUEST[:37] + DEVICE_GUID.encode() + OPEN_REQUEST[69:],
         READ_REQUEST,
     ]
 

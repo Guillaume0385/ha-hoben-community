@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche B
+
+- Véritable HobenClient raccordé au V4Lifecycle persistant partagé : TLS saine
+  réutilisée, lecture sans replay et reconnexion de durée de vie finie, sans
+  reset après refresh. API/snapshots et association initiale conservés.
+- Persistance HA de l'identité acceptée même après erreur de lecture, états
+  unavailable/recovered après réponse corrélée, sous-code CloseClient UInt8
+  expurgé, arrêt et cleanup testés avec le vrai client sous HA hors ligne.
+  Aucun changement de workflow ni test réel hoben-live (tranche C séparée).
+
 ## En cours — #112, étape 8 tranche A
 
 - Contrat explicite de session V4 persistante réutilisant le framer/RX partagé,

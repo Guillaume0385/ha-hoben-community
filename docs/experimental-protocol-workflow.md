@@ -2,6 +2,13 @@
 
 ## Voie courante : dispatch manuel sur experimental
 
+Étape 8, tranche B de #112 : le véritable client HA utilise le mode persistant
+partagé préparé par A. Ses tests sont exclusivement hors ligne ; B ne modifie
+aucun workflow/gate. Le futur test manuel hoben-live et son admission relèvent
+de C. Les descriptions ha-parity one-shot historiques plus bas, ainsi que leurs
+anciens rapports, ne valident ni une seconde ouverture actuelle ni ce client
+persistant. Aucun accès réel HA n'est activé par la seule livraison de B.
+
 La [procédure #119](hoben-manual-workflow.md) prévaut pour toute nouvelle campagne :
 workflow_dispatch du propriétaire, sélecteur natif Use workflow from, experimental
 seule active, SHA/provenance/revue/CI exacts, claim anti-rejeu et recheck après

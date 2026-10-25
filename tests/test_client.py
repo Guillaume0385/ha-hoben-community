@@ -13,7 +13,6 @@ import pytest
 from custom_components.hoben import client as client_module
 from custom_components.hoben.client import HobenClient, RawStoveSnapshot
 from custom_components.hoben.exceptions import (
-    HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
@@ -23,6 +22,7 @@ from custom_components.hoben.exceptions import (
     HobenProtocolError,
     HobenRefreshExhaustedError,
     HobenTimeoutError,
+    HobenTransportError,
     HobenUnsupportedProfileError,
 )
 from custom_components.hoben.myhoben import (
@@ -73,21 +73,43 @@ def make_client(**overrides):
 
 @pytest.fixture
 def tls(monkeypatch):
-    """Two distinct TLS stream pairs and tracked fresh real transport instances."""
+    """Real TLS primitives over request-gated, indefinitely quiet fake streams."""
     pairs = []
     for _ in range(2):
-        pairs.append(
-            SimpleNamespace(
-                reader=SimpleNamespace(read=AsyncMock(side_effect=[OPENED, RESPONSE])),
-                writer=SimpleNamespace(
-                    write=Mock(),
-                    drain=AsyncMock(),
-                    close=Mock(),
-                    wait_closed=AsyncMock(),
-                    transport=SimpleNamespace(abort=Mock()),
-                ),
-            )
+        pair = SimpleNamespace(
+            opening=[OPENED],
+            responses=[[RESPONSE]],
+            queue=asyncio.Queue(),
+            reader=SimpleNamespace(read=AsyncMock()),
+            writer=SimpleNamespace(
+                write=Mock(),
+                drain=AsyncMock(),
+                close=Mock(),
+                wait_closed=AsyncMock(),
+                transport=SimpleNamespace(abort=Mock()),
+            ),
         )
+
+        async def receive(max_bytes, pair=pair):
+            value = await pair.queue.get()
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def send(packet, pair=pair):
+            chunks = (
+                pair.opening
+                if packet[0] == 3
+                else (pair.responses.pop(0) if pair.responses else [RESPONSE])
+                if packet[0] == 13
+                else []
+            )
+            for chunk in chunks:
+                pair.queue.put_nowait(chunk)
+
+        pair.reader.read.side_effect = receive
+        pair.writer.write.side_effect = send
+        pairs.append(pair)
     connect = AsyncMock(side_effect=[(pair.reader, pair.writer) for pair in pairs])
     monkeypatch.setattr(asyncio, "open_connection", connect)
     transports = []
@@ -223,31 +245,27 @@ def test_all_invalid_settings_are_sanitized_before_network(tls, overrides):
     tls.factory.assert_not_called()
 
 
-def test_two_refreshes_close_first_then_reuse_assignment_on_fresh_transport(tls):
+def test_two_refreshes_reuse_one_lifecycle_and_one_healthy_tls(tls):
     client = make_client()
-    rotated = "Z" * 32
-    tls.pairs[1].reader.read.side_effect = [
-        OPENED[:14] + rotated.encode() + OPENED[46:],
-        read_response((42,) * 20),
-    ]
+    tls.pairs[0].responses = [[RESPONSE], [read_response((42,) * 20)]]
 
     async def run():
         first = await client.async_refresh()
-        tls.pairs[0].writer.wait_closed.assert_awaited_once_with()
+        lifecycle = client._lifecycle
+        tls.pairs[0].writer.wait_closed.assert_not_awaited()
         second = await client.async_refresh()
         assert first.registers == REGISTERS
         assert second.registers == (42,) * 20
         assert client.last_snapshot is second
+        assert client._lifecycle is lifecycle
+        assert lifecycle.witness.verified_read_sequence == 2
         await client.async_close()
         await client.async_close()
 
     asyncio.run(run())
-    assert emitted(tls.pairs[1]) == [
-        OPEN_REQUEST[:37] + DEVICE_GUID.encode() + OPEN_REQUEST[69:],
-        READ_REQUEST,
-    ]
-    assert client.device_guid_for_persistence == rotated
-    assert_cleanup(tls, 2)
+    assert emitted(tls.pairs[0]) == [OPEN_REQUEST, READ_REQUEST, READ_REQUEST]
+    assert client.device_guid_for_persistence == DEVICE_GUID
+    assert_cleanup(tls)
 
 
 def test_persistence_accessor_can_seed_a_new_client(tls):
@@ -315,7 +333,7 @@ def test_unsupported_dynamic_profile_fails_without_read_adoption_or_retry(
 ):
     opened = bytearray(OPENED)
     opened[7], opened[8], opened[10] = revision, product_type, major
-    tls.pairs[0].reader.read.side_effect = [bytes(opened)]
+    tls.pairs[0].opening = [bytes(opened)]
     client = make_client()
     with pytest.raises(HobenUnsupportedProfileError) as caught:
         asyncio.run(client.async_refresh())
@@ -326,13 +344,13 @@ def test_unsupported_dynamic_profile_fails_without_read_adoption_or_retry(
     assert_cleanup(tls)
 
 
-@pytest.mark.parametrize("suffix", [b"PRIVATE", b"\x0a", RESPONSE])
-def test_unclassified_opening_fails_without_reframing_adoption_or_retry(tls, suffix):
-    tls.pairs[0].reader.read.side_effect = [OPENED + suffix]
+@pytest.mark.parametrize("suffix", [b"PRIVATE", RESPONSE])
+def test_undecidable_or_unsolicited_opening_suffix_fails_without_retry(tls, suffix):
+    tls.pairs[0].opening = [OPENED + suffix]
     client = make_client()
-    with pytest.raises(HobenAmbiguousSessionError):
+    with pytest.raises(HobenProtocolError):
         asyncio.run(client.async_refresh())
-    assert client.device_guid_for_persistence == INITIAL_DEVICE_GUID
+    assert client.device_guid_for_persistence == DEVICE_GUID
     assert emitted(tls.pairs[0]) == [OPEN_REQUEST]
     assert_cleanup(tls)
 
@@ -361,7 +379,7 @@ def test_unclassified_opening_fails_without_reframing_adoption_or_retry(tls, suf
 def test_authorization_or_server_close_never_reads_or_retries(
     tls, backoff, capsys, caplog, opening, error, reason
 ):
-    tls.pairs[0].reader.read.side_effect = [opening]
+    tls.pairs[0].opening = [opening]
     with caplog.at_level("DEBUG"), pytest.raises(error) as caught:
         asyncio.run(make_client().async_refresh())
     if reason is not None:
@@ -401,9 +419,9 @@ def test_authorization_or_server_close_never_reads_or_retries(
     ],
 )
 def test_malformed_or_uncorrelated_read_never_retries(tls, backoff, reply):
-    tls.pairs[0].reader.read.side_effect = [OPENED, reply, b""]
-    client = make_client()
-    with pytest.raises(HobenProtocolError):
+    tls.pairs[0].responses = [[reply, b""]]
+    client = make_client(max_attempts=1)
+    with pytest.raises((HobenProtocolError, HobenTransportError)):
         asyncio.run(client.async_refresh())
     assert client.has_assigned_device_guid
     assert client.last_snapshot is None
@@ -414,9 +432,10 @@ def test_malformed_or_uncorrelated_read_never_retries(tls, backoff, reply):
 
 @pytest.mark.parametrize("code", [0, 2, 255])
 def test_correlated_modbus_exception_is_distinct_and_not_retried(tls, backoff, code):
-    tls.pairs[0].reader.read.side_effect = [
-        OPENED,
-        bytes.fromhex("0E FF FF 00 00 00 03 01 84") + bytes([code]),
+    tls.pairs[0].responses = [
+        [
+            bytes.fromhex("0E FF FF 00 00 00 03 01 84") + bytes([code]),
+        ]
     ]
     with pytest.raises(HobenModbusError) as caught:
         asyncio.run(make_client().async_refresh())
@@ -430,7 +449,9 @@ def test_invalid_returned_identity_never_adopted(tls, monkeypatch):
     session = OpenSessionResult(
         OpenedClient(0, 5, 2, 8, "INVALID", 512), StoveProfile.V4
     )
-    monkeypatch.setattr(client_module, "_open_session", AsyncMock(return_value=session))
+    from custom_components.hoben import v4_session
+
+    monkeypatch.setattr(v4_session, "_open_session", AsyncMock(return_value=session))
     client = make_client()
     with pytest.raises(HobenProtocolError):
         asyncio.run(client.async_refresh())
@@ -445,7 +466,7 @@ def test_invalid_returned_identity_never_adopted(tls, monkeypatch):
     "opening", [OPENED[:14] + b"\xff" + OPENED[15:], b"\xffPRIVATE"]
 )
 def test_malformed_opening_is_not_retried(tls, opening):
-    tls.pairs[0].reader.read.side_effect = [opening]
+    tls.pairs[0].opening = [opening]
     client = make_client()
     with pytest.raises(HobenProtocolError):
         asyncio.run(client.async_refresh())
@@ -454,18 +475,22 @@ def test_malformed_opening_is_not_retried(tls, opening):
 
 
 def test_leading_ping_and_fragmented_responses_preserve_exact_read(tls):
-    tls.pairs[0].reader.read.side_effect = [
+    tls.pairs[0].opening = [
         b"\x0a" + OPENED[:9],
         OPENED[9:],
-        b"\x0a" + RESPONSE[:5],
-        RESPONSE[5:],
+    ]
+    tls.pairs[0].responses = [
+        [
+            b"\x0a" + RESPONSE[:5],
+            RESPONSE[5:],
+        ]
     ]
     assert asyncio.run(make_client().async_refresh()).registers == REGISTERS
     assert emitted(tls.pairs[0]) == [OPEN_REQUEST, b"\x0b", READ_REQUEST, b"\x0b"]
     assert_cleanup(tls)
 
 
-@pytest.mark.parametrize("phase", ["connect", "handshake", "read", "write", "close"])
+@pytest.mark.parametrize("phase", ["connect", "handshake", "read", "write"])
 @pytest.mark.parametrize("failure", [OSError("PRIVATE"), TimeoutError("PRIVATE")])
 def test_one_transport_failure_gets_one_async_delay_and_fresh_success(
     tls, backoff, phase, failure
@@ -474,14 +499,30 @@ def test_one_transport_failure_gets_one_async_delay_and_fresh_success(
     if phase == "connect":
         tls.connect.side_effect = [failure, (tls.pairs[1].reader, tls.pairs[1].writer)]
     elif phase == "handshake":
-        tls.pairs[0].reader.read.side_effect = [failure]
+        tls.pairs[0].opening = [failure]
     elif phase == "read":
-        tls.pairs[0].reader.read.side_effect = [OPENED, failure]
+        tls.pairs[0].responses = [[failure]]
     elif phase == "write":
         tls.pairs[0].writer.drain.side_effect = [None, failure]
-    else:
-        tls.pairs[0].writer.wait_closed.side_effect = failure
-    assert asyncio.run(client.async_refresh()).registers == REGISTERS
+
+    async def run():
+        if isinstance(failure, TimeoutError):
+            with pytest.raises(HobenTransportError):
+                await client.async_refresh()
+            with pytest.raises(HobenTransportError):
+                await client.async_refresh()
+            assert tls.factory.call_count == 1
+        else:
+            if phase in ("read", "write"):
+                with pytest.raises(HobenTransportError):
+                    await client.async_refresh()  # No replay of the failed read.
+            assert (await client.async_refresh()).registers == REGISTERS
+        await client.async_close()
+
+    asyncio.run(run())
+    if isinstance(failure, TimeoutError):
+        assert backoff.delays == []
+        return
     assert backoff.delays == [0.25]
     assert tls.factory.call_count == tls.connect.await_count == 2
     assert len({id(transport) for transport in tls.transports}) == 2
@@ -506,15 +547,19 @@ def test_retry_exhaustion_is_finite_typed_and_sanitized(
     tls, backoff, caplog, max_attempts, failure
 ):
     tls.connect.side_effect = failure
-    with caplog.at_level("DEBUG"), pytest.raises(HobenRefreshExhaustedError) as caught:
-        asyncio.run(make_client(max_attempts=max_attempts).async_refresh())
-    assert caught.value.attempts == max_attempts
-    assert caught.value.safe_report()["attempts"] == max_attempts
-    assert isinstance(caught.value.last_error, HobenTimeoutError) == isinstance(
-        failure, TimeoutError
+    expected = (
+        HobenTimeoutError
+        if isinstance(failure, TimeoutError)
+        else HobenRefreshExhaustedError
     )
-    assert tls.connect.await_count == tls.factory.call_count == max_attempts
-    assert backoff.delays == ([1.0] if max_attempts == 2 else [])
+    with caplog.at_level("DEBUG"), pytest.raises(expected) as caught:
+        asyncio.run(make_client(max_attempts=max_attempts).async_refresh())
+    if not isinstance(failure, TimeoutError):
+        assert caught.value.attempts == max_attempts
+        assert caught.value.safe_report()["attempts"] == max_attempts
+    attempts = 1 if isinstance(failure, TimeoutError) else max_attempts
+    assert tls.connect.await_count == tls.factory.call_count == attempts
+    assert backoff.delays == ([1.0] if attempts == 2 else [])
     assert "PRIVATE" not in "".join(
         traceback.format_exception(caught.value)
     ) + caplog.text + json.dumps(caught.value.safe_report())
@@ -527,6 +572,9 @@ def test_overall_deadline_is_typed_transport_failure(tls, deadlines, phase):
     async def receive(max_bytes):
         if phase == "read" and tls.pairs[0].reader.read.await_count == 1:
             return OPENED
+        if phase == "read":
+            while not any(p[0] == 13 for p in emitted(tls.pairs[0])):
+                await asyncio.sleep(0)
         context = next(
             ctx for delay, ctx in reversed(deadlines.contexts) if delay == 23.0
         )
@@ -535,14 +583,13 @@ def test_overall_deadline_is_typed_transport_failure(tls, deadlines, phase):
 
     tls.pairs[0].reader.read.side_effect = receive
     client = make_client(max_attempts=1, handshake_timeout=23.0, read_timeout=23.0)
-    with pytest.raises(HobenRefreshExhaustedError) as caught:
+    with pytest.raises(HobenTimeoutError):
         asyncio.run(client.async_refresh())
-    assert isinstance(caught.value.last_error, HobenTimeoutError)
     assert_cleanup(tls)
 
 
 def test_shutdown_failure_cannot_turn_protocol_error_into_retry(tls, backoff):
-    tls.pairs[0].reader.read.side_effect = [OPENED, RESPONSE + b"PRIVATE"]
+    tls.pairs[0].responses = [[RESPONSE + b"PRIVATE"]]
     tls.pairs[0].writer.wait_closed.side_effect = OSError("PRIVATE")
     with pytest.raises(HobenProtocolError):
         asyncio.run(make_client().async_refresh())
@@ -552,7 +599,7 @@ def test_shutdown_failure_cannot_turn_protocol_error_into_retry(tls, backoff):
 
 
 def test_failed_later_refresh_keeps_last_successful_snapshot(tls):
-    tls.pairs[1].reader.read.side_effect = [OPENED, RESPONSE + b"PRIVATE"]
+    tls.pairs[0].responses = [[RESPONSE], [RESPONSE + b"PRIVATE"]]
     client = make_client()
 
     async def run():
@@ -562,10 +609,10 @@ def test_failed_later_refresh_keeps_last_successful_snapshot(tls):
         assert client.last_snapshot is previous
 
     asyncio.run(run())
-    assert_cleanup(tls, 2)
+    assert_cleanup(tls)
 
 
-@pytest.mark.parametrize("phase", ["connect", "handshake", "read", "backoff"])
+@pytest.mark.parametrize("phase", ["connect", "handshake", "read", "write", "backoff"])
 def test_cancellation_propagates_closes_and_does_not_retry(
     tls, backoff, monkeypatch, phase
 ):
@@ -589,6 +636,13 @@ def test_cancellation_propagates_closes_and_does_not_retry(
                 await backoff.original(0)
 
             monkeypatch.setattr(asyncio, "sleep", sleep)
+        elif phase == "write":
+
+            async def drain():
+                if tls.pairs[0].writer.drain.await_count > 1:
+                    await blocked()
+
+            tls.pairs[0].writer.drain.side_effect = drain
         else:
 
             async def receive(max_bytes):
@@ -602,13 +656,15 @@ def test_cancellation_propagates_closes_and_does_not_retry(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+        with pytest.raises(HobenClientClosedError):
+            await client.async_refresh()
         await client.async_close()
         await client.async_close()
 
     asyncio.run(asyncio.wait_for(run(), 2))
     assert tls.factory.call_count == tls.connect.await_count == 1
     tls.transports[0].close.assert_awaited_once_with()
-    if phase in ("handshake", "read"):
+    if phase in ("handshake", "read", "write"):
         tls.pairs[0].writer.wait_closed.assert_awaited_once_with()
     assert client.last_snapshot is None
 
@@ -617,11 +673,6 @@ def test_concurrent_refreshes_serialize_identity_read_and_transport_cleanup(
     tls, backoff
 ):
     client = make_client()
-    rotated = "Z" * 32
-    tls.pairs[1].reader.read.side_effect = [
-        OPENED[:14] + rotated.encode() + OPENED[46:],
-        RESPONSE,
-    ]
 
     async def run():
         first_reading = asyncio.Event()
@@ -629,10 +680,12 @@ def test_concurrent_refreshes_serialize_identity_read_and_transport_cleanup(
 
         async def receive(max_bytes):
             if tls.pairs[0].reader.read.await_count == 1:
-                return OPENED
+                return await tls.pairs[0].queue.get()
+            while not any(p[0] == 13 for p in emitted(tls.pairs[0])):
+                await backoff.original(0)
             first_reading.set()
             await release_first.wait()
-            return RESPONSE
+            return await tls.pairs[0].queue.get()
 
         tls.pairs[0].reader.read.side_effect = receive
         first = asyncio.create_task(client.async_refresh())
@@ -642,20 +695,15 @@ def test_concurrent_refreshes_serialize_identity_read_and_transport_cleanup(
         assert tls.factory.call_count == tls.connect.await_count == 1
         assert client.device_guid_for_persistence == DEVICE_GUID
 
-        async def connect(*args, **kwargs):
-            tls.pairs[0].writer.wait_closed.assert_awaited_once_with()
-            return tls.pairs[1].reader, tls.pairs[1].writer
-
-        tls.connect.side_effect = connect
         release_first.set()
         results = await asyncio.gather(first, second)
         assert len(results) == 2
-        assert client.device_guid_for_persistence == rotated
+        assert client.device_guid_for_persistence == DEVICE_GUID
         await client.async_close()
 
     asyncio.run(asyncio.wait_for(run(), 2))
-    assert emitted(tls.pairs[1])[0][37:69] == DEVICE_GUID.encode()
-    assert_cleanup(tls, 2)
+    assert emitted(tls.pairs[0]) == [OPEN_REQUEST, READ_REQUEST, READ_REQUEST]
+    assert_cleanup(tls)
 
 
 def test_close_cancels_active_refresh_and_blocks_queued_or_new_calls(tls, backoff):
@@ -697,3 +745,79 @@ def test_zero_delay_and_closed_unused_client_need_no_network(tls):
 
     asyncio.run(run())
     tls.factory.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "chunks", [[b"\x05", b"\x03\x0a" + RESPONSE], [b"\x05\x03\xff"]]
+)
+def test_client_close_recovers_only_on_new_correlated_refresh(tls, backoff, chunks):
+    from custom_components.hoben.v4_experiment import ExperimentalCloseClientError
+
+    async def run():
+        client = make_client()
+        tls.pairs[0].responses = [[RESPONSE], chunks]
+        previous = await client.async_refresh()
+        lifecycle = client._lifecycle
+        with pytest.raises(ExperimentalCloseClientError) as caught:
+            await client.async_refresh()
+        assert caught.value.subcode == 3
+        assert client.last_snapshot is previous
+        assert client.safe_report()["close_client_subcode"] == 3
+        recovered = await client.async_refresh()
+        assert recovered.registers == REGISTERS
+        assert client._lifecycle is lifecycle
+        assert lifecycle.witness.verified_read_generation == 2
+        assert [p[0] for p in emitted(tls.pairs[0])] == [3, 13, 13]
+        assert emitted(tls.pairs[1])[0][37:69] == DEVICE_GUID.encode()
+        await client.async_close()
+
+    asyncio.run(run())
+    assert backoff.delays == [1]
+    assert_cleanup(tls, 2)
+
+
+def test_terminal_failure_never_recreates_lifecycle_or_replenishes_budget(tls):
+    tls.connect.side_effect = OSError("PRIVATE")
+
+    async def run():
+        client = make_client()
+        for _ in range(3):
+            with pytest.raises(HobenRefreshExhaustedError):
+                await client.async_refresh()
+        assert tls.factory.call_count == 2
+        await client.async_close()
+
+    asyncio.run(run())
+
+
+def test_read_failure_keeps_accepted_identity_and_profile(tls):
+    tls.pairs[0].responses = [[RESPONSE[:1] + b"\x00\x00" + RESPONSE[3:]]]
+
+    async def run():
+        client = make_client()
+        with pytest.raises(HobenProtocolError):
+            await client.async_refresh()
+        assert client.device_guid_for_persistence == DEVICE_GUID
+        assert client.profile is StoveProfile.V4 and client.last_snapshot is None
+        await client.async_close()
+
+    asyncio.run(run())
+
+
+def test_failed_transport_cleanup_cannot_reopen_from_later_refresh(tls):
+    tls.pairs[0].responses = [[OSError("PRIVATE")]]
+    tls.pairs[0].writer.wait_closed.side_effect = OSError("PRIVATE-close")
+
+    async def run():
+        client = make_client()
+        with pytest.raises(HobenTransportError):
+            await client.async_refresh()
+        with pytest.raises(HobenTransportError):
+            await client._lifecycle.wait_stopped()
+        with pytest.raises(HobenTransportError):
+            await client.async_refresh()
+        assert tls.factory.call_count == 1
+        await client.async_close()
+
+    asyncio.run(run())
+    tls.pairs[0].writer.transport.abort.assert_called_once_with()
