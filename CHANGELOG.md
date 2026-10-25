@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche C1
+
+- Observation publique typée et sans I/O du vrai client/lifecycle, témoins de
+  lecture corrélée, perte et cleanup ; aucun changement de handshake ou retry.
+- Collecteur HA de fixtures, rapport fermé offline et validation indépendante
+  Python/Node, budgets et tests déterministes. Reconnexion INCONCLUSIVE sans
+  perte. Aucun workflow, gate C2, contrôle système actif ni test réel ajouté.
+
 ## En cours — #112, étape 8 tranche B
 
 - Véritable HobenClient raccordé au V4Lifecycle persistant partagé : TLS saine

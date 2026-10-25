@@ -662,6 +662,18 @@ réalisée par B**. Les anciens scripts/rapports one-shot conservés ne prouvent
 plus une seconde ouverture ni la validation live de la session persistante.
 Aucun workflow, gate, lancement réel ou promotion main dans cette tranche.
 
+## Étape 8, tranche C1 — contrat de preuve hors ligne
+
+La consigne MANAGER de #112 découpe C1 et C2. C1 ajoute uniquement une observation
+publique typée et sans effet de bord au client/lifecycle, un collecteur de
+fixtures du véritable coordinator HA, une projection fermée et une validation
+indépendante Python/Node. Voir [critères et budgets C1](docs/ha-session-proof-c1.md).
+Absence de perte : reconnexion INCONCLUSIVE ; aucune ouverture seule ni identité
+stable ne prouve une récupération. Les rapports portent obligatoirement offline,
+system_enforcement=NOT RUN et boundary_proven=false. Aucun workflow/admission,
+secret, réseau réel ou changement de comportement B. Les limites système et
+le raccord manuel hoben-live relèvent de C2, après revue/fusion et attribution.
+
 ## High-level architecture
 
 ```text

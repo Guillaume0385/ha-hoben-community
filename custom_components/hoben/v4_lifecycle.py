@@ -22,6 +22,7 @@ from .exceptions import (
 )
 from .modbus import ModbusReadResponse
 from .myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
+from .session_observation import SessionLossKind, SessionObservation
 from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
 from .v4_experiment import ExperimentalCloseClientError
 from .v4_session import (
@@ -124,6 +125,8 @@ class V4Lifecycle:
         "_opening_options",
         "_opening_metadata",
         "_accepted_device_guid",
+        "_observation",
+        "_active_generation",
     )
 
     def __init__(
@@ -178,6 +181,8 @@ class V4Lifecycle:
         self._clock = clock
         self._witness = LifecycleWitness()
         self._generation = 0
+        self._observation = SessionObservation()
+        self._active_generation: int | None = None
         self._user_guid = user_guid
         self._device_guid = device_guid
         self._factory = session_factory
@@ -220,6 +225,23 @@ class V4Lifecycle:
         """Latest immutable owner-origin evidence, never a polling inference."""
         return self._witness
 
+    @property
+    def session_observation(self) -> SessionObservation:
+        """Project safe owner evidence without I/O, mutation or identity access."""
+        witness = self._witness
+        return replace(
+            self._observation,
+            attempts=self._snapshot.attempts,
+            generation=witness.established_generation,
+            read_generation=witness.verified_read_generation,
+            read_sequence=witness.verified_read_sequence,
+            stopped=(
+                self._stopping
+                and self._session is None
+                and (self._task is None or self._task.done())
+            ),
+        )
+
     def _note_natural_loss(self, session: V4Session, error: HobenError) -> None:
         """Record a witnessed loss before cleanup, never a local close/timeout."""
         if (
@@ -234,6 +256,12 @@ class V4Lifecycle:
         at_ms = session.loss_monotonic_ms
         if at_ms is None:
             return
+        self._observation = replace(
+            self._observation,
+            loss_generation=self._witness.established_generation,
+            loss_kind=SessionLossKind.TRANSPORT,
+            close_client_subcode=None,
+        )
         self._witness = replace(
             self._witness,
             lost_generation=self._witness.established_generation,
@@ -346,10 +374,22 @@ class V4Lifecycle:
             except asyncio.CancelledError:
                 raise  # Keep ownership so explicit close can finish cancellation.
             except Exception:
+                self._observation = replace(self._observation, cleanup_failed=True)
                 self._session = None
                 raise
             else:
+                if session.cleanup_succeeded:
+                    if self._active_generation is not None:
+                        self._observation = replace(
+                            self._observation,
+                            cleaned_generation=self._active_generation,
+                        )
+                else:
+                    self._observation = replace(self._observation, cleanup_failed=True)
                 self._session = None
+            finally:
+                if self._session is None:
+                    self._active_generation = None
 
     def _private_session(self, attempt):
         cap = self._quarantine
@@ -526,6 +566,7 @@ class V4Lifecycle:
                     self._accepted_device_guid = self._device_guid
                     self._opening_metadata = session.snapshot.opening
                     self._generation += 1
+                    self._active_generation = self._generation
                     self._witness = replace(
                         self._witness,
                         established_generation=self._generation,
@@ -549,6 +590,18 @@ class V4Lifecycle:
                 self._connected.clear()
                 if opened:
                     self._note_natural_loss(session, error)
+                    if (
+                        not self._stopping
+                        and self._quarantine is None
+                        and type(error) is ExperimentalCloseClientError
+                        and session.close_client_received
+                    ):
+                        self._observation = replace(
+                            self._observation,
+                            loss_generation=self._witness.established_generation,
+                            loss_kind=SessionLossKind.CLOSE_CLIENT,
+                            close_client_subcode=session.snapshot.close_client_subcode,
+                        )
                 # Exact classification excludes application deadlines (including
                 # read timeouts), protocol ambiguity, auth and Modbus errors.
                 retryable = type(error) is HobenTransportError and (
