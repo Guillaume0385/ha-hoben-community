@@ -21,6 +21,7 @@ const messages = new Map([
   ["message_classification",["close_client","data_updated","other_known","unknown","unclassified"]],
   ["request_correlation",["data_response"]], ["response_validation",["data_response"]],
   ["pong_tx",["ping"]],
+  ["close_client",["close_client"]],
 ]);
 const suiteKeys = [...provenance,"schema","scenario","boundary_proven","result",
   "duration_ms","session_300","session_reconnect_no_pong"];
@@ -32,10 +33,12 @@ function keys(r, expected) {
     Object.keys(r).sort().join() === [...expected].sort().join());
 }
 function validateSecond(r,p) {
-  if (r && r.schema === 3) return require("./session-suite-v3.cjs").validateV3(r,p,provenance,limits,terminals,messages);
+  if (r && r.schema === 3) return require("./session-suite-v3.cjs").validateV3(r,p,provenance,limits,terminals,
+    new Map([...messages].filter(([phase])=>phase!=="close_client")));
   need(r && [1,2].includes(r.schema));
   const expected = r.schema === 2 ? [...secondKeys,...diagnosticKeys] : [...secondKeys];
   if (Object.hasOwn(r,"ignored_messages")) expected.push("ignored_messages");
+  if (Object.hasOwn(r,"close_client")) expected.push("close_client");
   keys(r,expected);
   need(r.scenario === "session-reconnect-no-pong" && r.boundary_proven === false);
   need(provenance.every(k => r[k] === p[k]));
@@ -50,18 +53,27 @@ function validateSecond(r,p) {
     r.peer_eofs <= r.opens && r.recovery_generation <= r.opens &&
     r.recovery_reads_ok <= r.reads_ok && r.recovery_pongs <= r.pongs);
   if (Object.hasOwn(r,"ignored_messages")) need(firstApi.validIgnoredMessages(r.ignored_messages,r.rx_bytes_total));
+  let closeAt=null;
+  if (Object.hasOwn(r,"close_client")) {
+    need(firstApi.validCloseClient(r.close_client,r.opens,r.rx_bytes_total,true));
+    closeAt=r.close_client.after_threshold_ms;
+    if(closeAt!==null)need(r.pongs_suppressed>0);
+  }
   const eof = r.eof_after_threshold_ms;
   need(eof === null || (Number.isSafeInteger(eof) && eof >= 0 && eof <= 480000));
   need((eof !== null) === (r.eofs_after_suppression === 1));
   if (eof !== null) need(r.pongs_suppressed > 0);
+  const observations=[eof,closeAt].filter(v=>v!==null);
+  const loss=observations.length?Math.min(...observations):null;
   need((r.result === "recovered_120s") === (r.terminal === "verified"));
   need((r.result === "not_run") === (r.terminal === "first_not_admissible"));
   if (r.result === "not_run") need(Object.keys(limits).every(k => r[k] === 0) && eof === null);
-  if (r.result === "recovered_120s") need(eof !== null && eof <= 180000 &&
+  if (r.result === "recovered_120s") need(loss !== null && loss <= 180000 &&
     r.opens >= 2 && r.recovery_generation >= 2 && r.stable_ms === 120000 &&
     r.duration_ms >= 240000 && r.recovery_reads_ok > 0 && r.recovery_pongs > 0);
-  if (r.terminal === "not_exercised") need(r.pongs_suppressed === 0 && eof === null);
-  if (r.terminal === "no_disconnect") need(r.pongs_suppressed > 0 && (eof === null || eof > 180000));
+  if (r.result === "recovered_120s" && eof === null) need(closeAt < 120000);
+  if (r.terminal === "not_exercised") need(r.pongs_suppressed === 0 && loss === null);
+  if (r.terminal === "no_disconnect") need(r.pongs_suppressed > 0 && (loss === null || loss > 180000));
   if (r.schema === 2) {
     need(messages.has(r.failure_phase) && terminals.has(r.failure_category) &&
       messages.get(r.failure_phase).includes(r.message_category) &&
@@ -74,6 +86,7 @@ function validateSecond(r,p) {
     if (r.failure_phase === "tls_read") need(["transport","budget"].includes(r.failure_category));
     if (r.failure_phase === "pong_tx") need(["transport","protocol"].includes(r.failure_category));
     if (r.failure_phase === "teardown") need(r.failure_category === "closed" && r.terminal === "closed");
+    if (r.failure_phase === "close_client") need(r.failure_category === "closed" && Object.hasOwn(r,"close_client"));
   }
   return Object.fromEntries([...expected].sort().map(k => [k,r[k]]));
 }

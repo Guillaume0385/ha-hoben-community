@@ -12,6 +12,11 @@ leurs plafonds. Le reste de ce document conserve les contrats et observations
 historiques des anciennes voies : leurs décisions/claims ne sont jamais un repli.
 Les règles de revue/branche restent applicables, aucun test réel par DEV.
 
+Le [contrat expérimental CloseClient](session-suite-plan.md#closeclient-expérimental--closeclient-session-close-006)
+autorisé par #112 emploie deux octets, une fermeture typée distincte d'EOF et
+les mêmes bornes de reconnexion/stabilité. Il ne modifie aucune admission,
+approbation, protection de workflow ou limite de processus.
+
 
 
 ## Règles de branche et de revue

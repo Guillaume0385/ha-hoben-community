@@ -8,8 +8,9 @@ No register interpretation, Home Assistant or research capture lives here.
 import time
 from dataclasses import dataclass, field
 
-from .exceptions import HobenProtocolError
+from .exceptions import HobenClosedError, HobenProtocolError
 from .modbus import modbus_tcp_frame_size
+from .myhoben import decode_close_client
 from .transport import TransportError
 
 DIAGNOSTIC_MESSAGES = {
@@ -24,6 +25,7 @@ DIAGNOSTIC_MESSAGES = {
     "request_correlation": {"data_response"},
     "response_validation": {"data_response"},
     "pong_tx": {"ping"},
+    "close_client": {"close_client"},
 }
 RECONNECT_DIAGNOSTIC_MESSAGES = DIAGNOSTIC_MESSAGES | {
     "message_classification": {
@@ -69,6 +71,30 @@ class _RejectedCloseClient(HobenProtocolError):
     """Private classification of the rejected head only, never a full frame."""
 
 
+class ExperimentalCloseClientError(HobenClosedError):
+    """Terminal post-open event under #112's experimental two-byte contract.
+
+    Neither a universal protocol length nor a TLS EOF. Keep the UInt8 even when
+    its meaning is unknown; never attach remaining RX or an exchange to errors.
+    """
+
+    code = "experimental_close_client"
+
+    def __init__(self, subcode):
+        if type(subcode) is not int or not 0 <= subcode <= 255:
+            raise ValueError("invalid_close_client_subcode")
+        self.subcode = subcode
+        self._cleanup_failed = False
+        super().__init__(decode_close_client(bytes((5, subcode))))
+
+    def safe_report(self):
+        return super().safe_report() | {
+            "state": "closed",
+            "subcode": self.subcode,
+            "phase": "post_open",
+        }
+
+
 class Session300:
     """One shared lifetime budget, explicitly named for the fixed experiment."""
 
@@ -90,6 +116,25 @@ class Session300:
         # Dense histograms bound storage independently of the number of events.
         # Bin i means total length prefix + 6 + 2 + i (MBAP.length 2..254).
         self.ignored_messages = {str(t): [0] * 253 for t in IGNORED_PREFIXES}
+        self.close_client_subcodes = []
+
+    def note_close_client(self, subcode):
+        if len(self.close_client_subcodes) >= 3:
+            raise Session300BudgetError()
+        self.close_client_subcodes.append(subcode)
+        self.note_failure("close_client", "closed", "close_client")
+
+    def close_client_diagnostic(self, after_threshold_ms=None):
+        """At most one numeric code per opening, never bytes or identifiers."""
+        if not self.close_client_subcodes:
+            return {}
+        return {
+            "close_client": {
+                "phase": "post_open",
+                "subcodes": self.close_client_subcodes.copy(),
+                "after_threshold_ms": after_threshold_ms,
+            }
+        }
 
     def note_ignored(self, message_type, total_length):
         prefix = IGNORED_PREFIXES[message_type]
@@ -122,8 +167,9 @@ class Session300:
         """
         if (
             phase not in self.diagnostic_messages
-            or category not in {"protocol", "transport", "budget"}
+            or category not in {"protocol", "transport", "budget", "closed"}
             or message not in self.diagnostic_messages[phase]
+            or (category == "closed") != (phase == "close_client")
         ):
             raise ValueError("invalid_session_300_diagnostic")
         if self.failure is None:
@@ -218,12 +264,15 @@ class ExperimentalV4Framer:
     if answering Ping yields and lets another caller register a new request.
     """
 
-    def __init__(self, *, diagnostic=None):
+    def __init__(self, *, diagnostic=None, _reject_close_client=False):
         self._buffer = bytearray()
         self._exchange = None
         self._diagnostic = diagnostic
         self._remaining = 0
         self._ignored_type = self._ignored_size = None
+        self._tail = None
+        # Preserve the separate, dormant private EOF-quarantine contract.
+        self._reject_close_client = _reject_close_client
 
     def _fail(self, phase, message):
         if self._diagnostic is not None:
@@ -246,16 +295,24 @@ class ExperimentalV4Framer:
         self._exchange = None
         self._remaining = 0
         self._ignored_type = self._ignored_size = None
+        self._tail = None
 
     @property
     def partial(self):
-        return bool(self._buffer) or self._remaining > 0
+        return bool(self._buffer) or self._remaining > 0 or self._tail is not None
 
     def feed(self, data: bytes, exchange: object):
         if not isinstance(data, bytes) or len(data) > 4096:
             self._fail("frame_boundary", "unclassified")
+        if self._tail is not None:
+            # Drain retained coalesced bytes before accepting another chunk.
+            # This bounds retention to one original <=4096-byte delivery.
+            if data:
+                self._fail("frame_boundary", "ambiguous")
+            data, exchange = self._tail
+            self._tail = None
         events = []
-        for byte in data:
+        for index, byte in enumerate(data):
             if self._remaining:
                 # Consume exactly the validated body; never retain or decode it.
                 self._remaining -= 1
@@ -270,6 +327,16 @@ class ExperimentalV4Framer:
             if self._buffer[0] == 10:
                 events.append(ExperimentalFrame(b"\x0a", self._exchange))
                 self._buffer.clear()
+            elif self._buffer[0] == 5 and not self._reject_close_client:
+                # Owner-authorized hypothesis (#6395141200), not wire proof.
+                if len(self._buffer) == 2:
+                    events.append(
+                        ExperimentalFrame(bytes(self._buffer), self._exchange)
+                    )
+                    self._buffer.clear()
+                    if index + 1 < len(data):
+                        self._tail = (data[index + 1 :], exchange)
+                    return events  # Never scan/process bytes past terminal RX.
             elif self._buffer[0] not in {7, 14, 27}:
                 message = (
                     "unknown"

@@ -23,11 +23,13 @@ class TimedHarness(Harness):
         opening_delay=0,
         bad_read=False,
         eof_on_read=False,
+        silence_after_partial=False,
     ):
         super().__init__(mode)
         self.events = list(events)
         self.opening_delay, self.bad_read = opening_delay, bad_read
         self.eof_on_read = eof_on_read
+        self.silence_after_partial = silence_after_partial
         # The test owns the event schedule, not the inherited EOF at T+160.
         self.first_eof_sent = self.second_eof_sent = True
 
@@ -53,6 +55,14 @@ class TimedHarness(Harness):
         return life
 
     async def sleep(self, delay):
+        if (
+            self.policy is not None
+            and self.silence_after_partial
+            and self.budget.partial
+        ):
+            # Any later byte, including a Ping discriminator, would be the
+            # subcode under the owner's explicit two-byte CloseClient contract.
+            self.next_ping = float("inf")
         if self.policy is not None and self.events:
             at, _, _ = self.events[0]
             delay = min(delay, max(0, self.policy.first_opened_at + at - self.now))
@@ -128,7 +138,7 @@ def test_eof_and_new_acceptance_must_both_precede_240(events, terminal):
 @pytest.mark.parametrize(
     "events,terminal",
     [
-        ([(151, 0, b"\x05")], "protocol"),
+        ([(151, 0, b"\x05")], "no_disconnect"),
         ([(151, 0, b"\x0e"), (160, 0, b"")], "protocol"),
         ([(160, 0, b""), (170, 1, response())], "stability_lost"),
         ([(160, 0, b""), (220, 1, b"")], "stability_lost"),
@@ -136,11 +146,14 @@ def test_eof_and_new_acceptance_must_both_precede_240(events, terminal):
     ],
 )
 def test_partial_unsolicited_and_second_loss_never_become_success(events, terminal):
-    report, second = asyncio.run(observe(TimedHarness(events)))
+    report, second = asyncio.run(
+        observe(TimedHarness(events, silence_after_partial=events[0][2] == b"\x05"))
+    )
     assert report["result"] == "not_successful" and second["terminal"] == terminal
     if events[0][2] == b"\x05":
         assert second["peer_eofs"] == second["reconnections"] == 0
-        assert second["message_category"] == "close_client"
+        assert second["message_category"] == "unclassified"
+        assert "close_client" not in second
 
 
 def test_corrupted_response_on_recovered_session_is_not_a_valid_read():

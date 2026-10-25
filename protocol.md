@@ -560,6 +560,24 @@ de 32 zéros et le DeviceGuid initial normal de 32 zéros. Aucun identifiant ré
 n'est publié. Les autres sous-codes restent confirmés statiquement seulement ;
 leur comportement exact sur le serveur actuel reste à valider.
 
+### Contrat expérimental CloseClient post-open — décision propriétaire, pas fait confirmé
+
+L'[arbitrage #112 du 25 octobre 2026](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+autorise **exactement deux octets**, type `05` puis sous-code UInt8, dans le
+framer V4 expérimental sous handoff session-300/reconnexion. Attendre le second
+octet s'il est fragmenté ; conserver les octets coalescés suivants au framer,
+sans les traiter après cette fermeture ni les attribuer à une nouvelle session.
+Ce contrat n'établit aucune longueur universelle de CloseClient ou OpenedClient.
+Les codecs d'ouverture/compatibilité restent inchangés.
+
+Le gestionnaire émet une fermeture typée `experimental_close_client`, termine
+les waiters et ferme le transport. La reconnexion utilise le budget/backoff
+existant ; ni la fermeture seule ni une réouverture sans lecture V4 corrélée ne
+constituent un succès. Les compteurs EOF TLS ne sont jamais incrémentés par
+CloseClient. Les sous-codes, y compris inconnus, sont rapportés numériquement
+dans une extension bornée ; aucun payload n'est publié. Voir le
+[contrat de rapport](docs/session-suite-plan.md#closeclient-expérimental--closeclient-session-close-006).
+
 ### Flux de première association déduit du code — CONFIRMÉ statiquement / À VALIDER dynamiquement
 
 ```text

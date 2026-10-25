@@ -29,6 +29,7 @@ from custom_components.hoben.exceptions import (  # noqa: E402
 )
 from custom_components.hoben.v4_experiment import (  # noqa: E402
     DIAGNOSTIC_MESSAGES,
+    ExperimentalCloseClientError,
     Session300,
     Session300BudgetError,
 )
@@ -106,10 +107,34 @@ def valid_ignored_messages(value, rx_bytes):
     return total <= rx_bytes
 
 
+def valid_close_client(value, opens, rx_bytes, *, reconnect=False):
+    """Optional experimental metadata, never retrofilled into old reports."""
+    if type(value) is not dict or set(value) != {
+        "phase",
+        "subcodes",
+        "after_threshold_ms",
+    }:
+        return False
+    codes = value["subcodes"]
+    after = value["after_threshold_ms"]
+    return (
+        value["phase"] == "post_open"
+        and type(codes) is list
+        and 1 <= len(codes) <= min(3, opens)
+        and all(type(code) is int and 0 <= code <= 255 for code in codes)
+        and len(codes) * 2 <= rx_bytes
+        and (
+            after is None or (reconnect and type(after) is int and 0 <= after <= 480000)
+        )
+    )
+
+
 def validate_report(report, proof):
     """Independent fixed projection: reject keys and values outside the schema."""
     require(type(report) is dict)
     keys = KEYS | ({"ignored_messages"} if "ignored_messages" in report else set())
+    if "close_client" in report:
+        keys |= {"close_client"}
     require(set(report) == keys)
     require(
         type(report["schema"]) is int
@@ -152,6 +177,14 @@ def validate_report(report, proof):
         require(
             valid_ignored_messages(report["ignored_messages"], report["rx_bytes_total"])
         )
+    if "close_client" in report:
+        require(
+            valid_close_client(
+                report["close_client"], report["opens"], report["rx_bytes_total"]
+            )
+        )
+    if report["failure_phase"] == "close_client":
+        require("close_client" in report and report["terminal"] == "closed")
     require(
         (report["failure_phase"] == "none")
         == (report["terminal"] in {"completed", "recovery_verified"})
@@ -225,7 +258,7 @@ async def observe(
                     reads_ok += 1
                     last_success_attempt = lifecycle.snapshot.attempts
                     phase = "lifecycle_transition"
-                except HobenTransportError:
+                except (HobenTransportError, ExperimentalCloseClientError):
                     # No replay: a subsequent scheduled slot may use a fresh
                     # session after the lifecycle has completed cleanup/backoff.
                     if stop.done():
@@ -312,6 +345,7 @@ async def observe(
             "failure_category": terminal,
             "message_category": message_category,
             **budget.ignored_diagnostic(),
+            **budget.close_client_diagnostic(),
         },
         proof,
     )

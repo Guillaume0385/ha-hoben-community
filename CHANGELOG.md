@@ -2,6 +2,12 @@
 
 ## Unreleased — recherche experimental
 
+- Issue #112, CLOSECLIENT-SESSION-CLOSE-006 : hypothèse expérimentale propriétaire
+  CloseClient de deux octets ; sous-code numérique, réception fragmentée et
+  octets coalescés conservés. Fermeture typée, waiters/nettoyage et reconnexion
+  bornée sans confusion avec EOF. Métadonnée de rapport optionnelle validée
+  Python/Node, anciens rapports préservés. Tests hors ligne uniquement.
+
 - Issue #119, correction de revue #121 : résultat global explicite et états
   par scénario issus uniquement du rapport validé. Les étapes non démarrées ou
   non attestées restent NOT RUN après échec/annulation de capture. Régressions

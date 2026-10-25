@@ -22,6 +22,29 @@ class NoPongAfter120:
         self._first = self._current = self._last_eof = None
         self.suppressed = self.peer_eofs = self.peer_eofs_after_suppression = 0
         self.first_eof_after_suppression_at = None
+        self.first_close_after_suppression_at = None
+        self._last_close = None
+
+    @property
+    def first_loss_after_suppression_at(self):
+        """A framed experimental close or actual EOF; counters stay distinct."""
+        observed = [
+            v
+            for v in (
+                self.first_eof_after_suppression_at,
+                self.first_close_after_suppression_at,
+            )
+            if v is not None
+        ]
+        return min(observed) if observed else None
+
+    def client_closed(self, generation):
+        """Called only for the two-byte post-open event, never a partial 05."""
+        if generation != self._current or generation == self._last_close:
+            return
+        self._last_close = generation
+        if generation == self._first and self.suppressed:
+            self.first_close_after_suppression_at = self._clock()
 
     def __repr__(self):
         return "NoPongAfter120()"

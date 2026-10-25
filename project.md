@@ -154,6 +154,11 @@ validation de leur en-tête MBAP et calcul de leur longueur exacte, sans décoda
 de données ni mise à jour HA. Type inconnu, autre type non pris en charge, MBAP
 invalide, suffixe indécidable ou dépassement de budget arrêtent la session,
 sans saut d'octets ni resynchronisation devinée.
+L'[arbitrage propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+ajoute un contrat expérimental CloseClient de deux octets (05 + sous-code),
+avec fermeture typée et reconnexion bornée, sans le qualifier de longueur
+universelle ni d'EOF TLS. Sous-code numérique et phase post-open seulement
+dans les diagnostics ; succès après nouvelle session et lecture corrélée.
 Les lectures restent fixes et strictement en lecture seule, avec TLS vérifié
 vers `myhoben.fr:465` et un seul propriétaire RX.
 

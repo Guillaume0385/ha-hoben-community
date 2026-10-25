@@ -15,6 +15,7 @@ from custom_components.hoben.exceptions import (
 )
 from custom_components.hoben.v4_experiment import (
     RECONNECT_DIAGNOSTIC_MESSAGES,
+    ExperimentalCloseClientError,
     Session300,
     Session300BudgetError,
     SessionReconnect,
@@ -23,7 +24,7 @@ from custom_components.hoben.v4_lifecycle import LifecycleExhaustedError
 from custom_components.hoben.v4_no_pong import NoPongAfter120
 from custom_components.hoben.v4_session import SessionState
 from scripts.run_session_300 import observe as observe_300
-from scripts.run_session_300 import valid_ignored_messages
+from scripts.run_session_300 import valid_close_client, valid_ignored_messages
 from scripts.run_session_300 import validate_report as validate_300
 from scripts.session_suite_v3 import validate_v3
 
@@ -118,12 +119,23 @@ def validate_second(r, proof):
     """Closed scalar projection, independent from the engine's mutable state."""
     if type(r) is dict and type(r.get("schema")) is int and r["schema"] == 3:
         return validate_v3(
-            r, proof, PROVENANCE, COUNTERS, TERMINALS, RECONNECT_DIAGNOSTIC_MESSAGES
+            r,
+            proof,
+            PROVENANCE,
+            COUNTERS,
+            TERMINALS,
+            {
+                k: v
+                for k, v in RECONNECT_DIAGNOSTIC_MESSAGES.items()
+                if k != "close_client"
+            },
         )
     need(type(r) is dict and type(r.get("schema")) is int and r["schema"] in {1, 2})
     keys = SECOND_KEYS | (SECOND_DIAGNOSTIC_KEYS if r["schema"] == 2 else set())
     if "ignored_messages" in r:
         keys |= {"ignored_messages"}
+    if "close_client" in r:
+        keys |= {"close_client"}
     need(set(r) == keys)
     need(r["scenario"] == "session-reconnect-no-pong")
     need(r["boundary_proven"] is False)
@@ -141,6 +153,16 @@ def validate_second(r, proof):
     need(r["rx_chunks_total"] <= r["rx_bytes_total"])
     if "ignored_messages" in r:
         need(valid_ignored_messages(r["ignored_messages"], r["rx_bytes_total"]))
+    close_at = None
+    if "close_client" in r:
+        need(
+            valid_close_client(
+                r["close_client"], r["opens"], r["rx_bytes_total"], reconnect=True
+            )
+        )
+        close_at = r["close_client"]["after_threshold_ms"]
+        if close_at is not None:
+            need(r["pongs_suppressed"] > 0)
     need(r["eofs_after_suppression"] <= r["peer_eofs"] <= r["opens"])
     need(r["recovery_generation"] <= r["opens"])
     need(r["recovery_reads_ok"] <= r["reads_ok"])
@@ -150,19 +172,24 @@ def validate_second(r, proof):
     need((eof is not None) == (r["eofs_after_suppression"] == 1))
     if eof is not None:
         need(r["pongs_suppressed"] > 0)
+    loss = min((v for v in (eof, close_at) if v is not None), default=None)
     need((r["result"] == "recovered_120s") == (r["terminal"] == "verified"))
     need((r["result"] == "not_run") == (r["terminal"] == "first_not_admissible"))
     if r["result"] == "not_run":
         need(all(r[k] == 0 for k in COUNTERS) and eof is None)
     if r["result"] == "recovered_120s":
-        need(eof is not None and eof <= 180000)
+        need(loss is not None and loss <= 180000)
+        if eof is None:
+            # Preserve historical EOF validation; the newly admitted close
+            # must satisfy the current T0+240 s functional recovery window.
+            need(close_at < 120000)
         need(r["opens"] >= 2 and r["recovery_generation"] >= 2)
         need(r["stable_ms"] == 120000 and r["duration_ms"] >= 240000)
         need(r["recovery_reads_ok"] > 0 and r["recovery_pongs"] > 0)
     if r["terminal"] == "not_exercised":
-        need(r["pongs_suppressed"] == 0 and eof is None)
+        need(r["pongs_suppressed"] == 0 and loss is None)
     if r["terminal"] == "no_disconnect":
-        need(r["pongs_suppressed"] > 0 and (eof is None or eof > 180000))
+        need(r["pongs_suppressed"] > 0 and (loss is None or loss > 180000))
     if r["schema"] == 2:
         phase, category, message = (
             r["failure_phase"],
@@ -189,6 +216,8 @@ def validate_second(r, proof):
             need(category in {"transport", "protocol"})
         if phase == "teardown":
             need(category == r["terminal"] == "closed")
+        if phase == "close_client":
+            need(category == "closed" and "close_client" in r)
     return {k: r[k] for k in sorted(keys)}
 
 
@@ -252,10 +281,10 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
             while True:
                 now = clock()
                 first_at = policy.first_opened_at
-                eof_at = policy.first_eof_after_suppression_at
+                loss_at = policy.first_loss_after_suppression_at
                 first_generation = policy.first_generation
                 recovered = (
-                    eof_at is not None
+                    loss_at is not None
                     and budget.usable
                     and budget.connected_generation != first_generation
                     and budget.accepted_at is not None
@@ -264,7 +293,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                 if budget.last_lost_generation not in {None, first_generation}:
                     result, terminal = "inconclusive", "stability_lost"
                     break
-                if first_at is not None and eof_at is None and now >= first_at + 240:
+                if first_at is not None and loss_at is None and now >= first_at + 240:
                     result = "inconclusive"
                     terminal = (
                         "not_exercised" if not policy.suppressed else "no_disconnect"
@@ -274,9 +303,9 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                     stop.result()
                 if (
                     first_at is not None
-                    and eof_at is not None
+                    and loss_at is not None
                     and (
-                        eof_at >= first_at + 240
+                        loss_at >= first_at + 240
                         or (not recovered and now >= first_at + 240)
                         or (recovered and budget.accepted_at >= first_at + 240)
                     )
@@ -320,14 +349,14 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
                         await read  # Returned registers are deliberately discarded.
                         reads_ok += 1
                         if (
-                            eof_at is not None
+                            loss_at is not None
                             and generation != first_generation
                             and budget.connected_generation == generation
                             and budget.usable
                             and life.state is SessionState.CONNECTED
                         ):
                             recovery_reads += 1
-                    except HobenTransportError:
+                    except (HobenTransportError, ExperimentalCloseClientError):
                         pass  # No replay; only the next >=60 s slot can read again.
                     finally:
                         if not read.done():
@@ -349,7 +378,7 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
         if (
             policy.first_opened_at is not None
             and clock() >= policy.first_opened_at + 240
-            and policy.first_eof_after_suppression_at is None
+            and policy.first_loss_after_suppression_at is None
         ):
             result = "inconclusive"
             terminal = "not_exercised" if not policy.suppressed else "no_disconnect"
@@ -359,6 +388,8 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
         result, terminal = "inconclusive", "reopen_failed"
     except HobenTransportError:
         result, terminal = "interrupted", "transport"
+    except ExperimentalCloseClientError:
+        result, terminal = "interrupted", "closed"
     except HobenError:
         result, terminal = "inconclusive", "protocol"
     except Exception:
@@ -413,6 +444,17 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
             "failure_category": diagnostic[1],
             "message_category": diagnostic[2],
             **budget.ignored_diagnostic(),
+            **budget.close_client_diagnostic(
+                None
+                if policy.first_close_after_suppression_at is None
+                else max(
+                    0,
+                    int(
+                        (policy.first_close_after_suppression_at - first_at - 120)
+                        * 1000
+                    ),
+                )
+            ),
         },
         proof,
     )
