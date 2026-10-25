@@ -562,6 +562,14 @@ leur comportement exact sur le serveur actuel reste à valider.
 
 ### Contrat expérimental CloseClient post-open — décision propriétaire, pas fait confirmé
 
+L'arbitrage E8 tranche A du même commentaire autorise désormais le mode typé
+`V4SessionMode.PERSISTENT` à réutiliser le framer et ces contrats post-open,
+indépendamment des budgets Session300/SessionReconnect. Ce préalable partagé
+ne raccorde pas encore le client HA. Les hypothèses OpenedClient/préfixe 48
+octets et CloseClient/deux octets restent explicitement non universelles ; les
+succès fonctionnels E7 sur le SHA fusionné de #122 ne changent pas cette preuve.
+Voir le [contrat de ressources et API](project.md#étape-8-tranche-a--contrat-persistant-partagé).
+
 L'[arbitrage #112 du 25 octobre 2026](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
 autorise **exactement deux octets**, type `05` puis sous-code UInt8, dans le
 framer V4 expérimental sous handoff session-300/reconnexion. Attendre le second

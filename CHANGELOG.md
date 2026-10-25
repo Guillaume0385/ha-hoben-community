@@ -1,5 +1,14 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche A
+
+- Contrat explicite de session V4 persistante réutilisant le framer/RX partagé,
+  séparé des budgets expérimentaux inchangés ; API d'ouverture, métadonnées et
+  identité privée acceptée, reconnexion finie et arrêt après cleanup en échec.
+- Tests déterministes de réutilisation au-delà de dix lectures, fragmentation,
+  CloseClient, corrélation, EOF/TLS, annulation et limites ; aucun raccordement
+  Home Assistant ou workflow live dans cette tranche, aucune validation HA réelle.
+
 ## Unreleased — recherche experimental
 
 - Issue #112, CLOSECLIENT-SESSION-CLOSE-006 : hypothèse expérimentale propriétaire

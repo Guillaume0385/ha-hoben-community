@@ -24,7 +24,9 @@ La voie live courante de #119 est le [workflow manuel](docs/hoben-manual-workflo
 sur experimental : sélection H1/H2, session-300, reconnexion autonome ou all.
 Le dispatch propriétaire remplace le commentaire d'admission pré-fusion ; revue,
 CI, provenance, environnement/approbations, anti-rejeu, budgets et confidentialité
-restent requis. Main reste inactive ; étape 8 HA suspendue. Les descriptions
+restent requis. Main reste inactive. L'étape 8 avance par tranches A/B/C selon
+l'arbitrage actuel de #112 ; A prépare le contrat partagé hors ligne, sans
+raccordement du client HA ni nouvelle voie live. Les descriptions
 push/labels/commentaires d'admission plus bas sont historiques et ne réactivent
 aucune ancienne voie. La précondition du premier scénario reste imposée dans all.
 
@@ -563,6 +565,53 @@ Tâche globale : réévaluer les fonctionnalités et contrôles après fiabilisa
 Les détails et pistes non normatives restent dans [fonctionnalités futures](docs/fonctionnalites-futures.md). Cette séquence ne constitue **aucune autorisation d'écriture au poêle**.
 
 # Architecture
+
+## Étape 8, tranche A — contrat persistant partagé
+
+L'[arbitrage MANAGER de #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+autorise le préalable A, séparé du futur adaptateur `HobenClient` (B) et de
+l'admission/test manuel `hoben-live` (C). Les artefacts des runs #40181662106
+et #40186510530 sur `4949a6c2938108eb37c9c435d700718b9d63325f` ont été examinés
+et revalidés Python/Node : session-300 continue 300 s, puis CloseClient sous-code
+3, nouvelle génération avec réponses corrélées et 120 s stables. H1/H2 reste
+inconclusif, `boundary_proven=false`. Ces résultats du gestionnaire expérimental
+ne valident ni le futur client HA ni une frontière universelle.
+
+`V4Session(mode=V4SessionMode.PERSISTENT)` active explicitement le même framer,
+RX unique, TX sérialisées, corrélation, fermeture et cleanup que les expériences.
+Le mode par défaut reste `CONSERVATIVE`. Le mode persistant refuse tout budget
+Session300/SessionReconnect ou capacité d'inhibition/quarantaine : aucun budget
+de campagne n'est réinitialisé ou élargi. Il conserve une TLS saine sans quota
+cumulatif de lectures/octets et sans tâche de polling. La planification restera
+chez le propriétaire HA en B ; aucune modification de `client.py` en A.
+
+| Ressource / opération | Contrat persistant |
+| --- | --- |
+| Réception | Une seule lecture TLS, au plus 4096 octets livrés ; framer incrémental existant, MBAP 2–254, corps 07/1B ignorés sans rétention. Résidu après CloseClient borné à la livraison, jamais traité sur nouvelle génération. |
+| Lecture V4 | Une seule demande en attente ; deuxième appel concurrent refusé ; délai total positif fini, 30 s par défaut, incluant attente TX/émission/réponse. Aucun replay automatique. |
+| Silence | Pas de timeout d'inactivité RX ni de reconnexion due à un intervalle de polling. |
+| Ouverture | `V4OpeningOptions(build, device_info, handshake_timeout)` immuable et validé avant acquisition ; défauts historiques conservés, délai handshake 30 s par défaut. DeviceInfo n'est jamais exporté. |
+| Transport réel | Implémentation TLS existante, certificat/hostname vérifiés, destination fixe myhoben.fr:465 ; connect/write/close bornés à 10/10/5 s par défaut. Pas de nouvelle destination ni bypass. |
+| Reconnexion | `V4Lifecycle(mode=PERSISTENT)` : une ouverture initiale et au plus huit retries, chacun avec délai fini de 0–30 s ; défaut 1/2/4 s. Budget de durée de vie non rechargé par succès ou refresh ; épuisement terminal. |
+| Erreurs | EOF/perte transport ou CloseClient complet peuvent consommer ce budget ; timeout applicatif, lecture abandonnée, refus protocolaire/auth ne le peuvent pas. Cleanup non confirmé interdit toute nouvelle ouverture. |
+| Arrêt | close/abort existants arrêtent RX, TX, timers et waiters ; aucune tâche de reconnexion après stop. |
+
+Le futur adaptateur utilisera seulement `connect`, `wait_connected`,
+`request_v4_data`, `wait_stopped`, `close`, `snapshot`, `witness`,
+`opening_metadata` et `accepted_device_guid_for_persistence` de V4Lifecycle.
+Les métadonnées sont immuables et allowlistées. L'identité acceptée reste privée,
+disponible même après une erreur terminale pour persistance, puis effacée à
+l'arrêt explicite ; aucune ouverture refusée ne la remplace. Le seul dernier
+`close_client_subcode` UInt8 est conservé dans le snapshot, sans historique RX,
+GUID ou valeur domestique. Une réouverture ne prouve une récupération qu'après
+une nouvelle réponse corrélée, identifiée par la génération du `witness`.
+
+La PR A et ses tests synthétiques ne raccordent pas encore Home Assistant.
+Après revue/fusion de A, MANAGER attribuera séparément B, puis C : critères HA,
+rapport fermé SUCCESS/FAILURE/INCONCLUSIVE/NOT RUN et admission manuelle hoben-live
+sur SHA exact devront être préparés/revus. Aucun ancien rapport one-shot,
+collecteur renommé, workflow historique retiré ou succès de A ne valide ce test.
+DEV et CI ordinaires restent hors ligne ; aucun live ni promotion main implicite.
 
 ## High-level architecture
 
