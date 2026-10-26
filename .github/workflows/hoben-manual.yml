@@ -13,6 +13,7 @@ name: Tests Hoben manuels
         - session-300
         - session-reconnect
         - all
+        - hoben-live
 permissions: {}
 concurrency:
   group: hoben-read-only-observation
@@ -37,7 +38,7 @@ jobs:
           const scenarios = ['h1h2', 'session-300', 'session-reconnect'];
           const inputs = context.payload.inputs;
           const selected = inputs?.scenario;
-          const choices = [...scenarios, 'all'];
+          const choices = [...scenarios, 'all', 'hoben-live'];
           const stop = async reason => {
             const plan = choices.includes(selected)
               ? (selected === 'all' ? scenarios : [selected]) : [];
@@ -46,7 +47,7 @@ jobs:
               .addTable([
                 [{data: 'Scénario', header: true}, {data: 'État', header: true},
                  {data: 'Sélection', header: true}],
-                ...scenarios.map(s => [s, 'NOT RUN', plan.includes(s) ? 'demandé' : 'non sélectionné'])
+                ...[...scenarios, 'hoben-live'].map(s => [s, 'NOT RUN', plan.includes(s) ? 'demandé' : 'non sélectionné'])
               ]).write();
             core.setFailed('NOT RUN: ' + reason);
           };
@@ -120,6 +121,8 @@ jobs:
             const d=await require('./.github/scripts/manual-hoben-gate.cjs').verify({github,context});
             core.setOutput('approved','true');core.setOutput('pr',String(d.pr));
             core.setOutput('candidate',d.candidate_sha);core.setOutput('selection',d.selection);
+            core.setOutput('ci',String(d.ci_run_id));core.setOutput('environment',String(d.environment_id));
+            core.setOutput('policy',d.environment_digest);core.setOutput('claim',d.claim_sha);
             await core.summary.addRaw(d.status + ': GitHub environment rules remain mandatory.').write();
           }catch(_){core.setFailed('NOT RUN: manual provenance, review, CI, environment or claim refused.');}
     outputs:
@@ -127,9 +130,13 @@ jobs:
       pr: ${{ steps.gate.outputs.pr }}
       candidate: ${{ steps.gate.outputs.candidate }}
       selection: ${{ steps.gate.outputs.selection }}
+      ci: ${{ steps.gate.outputs.ci }}
+      environment: ${{ steps.gate.outputs.environment }}
+      policy: ${{ steps.gate.outputs.policy }}
+      claim: ${{ steps.gate.outputs.claim }}
   collect:
     needs: preflight
-    if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && github.event_name == 'workflow_dispatch'
+    if: needs.preflight.outputs.approved == 'true' && needs.preflight.outputs.selection != 'hoben-live' && github.run_attempt == 1 && github.event_name == 'workflow_dispatch'
       && github.ref == 'refs/heads/experimental'
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -165,6 +172,8 @@ jobs:
             const d=await require('./trusted/.github/scripts/manual-hoben-gate.cjs').verify({github,context,recheck:true});
             core.setOutput('approved','true');core.setOutput('pr',String(d.pr));
             core.setOutput('candidate',d.candidate_sha);core.setOutput('selection',d.selection);
+            core.setOutput('ci',String(d.ci_run_id));core.setOutput('environment',String(d.environment_id));
+            core.setOutput('policy',d.environment_digest);core.setOutput('claim',d.claim_sha);
           }catch(_){core.setFailed('NOT RUN: required approval, current SHA or reserved proof changed.');}
     - id: capture
       name: Fixed read-only scenarios in one isolated supervised group
@@ -234,7 +243,7 @@ jobs:
     - preflight
     - collect
     - publish
-    if: ${{ always() }}
+    if: ${{ always() && github.event.inputs.scenario != 'hoben-live' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -279,3 +288,153 @@ jobs:
             ...Object.entries(states)
           ]).addRaw('NOT RUN: not started or start not attested by a validated report. boundary_proven=false. H1/H2 INCONCLUSIVE remains a hypothesis, never protocol validation.').write();
           if(!complete)core.setFailed('Manual scenarios incomplete, inconclusive, failed or NOT RUN.');
+
+  collect-ha:
+    needs: preflight
+    if: needs.preflight.outputs.approved == 'true' && needs.preflight.outputs.selection == 'hoben-live' && github.run_attempt == 1 && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/experimental'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: hoben-live
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      report_b64: ${{ steps.exports.outputs.report_b64 }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        path: trusted
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        path: candidate
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - name: Prepare pinned HA image without Hoben identity
+      run: >-
+        env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH
+        docker --host=unix:///var/run/docker.sock build
+        --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt
+        --iidfile "$RUNNER_TEMP/hoben-ha-runtime.id" candidate/scripts/ha_session_runtime
+    - id: recheck
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      with:
+        script: |
+          try {
+            const d=await require('./trusted/.github/scripts/manual-hoben-gate.cjs').verify({github,context,recheck:true});
+            if(d.selection!=='hoben-live')throw Error('selection');
+            core.setOutput('approved','true');core.setOutput('pr',String(d.pr));
+            core.setOutput('candidate',d.candidate_sha);core.setOutput('ci',String(d.ci_run_id));
+            core.setOutput('environment',String(d.environment_id));core.setOutput('policy',d.environment_digest);
+            core.setOutput('claim',d.claim_sha);
+          }catch(_){core.setFailed('NOT RUN: HA environment, approval, SHA, CI or claim changed.');}
+    - id: capture
+      name: True HA persistent session in bounded C2a supervisor
+      if: steps.recheck.outputs.approved == 'true'
+      env:
+        MANUAL_HOBEN_SHA: ${{ github.sha }}
+        MANUAL_HOBEN_PR: ${{ steps.recheck.outputs.pr }}
+        MANUAL_HOBEN_CANDIDATE: ${{ steps.recheck.outputs.candidate }}
+        MANUAL_HOBEN_CI: ${{ steps.recheck.outputs.ci }}
+        MANUAL_HOBEN_ENVIRONMENT: ${{ steps.recheck.outputs.environment }}
+        MANUAL_HOBEN_POLICY: ${{ steps.recheck.outputs.policy }}
+        MANUAL_HOBEN_CLAIM: ${{ steps.recheck.outputs.claim }}
+        MANUAL_HOBEN_SCENARIO: hoben-live
+        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+      run: python -I trusted/scripts/launch_ha_manual_live.py
+    - id: exports
+      if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.capture.outcome == 'success' }}
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ needs.preflight.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ needs.preflight.outputs.candidate }}
+        APPROVED_CI: ${{ needs.preflight.outputs.ci }}
+        APPROVED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        APPROVED_POLICY: ${{ needs.preflight.outputs.policy }}
+        APPROVED_CLAIM: ${{ needs.preflight.outputs.claim }}
+      with:
+        script: |
+          const api=require('./trusted/.github/scripts/ha-manual-live-report.cjs');
+          api.prepare({core,proof:api.proof(process.env,context)});
+  publish-ha:
+    needs: [preflight, collect-ha]
+    if: ${{ always() && needs.preflight.outputs.selection == 'hoben-live' && needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && needs.collect-ha.outputs.report_b64 != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - id: publish
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ needs.preflight.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ needs.preflight.outputs.candidate }}
+        APPROVED_CI: ${{ needs.preflight.outputs.ci }}
+        APPROVED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        APPROVED_POLICY: ${{ needs.preflight.outputs.policy }}
+        APPROVED_CLAIM: ${{ needs.preflight.outputs.claim }}
+        PUBLIC_REPORT_B64: ${{ needs.collect-ha.outputs.report_b64 }}
+      with:
+        script: |
+          const api=require('./.github/scripts/ha-manual-live-report.cjs');
+          api.publish({core,proof:api.proof(process.env,context),text:process.env.PUBLIC_REPORT_B64});
+    - if: steps.publish.outputs.report == 'true'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: ha-live-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/hoben-ha-live-published/report.json
+        if-no-files-found: error
+        retention-days: 7
+  result-ha:
+    needs: [preflight, collect-ha, publish-ha]
+    if: ${{ always() && github.event.inputs.scenario == 'hoben-live' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+      if: needs.preflight.outputs.approved == 'true' && github.run_attempt == 1 && needs.publish-ha.result == 'success'
+      continue-on-error: true
+      with:
+        name: ha-live-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: public-ha-report
+    - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+      env:
+        APPROVED_PR: ${{ needs.preflight.outputs.pr }}
+        APPROVED_CANDIDATE: ${{ needs.preflight.outputs.candidate }}
+        APPROVED_CI: ${{ needs.preflight.outputs.ci }}
+        APPROVED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        APPROVED_POLICY: ${{ needs.preflight.outputs.policy }}
+        APPROVED_CLAIM: ${{ needs.preflight.outputs.claim }}
+        APPROVED: ${{ needs.preflight.outputs.approved }}
+        COLLECTION_RESULT: ${{ needs.collect-ha.result }}
+        PUBLICATION_RESULT: ${{ needs.publish-ha.result }}
+      with:
+        script: |
+          let state='NOT RUN',complete=false,criteria={};
+          if(process.env.APPROVED==='true'&&process.env.GITHUB_RUN_ATTEMPT==='1')try{
+            const api=require('./.github/scripts/ha-manual-live-report.cjs');
+            const r=api.read('public-ha-report/report.json',api.proof(process.env,context));
+            state=r.outcome;criteria=r.criteria;
+            complete=state==='SUCCESS'&&process.env.COLLECTION_RESULT==='success'&&process.env.PUBLICATION_RESULT==='success';
+          }catch(_){}
+          await core.summary.addHeading('Hoben live — client/coordinator HA')
+            .addTable([[{data:'Scénario',header:true},{data:'État',header:true}],['hoben-live',state],...Object.entries(criteria)])
+            .addRaw('Résultat global : '+(complete?'SUCCESS':'FAILURE')+'. NOT RUN signifie absence de démarrage attesté, jamais absence prouvée de connexion. boundary_proven=false.').write();
+          if(!complete)core.setFailed('HA live incomplete, failed or NOT RUN.');

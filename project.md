@@ -694,6 +694,16 @@ virtuelle et les transports synthétiques des tests ne valent aucun live.
 C2b et #126 restent séparées : aucune entrée Actions, gate, publication ou
 modification main dans cette fondation.
 
+## Étape 8, tranche C2b — voie manuelle HA
+
+La décision propriétaire du 26/10 autorise le développement offline C2b après
+C2a. Le [contrat C2b](docs/ha-session-live-c2b.md) ajoute le choix hoben-live,
+le vrai client/coordinator et le superviseur partagé, admission/recheck stricts
+et rapport live distinct. Les scénarios historiques et all restent inchangés.
+300 s utiles/360 s absolues, mémoire/processus, aucun quota RX hoben-live.
+La promotion minimale du seul formulaire main est documentée pour une décision
+MANAGER séparée ; aucune PR main ou exécution réelle par DEV. Test réel NOT RUN.
+
 ## High-level architecture
 
 ```text

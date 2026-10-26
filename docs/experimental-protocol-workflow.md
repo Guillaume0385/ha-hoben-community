@@ -1,5 +1,8 @@
 # Workflow courant — voie manuelle #119 et historique
 
+Étape 8 C2b : [voie manuelle HA](ha-session-live-c2b.md), développement offline
+autorisé par le propriétaire le 26/10. Aucun run réel autorisé par le développement.
+
 ## Voie courante : dispatch manuel sur experimental
 
 Étape 8 C2a : [superviseur et preuve HA inactifs](ha-session-runtime-c2a.md),

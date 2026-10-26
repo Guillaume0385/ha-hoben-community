@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche C2b
+
+- Choix manuel hoben-live séparé des scénarios historiques, admission et recheck
+  de propriétaire/ref/SHA/PR/CI/environnement/claim, sans test automatique.
+- Vrai client/coordinator HA dans le superviseur C2a, identifiants par canal
+  mémoire privé, rapport live fermé doublement validé, publication sans secret.
+- 300/360 s, mémoire/processus et budgets historiques conservés ; aucun quota
+  RX hoben-live. Tests offline et plan de promotion minimale du formulaire main
+  seulement ; aucun run réel ni PR main par DEV.
+
 ## En cours — #112, étape 8 tranche C2a
 
 - Fondation HA inactive : superviseur externe cgroup/PID namespace, gardien

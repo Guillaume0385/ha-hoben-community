@@ -43,6 +43,11 @@ function setup(selection='all') {
     paginate:async(fn,args)=>fn(args),
     graphql:async()=>({repository:{pullRequest:{reviewThreads:{nodes:s.threads,pageInfo:{hasNextPage:false}}}}}),
     request:async()=>({data:s.history})};
+  if(selection==='hoben-live') {
+    s.branch.name='experimental';
+    s.environment.name='hoben-live';s.environment.can_admins_bypass=true;
+    s.environment.deployment_branch_policy={protected_branches:true,custom_branch_policies:false};
+  }
   s.options=()=>({github:s.github,context:s.context,env:s.env});
   return s;
 }
@@ -101,4 +106,39 @@ test('publication refuses oversized or incomplete environment parts before files
     api.publish({core:{setFailed:x=>failures.push(x)},proof:{},parts});
     assert.deepEqual(failures,['NOT RUN: manual publication refused.']);
   }
+});
+
+test('live protected environment without reviewers is accepted, never inferred from absence',async()=>{
+  const s=setup('hoben-live');
+  const d=await gate.verify(s.options());
+  assert.equal(d.environment_id,1);assert.match(d.environment_digest,/^[a-f0-9]{64}$/);
+  assert.equal(d.claim_sha,'d'.repeat(40));
+  await gate.verify({...s.options(),recheck:true});
+  s.environment.deployment_branch_policy={protected_branches:false,custom_branch_policies:false};
+  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
+});
+for(const [name,mutate] of Object.entries(mutations))test('live refuses before claim '+name,async()=>{
+  const s=setup('hoben-live');
+  if(name==='environment')s.environment.deployment_branch_policy={protected_branches:false,custom_branch_policies:false};
+  else mutate(s);
+  await assert.rejects(()=>gate.verify(s.options()));assert.equal(s.writes,0);
+});
+test('live approval is fresh, independent and bound to hoben-live',async()=>{
+  const s=setup('hoben-live');
+  s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
+    reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
+  assert.equal((await gate.verify(s.options())).status,'PENDING APPROVAL');
+  const approval={state:'approved',created_at:'2026-10-24T12:09:00Z',environments:[{id:1,name:'hoben-live'}],
+    user:{type:'User',id:2,login:'reviewer'}};
+  for(const history of [[],[approval]]){s.history=history;await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));}
+  approval.created_at='2026-10-24T12:11:00Z';s.history=[approval];
+  await gate.verify({...s.options(),recheck:true});
+  approval.environments[0].name='hoben-experimental';
+  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
+});
+
+test('accepted admin-bypass setting cannot silently change after reservation',async()=>{
+  const s=setup('hoben-live');await gate.verify(s.options());
+  s.environment.can_admins_bypass=false;
+  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
 });

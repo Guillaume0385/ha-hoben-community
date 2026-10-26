@@ -1,6 +1,7 @@
-"""External C2a supervisor. Fixed local engine, no CLI, secrets or live network.
+"""Shared bounded supervisor; fixed C2a fixtures or admitted C2b worker.
 
-Only reviewed offline fixtures are selectable. Image preparation is separate;
+Offline execution always uses network=none. Live uses only the fixed TLS worker.
+Image preparation is separate;
 this API never downloads/installs dependencies or falls back to host execution.
 The namespace guardian remains armed if this host observer disappears.
 """
@@ -15,7 +16,7 @@ import tarfile
 import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import quote
@@ -75,10 +76,16 @@ class CancelledBeforeStart(Exception):
     """No worker may start after an already observed cancellation."""
 
 
+@dataclass(frozen=True, repr=False)
+class _LiveRun:
+    proof: dict
+    identity: bytes = field(repr=False)
+
+
 class SourceBundle:
     """Public code snapshot only; never relax checkout permissions or mount .git."""
 
-    def __init__(self):
+    def __init__(self, live=False):
         self.folder = Path(tempfile.mkdtemp(prefix="hoben-c2a-source-"))
         try:
             paths = list((ROOT / "custom_components/hoben").glob("*.py"))
@@ -92,7 +99,14 @@ class SourceBundle:
                     "ha_session_observer.py",
                 )
             ]
-            paths += [ROOT / "tests/fixtures/ha_session_worker.py"]
+            paths += [
+                ROOT
+                / (
+                    "scripts/ha_session_live_worker.py"
+                    if live
+                    else "tests/fixtures/ha_session_worker.py"
+                )
+            ]
             for path in paths:
                 if (
                     any(parent.is_symlink() for parent in path.parents)
@@ -162,6 +176,26 @@ class Engine:
         finally:
             connection.close()
 
+    def feed(self, name, payload, *, timeout=2):
+        """Private stdin stream only; no Docker Env/command/disk/log identity."""
+        connection = LocalConnection(timeout)
+        try:
+            connection.request(
+                "POST",
+                "/v1.41/containers/"
+                + name
+                + "/attach?stream=1&stdin=1&stdout=0&stderr=0",
+                headers={"Connection": "Upgrade", "Upgrade": "tcp"},
+            )
+            response = connection.getresponse()
+            if response.status != 101:
+                raise Unavailable()
+            connection.sock.sendall(payload)
+        except (OSError, ValueError, http.client.HTTPException):
+            raise Unavailable() from None
+        finally:
+            connection.close()
+
 
 class DeadlineEngine:
     """Every engine operation consumes the original external deadline."""
@@ -183,14 +217,39 @@ class DeadlineEngine:
             **kwargs,
         )
 
+    def feed(self, name, payload):
+        remaining = self.deadline - self.clock()
+        if remaining <= 0.01:
+            raise Unavailable()
+        self.engine.feed(name, payload, timeout=min(2, remaining / 2))
 
-def verified_config(container, limits, image_id):
+
+def verified_config(container, limits, image_id, live=False, expected=None):
     """Check effective configuration before start, including privilege isolation."""
     h = container["HostConfig"]
+    if live and (
+        expected is None
+        or container["Config"]["Entrypoint"] != expected["Entrypoint"]
+        or container["Config"]["Cmd"] != expected["Cmd"]
+        or (
+            container["Config"].get("NetworkDisabled") is not False
+            and container["Config"].get("NetworkDisabled") is not None
+        )
+        or not all(type(m.get("ReadOnly", False)) is bool for m in h["Mounts"])
+        or [dict(m, ReadOnly=m.get("ReadOnly", False)) for m in h["Mounts"]]
+        != expected["HostConfig"]["Mounts"]
+        or h["Tmpfs"] != expected["HostConfig"]["Tmpfs"]
+    ):
+        return False
     return (
         container["Image"] == image_id
         and not container["State"]["Running"]
-        and h["NetworkMode"] == "none"
+        and h["NetworkMode"] == ("bridge" if live else "none")
+        and (
+            not live
+            or container["Config"]["OpenStdin"] is True
+            and container["Config"]["StdinOnce"] is True
+        )
         and h["ReadonlyRootfs"] is True
         and h["Privileged"] is False
         and h["PidMode"] == ""
@@ -205,7 +264,7 @@ def verified_config(container, limits, image_id):
     )
 
 
-def read_receipt(engine, name):
+def read_receipt(engine, name, live=False):
     blob = engine.request(
         "GET",
         "/containers/" + name + "/archive?path=/run/hoben/receipt.json",
@@ -230,7 +289,9 @@ def read_receipt(engine, name):
         "oom_killed",
         "pids_limited",
         "evidence",
-    }:
+    } | ({"mode"} if live else set()):
+        raise Unavailable()
+    if live and data["mode"] != "live":
         raise Unavailable()
     return data
 
@@ -245,6 +306,7 @@ def supervise(
     engine=None,
     clock=time.monotonic,
     sleep=time.sleep,
+    _live=None,
 ):
     """Run one fixed offline fixture and return validated, unadmitted evidence.
 
@@ -258,10 +320,21 @@ def supervise(
         or not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id)
     ):
         raise ValueError("invalid offline sandbox request")
+    if _live is not None and type(_live) is not _LiveRun:
+        raise ValueError("invalid live request")
+    live = _live is not None
+
+    def make_report(provenance, receipt, evidence):
+        if live:
+            from scripts.ha_manual_live_report import build_live_report
+
+            return build_live_report(_live.proof, receipt, evidence)
+        return build_report(provenance, receipt, evidence)
+
     engine = Engine() if engine is None else engine
     start = deadline = None
     reserve = min(10, limits.process_ms / 3000)
-    name = "hoben-c2a-offline-" + uuid.uuid4().hex
+    name = ("hoben-ha-live-" if live else "hoben-c2a-offline-") + uuid.uuid4().hex
     receipt = {
         "started": False,
         "reason": "unavailable",
@@ -274,7 +347,7 @@ def supervise(
     }
     evidence = empty_evidence()
     provenance = dict(provenance)
-    build_report(provenance, receipt, evidence)
+    make_report(provenance, receipt, evidence)
     created, attempted_start, stopped = False, False, False
     cancel_sent = False
     bundle = None
@@ -290,7 +363,7 @@ def supervise(
         image = engine.request("GET", "/images/" + quote(image_id, safe=":") + "/json")
         if image.get("Id") != image_id:
             raise Unavailable()
-        bundle = SourceBundle()
+        bundle = SourceBundle(live=True) if live else SourceBundle()
         mounts = [
             {
                 "Type": "bind",
@@ -311,14 +384,17 @@ def supervise(
             "Image": image_id,
             "Entrypoint": ["python", "-I", "/source/scripts/ha_session_guard.py"],
             "Cmd": [
-                case.value,
+                "live" if live else case.value,
                 json.dumps(asdict(limits), separators=(",", ":")),
             ],
             "Env": [],
             "WorkingDir": "/source",
-            "NetworkDisabled": True,
+            "NetworkDisabled": not live,
+            "OpenStdin": live,
+            "StdinOnce": live,
+            "AttachStdin": live,
             "HostConfig": {
-                "NetworkMode": "none",
+                "NetworkMode": "bridge" if live else "none",
                 "ReadonlyRootfs": True,
                 "Privileged": False,
                 "PidMode": "",
@@ -339,7 +415,7 @@ def supervise(
         engine.request("POST", "/containers/create?name=" + name, config, timeout=45)
         created = True
         current = engine.request("GET", "/containers/" + name + "/json")
-        if not verified_config(current, limits, image_id):
+        if not verified_config(current, limits, image_id, live, config):
             raise Unavailable()
         if cancelled():
             raise CancelledBeforeStart()
@@ -360,6 +436,8 @@ def supervise(
         )
         attempted_start = True
         engine.request("POST", "/containers/" + name + "/start")
+        if live:
+            engine.feed(name, _live.identity)
         receipt["reason"] = "worker_failure"
         ready_data = None
         while clock() < deadline - reserve:
@@ -369,7 +447,7 @@ def supervise(
                 break
             if ready_data is None:
                 try:
-                    ready_data = read_receipt(engine, name)
+                    ready_data = read_receipt(engine, name, live)
                 except Unavailable as error:
                     if str(error) != "http_404":
                         raise
@@ -389,7 +467,9 @@ def supervise(
                 receipt["oom_killed"], receipt["reason"] = True, "memory"
             else:
                 data = (
-                    ready_data if ready_data is not None else read_receipt(engine, name)
+                    ready_data
+                    if ready_data is not None
+                    else read_receipt(engine, name, live)
                 )
                 for key in ("started", "reason", "oom_killed", "pids_limited"):
                     receipt[key] = data[key]
@@ -440,7 +520,30 @@ def supervise(
         ):
             receipt["reason"] = "timeout"
     try:
-        return build_report(provenance, receipt, evidence)
+        return make_report(provenance, receipt, evidence)
     except Exception:
         receipt.update(reason="worker_failure", oom_killed=False, pids_limited=False)
-        return build_report(provenance, receipt, empty_evidence())
+        return make_report(provenance, receipt, empty_evidence())
+
+
+def supervise_live(image_id, proof, identity, **options):
+    """Fixed live path after admission; tests use doubles, never Hoben sockets."""
+    from scripts.ha_manual_live_report import validate_proof
+
+    validate_proof(proof)
+    if (
+        type(identity) is not bytes
+        or not 0 < len(identity) <= 512
+        or not identity.endswith(b"\n")
+    ):
+        raise ValueError("invalid private identity pipe")
+    provenance = {
+        k: proof[k] for k in ("merge_sha", "pr_number", "run_id", "run_attempt")
+    }
+    return supervise(
+        OfflineCase.HEALTHY,
+        image_id,
+        provenance,
+        _live=_LiveRun(dict(proof), identity),
+        **options,
+    )

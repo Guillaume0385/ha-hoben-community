@@ -54,7 +54,7 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
     assert set(config["on"]) == {"workflow_dispatch"}
     assert config["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == list(
         PLANS
-    )
+    ) + ["hoben-live"]
     assert config["concurrency"]["cancel-in-progress"] == "false"
     assert config["concurrency"]["group"] == "hoben-read-only-observation"
     assert config["permissions"] == {}
@@ -65,7 +65,7 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
         assert "env" not in job
         for step in job["steps"]:
             if "secrets." in json.dumps(step):
-                assert job_name == "collect" and step["id"] == "capture"
+                assert job_name in {"collect", "collect-ha"} and step["id"] == "capture"
                 assert step["if"] == "steps.recheck.outputs.approved == 'true'"
             if step.get("uses", "").startswith("actions/checkout"):
                 assert step["with"]["ref"] == "${{ github.sha }}"
