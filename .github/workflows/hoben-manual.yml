@@ -10,7 +10,7 @@ on:
         required: true
         type: choice
         default: h1h2
-        options: [h1h2, session-300, session-reconnect, all]
+        options: [h1h2, session-300, session-reconnect, all, hoben-live]
 
 permissions: {}
 
