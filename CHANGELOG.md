@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #112, étape 8 tranche C2c
+
+- Refus explicite des identifiants obligatoires absents, sans valeur par défaut
+  ni association : diagnostic catégoriel fermé, code 1 et rapport de session
+  NOT RUN avant superviseur. Export possible malgré l'échec de capture, avec
+  validation indépendante inchangée et échec global conservé.
+- Résultat distinguant job de collecte échoué et preuve de session ; tests
+  offline de l'entrée vide, provenance réelle locale, sorties et arrêts précoces.
+  Aucun test réel, changement de gate, budget ou secret.
+
 ## En cours — #112, étape 8 tranche C2b
 
 - Choix manuel hoben-live séparé des scénarios historiques, admission et recheck

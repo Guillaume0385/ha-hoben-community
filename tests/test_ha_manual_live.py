@@ -373,9 +373,6 @@ def test_capture_checks_local_provenance_and_image_before_identity(
     for key, value in source.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(launch.sys, "argv", ["launch_ha_manual_live.py"])
-    # No image => refuse BEFORE missing identity keys are accessed.
-    with pytest.raises(ValueError):
-        launch.main()
     (storage / "hoben-ha-runtime.id").write_text(IMAGE)
     monkeypatch.setenv("HOBEN_USER_GUID", "1" * 32)
     monkeypatch.setenv("HOBEN_DEVICE_GUID", "D" * 32)

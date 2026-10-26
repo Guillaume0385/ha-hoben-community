@@ -349,7 +349,7 @@ jobs:
         HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
       run: python -I trusted/scripts/launch_ha_manual_live.py
     - id: exports
-      if: ${{ always() && steps.recheck.outputs.approved == 'true' && steps.capture.outcome == 'success' }}
+      if: ${{ always() && steps.recheck.outputs.approved == 'true' && (steps.capture.outcome == 'success' || steps.capture.outcome == 'failure') }}
       uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
       env:
         APPROVED_PR: ${{ needs.preflight.outputs.pr }}
@@ -435,6 +435,6 @@ jobs:
             complete=state==='SUCCESS'&&process.env.COLLECTION_RESULT==='success'&&process.env.PUBLICATION_RESULT==='success';
           }catch(_){}
           await core.summary.addHeading('Hoben live — client/coordinator HA')
-            .addTable([[{data:'Scénario',header:true},{data:'État',header:true}],['hoben-live',state],...Object.entries(criteria)])
-            .addRaw('Résultat global : '+(complete?'SUCCESS':'FAILURE')+'. NOT RUN signifie absence de démarrage attesté, jamais absence prouvée de connexion. boundary_proven=false.').write();
+            .addTable([[{data:'Scénario',header:true},{data:'État',header:true}],['Collecte (job)',process.env.COLLECTION_RESULT],['hoben-live (preuve de session)',state],...Object.entries(criteria)])
+            .addRaw('Résultat global : '+(complete?'SUCCESS':'FAILURE')+'. Un job de collecte échoué est une exécution échouée ; NOT RUN qualifie seulement la preuve de session, jamais une absence prouvée de connexion. boundary_proven=false.').write();
           if(!complete)core.setFailed('HA live incomplete, failed or NOT RUN.');
