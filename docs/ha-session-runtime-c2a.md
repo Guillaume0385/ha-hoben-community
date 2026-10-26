@@ -9,8 +9,10 @@ reste un format offline historique, jamais une preuve d'exécution live.
 
 ## Une fondation entièrement hors ligne
 
-`scripts/ha_session_supervisor.py` ne propose aucun CLI, chargement de secret ou
-mode réseau. Il accepte uniquement des `OfflineCase` de fixtures connues.
+L'entrée C2a `supervise` de `scripts/ha_session_supervisor.py` n'a aucun CLI et
+accepte seulement des `OfflineCase` de fixtures connues, réseau toujours none.
+C2b dispose de l'entrée distincte `supervise_live`, liée au gate et au worker
+fixe ; ce raccord ne change pas les appels offline ni leur format de preuve.
 Il refuse sans repli sur l'hôte si le daemon local, l'image préparée, cgroup v2,
 mémoire/swap/PID ou leur configuration effective sont invérifiables.
 Les conteneurs utilisent toujours **network=none**, sans variables héritées,
@@ -121,7 +123,8 @@ reste distinct de transport, avec seul UInt8 numérique ; transport n'affirme
 aucun EOF. Une absence de démarrage/rapport attesté reste NOT RUN ; une défaillance
 de supervision a une issue globale FAILURE même sans résultat protocolaire.
 
-C2b devra être attribuée séparément : véritable mode live, preuve UI, admission
+La [tranche C2b](ha-session-live-c2b.md), autorisée pour développement offline
+le 26/10, réutilise cette fondation : véritable mode live, preuve UI, admission
 propriétaire/ref/SHA/PR/revue/CI, politique hoben-live et approbations, anti-rejeu,
 mutex, recheck et publication isolée. Modifier un discriminant C1/C2a ne crée
 aucune preuve live recevable. Aucun workflow ou gate n'est raccordé dans C2a.

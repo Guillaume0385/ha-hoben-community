@@ -242,3 +242,83 @@ def test_guardian_deadline_survives_loss_of_host_control(sandbox_image):
         observer.request(
             "DELETE", "/containers/" + engine.name + "?force=true&v=true", timeout=10
         )
+
+
+def test_private_docker_stdin_channel_without_hoben_or_network(sandbox_image):
+    """Exercise the real attach protocol with synthetic bytes and no live path."""
+    import uuid
+
+    engine = Engine()
+    name = "hoben-c2b-pipe-test-" + uuid.uuid4().hex
+    payload = b"PRIVATE_SYNTHETIC_CHANNEL\n"
+    config = {
+        "Image": sandbox_image,
+        "Entrypoint": [
+            "python",
+            "-I",
+            "-c",
+            "import sys; b=sys.stdin.buffer.readline(513); "
+            'sys.exit(0 if len(b)==26 and b.endswith(b"\\n") else 1)',
+        ],
+        "OpenStdin": True,
+        "StdinOnce": True,
+        "AttachStdin": True,
+        "NetworkDisabled": True,
+        "Env": [],
+        "HostConfig": {
+            "NetworkMode": "none",
+            "ReadonlyRootfs": True,
+            "LogConfig": {"Type": "none"},
+            "Memory": 64 * 1024**2,
+            "MemorySwap": 64 * 1024**2,
+            "PidsLimit": 8,
+        },
+    }
+    # Neither the command nor the Docker config contains the private bytes.
+    assert payload.decode().strip() not in str(config)
+    engine.request("POST", "/containers/create?name=" + name, config, timeout=45)
+    try:
+        engine.request("POST", "/containers/" + name + "/start")
+        engine.feed(name, payload)
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            state = engine.request("GET", "/containers/" + name + "/json")["State"]
+            if not state["Running"]:
+                break
+            time.sleep(0.05)
+        assert not state["Running"] and state["ExitCode"] == 0
+    finally:
+        engine.request(
+            "DELETE", "/containers/" + name + "?force=true&v=true", timeout=10
+        )
+
+
+def test_live_container_configuration_is_compatible_while_stopped_only(sandbox_image):
+    """No worker/start/identity stream. Verify real Docker normalization safely."""
+    from scripts.ha_session_supervisor import Unavailable, supervise_live
+    from tests.test_ha_manual_live import IDENTITY, PROOF
+
+    class StoppedOnly(Engine):
+        attempted = False
+
+        def request(self, method, path, body=None, **kwargs):
+            if path.endswith("/start"):
+                self.attempted = True
+                raise Unavailable()  # NEVER start any network-enabled container
+            allowed = (
+                method == "GET"
+                or method == "DELETE"
+                or (method == "POST" and "/containers/create?" in path)
+                or (method == "PUT" and "/archive?" in path)
+            )
+            if not allowed:
+                raise Unavailable()
+            return super().request(method, path, body, **kwargs)
+
+        def feed(self, *args, **kwargs):
+            raise AssertionError("No identity stream allowed in this offline test")
+
+    engine = StoppedOnly()
+    r = supervise_live(sandbox_image, PROOF, IDENTITY, engine=engine)
+    assert engine.attempted, "Effective configuration must be verified before start"
+    assert r["outcome"] == "FAILURE" and not r["supervisor"]["started"]

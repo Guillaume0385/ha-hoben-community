@@ -267,7 +267,8 @@ async function environmentPolicy(github, context) {
   }
   return { id: environment.id, reviewers, approvalRequired: required.length === 1,
     digest: digest({ id: environment.id,
-    name: environment.name, deployment_branch_policy: environment.deployment_branch_policy,
+    name: environment.name, can_admins_bypass: environment.can_admins_bypass ?? null,
+    deployment_branch_policy: environment.deployment_branch_policy,
     protection_rules: environment.protection_rules, branch }) };
 }
 
@@ -287,11 +288,11 @@ async function noOtherObservation(github, context) {
   }
 }
 
-async function actualApproval(github, context, environment, proof) {
+async function actualApproval(github, context, environment, proof, requireFresh = false) {
   const { data: history } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals",
     { ...API, run_id: context.runId });
   need(Array.isArray(history), "approval_unverified");
-  need(rerun.freshEnvironmentApproval(history, environment, proof, policy.environment),
+  need(rerun.freshEnvironmentApproval(history, environment, proof, policy.environment, requireFresh),
     "approval_unverified");
 }
 
@@ -341,4 +342,4 @@ async function verify({ github, context, env = process.env, recheck = false }) {
 }
 
 module.exports = { dryRun, verify, refusalCategory,
-  WORKFLOW: push.LIVE_WORKFLOW, MARKER, MARKER_V2, workflowPath };
+  WORKFLOW: push.LIVE_WORKFLOW, MARKER, MARKER_V2, workflowPath, environmentPolicy, actualApproval };

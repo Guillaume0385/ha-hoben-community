@@ -20,7 +20,7 @@ def require(fact):
         raise ValueError("invalid_manual_context")
 
 
-def proof(source, root):
+def proof(source, root, *, plans=PLANS):
     """Verify before any identity access; never manufacture a push event."""
     expected = {
         "GITHUB_ACTIONS": "true",
@@ -34,7 +34,7 @@ def proof(source, root):
     }
     require(all(source.get(k) == v for k, v in expected.items()))
     selection = source.get("MANUAL_HOBEN_SCENARIO")
-    require(selection in PLANS)
+    require(selection in plans)
     sha = source.get("GITHUB_SHA", "")
     require(re.fullmatch(r"[a-f0-9]{40}", sha) is not None)
     require(sha == source.get("GITHUB_WORKFLOW_SHA") == source.get("MANUAL_HOBEN_SHA"))

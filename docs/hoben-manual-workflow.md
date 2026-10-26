@@ -4,14 +4,17 @@ La phase 1 a installé le bouton sur la branche par défaut `main` (PR #120,
 `b0c177d8146d4891d366a39e1fb0cd1dba86126c`). Cette phase 2 reporte le même chemin
 `.github/workflows/hoben-manual.yml` sur `experimental` et raccorde les collecteurs
 existants. `main` conserve son point d'entrée sans runtime et reste inactive.
-Aucun protocole n'est promu vers main ; étape 8 HA toujours suspendue.
+Aucun protocole n'est promu vers main. La [tranche C2b](ha-session-live-c2b.md)
+ajoute le choix HA hoben-live après autorisation propriétaire du 26/10 ; tests
+réels NOT RUN jusqu'à une autorisation distincte et aux contrôles effectifs.
 
 ## Utilisation après fusion et revue MANAGER
 
 Dans **Actions → Tests Hoben manuels → Run workflow** :
 
 1. Choisir **experimental** dans le sélecteur natif **Use workflow from**.
-2. Choisir `h1h2`, `session-300`, `session-reconnect` ou `all`.
+2. Choisir `h1h2`, `session-300`, `session-reconnect`, `all` ou `hoben-live`.
+   `all` conserve les trois anciens scénarios ; hoben-live reste séparé.
 3. Déclencher explicitement le workflow en tant que propriétaire autorisé.
 4. Attendre les approbations d'environnement effectivement requises. PENDING
    APPROVAL ne permet aucune collecte et ne doit jamais être contourné.
@@ -59,6 +62,7 @@ le propriétaire doit contrôler les runs historiques avant une campagne.
 | h1h2 | Même campagne H1/H2 : six sessions par hypothèse, 90 s et 1 Mio RX par session ; processus 1800 s. |
 | session-300 | Même observe(), 300 s utiles, processus 360 s, trois ouvertures, six lectures fixes et 1 Mio RX. |
 | session-reconnect | Même collecteur borné de reconnexion : processus 600 s, fonctionnel au plus 360 s, dix lectures, trois ouvertures, 1 Mio RX. |
+| hoben-live | Vrai HobenClient/coordinator HA, superviseur C2a ; 300 s utiles, 360 s absolues cleanup inclus, 1 Gio/128 PID, six refreshs/deux ouvertures, aucun quota RX. |
 | all | H1/H2 puis suite existante session-300 → reconnexion ; plafond des deux sessions 1020 s, total processus 1800+1020=2820 s. |
 
 Le superviseur parent possède un seul groupe isolé. Chaque transition fixe doit
@@ -114,3 +118,13 @@ Seuls hoben-manual, Validate et publication de release restent dans Actions.
 Le retrait ne supprime ni ne relance les runs déjà créés ou leurs claims.
 Une activation future de main exige une décision propriétaire distincte après
 installation et validation de ses contrôles ; aucune PR main dans cette phase.
+
+
+## Environnement HA et formulaire main
+
+Le choix hoben-live utilise exclusivement hoben-live, sans changer les protections
+hoben-experimental. La politique protégée acceptée par le propriétaire, les
+preuves du rapport schéma 3, les limites et le plan minimal de formulaire main
+sont détaillés dans [C2b](ha-session-live-c2b.md). Aucune PR main ni exécution
+réelle dans le développement C2b. Le bouton actuel peut nécessiter la publication
+séparée de cette seule option sur la branche par défaut.

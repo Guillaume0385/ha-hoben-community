@@ -1,6 +1,7 @@
-"""PID 1 guardian outside the HA worker; private offline sandbox only.
+"""PID 1 guardian outside the HA worker; fixed offline/live entry points.
 
-No secret reader, network setup, Actions context or live entry. PID namespace
+No Actions token or public logs. C2b receives identity on private stdin.
+PID namespace
 exit is the final cleanup for descendants that escaped the worker's session.
 The worker runs as another UID and cannot signal or replace this guardian.
 """
@@ -77,6 +78,35 @@ def worker_deadline(limits, hard_deadline_ns, now_ns):
     )
 
 
+def identity_pipe(deadline_ns):
+    """Bounded in-memory channel; no identity in env, argv, volume or receipt."""
+    raw = bytearray()
+    until = min(time.monotonic() + 5, deadline_ns / 1e9 - 1)
+    with selectors.DefaultSelector() as selector:
+        selector.register(0, selectors.EVENT_READ)
+        while time.monotonic() < until and not stopping and len(raw) <= 512:
+            if selector.select(min(0.05, max(0, until - time.monotonic()))):
+                data = os.read(0, 513 - len(raw))
+                if not data:
+                    break
+                raw.extend(data)
+                if raw.endswith(b"\n"):
+                    break
+    require(raw.endswith(b"\n") and len(raw) <= 512)
+    value = json.loads(raw)
+    require(type(value) is dict and set(value) == {"user_guid", "device_guid"})
+    require(
+        all(type(x) is str and x.isascii() and 0 < len(x) <= 64 for x in value.values())
+    )
+    require(json.dumps(value, separators=(",", ":")).encode() + b"\n" == raw)
+    read_fd, write_fd = os.pipe()
+    try:
+        require(os.write(write_fd, raw) == len(raw))
+    finally:
+        os.close(write_fd)
+    return read_fd
+
+
 def run(case, limits, deadline_ns):
     """Attest cgroup bounds before the unprivileged worker can execute."""
     global worker_started
@@ -114,10 +144,20 @@ def run(case, limits, deadline_ns):
     os.set_blocking(read_fd, False)
     started = False
     process = None
+    identity_fd = None
     try:
         # Group/cgroup membership and the guardian's absolute timer exist first.
+        live = case == "live"
+        if live:
+            identity_fd = identity_pipe(deadline_ns)
         process = subprocess.Popen(
             [
+                sys.executable,
+                "-I",
+                str(ROOT / "scripts/ha_session_live_worker.py"),
+            ]
+            if live
+            else [
                 sys.executable,
                 "-I",
                 str(ROOT / "tests/fixtures/ha_session_worker.py"),
@@ -129,8 +169,9 @@ def run(case, limits, deadline_ns):
             env={
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "HA_EVIDENCE_FD": str(write_fd),
+                **({"HA_IDENTITY_FD": str(identity_fd)} if live else {}),
             },
-            pass_fds=(write_fd,),
+            pass_fds=(write_fd, identity_fd) if live else (write_fd,),
             start_new_session=True,
             user=65534,
             group=65534,
@@ -215,6 +256,8 @@ def run(case, limits, deadline_ns):
                 )
             except subprocess.TimeoutExpired:
                 reason = "timeout"
+        if identity_fd is not None:
+            os.close(identity_fd)
         os.close(read_fd)
         if write_fd is not None:
             os.close(write_fd)
@@ -253,6 +296,8 @@ def main():
             "evidence": empty_evidence(),
         }
     try:
+        if sys.argv[1] == "live":
+            result["mode"] = "live"
         encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
         if len(encoded) > 8192:
             return 1
