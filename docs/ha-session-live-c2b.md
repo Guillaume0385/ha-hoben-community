@@ -3,7 +3,9 @@
 Source : [première section MANAGER #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200),
 décision propriétaire du 26/10. Base C2a fusionnée par #127,
 `6a58afe65b200bc9a43c71efa11658086abc1084`.
-Développement et CI exclusivement hors ligne ; test réel **NOT RUN**.
+Développement et CI exclusivement hors ligne ; aucun test réel par DEV.
+Le run propriétaire ultérieur #40326783513 a échoué (voir correction C2c),
+sans validation de session HA.
 
 ## Sélection et admission
 
@@ -91,7 +93,8 @@ sans perte** ; il n'est pas requis pour réussir cette observation de continuit�
 Une perte tardive invalide la continuité, même si une reconnexion antérieure est
 prouvée. Les arrêts locaux ne prouvent jamais EOF ou reconnexion.
 Une absence de démarrage attesté reste NOT RUN ; absence/rapport falsifié après
-capture échouée => NOT RUN avec échec global, jamais preuve d'absence de connexion.
+capture échouée => NOT RUN pour la preuve de session, avec échec global, jamais
+preuve d'absence de connexion ni requalification du job échoué en non-exécution.
 
 Collect exporte seulement une valeur base64 bornée après validation ; un runner
 publish distinct, sans environnement/secret Hoben, revalide contre les preuves
@@ -101,9 +104,59 @@ Le backend Docker/cgroup absent refuse sans exécution sur l'hôte. Comme en C2a
 une perte du contrôle Docker peut laisser des métadonnées/volume anonymisé à
 supprimer après rétablissement ; aucun reaping non attesté n'est inventé.
 
-## Promotion minimale du formulaire vers main — plan séparé MANAGER
+## Correction C2c — collecte refusée avant superviseur
 
-Lecture GitHub effectuée : main possède le même chemin de workflow_dispatch,
+Le run propriétaire [#40326783513](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/40326783513)
+sur le merge #128 a échoué : preflight et construction d'image réussis,
+`python -I trusted/scripts/launch_ha_manual_live.py` arrêté avec code 1,
+collect-ha/result-ha FAILURE, sans artefact. Ce run a bien été lancé ; aucune
+session HA aboutie n'est prouvée. Les journaux ne contiennent pas la phase
+interne exacte de l'ancienne sortie silencieuse.
+
+Défaut d'entrée démontré par code et reproduction offline : **C2b exige les
+deux entrées HOBEN_USER_GUID et HOBEN_DEVICE_GUID**. Le DeviceGuid doit être déjà
+attribué, exactement 32 caractères ASCII et différent de l'identité initiale.
+La valeur DeviceGuid vide observée dans l'environnement du job suffit à faire
+échouer sa validation avant tout appel du superviseur, indépendamment de TLS,
+du serveur ou du protocole. La reproduction isolée Python `-I` emploie de vrais
+checkouts Git locaux et contrôles de provenance/image, un événement/identifiant
+de fixture et un superviseur interdit : même refus, aucun accès réseau. Elle
+n'ajoute pas rétroactivement une trace de phase au run historique et n'exclut
+pas un autre refus antérieur non journalisé.
+
+Cette exigence est conservée : ni identité inventée, ni repli à zéro, ni nouvelle
+association, ni recherche/lecture/création de secret par DEV. Avant un futur test,
+le propriétaire/MANAGER doit faire fournir l'identité persistée via la gestion
+de secrets autorisée, hors de ce correctif. Sans elle, le refus reste obligatoire.
+
+Le correctif remplace la sortie silencieuse par **un seul diagnostic fermé** :
+phase (provenance/image/identity/supervision/report), catégorie allowlistée,
+statut de démarrage, rapport absent/validé, résultat de session et code de sortie.
+Aucune valeur d'entrée, exception libre, identifiant de session ou donnée Hoben.
+Un refus d'image/identité après provenance valide écrit le schéma 3 NOT RUN
+existant (`unavailable` : prérequis indisponible), sans témoin ni faux cleanup ;
+la catégorie du diagnostic précise le prérequis. Le lanceur garde **code 1**.
+L'export s'exécute aussi après échec de capture, uniquement après recheck admis ;
+seul le rapport fermé validé peut être publié sur le runner sans secret. Aucun
+rapport n'est fabriqué après échec de provenance, exception du superviseur ou
+rapport invalide ; le démarrage reste alors non attesté après appel du superviseur.
+Une panne d'écriture laisse un échec explicite sans repli brut.
+
+Result-ha distingue le statut du **job de collecte** et la **preuve de session**.
+Un rapport NOT RUN publiable ne rend jamais la collecte ni le run réussis.
+Un rapport absent ou même SUCCESS ne neutralise pas l'échec du job. Les tests
+offline couvrent ces cas, entrée manquante/invalide, arrêt précoce, exception
+privée et codes retour ; gates, anti-rejeu, TLS, vrai HA et budgets inchangés.
+Après fusion et autorisation distincte du propriétaire, seul un **nouveau**
+dispatch serait admissible ; aucune relance du run consommé, aucun run par DEV.
+
+## Promotion minimale du formulaire vers main — plan historique MANAGER
+
+État C2c selon la consigne canonique : #129 fusionnée par MANAGER, choix UI
+experimental/hoben-live acquis. Le plan initial C2b ci-dessous est conservé
+comme historique ; il ne constitue ni une nouvelle PR main ni une activation.
+
+Lors de la préparation C2b, lecture GitHub effectuée : main possède le même chemin de workflow_dispatch,
 mais ses options actuelles s'arrêtent à all. La capture propriétaire confirme
 que la sélection experimental n'affiche pas encore hoben-live.
 Après revue/fusion C2b, proposer séparément au MANAGER **uniquement** ce changement
