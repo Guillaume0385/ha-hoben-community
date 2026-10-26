@@ -112,7 +112,7 @@ def test_only_manual_hoben_entry_remains_and_ci_release_are_preserved():
     assert set(config["on"]["workflow_dispatch"]["inputs"]) == {"scenario"}
     choice = config["on"]["workflow_dispatch"]["inputs"]["scenario"]
     assert choice["type"] == "choice" and choice["required"] == "true"
-    assert choice["options"] == SCENARIOS + ["all"]
+    assert choice["options"] == SCENARIOS + ["all", "hoben-live"]
     assert config["permissions"] == {}
     assert config["concurrency"] == {
         "group": "hoben-read-only-observation",
