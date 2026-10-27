@@ -26,6 +26,7 @@ from custom_components.hoben.exceptions import (
 from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID, CloseClientReason
 from custom_components.hoben.profiles import StoveProfile
 from custom_components.hoben.transport import AsyncTlsTransport
+from tests.tls_script import script_tls
 
 # Independent synthetic wire vectors; no production identity/capture/code.
 USER_GUID = "01234567-89AB-CDEF-0123-456789ABCDEF"
@@ -584,7 +585,12 @@ def test_association_serializes_with_refresh_and_reuses_assignment_on_fresh_tls(
     streams, transports
 ):
     client = make_client()
-    streams.reader.read.side_effect = [b"\x2f", OPENED, OPENED, READ_RESPONSE]
+    script_tls(
+        streams,
+        openings=[[b"\x2f"], [OPENED]],
+        reads=[[READ_RESPONSE]],
+        authorizations=[[OPENED]],
+    )
 
     async def run():
         waiting = asyncio.Event()
@@ -624,7 +630,12 @@ def test_association_serializes_with_refresh_and_reuses_assignment_on_fresh_tls(
 def test_association_failure_preserves_previous_identity_profile_and_snapshot(
     streams, transports
 ):
-    streams.reader.read.side_effect = [OPENED, READ_RESPONSE, b"\x2f", b"\x05\x04"]
+    script_tls(
+        streams,
+        openings=[[OPENED], [b"\x2f"]],
+        reads=[[READ_RESPONSE]],
+        authorizations=[[b"\x05\x04"]],
+    )
     client = make_client()
 
     async def run():
@@ -667,12 +678,12 @@ def test_successful_association_rotates_identity_without_replacing_snapshot(
     streams, transports
 ):
     rotated = "Z" * 32
-    streams.reader.read.side_effect = [
-        OPENED,
-        READ_RESPONSE,
-        b"\x2f",
-        OPENED[:14] + rotated.encode("ascii") + OPENED[46:],
-    ]
+    script_tls(
+        streams,
+        openings=[[OPENED], [b"\x2f"]],
+        reads=[[READ_RESPONSE]],
+        authorizations=[[OPENED[:14] + rotated.encode("ascii") + OPENED[46:]]],
+    )
     client = make_client()
 
     async def run():
@@ -682,6 +693,10 @@ def test_successful_association_rotates_identity_without_replacing_snapshot(
         )
         assert client.last_snapshot is previous
         assert client.device_guid_for_persistence == rotated
+        # Explicit association stopped the prior read owner; it cannot silently
+        # replenish that owner's lifetime retry budget on a later refresh.
+        with pytest.raises(HobenClientClosedError):
+            await client.async_refresh()
 
     asyncio.run(run())
     assert emitted(streams) == [

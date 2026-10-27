@@ -1,4 +1,4 @@
-"""Retired gate/status regressions, executed only with offline GitHub doubles."""
+"""Execute the trusted workflow gates/status scripts with offline GitHub doubles."""
 
 import copy
 import json

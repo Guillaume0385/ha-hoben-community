@@ -1,98 +1,130 @@
-# Tests Hoben manuels — installation du bouton, phase 1 de #119
+# Tests Hoben manuels — #119, phase 2 experimental
 
-La section finale **ARBITRAGE PROPRIÉTAIRE PRIORITAIRE — 24/10/2026** de
-[l'Issue #119](https://github.com/Guillaume0385/ha-hoben-community/issues/119)
-autorise cette première PR issue de `main` et ciblant `main`, limitée à Actions,
-ses tests et sa documentation. Elle ne promeut aucun protocole expérimental,
-client HA ou scénario réel sur `main`. La revue indépendante et MANAGER, ainsi
-que les quatre checks CI hors ligne, restent requis ; DEV ne fusionne pas.
+La phase 1 a installé le bouton sur la branche par défaut `main` (PR #120,
+`b0c177d8146d4891d366a39e1fb0cd1dba86126c`). Cette phase 2 reporte le même chemin
+`.github/workflows/hoben-manual.yml` sur `experimental` et raccorde les collecteurs
+existants. `main` conserve son point d'entrée sans runtime et reste inactive.
+Aucun protocole n'est promu vers main. La [tranche C2b](ha-session-live-c2b.md)
+ajoute le choix HA hoben-live après autorisation propriétaire du 26/10 ; tests
+réels NOT RUN jusqu'à une autorisation distincte et aux contrôles effectifs.
 
-## Interface GitHub réellement installée
+## Utilisation après fusion et revue MANAGER
 
-Après fusion MANAGER de la phase 1 sur la branche par défaut `main`, la page
-**Actions → Tests Hoben manuels → Run workflow** peut proposer le formulaire
-du fichier `.github/workflows/hoben-manual.yml`.
-[GitHub exige la présence du fichier sur la branche par défaut](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
-pour afficher ce bouton. Aucun dispatch n'est réalisé pour vérifier son affichage
-pendant le développement.
+Dans **Actions → Tests Hoben manuels → Run workflow** :
 
-Le sélecteur natif **Use workflow from** choisit la branche ou le ref dont GitHub
-exécute le workflow. Il n'est pas remplacé par un input libre et ne peut pas
-masquer `main`. Choisir `main` ne provoque jamais un checkout ou un lancement
-implicite du code d'`experimental`.
+1. Choisir **experimental** dans le sélecteur natif **Use workflow from**.
+2. Choisir `h1h2`, `session-300`, `session-reconnect`, `all` ou `hoben-live`.
+   `all` conserve les trois anciens scénarios ; hoben-live reste séparé.
+3. Déclencher explicitement le workflow en tant que propriétaire autorisé.
+4. Attendre les approbations d'environnement effectivement requises. PENDING
+   APPROVAL ne permet aucune collecte et ne doit jamais être contourné.
+5. Lire le résultat distinct de chaque scénario et le rapport anonymisé.
 
-La liste obligatoire `scenario` propose exactement :
+Le fichier doit exister au même chemin sur le ref sélectionné. GitHub utilise
+le ref/SHA choisi ; le workflow ne remplace pas une sélection main par un checkout
+experimental. La branche main reste visible dans le sélecteur et refuse le live.
+Aucun lancement sur push, PR, merge, label ou schedule ; les quatre checks CI
+ordinaires restent hors ligne. DEV ne clique pas Run workflow et ne lance aucun
+rerun réel. Pour répéter une observation, le propriétaire crée un **nouveau
+dispatch**, jamais Re-run all jobs / failed jobs.
 
-- `h1h2` : campagne H1/H2 ;
-- `session-300` : session continue 300 s ;
-- `session-reconnect` : scénario de reconnexion par inhibition des Pong ;
-- `all` : H1/H2, puis session-300, puis reconnexion, dans cet ordre.
+## Gate technique, sans commentaire d'admission MANAGER
 
-## Phase 1 : toutes les collectes restent NOT RUN
+Le dispatch manuel du propriétaire remplace l'ancien commentaire pré-fusion.
+Le gate ne lit aucune décision d'admission dans les commentaires GitHub.
+Il vérifie, avant claim puis à nouveau après l'attente d'environnement :
 
-Le seul job est un préflight de cinq minutes au plus. Il ne contient ni checkout,
-script Python, sonde, artefact, environnement, accès à un secret Hoben, ni job
-aval de collecte. Le token GitHub de l'action épinglée a seulement les droits
-de lecture du contenu et des Actions nécessaires à la vérification de provenance.
+- dépôt/identifiants GitHub exacts, acteur/sender/triggering_actor propriétaire,
+  `workflow_dispatch`, tentative 1, inputs fermés et scénario connu ;
+- ref exact experimental, SHA du workflow et Actions, HEAD courant protégé,
+  provenance API du run ; aucun choix de script, destination ou durée libre ;
+- PR unique fusionnée sur ce SHA par le propriétaire, arbre candidat identique,
+  absence de CHANGES_REQUESTED actif et de thread non résolu ;
+- Validate PR du HEAD candidat exact, branche/dépôt/workflow concordants,
+  tentative 1, quatre jobs tests/ha-tests/hacs/hassfest réussis avant le dispatch ;
+- politique effective hoben-experimental : branche experimental seule, règles
+  reconnues ; reviewers indépendants et approbation réelle fraîche si configurés.
 
-L'événement doit être `workflow_dispatch`, sur le dépôt exact, par
-`Guillaume0385` (identifiant GitHub vérifié), tentative 1. Toute relance nécessite
-un **nouveau dispatch manuel** ; Re-run all jobs / failed jobs reste refusé.
-Le ref et le SHA Actions/workflow doivent concorder. Seul le ref exact
-`refs/heads/experimental` peut atteindre la vérification API : HEAD courant
-protégé, provenance et identité du run doivent encore correspondre.
+La réservation atomique `hoben-manual-<run_id>-attempt1` lie sélection, SHA,
+PR/candidat/CI et empreinte d'environnement. Elle reste consommée après échec
+ou annulation. Le recheck relit le claim exact et les preuves ; une politique
+modifiée, API inaccessible ou approbation non vérifiable donne NOT RUN.
+Les approbations configurées doivent dater au moins du début du dispatch courant.
+Aucun secret Hoben avant le recheck. Le mutex hoben-read-only-observation conserve
+sa file sans annulation ; les anciens runs sont aussi recherchés avant collecte.
+Ce scan API n'est pas un verrou atomique pour une ancienne voie hors mutex :
+le propriétaire doit contrôler les runs historiques avant une campagne.
 
-- `main`, autre branche ou tag : `NOT RUN: branch_not_activated` ;
-- contexte, acteur ou tentative invalide : refus avant vérification API ;
-- preuve API manquante, modifiée ou inaccessible : NOT RUN ;
-- contexte experimental recevable : `NOT RUN: experimental_runtime_not_installed`.
+## Scénarios et budgets conservés
 
-Les trois scénarios sont toujours affichés comme NOT RUN, avec leur sélection
-explicite. Le job est volontairement en échec ; ce n'est ni un test réel échoué,
-ni une réussite simulée. Aucun commentaire d'admission MANAGER n'est demandé.
-Le mutex partagé `hoben-read-only-observation`, sans annulation et avec file
-d'attente, est conservé ; aucun réglage de dépôt n'est modifié.
+| Sélection | Collecteur et limite externe |
+| --- | --- |
+| h1h2 | Même campagne H1/H2 : six sessions par hypothèse, 90 s et 1 Mio RX par session ; processus 1800 s. |
+| session-300 | Même observe(), 300 s utiles, processus 360 s, trois ouvertures, six lectures fixes et 1 Mio RX. |
+| session-reconnect | Même collecteur borné de reconnexion : processus 600 s, fonctionnel au plus 360 s, dix lectures, trois ouvertures, 1 Mio RX. |
+| hoben-live | Vrai HobenClient/coordinator HA, superviseur C2a ; 300 s utiles, 360 s absolues cleanup inclus, 1 Gio/128 PID, six refreshs/deux ouvertures, aucun quota RX. |
+| all | H1/H2 puis suite existante session-300 → reconnexion ; plafond des deux sessions 1020 s, total processus 1800+1020=2820 s. |
 
-## Dépendance : seconde PR sur experimental après fusion de la première
+Le superviseur parent possède un seul groupe isolé. Chaque transition fixe doit
+être reconnue et acquittée après armement du délai, sans prolonger le précédent.
+Une seconde est réservée à SIGKILL/reaping ; groupe entier arrêté à expiration,
+annulation et sortie normale, captures privées H1/H2 supprimées avant export.
+Aucun stdout/stderr candidat, token GitHub/Actions/OIDC, hook Python, fichier de
+commandes Actions ou dépendance libre transmis au collecteur.
 
-Le fichier doit aussi exister au même chemin sur le ref choisi. Avant report,
-le bouton sur `main` ne rend donc pas le fichier disponible sur `experimental` ;
-un dispatch vers un ref sans ce fichier n'est pas un lancement valide. Ne pas
-utiliser une ancienne voie, un rerun ou un autre checkout pour le contourner.
+`all` poursuit après une campagne H1/H2 entièrement collectée et validée, dont
+le résultat scientifique reste INCONCLUSIVE. Une campagne interrompue bloque
+les sessions suivantes. Le premier scénario session doit être admissible avant
+la reconnexion, selon le moteur existant ; sinon la reconnexion reste NOT RUN.
+La sélection autonome session-reconnect utilise le même collecteur et ses
+critères, sans fabriquer un premier scénario réussi.
 
-Après validation/fusion de cette première PR par MANAGER, une **seconde PR**
-reportera l'interface sur `experimental` et raccordera les collecteurs existants.
-Elle devra conserver acteur/ref/SHA, revue/CI exactes, anti-rejeu, approbations
-d'environnement effectivement requises et recheck avant secrets, isolation des
-collecteurs et de la publication, lecture seule et TLS vérifié `myhoben.fr:465`.
-La décision MANAGER par commentaire pré-fusion est supprimée pour cette nouvelle
-voie manuelle ; elle n'est pas remplacée par une approbation fabriquée.
+## Résultats et confidentialité
 
-Les plafonds existants demeurent : H1/H2 six sessions par hypothèse, 90 s et
-1 Mio RX par session ; session-300 300 s utiles / 360 s de processus ; reconnexion
-600 s de processus avec maximum fonctionnel 360 s ; suite 1020 s. Les critères
-EOF, nouvelle génération, 120 s stables et lecture corrélée restent requis.
-La phase 2 devra distinguer SUCCESS, FAILURE, INCONCLUSIVE et NOT RUN, arrêter
-`all` en cas de condition bloquante et nommer les scénarios non exécutés.
+SUCCESS signifie une session fonctionnelle vérifiée ; FAILURE une interruption,
+un processus ou un nettoyage en échec ; INCONCLUSIVE une observation non concluante ;
+NOT RUN un scénario non sélectionné, non commencé ou dont le démarrage n'est
+pas attesté par un rapport validé. Sans rapport vérifiable après un échec ou une
+annulation de capture, les scénarios restent NOT RUN et le résultat global est
+explicitement FAILURE. Ce statut ne prouve aucune absence de connexion.
+L'échec ou l'annulation d'un job ne transforme jamais les étapes sélectionnées
+en observations INCONCLUSIVE ; seuls les résultats validés font foi.
+H1/H2 reste INCONCLUSIVE même quand la collecte se termine correctement : cela
+ne démontre jamais une frontière OpenedClient. Le workflow peut terminer sa collecte
+avec ce résultat scientifique, tandis que les sessions exigent leur vrai SUCCESS.
 
-Aucune activation de `main` par simple copie de fichiers : elle exigera une
-décision propriétaire distincte après installation et validation de ses contrôles.
-Aucun test réel par DEV ; étape 8 HA toujours suspendue.
+Les projections Python et lecteurs Node historiques sont réutilisés. Les limites
+individuelles restent 340 Kio H1/H2, 4096 octets session-300 et 8192 suite/reconnexion.
+Le bundle fermé ajoute seulement sélection, provenance, étapes armées et résultat
+du processus ; maximum 358400 octets, base64 canonique borné, transmis en quatre
+valeurs de 120000 caractères maximum pour respecter aussi la limite exec Linux.
+Il est revalidé et
+matérialisé sur un runner distinct sans environnement ni secret Hoben, puis publié
+sept jours au plus. Aucun RX, registre, valeur domestique, GUID, exception libre
+ou identifiant privé. Les anciennes conventions de provenance des sous-rapports
+restent intactes et sont vérifiées contre le même SHA exécuté et la PR revue.
 
-## Voies retirées et historique
+TLS certificat et hostname vérifiés vers myhoben.fr:465 ; lecture seule, aucune
+association ou commande poêle, aucune écriture Modbus 06/16/22. EOF, CloseClient,
+quarantaine et corrélation ne sont pas réinterprétés. boundary_proven=false reste
+obligatoire ; aucun succès réel revendiqué par les tests synthétiques.
 
-Les trois anciens workflows `live-validation.yml`, `manager-live-hoben.yml` et
-`opened-client-boundary.yml` sont retirés de `.github/workflows/`. Leurs copies
-figées restent dans `tests/fixtures/retired_workflows/`, uniquement pour les
-régressions hors ligne. GitHub ne les exécute pas depuis ce dossier. Les scripts
-et codecs historiques restent en place ; aucun workflow actif ne les appelle.
-`validate.yml` et `publish-release.yml` sont inchangés.
+## Retrait des anciennes voies
 
-Retirer un fichier empêche ses nouveaux déclenchements depuis cette définition ;
-cela n'annule pas un ancien run déjà créé. Le propriétaire doit contrôler les
-runs historiques avant toute activation ultérieure. DEV n'en relance ni n'en
-annule aucun à l'occasion de cette PR.
+Les sept anciennes définitions live/préflight sont déplacées hors d'Actions dans
+`tests/fixtures/retired_workflows/`. Leurs scripts et régressions restent testés
+hors ligne ; leurs commentaires/gates ne sont jamais un repli de la nouvelle voie.
+Seuls hoben-manual, Validate et publication de release restent dans Actions.
+Le retrait ne supprime ni ne relance les runs déjà créés ou leurs claims.
+Une activation future de main exige une décision propriétaire distincte après
+installation et validation de ses contrôles ; aucune PR main dans cette phase.
 
-Cette phase ne retire pas encore les définitions propres à `experimental` :
-leur suppression appartient à la seconde PR. Les anciennes procédures ci-dessous
-et dans les archives ne constituent aucune autorisation de les lancer.
+
+## Environnement HA et formulaire main
+
+Le choix hoben-live utilise exclusivement hoben-live, sans changer les protections
+hoben-experimental. La politique protégée acceptée par le propriétaire, les
+preuves du rapport schéma 3, les limites et le plan minimal de formulaire main
+sont détaillés dans [C2b](ha-session-live-c2b.md). Aucune PR main ni exécution
+réelle dans le développement C2b. Le bouton actuel peut nécessiter la publication
+séparée de cette seule option sur la branche par défaut.

@@ -20,12 +20,17 @@ The README should contain a visible disclaimer:
 
 ## Goals
 
-L'[arbitrage propriétaire #119](https://github.com/Guillaume0385/ha-hoben-community/issues/119)
-du 24/10/2026 autorise une première PR d'infrastructure issue de `main` et ciblant
-`main`, sans promotion du runtime expérimental. Le [bouton manuel](docs/hoben-manual-workflow.md)
-reste NOT RUN sur main et sans collecteur en phase 1. Après fusion MANAGER,
-une seconde PR reportera l'interface et raccordera les scénarios sur experimental.
-Aucune activation réelle de main ni reprise de l'étape 8 HA par cette installation.
+La voie live courante de #119 est le [workflow manuel](docs/hoben-manual-workflow.md)
+sur experimental : sélection H1/H2, session-300, reconnexion autonome ou all.
+Le dispatch propriétaire remplace le commentaire d'admission pré-fusion ; revue,
+CI, provenance, environnement/approbations, anti-rejeu, budgets et confidentialité
+restent requis. Main reste inactive. L'étape 8 avance par tranches A/B/C selon
+l'arbitrage actuel de #112 ; A fournit le contrat partagé et B raccorde le vrai
+client HA avec tests hors ligne. Le test hoben-live reste réservé à C, sans
+nouvelle voie live dans B. Les descriptions
+push/labels/commentaires d'admission plus bas sont historiques et ne réactivent
+aucune ancienne voie. La précondition du premier scénario reste imposée dans all.
+
 
 The project aims to provide a stable Home Assistant integration for Hoben pellet stoves that communicates through the same remote service used by MyHOBEN, without requiring hardware modification or a contact relay.
 
@@ -105,14 +110,16 @@ remain allowed:
    `OpenedClient` result to the post-open persistent receive loop on the
    reference Osmose. This may validate message-length/type-transition behavior
    but must not invent or change an OpenClient/OpenedClient format. If the
-   handoff cannot be established safely, the persistent-session task must block
-   rather than guess.
+   handoff cannot be established safely, ordinary persistent reception must
+   block rather than guess. The narrowly scoped `session-300` experiment below
+   is an explicit exception for evaluating a hypothesis, not a framing proof.
 
 Unknown OpenClient/OpenedClient facts remain documented as unknown in
 `protocol.md`. Universal boundary knowledge is not a prerequisite for the
-reference-Osmose v0.1 target, but the **local handoff needed by the persistent
-session must itself be proven safe** before long-lived reception or DataUpdated
-state handling is enabled.
+reference-Osmose v0.1 target. Outside the opt-in `session-300` experiment below,
+the **local handoff needed by the persistent session must itself be proven
+safe** before long-lived reception is enabled. The experiment does not authorize
+DataUpdated state handling or change the current Home Assistant client.
 
 New v0.1 tasks should prioritize post-opening read-only behavior, V4 semantic
 decoding, diagnostics, polling reliability and deterministic tests. No new
@@ -121,7 +128,179 @@ started unless this scope decision is explicitly reversed.
 
 ### Priorité : session persistante V4 en lecture seule
 
-Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les lectures V4, gérer les messages inconnus sans désynchronisation et reconnecter uniquement après perte de session. Aucun framing non prouvé ne peut être supposé. Tests hors ligne et live requis.
+Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les lectures V4, gérer les messages inconnus sans désynchronisation et reconnecter uniquement après perte de session. Aucun framing non prouvé ne peut être présenté comme confirmé. L'hypothèse locale ci-dessous reste limitée à son scénario expérimental. Tests hors ligne et live requis.
+
+### Décision de périmètre — handoff expérimental `session-300`
+
+La [décision du propriétaire sur #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+et la [tâche MANAGER de #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+distinguent trois niveaux :
+
+- **Preuve factuelle :** seul le préfixe V4 décodable de 48 octets est établi.
+  La longueur totale d'OpenedClient reste **À VALIDER** ; les observations H1/H2
+  conservent `boundary_proven=false`. Une lecture TLS ne prouve aucune frontière.
+- **Décision de périmètre :** pour le seul scénario opt-in et borné
+  `session-300`, sur `experimental` et l'Osmose V4 de référence, le futur
+  gestionnaire pourra traiter les octets suivant le préfixe strictement accepté
+  comme trafic post-ouverture. C'est une **hypothèse expérimentale autorisée**,
+  sans nouvelle preuve locale ni généralisation aux autres profils.
+- **Validation fonctionnelle :** les runs 300 s historique #38766830984 et
+  #38828423500 sont consignés `continuous_300s` par MANAGER ; le second scénario
+  de ce dernier reste `inconclusive/protocol`, donc la suite non validée.
+  Une décision de périmètre ne valide ni le code ni son résultat, et un
+  résultat fonctionnel ne démontre pas une longueur totale universelle.
+
+Le framer de cette voie s'arrête en cas d'ambiguïté. Ping et DataResponse corrélée
+gardent leurs traitements. Le [complément propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
+autorise seulement l'ignorance bornée de DataResponseServer et DataUpdated après
+validation de leur en-tête MBAP et calcul de leur longueur exacte, sans décodage
+de données ni mise à jour HA. Type inconnu, autre type non pris en charge, MBAP
+invalide, suffixe indécidable ou dépassement de budget arrêtent la session,
+sans saut d'octets ni resynchronisation devinée.
+L'[arbitrage propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+ajoute un contrat expérimental CloseClient de deux octets (05 + sous-code),
+avec fermeture typée et reconnexion bornée, sans le qualifier de longueur
+universelle ni d'EOF TLS. Sous-code numérique et phase post-open seulement
+dans les diagnostics ; succès après nouvelle session et lecture corrélée.
+Les lectures restent fixes et strictement en lecture seule, avec TLS vérifié
+vers `myhoben.fr:465` et un seul propriétaire RX.
+
+La tranche documentaire 7/8-A n'autorisait aucun lancement réel. La tranche
+7/8-B fournit une voie dédiée (300 s utiles, plafond global 360 s, trois
+ouvertures, 1 Mio RX et six lectures fixes au maximum) qui reste soumise aux
+gates et à une décision MANAGER distincte avant merge ; voir le
+[contrat de la voie](docs/experimental-protocol-workflow.md#voie-session-300--hypothèse-expérimentale).
+`NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
+l'étape 7 et bloquent l'étape 8. Aucun changement HA ou usage par `hoben-live`
+avant une étape 7 réellement concluante ; aucune promotion `main` automatique.
+
+### Suite expérimentale — verrou L2 installé, lifecycle privé L5 désactivé
+
+Le moteur offline 7/8-F est fusionné par la PR #93 ; le contrat d'admission
+spécifique `session-suite` de G1 est fusionné par la PR #94. G2, fusionnée par
+la PR #95 après revue MANAGER et quatre checks réussis, raccorde ce gate, un
+launcher à plafonds externes et la publication sous verrou. H (PR #96) a fusionné
+le retrait isolé de `suite-installation` et du `needs`, après revue/CI et décision
+MANAGER distincte, au SHA `d382540b056adf189bc7969b3d9905ab7dc8cd8f`.
+Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6205715813)
+du run #38828423500 tentative 1 consigne `continuous_300s`, puis
+`inconclusive/protocol` après 181042 ms : trois lectures réussies, deux Pong
+inhibés, aucun EOF/reconnexion. Suite `not_successful`, statut global failure ;
+les deux scénarios ont été exécutés, ce n'est pas NOT RUN. La cause précise
+reste inconnue, sans preuve de CloseClient ni causalité timeout Ping.
+I a livré les diagnostics fermés du second scénario par la PR #97, schéma v2
+Python/Node explicite avec compatibilité historique v1 et sous-rapport 300 s
+inchangé ; le [plan](docs/session-suite-plan.md) décrit les critères. Un nom de
+discriminant rejeté ne signifie pas message complet ou frontière prouvée.
+Framing, retry, gates, contrat et budgets restent inchangés. Aucun run nouveau
+autorisé par cette tranche ; DEV ne publie ni approbation ni claim réel.
+Le [bilan J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)
+consigne ensuite le run #38839083483 tentative 1 sur le merge #97
+`991fbb8aefb3e3df9c38cd0eed38944a03e88cc7` : premier scénario continu 300 s,
+second `inconclusive/protocol` à 181260 ms, refus
+`message_classification/protocol/close_client`, lecture 3, aucun EOF/reconnexion.
+Le chemin de refus local est identifié ; message complet, sous-code, fermeture
+serveur et causalité timeout Ping restent non prouvés. Ne pas réinterpréter le
+rapport v1 antérieur. Les deux scénarios ont tourné, suite toujours non validée.
+
+K livre uniquement une [proposition documentaire de quarantaine](docs/session-eof-quarantine-proposal.md)
+**PROPOSÉE / NON INSTALLÉE** : second scénario opt-in, première génération après
+120 s et inhibition exercée, gel TX et attente passive EOF. L3 remplace la borne
+proposée historique T0+300/attente 180 par EOF ET réouverture avant T0+240.
+Le propriétaire RX serait unique, les suffixes privés non interprétés, la
+reconnexion réservée au lifecycle après EOF admissible, jamais sur le seul refus.
+La portée active demeure Ping/DataResponse seulement, avec refus protocolaire
+des autres types ; cette proposition n'adopte aucune exception. Implémentation,
+contrat/gates et activation nécessiteraient des décisions MANAGER séparées.
+Aucun changement runtime, test exécutable ou nouveau live dans K.
+L1 est fusionnée par la PR #99 au SHA
+`c220072d82ec9a34d178a3fa15406ea841ed527a`, quatre checks réussis et 3058 tests
+offline. Elle ajoute une politique d'état pure et ses seuls tests unitaires,
+sans import/appel depuis les chemins actifs. Timestamps et événements injectés,
+latch conservateur, échéance absolue et candidat EOF provisoire ne réalisent ni
+gel TX ni attente TLS ni reconnexion. La [limite de L1](docs/session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+reste distincte du futur runtime de quarantaine, NON INSTALLÉ/NON ACTIVÉ.
+Le raccordement, l'évolution éventuelle des rapports/admissions et toute
+activation exigent d'autres décisions MANAGER ; aucune exception active ici.
+L2 est installé par la PR #100, fusion
+`ea08be522c73fcca742c4bacbeafa7df75e8b0c7`. Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209326192)
+vérifie le run #38859779145 tentative 1 : préalable `quarantine-installation`
+en échec attendu, deux NOT RUN `quarantine_not_installed`, tous les jobs aval
+skipped avant admission/claim/secrets. Ce verrou inconditionnel sans permission/
+checkout/environnement reste intact. Aucune décision de scénario ne le contourne.
+
+L3 fournit seulement un contrat temporel pur immuable et des calculs/tests
+non raccordés : T0 = première génération du second scénario strictement acceptée,
+Pong normaux avant 120 s, inhibition dès 120, futur diagnostic fermé dès 150,
+EOF admissible ET nouvelle ouverture avant 240, puis 120 s stables sur cette même
+génération avec Pong/lecture corrélée. Fenêtre de récupération totale 120 s,
+maximum fonctionnel 360 s, fin précoce permise ; égalités de deadline et courses
+ambiguës refusées. Un EOF seul/reprise tardive/seconde perte ne valide rien.
+Les minima observation/process/suite ne sont pas prolongés pour obtenir 120 s.
+Premier scénario toujours 300 s, plafonds 360/600/1020 et budgets 350+10/590+10,
+trois ouvertures/1 Mio, six/dix lectures >= 60 s inchangés ; ouverture initiale et
+nettoyage séparés du temps fonctionnel mais soumis à ces plafonds.
+Le [contrat proposé](docs/session-eof-quarantine-proposal.md#contrat-temporel-l3-pur-sans-statut-de-réussite-réel)
+limite les futures observations à des temps relatifs, compteurs/tailles/offsets
+bornés, états/motifs/catégories fermés au rejet et origine/absence EOF. Aucun
+brut public ou privé autorisé, aucune instrumentation branchée ; clés/version/
+cohérence Python/Node restent à spécifier. Avant usage, un contrat d'admission
+versionné doit lier ces constantes ; anciennes décisions/claims/rapports ne les
+valident pas. L3 est fusionnée par #101 au SHA
+`11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8`, CI quatre checks/3220 tests offline
+réussis ; le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800)
+consigne le run de push #38862945022 arrêté au verrou, sans collecte.
+
+L4 livre un [pont privé de session](docs/session-eof-quarantine-proposal.md#pont-de-session-l4-livré-capacité-fermée-et-défaut-off),
+fusion #102 `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`, quatre checks/3294 tests
+offline réussis, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676).
+Run post-fusion #38868819504 arrêté au verrou L2 ; le pont reste désactivé chez les
+consommateurs. La capacité interne à usage unique exige les objets
+exacts SessionReconnect/NoPongAfter120 avant ouverture ; seuls tests offline
+la fournissent, aucun factory/client/collecteur/launcher/workflow/env/input.
+Le rejet close_client admissible déclenche sans await un latch irréversible,
+revérifié sous verrou par Pong/lecture ; une TX engagée rend l'observation
+non admissible. Signal privé au waiter sans close/replay, état/budget suspendus,
+seul RX passif sous échéances/budgets existants, sans framer ni capture/double
+comptage. EOF transport admissible seulement, candidat privé figé révocable ;
+aucun retry ni statut recovered_120s avec la seule capacité de session L4.
+La garde autorise uniquement l'import de politique par V4Session et interdit
+tout fournisseur consommateur. Régressions par défaut et tests de courses/
+cleanup sont offline. Aucun changement d'ouverture/identité/TLS/profil,
+V4Lifecycle, HobenClient/HA, collecteur, launcher/superviseur, rapport/validateur/
+export, gate/contrat, workflow/budget/verrou ni diagnostic 150 s actif.
+Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée restent
+des tâches MANAGER séparées, puis retrait/activation distincte après revue/CI.
+Aucune nouvelle observation réelle ou capture brute autorisée par L4.
+
+L5 livre le [lifecycle privé](docs/session-eof-quarantine-proposal.md#lifecycle-l5-livré-consommation-liée-à-lorigine-et-récupération-bornée),
+fusionné par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`, défaut-off et sans fournisseur consommateur.
+Sa capacité à usage unique lie exactement les propriétaires du second scénario
+et les deadlines L3 ; seules factories de test la fournissent. Notification locale
+de suspension, wait_connected bloqué et requests sans replay/close. Consommation
+unique d'un EOF d'origine encore candidat avant cleanup, jamais d'un snapshot
+révoqué ; lien et arrêt recontrôlés durant cleanup/backoff/ouverture/acceptation.
+Cleanup possédé distinct des stops publics concurrents ; terminal révoquant.
+Nouvelle V4Session stricte, identité/budgets/cadence partagés, pas de réponse
+tardive ni replay ; acceptation avant T0+240 avec 120 s encore possibles sous
+T0+360 et les plafonds existants. Timers privés bornés, trois ouvertures au plus,
+Pong rétablis ; deuxième perte terminale, sans cumul ni nouvel essai. Les tests
+offline démontrent ces effets, pas un nouveau recovered_120s/public rapport.
+Sans capacité, comportement antérieur conservé, refus protocolaire sans retry.
+Clients/HA, collecteurs/launchers/superviseurs, framer/protocole/ouverture/TLS/
+identité/profils, rapports/validateurs/export et gates/contrats/workflows/budgets
+inchangés. Diagnostic150 s, rapports/admission versionnée et raccordement du
+collecteur restent des tâches MANAGER séparées, puis activation distincte revue.
+Aucun live, claim, décision, rerun ou brut ; verrou L2 et étape 8 suspendue conservés.
+Les plafonds de processus 360/600/1020 s sont appliqués par un parent superviseur
+et testés hors ligne, indépendamment des timeouts asyncio ; les budgets ne sont
+pas des entrées libres issues d'un commentaire. La validation de suite/reconnexion
+exige premier scénario admissible et second `recovered_120s`, avec rapport
+anonymisé vérifié et `boundary_proven=false`. Les runs observés ne les satisfont pas ;
+l'étape 8 reste suspendue.
+Aucun développement du client HA, test hoben-live ou promotion main n'est autorisé
+par cette préparation. La validation historique 300 s ne valide pas la nouvelle
+suite ni une reconnexion réelle ; aucune frontière universelle n'est établie.
 
 ### Critères de développement actifs — session persistante V4
 
@@ -130,8 +309,9 @@ Après ouverture acceptée : conserver TLS, répondre aux Ping, corréler les le
 The already implemented `OpenClient` / `OpenedClient` codec, validation and
 profile-selection path stays frozen. This series starts **after an opening has
 already been accepted** by the existing strict implementation. It must not invent
-a new OpenClient layout, change association behavior, guess an unresolved
-OpenedClient suffix, or broaden model support.
+a new OpenClient layout, change association behavior or broaden model support.
+Unresolved opening bytes remain unclassified outside the explicitly scoped
+`session-300` hypothesis above; that hypothesis never becomes a confirmed fact.
 
 The intended lifecycle for the reference Osmose is:
 
@@ -179,18 +359,22 @@ may later refresh state between polls once its safe merge semantics are proven.
 
 **Task 1 — post-open stream framing and router**
 
-First prove the safe handoff from the existing accepted OpenedClient path to
-post-open reception on the reference Osmose. This is a bounded validation of the
-transition only, not authorization to redesign OpenClient/OpenedClient. The
-implementation must never reinterpret unknown trailing opening bytes as a
-post-open message. If delayed/unclassified opening bytes are observed or the
-handoff cannot be established deterministically, stop and mark the task blocked
-for MANAGER/protocol review.
+Outside `session-300`, first prove the safe handoff from the existing accepted
+OpenedClient path to post-open reception on the reference Osmose. This is a
+bounded validation of the transition only, not authorization to redesign
+OpenClient/OpenedClient. Unknown trailing opening bytes must remain unclassified;
+if the handoff cannot be established deterministically, stop and block for
+MANAGER/protocol review. In `session-300` only, evaluate the named experimental
+hypothesis above, retain its uncertainty and stop on any undecidable suffix.
 
 Then create a deterministic HA-independent parser/router for traffic received
-after that proven handoff. It must support Ping/Pong,
+after a proven handoff, or within the scoped experiment. The general target
+includes Ping/Pong,
 `DataResponseClient (0x0E)`, `DataUpdated (0x1B)`, documented close/error
 conditions that are valid post-open, and fragmented/coalesced TLS reads.
+For `session-300`, the narrower scope above applies: Ping and correlated
+DataResponse, plus exact header-validated discard of 07/1B under the owner's
+Issue #112 clarification. Their payload is never interpreted or merged.
 
 For `0x0E`, the MyHOBEN prefix is one byte and the embedded Modbus/TCP ADU size
 comes from the MBAP Length field. For `0x1B`, the prefix is five bytes and the
@@ -334,6 +518,39 @@ date/time 1036–1038, practical meaning of 1033/1042) remains deferred behind
 session stability; these unknowns are not completed or discarded.
 
 
+### Contrat v3 livré, correction L6ter candidate sans producteur
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`,
+quatre checks/3350 tests offline/308 HA réussis. Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
+confirme le run #38889510562 arrêté au verrou L2, sans collecte ni décision live.
+L6 est fusionnée par #104, L6bis par #105 au SHA
+`182daa62177c74bb14dc6412a166e95ad36c8350` : contrat de rapport suite/second v3,
+avec validation et projection
+Python/Node, fixtures communes, chronologie relative 120/150/240/360 et agrégat
+RX fermé. Les couples historiques 1/1 et 2/2 restent strictement inchangés ;
+les producteurs actifs continuent d'émettre v2. Premier sous-rapport v1,
+provenance, 8192 octets/10924 base64, revalidation et publication isolée restent
+requis. Contrat livré sans producteur v3 :
+aucune instrumentation 150 s ni capacité fournie à un consommateur. Le reçu
+valide à sa consommation ne vient jamais d'une copie finale révoquée. Collecteur,
+instrumentation et admission versionnée demandent de nouvelles tranches, puis
+activation distincte après revue/CI ; verrou et graphe inchangés. Suite 7 non
+validée, étape 8 suspendue, aucun live/claim/décision/rerun par DEV.
+
+La tranche L6ter est une correction contractuelle candidate, puis livrée après
+revue/fusion MANAGER. Elle distingue les livraisons non vides first/last_rx des
+décisions réelles de rejet/validation : le parsing peut suivre la dernière
+livraison et référencer des octets conservés avant150, sans les recompter après.
+Un refus antérieur150 peut être observé comme état, sans nouveau rejet inventé.
+La cadence >=60s reste celle des requêtes ; aucune dernière livraison n'est
+extrapolée de leur nombre. Offsets globaux bornés, génération/stabilité et tous
+les critères EOF/reprise/arrêts L6bis restent requis. Voir le
+[contrat normatif](docs/session-suite-plan.md#agrégat-rx-fixe-à-partir-de-t0150000-ms).
+Seuls validateurs/tests/docs changent ; aucun runtime, hook ou activation.
+Le travail local L7 incomplet est préservé, non publié, suspendu jusqu'à fusion
+L6ter et réautorisation distincte ; admission/routage fixe puis retrait du verrou
+restent séparés. Aucune nouvelle preuve réelle ou frontière protocolaire.
+
 ## Fonctionnalités futures
 
 Tâche globale : réévaluer les fonctionnalités et contrôles après fiabilisation de V4 en lecture seule. Voir [fonctionnalités futures](docs/fonctionnalites-futures.md). Aucune commande physique autorisée.
@@ -349,6 +566,143 @@ Tâche globale : réévaluer les fonctionnalités et contrôles après fiabilisa
 Les détails et pistes non normatives restent dans [fonctionnalités futures](docs/fonctionnalites-futures.md). Cette séquence ne constitue **aucune autorisation d'écriture au poêle**.
 
 # Architecture
+
+## Étape 8, tranche A — contrat persistant partagé
+
+L'[arbitrage MANAGER de #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+autorise le préalable A, séparé du futur adaptateur `HobenClient` (B) et de
+l'admission/test manuel `hoben-live` (C). Les artefacts des runs #40181662106
+et #40186510530 sur `4949a6c2938108eb37c9c435d700718b9d63325f` ont été examinés
+et revalidés Python/Node : session-300 continue 300 s, puis CloseClient sous-code
+3, nouvelle génération avec réponses corrélées et 120 s stables. H1/H2 reste
+inconclusif, `boundary_proven=false`. Ces résultats du gestionnaire expérimental
+ne valident ni le futur client HA ni une frontière universelle.
+
+`V4Session(mode=V4SessionMode.PERSISTENT)` active explicitement le même framer,
+RX unique, TX sérialisées, corrélation, fermeture et cleanup que les expériences.
+Le mode par défaut reste `CONSERVATIVE`. Le mode persistant refuse tout budget
+Session300/SessionReconnect ou capacité d'inhibition/quarantaine : aucun budget
+de campagne n'est réinitialisé ou élargi. Il conserve une TLS saine sans quota
+cumulatif de lectures/octets et sans tâche de polling. La planification restera
+chez le propriétaire HA en B ; aucune modification de `client.py` en A.
+
+| Ressource / opération | Contrat persistant |
+| --- | --- |
+| Réception | Une seule lecture TLS, au plus 4096 octets livrés ; framer incrémental existant, MBAP 2–254, corps 07/1B ignorés sans rétention. Résidu après CloseClient borné à la livraison, jamais traité sur nouvelle génération. |
+| Lecture V4 | Une seule demande en attente ; deuxième appel concurrent refusé ; délai total positif fini, 30 s par défaut, incluant attente TX/émission/réponse. Aucun replay automatique. |
+| Silence | Pas de timeout d'inactivité RX ni de reconnexion due à un intervalle de polling. |
+| Ouverture | `V4OpeningOptions(build, device_info, handshake_timeout)` immuable et validé avant acquisition ; défauts historiques conservés, délai handshake 30 s par défaut. DeviceInfo n'est jamais exporté. |
+| Transport réel | Implémentation TLS existante, certificat/hostname vérifiés, destination fixe myhoben.fr:465 ; connect/write/close bornés à 10/10/5 s par défaut. Pas de nouvelle destination ni bypass. |
+| Reconnexion | `V4Lifecycle(mode=PERSISTENT)` : une ouverture initiale et au plus huit retries, chacun avec délai fini de 0–30 s ; défaut 1/2/4 s. Budget de durée de vie non rechargé par succès ou refresh ; épuisement terminal. |
+| Erreurs | EOF/perte transport ou CloseClient complet peuvent consommer ce budget ; timeout applicatif, lecture abandonnée, refus protocolaire/auth ne le peuvent pas. Cleanup non confirmé interdit toute nouvelle ouverture. |
+| Arrêt | close/abort existants arrêtent RX, TX, timers et waiters ; aucune tâche de reconnexion après stop. |
+
+Le futur adaptateur utilisera seulement `connect`, `wait_connected`,
+`request_v4_data`, `wait_stopped`, `close`, `snapshot`, `witness`,
+`opening_metadata` et `accepted_device_guid_for_persistence` de V4Lifecycle.
+Les métadonnées sont immuables et allowlistées. L'identité acceptée reste privée,
+disponible même après une erreur terminale pour persistance, puis effacée à
+l'arrêt explicite ; aucune ouverture refusée ne la remplace. Le seul dernier
+`close_client_subcode` UInt8 est conservé dans le snapshot, sans historique RX,
+GUID ou valeur domestique. Une réouverture ne prouve une récupération qu'après
+une nouvelle réponse corrélée, identifiée par la génération du `witness`.
+
+La PR A et ses tests synthétiques ne raccordent pas encore Home Assistant.
+Après revue/fusion de A, MANAGER attribuera séparément B, puis C : critères HA,
+rapport fermé SUCCESS/FAILURE/INCONCLUSIVE/NOT RUN et admission manuelle hoben-live
+sur SHA exact devront être préparés/revus. Aucun ancien rapport one-shot,
+collecteur renommé, workflow historique retiré ou succès de A ne valide ce test.
+DEV et CI ordinaires restent hors ligne ; aucun live ni promotion main implicite.
+
+## Étape 8, tranche B — véritable client Home Assistant
+
+La consigne active de #112 autorise B après fusion de A par #123 au SHA
+`98d87336c31ab64751f5dd9bfbb7cec5682dfcae`. `HobenClient.async_refresh()` utilise
+désormais directement `V4Lifecycle(mode=PERSISTENT)` et les API publiques de A.
+Un seul lifecycle est construit au premier refresh, puis conservé entre les
+rafraîchissements. Le coordinator planifie toujours à 60 s et convertit les
+snapshots ; il n'accède ni au transport ni au framer. Le gestionnaire partagé,
+les codecs et les budgets de campagnes restent inchangés dans B.
+
+L'API constructeur, RawStoveSnapshot immuable, dernier snapshot réussi,
+profil et accès de persistance sont conservés. Build, DeviceInfo et délai
+d'ouverture passent par V4OpeningOptions ; le délai de lecture borne la demande
+partagée. `max_attempts` (1–2, défaut 2) et `retry_delay` (0–30 s, défaut 1)
+définissent maintenant le budget **de durée de vie** du client : aucun reset
+au refresh ou après succès. Pas de replay d'une lecture échouée, retry de timeout
+applicatif ou recréation de lifecycle masquant son épuisement. Une erreur terminale
+reste en échec jusqu'à création explicite d'un nouveau client/rechargement HA.
+
+Après CloseClient complet, EOF ou perte TLS, le refresh en échec rend HA
+indisponible. Le suivant peut attendre la reconnexion bornée, mais ne rend un
+nouveau snapshot qu'après une nouvelle réponse V4 corrélée et un témoin de lecture
+de la même génération. Une ouverture seule ne rétablit pas la disponibilité.
+Le DeviceGuid accepté est conservé même si cette lecture échoue ; HA persiste
+l'identité acceptée et non nulle aussi sur ce chemin d'erreur, sans remplacer
+l'erreur causale par un éventuel échec de stockage. Les refus d'ouverture ne
+modifient pas l'identité. Annulation, setup échoué et unload ferment les propriétaires
+RX/TX/waiters ; reload crée un client propre avec l'identité persistée.
+
+L'association explicite initiale conserve son handshake ponctuel et son unique
+soumission, sans nouvelle fonction ni appel automatique depuis refresh. Si un
+appelant demande explicitement une association après des lectures sur le même
+objet, la session persistante est fermée d'abord et son budget n'est pas réarmé ;
+les futures lectures nécessitent un nouveau client. Le config-flow existant
+emploie déjà un client frais par soumission et reste inchangé.
+
+Les diagnostics ajoutent seulement le dernier sous-code CloseClient UInt8,
+et les erreurs post-open conservent catégorie/raison/phase/sous-code fermés.
+Les snapshots de registres, identités, DeviceInfo, exceptions arbitraires et RX
+bruts restent privés. `safe_report.state=ready` désigne l'API non fermée,
+pas une preuve de connexion ; la disponibilité HA dépend du refresh réussi.
+
+Validation B uniquement déterministe, dont HA réel sous transport synthétique.
+La préparation du scénario manuel hoben-live et de son admission est **C, non
+réalisée par B**. Les anciens scripts/rapports one-shot conservés ne prouvent
+plus une seconde ouverture ni la validation live de la session persistante.
+Aucun workflow, gate, lancement réel ou promotion main dans cette tranche.
+
+## Étape 8, tranche C1 — contrat de preuve hors ligne
+
+La consigne MANAGER de #112 découpe C1 et C2. C1 ajoute uniquement une observation
+publique typée et sans effet de bord au client/lifecycle, un collecteur de
+fixtures du véritable coordinator HA, une projection fermée et une validation
+indépendante Python/Node. Voir [critères et budgets C1](docs/ha-session-proof-c1.md).
+Absence de perte : reconnexion INCONCLUSIVE ; aucune ouverture seule ni identité
+stable ne prouve une récupération. Les rapports portent obligatoirement offline,
+system_enforcement=NOT RUN et boundary_proven=false. Aucun workflow/admission,
+secret, réseau réel ou changement de comportement B. Les limites système et
+le raccord manuel hoben-live relèvent de C2, après revue/fusion et attribution.
+
+## Étape 8, tranche C2a — fondation inactive du test HA
+
+La décision propriétaire du 25/10 supprime le plafond RX uniquement pour
+hoben-live C2a/C2b ; aucun compteur ou proxy réseau n'est ajouté. Les budgets
+H1/H2 et session-300 demeurent inchangés. Le [superviseur C2a](docs/ha-session-runtime-c2a.md)
+borne le namespace contenant gardien, vrai client/coordinator et descendants :
+300 s utiles, 360 s maximum, mémoire agrégée 1 Gio, 128 processus/threads,
+six refreshs et deux tentatives. Le gardien termine le namespace même si la
+boucle HA ne coopère pas ; les refus et arrêts locaux ne prouvent pas une perte
+naturelle. Image/dépendances figées, réseau interdit, aucun secret chargé.
+L'achèvement attend 300 s monotones après le premier témoin et projette la
+session encore active/perte à cette borne ; la sixième lecture à 250 s ne suffit
+pas. Le cleanup est séparé, dans l'échéance externe originale de 360 s.
+
+Le rapport schéma 2 est distinct de C1 et toujours offline, admission NOT RUN,
+boundary_proven=false ; validation indépendante Python/Node. La planification
+virtuelle et les transports synthétiques des tests ne valent aucun live.
+C2b et #126 restent séparées : aucune entrée Actions, gate, publication ou
+modification main dans cette fondation.
+
+## Étape 8, tranche C2b — voie manuelle HA
+
+La décision propriétaire du 26/10 autorise le développement offline C2b après
+C2a. Le [contrat C2b](docs/ha-session-live-c2b.md) ajoute le choix hoben-live,
+le vrai client/coordinator et le superviseur partagé, admission/recheck stricts
+et rapport live distinct. Les scénarios historiques et all restent inchangés.
+300 s utiles/360 s absolues, mémoire/processus, aucun quota RX hoben-live.
+La promotion minimale du seul formulaire main est documentée pour une décision
+MANAGER séparée ; aucune PR main ou exécution réelle par DEV. Test réel NOT RUN.
 
 ## High-level architecture
 
@@ -431,10 +785,7 @@ and must not override current experimental environment policies.
 
 ### Historique : ancien gate main, non applicable aux PR experimental
 
-Retiré en phase 1 de #119 ; définition figée dans
-`tests/fixtures/retired_workflows/manager-live-hoben.yml`. Le contrat suivant est
-historique et ne doit pas être réinstallé comme procédure courante.
-The former workflow required installation on protected `main`.
+`.github/workflows/manager-live-hoben.yml` must be installed on protected `main`.
 Only `pull_request_target: labeled`, the exact label `manager-live-hoben`, exact
 actor `Guillaume0385`, a non-draft PR targeting `main` and the exact same head
 repository `Guillaume0385/ha-hoben-community` can authorize execution. Forks,

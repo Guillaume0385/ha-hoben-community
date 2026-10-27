@@ -1,4 +1,4 @@
-"""Frozen regressions of retired workflows; these fixtures cannot run in Actions."""
+"""Offline checks of live-workflow isolation and the actual summary shell steps."""
 
 import json
 import os

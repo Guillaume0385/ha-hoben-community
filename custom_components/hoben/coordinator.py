@@ -1,5 +1,6 @@
 """Home Assistant scheduling over the HA-independent read-only client API."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -21,6 +22,7 @@ from .helpers import log_unexpected_error
 from .myhoben import INITIAL_DEVICE_GUID
 from .profiles import StoveProfile
 from .safe_reports import wrap_error
+from .v4_experiment import ExperimentalCloseClientError
 from .v4_state import V4StoveState, decode_v4_snapshot
 
 if TYPE_CHECKING:
@@ -55,23 +57,24 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         self.client = client
 
     async def _async_update_data(self) -> HobenCoordinatorData:
-        """Decode before persisting a successful nonzero identity change."""
+        """Decode successful reads; also persist identities accepted before loss."""
         try:
-            snapshot = await self.client.async_refresh()
+            try:
+                snapshot = await self.client.async_refresh()
+            except (HobenError, asyncio.CancelledError):
+                # The shared owner can accept/rotate an identity before its
+                # following read fails. Persist that accepted identity without
+                # replacing the original error if storage itself fails.
+                if self.client.profile is StoveProfile.V4:
+                    try:
+                        self._persist_identity()
+                    except Exception as storage_error:
+                        log_unexpected_error(_LOGGER, storage_error)
+                raise
             if snapshot.profile is not StoveProfile.V4:
                 raise HobenUnsupportedProfileError(snapshot.profile)
             state = decode_v4_snapshot(snapshot)
-            device_guid = self.client.device_guid_for_persistence
-            if device_guid == INITIAL_DEVICE_GUID:
-                raise ConfigEntryError("Hoben client identity was not assigned")
-            # Copy through HA's update API; retain other data fields and options.
-            # The entry is always supplied explicitly to DataUpdateCoordinator.
-            assert self.config_entry is not None
-            if device_guid != self.config_entry.data[CONF_DEVICE_GUID]:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={**self.config_entry.data, CONF_DEVICE_GUID: device_guid},
-                )
+            self._persist_identity()
             return HobenCoordinatorData(raw=snapshot, state=state)
         except HobenInvalidCredentialsError as error:
             raise wrap_error(
@@ -83,7 +86,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 "Hoben authorization is required; pairing is not supported yet",
                 error,
             ) from None
-        except HobenTransportError as error:
+        except (HobenTransportError, ExperimentalCloseClientError) as error:
             raise wrap_error(
                 UpdateFailed, "Cannot connect to the Hoben service", error
             ) from None
@@ -106,3 +109,15 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             raise wrap_error(
                 ConfigEntryError, "Unexpected Hoben client failure", error
             ) from None
+
+    def _persist_identity(self) -> None:
+        """Store only the client's accepted nonzero identity, never report it."""
+        device_guid = self.client.device_guid_for_persistence
+        if device_guid == INITIAL_DEVICE_GUID:
+            raise ConfigEntryError("Hoben client identity was not assigned")
+        assert self.config_entry is not None
+        if device_guid != self.config_entry.data[CONF_DEVICE_GUID]:
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={**self.config_entry.data, CONF_DEVICE_GUID: device_guid},
+            )

@@ -69,6 +69,26 @@ Le code de lecture reçoit les données directement depuis le flux TLS et examin
 - `DataUpdated = 27 (0x1B)` : le code saute **5 octets** avant le décodeur Modbus. Les quatre octets intermédiaires sont des métadonnées de notification serveur ; leur sémantique exacte reste **À VALIDER** par capture réelle.
 - `DataResponseServer = 7` est également traité comme une réponse contenant des registres.
 
+### Réception expérimentale 07/1B sans interprétation du corps — périmètre autorisé
+
+La [demande propriétaire #112](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6388642026)
+autorise le framer de session expérimentale à ignorer **exactement** ces deux
+enveloppes : préfixe de 1 octet pour `0x07`, de 5 pour `0x1B`, puis MBAP.
+La longueur totale est respectivement `7 + MBAP.length` ou `11 + MBAP.length`.
+L'identifiant de protocole doit être nul et Length entre 2 et 254 inclus :
+totaux 9–261 et 13–265 octets. Le framer conserve au plus les en-têtes nécessaires,
+puis compte les octets restants sans décoder Unit ID, fonction, registres ou
+métadonnées. Une fragmentation ne crée aucune nouvelle frontière ; un corps
+incomplet n'est jamais compté comme message entièrement ignoré.
+
+C'est une décision de traitement limitée au chemin expérimental, **pas une
+validation réelle**, une interprétation de notification ni une mise à jour HA.
+Ping et DataResponseClient corrélée gardent leurs traitements. Les autres types
+connus non pris en charge sont refusés après le seul discriminant, avec erreur
+typée et numéro public ; CloseClient garde son chemin spécifique. Un type inconnu,
+MBAP invalide ou suffixe ambigu ne permet jamais de saut ou resynchronisation.
+Cette règle ne prouve aucune longueur universelle d'OpenedClient.
+
 ---
 
 ## 3. Types de messages MyHOBEN
@@ -372,6 +392,15 @@ code d'authentification. Un sous-code absent à EOF ou inconnu reste non interpr
 Les types réellement inattendus sont rapportés uniquement par leur numéro,
 sans payload ni hypothèse sur sa longueur. Aucun suffixe inconnu n'est reframé.
 
+> **Note normative — décision de périmètre, pas preuve protocolaire :** la
+> [décision #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+> et la tâche #81 permettent de préparer l'hypothèse locale opt-in `session-300`
+> décrite dans [project.md](project.md#décision-de-périmètre--handoff-expérimental-session-300).
+> Elle ne change ni le chemin ponctuel décrit ici ni la preuve factuelle :
+> longueur totale **À VALIDER**, observations `boundary_proven=false`, validation
+> fonctionnelle 300 s **NOT RUN**. La boucle cible du §16 et les observations
+> H1/H2 ci-dessous ne deviennent pas des capacités validées par cette décision.
+
 ### Profil V4 actif
 
 Le développement actuel vise uniquement V4. La règle statiquement établie dans
@@ -530,6 +559,47 @@ Ces correspondances viennent du code de l'application. **`05 02` →
 de 32 zéros et le DeviceGuid initial normal de 32 zéros. Aucun identifiant réel
 n'est publié. Les autres sous-codes restent confirmés statiquement seulement ;
 leur comportement exact sur le serveur actuel reste à valider.
+
+### Contrat expérimental CloseClient post-open — décision propriétaire, pas fait confirmé
+
+La décision propriétaire E8-C2a du 25/10 retire le quota RX du futur test
+hoben-live, sans modifier les faits de protocole, le framing ou les budgets
+H1/H2/session-300. Sa [fondation inactive](docs/ha-session-runtime-c2a.md)
+n'apporte aucune observation réelle ni preuve de frontière.
+
+La tranche E8-C1 ajoute des témoins publics locaux de génération/lecture/perte
+et cleanup, avec [contrat offline fermé](docs/ha-session-proof-c1.md). Ce sont
+des preuves de tests synthétiques du client/coordinator, sans nouveau fait
+protocolaire : `transport` n'affirme aucun EOF TLS, `close_client` reste distinct,
+et `boundary_proven=false` reste obligatoire. Framing, codec et comportement
+partagé inchangés ; aucune observation réelle C1.
+
+L'arbitrage E8 tranche A du même commentaire autorise désormais le mode typé
+`V4SessionMode.PERSISTENT` à réutiliser le framer et ces contrats post-open,
+indépendamment des budgets Session300/SessionReconnect. Ce préalable partagé
+ne raccordait pas encore le client HA. La tranche B réutilise maintenant ce
+mode dans le véritable HobenClient, avec validation déterministe seulement ;
+le test manuel hoben-live reste une tranche distincte non exécutée.
+Les hypothèses OpenedClient/préfixe 48
+octets et CloseClient/deux octets restent explicitement non universelles ; les
+succès fonctionnels E7 sur le SHA fusionné de #122 ne changent pas cette preuve.
+Voir le [contrat de ressources et API](project.md#étape-8-tranche-a--contrat-persistant-partagé).
+
+L'[arbitrage #112 du 25 octobre 2026](https://github.com/Guillaume0385/ha-hoben-community/issues/112#issuecomment-6395141200)
+autorise **exactement deux octets**, type `05` puis sous-code UInt8, dans le
+framer V4 expérimental sous handoff session-300/reconnexion. Attendre le second
+octet s'il est fragmenté ; conserver les octets coalescés suivants au framer,
+sans les traiter après cette fermeture ni les attribuer à une nouvelle session.
+Ce contrat n'établit aucune longueur universelle de CloseClient ou OpenedClient.
+Les codecs d'ouverture/compatibilité restent inchangés.
+
+Le gestionnaire émet une fermeture typée `experimental_close_client`, termine
+les waiters et ferme le transport. La reconnexion utilise le budget/backoff
+existant ; ni la fermeture seule ni une réouverture sans lecture V4 corrélée ne
+constituent un succès. Les compteurs EOF TLS ne sont jamais incrémentés par
+CloseClient. Les sous-codes, y compris inconnus, sont rapportés numériquement
+dans une extension bornée ; aucun payload n'est publié. Voir le
+[contrat de rapport](docs/session-suite-plan.md#closeclient-expérimental--closeclient-session-close-006).
 
 ### Flux de première association déduit du code — CONFIRMÉ statiquement / À VALIDER dynamiquement
 

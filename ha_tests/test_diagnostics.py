@@ -46,6 +46,7 @@ from custom_components.hoben.exceptions import (
 from custom_components.hoben.myhoben import CloseClientReason
 from custom_components.hoben.profiles import StoveProfile
 from custom_components.hoben.transport import AsyncTlsTransport
+from tests.tls_script import script_transport
 
 # Invented inputs only. Distinctive private values do not overlap public metadata.
 CODE = 49261
@@ -623,9 +624,18 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
     "failure, expected, request_types",
     [
         ("malformed", {"error": "malformed_response"}, [0x03, 0x0D]),
-        ("ambiguous", {"error": "unclassified_opened_client_bytes"}, [0x03]),
+        ("ambiguous", {"error": "malformed_response"}, [0x03, 0x0D]),
         ("modbus", {"error": "modbus_exception", "exception_code": 7}, [0x03, 0x0D]),
-        ("closed", {"error": "server_closed", "reason": "server_maintenance"}, [0x03]),
+        (
+            "closed",
+            {
+                "error": "experimental_close_client",
+                "reason": "server_maintenance",
+                "phase": "post_open",
+                "subcode": 6,
+            },
+            [0x03, 0x0D],
+        ),
     ],
 )
 async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
@@ -641,24 +651,27 @@ async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
     registers = b"".join(word.to_bytes(2, "big") for word in WORDS)
     response = b"\x0e\xff\xff\x00\x00\x00\x2b\x01\x04\x28" + registers
     failures = {
-        "malformed": [opened, b"\x0e\xff\xfe\x00\x00\x00\x03\x01\x84\x07"],
-        "ambiguous": [opened + SECRET.encode()],
-        "modbus": [opened, b"\x0e\xff\xff\x00\x00\x00\x03\x01\x84\x07"],
+        "malformed": [b"\x0e\xff\xfe\x00\x00\x00\x03\x01\x84\x07"],
+        "ambiguous": [SECRET.encode()],
+        "modbus": [b"\x0e\xff\xff\x00\x00\x00\x03\x01\x84\x07"],
         "closed": [b"\x05\x06"],
     }
 
-    def transport(chunks):
-        return Mock(
+    def transport():
+        wire = Mock(
             spec=AsyncTlsTransport,
             connect=AsyncMock(),
             write=AsyncMock(),
-            read=AsyncMock(side_effect=chunks),
+            read=AsyncMock(),
             close=AsyncMock(),
         )
+        script_transport(
+            wire, openings=[[opened]], reads=[[response], failures[failure]]
+        )
+        return wire
 
-    successful = transport([opened, response])
-    failed = transport(failures[failure])
-    factory = Mock(side_effect=[successful, failed])
+    successful = transport()
+    factory = Mock(return_value=successful)
     monkeypatch.setattr("custom_components.hoben.client.AsyncTlsTransport", factory)
     assert await hass.config_entries.async_setup(private_entry.entry_id)
     await hass.async_block_till_done()
@@ -669,12 +682,15 @@ async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
         await coordinator.async_refresh()
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["coordinator"]["last_error"] == expected
-    assert type(coordinator.last_exception) is ConfigEntryError
+    assert type(coordinator.last_exception) is (
+        UpdateFailed if failure == "closed" else ConfigEntryError
+    )
     assert coordinator.data is previous
     assert private_entry.data == old_data
-    assert factory.call_count == 2  # no protocol retry or diagnostic connection
-    for wire, types in ((successful, [0x03, 0x0D]), (failed, request_types)):
-        assert [args.args[0][0] for args in wire.write.await_args_list] == types
+    assert factory.call_count == 1  # No separate diagnostic connection.
+    assert await hass.config_entries.async_unload(private_entry.entry_id)
+    for wire in (successful,):
+        assert [args.args[0][0] for args in wire.write.await_args_list] == [3, 13, 13]
         wire.close.assert_awaited_once_with()
         wire.connect.assert_awaited_once_with()
     assert_private_absent(report, private_entry)

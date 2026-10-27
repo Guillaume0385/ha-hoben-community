@@ -1,0 +1,248 @@
+name: Hoben experimental (MANAGER)
+
+# Only a reviewed MANAGER merge + explicit PR decision can reach admission.
+# The default-branch Issue/dispatch events are deliberately not used.
+on:
+  push:
+    branches: [experimental]
+
+permissions: {}
+
+concurrency:
+  group: hoben-read-only-observation
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  dry-run:
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/experimental' &&
+      github.actor == 'Guillaume0385' &&
+      github.triggering_actor == 'Guillaume0385' &&
+      github.run_attempt >= 1 && github.run_attempt <= 50
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./.github/scripts/experimental-lab-gate.cjs');
+            try {
+              await gate.dryRun({github, context});
+              core.info('DRY RUN ONLY: h1h2 report-only; no secret or Hoben connection.');
+            } catch (_) { core.setFailed('NOT RUN: secretless preflight refused.'); }
+
+  admission:
+    needs: dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: read
+      actions: read
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+      pr: ${{ steps.gate.outputs.pr }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: gate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./.github/scripts/experimental-lab-gate.cjs');
+            try {
+              const decision = await gate.verify({github, context});
+              core.setOutput('approved', 'true');
+              core.setOutput('pr', String(decision.pr));
+              const summary = decision.status === 'PENDING APPROVAL'
+                ? 'PENDING APPROVAL: reserved h1h2; required GitHub reviewer approval still applies.'
+                : 'READY FOR ENVIRONMENT: reserved h1h2; no required reviewers configured.';
+              await core.summary.addRaw(summary).write();
+            } catch (error) {
+              // Fixed enum only: never forward raw exception text, stack, API data or headers.
+              const category = gate.refusalCategory(error);
+              core.setFailed('NOT RUN: admission refused; category=' + category);
+              await core.summary.addRaw('NOT RUN: admission refused before Hoben secrets; category=' + category + '.').write();
+            }
+
+  collect:
+    needs: admission
+    if: needs.admission.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      report_b64: ${{ steps.exports.outputs.report_b64 }}
+    environment: hoben-experimental
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - id: recheck
+        name: Recheck exact SHA, claim, policy and required approval if configured
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            const gate = require('./trusted/.github/scripts/experimental-lab-gate.cjs');
+            try {
+              const authorized = await gate.verify({github, context, recheck: true});
+              core.setOutput('approved', 'true');
+              core.setOutput('pr', String(authorized.pr));
+            } catch (_) { core.setFailed('NOT RUN: approval or admission proof changed.'); }
+      - id: capture
+        name: Bounded H1/H2 with no runner tokens in the collector process
+        if: steps.recheck.outputs.approved == 'true'
+        env:
+          EXPERIMENTAL_APPROVED_SHA: ${{ github.sha }}
+          EXPERIMENTAL_APPROVED_PR: ${{ steps.recheck.outputs.pr }}
+          HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+          HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+        run: python trusted/scripts/launch_experimental_boundary.py
+      - id: exports
+        name: Validate strictly anonymized report before upload
+        if: ${{ always() && steps.recheck.outputs.approved == 'true' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          APPROVED_PR: ${{ steps.recheck.outputs.pr }}
+        with:
+          script: |
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./trusted/.github/scripts/experimental-exports.cjs').prepare({core, context: proof});
+      # Do not upload from the secret-bearing collector runner: a leftover
+      # candidate process could replace a checked file before upload.
+      # Only the strictly validated, size-bounded job output is transferred.
+
+  publish:
+    needs: [admission, collect]
+    if: ${{ always() && needs.admission.outputs.approved == 'true' && needs.collect.outputs.report_b64 != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: publish
+        name: Re-validate and materialize allowlisted JSON on isolated runner
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          PUBLIC_REPORT_B64: ${{ needs.collect.outputs.report_b64 }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
+        with:
+          script: |
+            const proof = {
+              sha: context.sha, runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              prNumber: Number(process.env.APPROVED_PR)
+            };
+            require('./.github/scripts/experimental-exports.cjs').publish({
+              core, context: proof, encoded: process.env.PUBLIC_REPORT_B64
+            });
+      - name: Publish only newly validated public JSON
+        if: ${{ steps.publish.outputs.report == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hoben-experimental-public/report.json
+          if-no-files-found: error
+          retention-days: 7
+
+  result:
+    needs: [admission, collect, publish]
+    if: ${{ always() && needs.admission.outputs.approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        id: download
+        continue-on-error: true
+        with:
+          name: experimental-report-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: public-report
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          COLLECTION_RESULT: ${{ needs.collect.result }}
+          PUBLICATION_RESULT: ${{ needs.publish.result }}
+          APPROVED_PR: ${{ needs.admission.outputs.pr }}
+        with:
+          script: |
+            const exports = require('./.github/scripts/experimental-exports.cjs');
+            let success = false;
+            try {
+              const proof = {
+                sha: context.sha, runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+                prNumber: Number(process.env.APPROVED_PR)
+              };
+              const report = exports.readReport('public-report/report.json', proof);
+              success = process.env.COLLECTION_RESULT === 'success' &&
+                process.env.PUBLICATION_RESULT === 'success' && report.result === 'inconclusive';
+            } catch (_) {}
+            const publicPR = Number(process.env.APPROVED_PR);
+            const publicAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            success = success &&
+              Number.isSafeInteger(publicPR) && publicPR > 0 &&
+              Number.isSafeInteger(publicAttempt) && publicAttempt >= 1 &&
+              publicAttempt <= 50;
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha: context.sha, context: 'hoben-experimental-h1h2',
+              state: success ? 'success' : 'failure',
+              target_url: 'https://github.com/Guillaume0385/ha-hoben-community/actions/runs/' + context.runId,
+              description: success ? 'Bounded collection completed; hypotheses unproven' : 'NOT RUN or collection/export failed'
+            });
+            await core.summary.addRaw(success ? 'Collection completed; boundary remains unproven.' : 'NOT RUN or collection/export failed; inspect the original run.').write();
+            const pr = Number(process.env.APPROVED_PR);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+            if (!Number.isSafeInteger(pr) || pr <= 0 ||
+                !Number.isSafeInteger(attempt) || attempt < 1 || attempt > 50) {
+              core.setFailed('NOT RUN: missing public attempt correlation.');
+            } else {
+              await core.summary.addRaw(
+                'Public correlation: scenario=h1h2; run_id=' + context.runId +
+                '; run_attempt=' + attempt + '; pr=' + pr +
+                '; sha=' + context.sha + '; status=' +
+                (success ? 'completed' : 'failed_or_not_run') +
+                '; observed_at=' + new Date().toISOString() + '.'
+              ).write();
+            }
+
+            if (!success) core.setFailed('Experimental collection did not complete safely.');

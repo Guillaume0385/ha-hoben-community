@@ -27,13 +27,6 @@ not authorize removing them.
 
 ## Repository and package architecture
 
-Exception propriétaire limitée à l'[Issue #119](https://github.com/Guillaume0385/ha-hoben-community/issues/119),
-arbitrage prioritaire du 24/10/2026 : première PR issue de `main` et ciblant `main`
-pour retirer les anciens workflows live et installer le bouton manuel sans
-runtime ni secret Hoben ; seconde PR sur `experimental` seulement après sa fusion
-par MANAGER. Voir [les limites de la phase 1](docs/hoben-manual-workflow.md).
-Cette exception ne promeut aucun protocole et n'autorise aucun test réel par DEV.
-
 Keep the Home Assistant integration under exactly one HACS integration directory:
 
 ```text
@@ -456,26 +449,20 @@ concerne uniquement les anciennes voies chiffrées ; leur suppression du chemin
 courant n'autorise jamais le téléversement de captures brutes. Voir le
 [contrat courant](docs/experimental-protocol-workflow.md).
 
-### Validation expérimentale autonome
+### Validation expérimentale manuelle — Issue #119
 
-Sur `main`, le [point d'entrée #119](docs/hoben-manual-workflow.md) reste NOT RUN.
-Le contrat suivant décrit les voies d'`experimental` avant leur report phase 2 ;
-il ne réactive aucun workflow retiré de `main`.
-
-MANAGER peut fusionner sur `experimental` après revue du SHA exact et CI, sous
-réserve des instructions explicites du propriétaire. Une fusion n'autorise pas
-à elle seule un test réel : décision MANAGER propre au scénario, provenance de
-la PR/arbre/CI, acteur original et de relance, HEAD protégé exact, réservation
-anti-rejeu, politique d'environnement et approbations réelles restent requis.
-Le recheck précède l'unique étape secrète ; jetons GitHub et secrets Hoben sont
-séparés. Les deux voies partagent `hoben-read-only-observation` ; aucune sonde
-historique concurrente. Les reruns natifs complets exigent une nouvelle décision
-v2 et un claim par tentative ; aucune relance partielle ni réutilisation d'un
-succès. Preuve absente : `NOT RUN` / `PENDING APPROVAL`, jamais contournement de
-Settings. CODEX DEV et la CI restent hors ligne. Le
-[workflow courant](docs/experimental-protocol-workflow.md) détaille ces contrats,
-les limites des preuves de reviewers et des tags, et les chemins installés.
-Aucune promotion `main` sans nouvelle demande explicite du propriétaire.
+La voie courante est [Tests Hoben manuels](docs/hoben-manual-workflow.md),
+workflow_dispatch uniquement, propriétaire autorisé, ref/SHA exact experimental.
+Aucun test réel sur push/PR/merge et aucun commentaire MANAGER d'admission.
+La PR fusionnée/arbre/CI exacts, revue, environnement/politique/approbations
+réelles, claim par dispatch et recheck avant secrets restent obligatoires.
+Les reruns sont refusés ; nouveau dispatch explicite pour toute répétition.
+Le mutex partagé, les budgets et les projections anonymisées restent imposés.
+Main conserve le point d'entrée inactif installé en phase 1 ; aucun checkout
+implicite d'une autre branche ni activation par simple présence de fichiers.
+CODEX DEV et CI restent hors ligne. Anciennes voies/gates conservés en fixtures
+historiques seulement ; aucun repli, contournement ou autorisation fabriquée.
+Aucune promotion main sans nouvelle demande explicite du propriétaire.
 
 ## Version and feature discipline
 
@@ -804,3 +791,7 @@ A feature is complete only when:
 ### Changelog obligatoire
 
 Chaque PR met à jour [CHANGELOG.md](CHANGELOG.md) ou justifie l'absence d'impact livrable ; MANAGER vérifie ce point. Les entrées historiques non vérifiées ne doivent jamais être présentées comme des PR fusionnées.
+
+## Orchestration des agents — mode manuel CHAT DEV
+
+Pour le pilotage actuel, consulter [le workflow MANAGER / CHAT DEV / CODEX DEV](docs/manager-dev-workflow.md). MANAGER surveille automatiquement GitHub et fournit un prompt copiable ; CHAT DEV est lancé **manuellement** par le propriétaire, CODEX DEV est réservé aux tâches complexes. Aucune automatisation DEV ne doit être déclenchée par simple passage à `state:ready` ; CODEX DEV peut être activé explicitement par MANAGER uniquement après autorisation du propriétaire et attribution vérifiée d'une tâche complexe. Ces modalités de lancement ne modifient aucune règle de revue, sécurité, branche, CI ou validation réelle définie ailleurs dans ce fichier.

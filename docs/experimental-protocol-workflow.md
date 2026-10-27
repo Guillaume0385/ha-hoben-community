@@ -1,16 +1,44 @@
-# Workflow courant — développement experimental, validation et promotion
+# Workflow courant — voie manuelle #119 et historique
 
-## Installation manuelle #119 — priorité sur les procédures historiques de main
+Étape 8 C2b : [voie manuelle HA](ha-session-live-c2b.md), développement offline
+autorisé par le propriétaire le 26/10. Aucun run réel autorisé par le développement.
 
-L'arbitrage propriétaire du 24/10/2026 autorise une première PR issue de main
-et ciblant main, limitée à l'infrastructure Actions et ses tests/docs. Le
-[point d'entrée manuel](hoben-manual-workflow.md) installe les quatre choix,
-retire les anciennes voies live de main et refuse toute collecte (aucun secret,
-runtime ou activation main). Une seconde PR experimental est requise après
-fusion MANAGER. Les contrats ci-dessous décrivent encore les voies propres à
-experimental avant cette phase 2 ; ils ne permettent pas de réactiver les
-anciens labels/dispatch de main. Revue indépendante main, MANAGER et quatre CI
-conservés ; aucune promotion de protocole ni exécution réelle par DEV.
+## Voie courante : dispatch manuel sur experimental
+
+Étape 8 C2a : [superviseur et preuve HA inactifs](ha-session-runtime-c2a.md),
+uniquement hors ligne, réseau interdit et sans entrée Actions. La décision
+propriétaire du 25/10 retire le quota RX hoben-live seulement ; délais,
+mémoire/processus et confidentialité restent imposés. Aucun budget RX H1/H2
+ou session-300 n'est changé. L'admission et la publication C2b restent séparées.
+
+Étape 8 C1 : [contrat de preuve HA exclusivement offline](ha-session-proof-c1.md),
+collecteur de fixtures et double validation sans CLI ni workflow. Les limites
+système ne sont pas appliquées ; admission/supervision/publication live C2
+restent différées jusqu'à revue/fusion et attribution distincte.
+
+Étape 8, tranche B de #112 : le véritable client HA utilise le mode persistant
+partagé préparé par A. Ses tests sont exclusivement hors ligne ; B ne modifie
+aucun workflow/gate. Le futur test manuel hoben-live et son admission relèvent
+de C. Les descriptions ha-parity one-shot historiques plus bas, ainsi que leurs
+anciens rapports, ne valident ni une seconde ouverture actuelle ni ce client
+persistant. Aucun accès réel HA n'est activé par la seule livraison de B.
+
+La [procédure #119](hoben-manual-workflow.md) prévaut pour toute nouvelle campagne :
+workflow_dispatch du propriétaire, sélecteur natif Use workflow from, experimental
+seule active, SHA/provenance/revue/CI exacts, claim anti-rejeu et recheck après
+approbations d'environnement. Aucun commentaire MANAGER pré-fusion ni lancement
+sur push/PR/merge ; reruns refusés, nouveau dispatch explicite requis.
+H1/H2, session-300, reconnexion seule et all réutilisent les vrais collecteurs et
+leurs plafonds. Le reste de ce document conserve les contrats et observations
+historiques des anciennes voies : leurs décisions/claims ne sont jamais un repli.
+Les règles de revue/branche restent applicables, aucun test réel par DEV.
+
+Le [contrat expérimental CloseClient](session-suite-plan.md#closeclient-expérimental--closeclient-session-close-006)
+autorisé par #112 emploie deux octets, une fermeture typée distincte d'EOF et
+les mêmes bornes de reconnexion/stabilité. Il ne modifie aucune admission,
+approbation, protection de workflow ou limite de processus.
+
+
 
 ## Règles de branche et de revue
 
@@ -78,6 +106,336 @@ commande technique, destination/script/mode libre. L'instrumentation H1/H2
 reste hors de `custom_components/hoben/`. Les suites pytest/CI PR restent hors
 ligne, sans identifiant Hoben ni accès au poêle.
 
+## Voie `session-300` — hypothèse expérimentale
+
+La [tranche structurelle 7/8-E](session-suite-plan.md) a suspendu cette voie avec
+un job en échec pendant l'installation de la suite complète à deux scénarios.
+G1/G2 sont fusionnées ; H (PR #96) a fusionné le seul retrait de ce préalable,
+après revue/CI et décision MANAGER distincte. Les gates sont conservés ; aucune
+ancienne autorisation session-300 n'admet la suite. Une PR candidate ne lance
+aucun test réel. Le run #38828423500 a ensuite exécuté les deux scénarios :
+300 s continu, puis reconnexion inconclusive/protocol ; suite non validée et
+étape 8 suspendue. Voir le [bilan sourcé](session-suite-plan.md).
+
+La [décision de périmètre #74](https://github.com/Guillaume0385/ha-hoben-community/issues/74#issuecomment-6177981552)
+et l'[Issue #81](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6176992612)
+autorisent la préparation d'une validation fonctionnelle expérimentale de 300 s
+avec le gestionnaire partagé. Après l'alignement documentaire 7/8-A, la tranche
+7/8-B fournit le [workflow dédié](../.github/workflows/hoben-session-300.yml),
+son [gate](../.github/scripts/session-300-gate.cjs), la
+[sonde](../scripts/run_session_300.py) et le
+[validateur d'export](../.github/scripts/session-300-report.cjs).
+Le code seul n'autorise aucun accès réel. MANAGER a consigné `continuous_300s`
+pour les runs #38766830984 et #38828423500 ; aucun des deux ne valide à lui seul
+une reconnexion réelle ni une frontière universelle.
+
+Pour ce seul scénario opt-in, borné, sur `experimental` et l'Osmose V4 de
+référence, les octets suivant le préfixe V4 de 48 octets strictement accepté
+pourront être traités comme trafic post-ouverture. Cette **hypothèse
+expérimentale** ne prouve ni le handoff local ni une longueur totale universelle,
+et ne transforme aucune observation en fait `CONFIRMÉ`.
+Le [contrat de périmètre](../project.md#décision-de-périmètre--handoff-expérimental-session-300)
+limite le framer à Ping et DataResponse corrélée, avec l'exception propriétaire
+#112 pour ignorer exactement 07/1B après validation MBAP, sans interpréter le
+corps. Type inconnu/autre non pris en charge, MBAP invalide, suffixe indécidable
+ou dépassement de budget gardent l'arrêt sûr.
+
+La voie fixe vise 300 s utiles, avec plafond dur de processus 360 s, au plus
+trois ouvertures, 1 Mio RX cumulé et six lectures fixes espacées d'au moins 60 s.
+La collecte réserve 350 s, puis au plus 10 s au nettoyage. Le rapport n'exporte
+que la provenance SHA/run/PR/tentative, `boundary_proven=false`, les compteurs
+et des catégories fermées ; aucun registre, identifiant ni RX brut.
+Scénario exact `session-300`, environnement
+`hoben-experimental`, mutex `hoben-read-only-observation`, déclenchement uniquement
+par le push du merge MANAGER sur `experimental`. Avant tout accès réel, elle
+devra conserver la provenance dépôt/branche/SHA/acteur, la PR revue et fusionnée
+par MANAGER, les quatre checks CI du HEAD exact et une autorisation MANAGER
+distincte, unique, immuable et antérieure au merge. Admission, politique
+d'environnement lue par API, approbation éventuelle, réservation anti-rejeu et
+recheck avant secrets restent obligatoires ; aucun token GitHub/Actions ne doit
+être transmis à la sonde. DEV et la CI PR restent hors ligne. Aucun commentaire
+d'autorisation live n'est publié par DEV. Le marqueur dédié est
+`<!-- hoben-session-300-approval:v1 -->`, suivi d'un objet JSON strict avec
+`schema=1`, `scenario=session-300`, `candidate_sha` et `ci_run_id` seulement.
+MANAGER publie cette décision immuable après revue et CI du HEAD, avant merge.
+La réservation atomique `hoben-session-300-<candidate_sha>` reste consommée même
+en cas d'échec. Seule la tentative 1 est admise : aucun rerun n'est autorisé par
+cette voie. Le recheck relit SHA, politique, décision et claim après l'attente
+d'environnement ; si des reviewers sont requis, une approbation indépendante
+datée après le début du dry-run doit être réellement vérifiable. Sinon NOT RUN.
+Les données validées passent vers un runner de publication sans secret, puis
+sont revalidées avant artefact (rétention sept jours) et résultat. Seules
+`continuous_300s` et `reconnected` peuvent valider la fenêtre fonctionnelle ;
+les autres catégories sont `interrupted`, `inconclusive` et `not_run`.
+
+Cette future voie n'étend ni ne remplace H1/H2 ou HA parity : leurs budgets,
+gates, rapports, réservations et statuts restent inchangés. Les contrats détaillés
+ci-dessous décrivent ces deux voies historiques installées ; leur v1/v2 ne
+vaut jamais autorisation `session-300`. La revue et les gates dédiés restent
+requis pour le scénario exact, sans réutilisation d'une décision H1/H2.
+`NOT RUN`, `PENDING APPROVAL`, `inconclusive` ou interruption ne valident pas
+l'étape 7 et bloquent l'étape 8. Une reconnexion ne sera jamais présentée comme
+une connexion continue. Aucun changement HA ni usage par `hoben-live` avant une
+étape 7 réellement concluante ; aucune promotion automatique vers `main`.
+
+## Suite activée 7/8-H, diagnostics offline 7/8-I
+
+Le [sous-ensemble 7/8-G1](session-suite-plan.md#contrat-dadmission-spécifique--sous-ensemble-78-g1)
+installe `session-suite-gate.cjs` et son contrat fixe. G2 (PR #95) a branché ce gate
+dans le workflow push existant et ajouté le launcher/collecteur de suite sous
+verrou. H a retiré seulement `suite-installation` et son `needs` dans `dry-run` ;
+conditions exactes push/branche/acteurs/tentative, permissions, gates, runtime,
+contrat et budgets restent identiques. Aucune ancienne décision ne peut activer
+un run partiel. Le préflight sans secret mène à l'admission, puis à
+l'environnement et au recheck avant capture ; tout refus pré-secrets conserve
+les deux NOT RUN.
+Le gate `session-300` historique garde son contrat et ses contrôles. Les deux
+wrappers réutilisent les mêmes vérifications de provenance/revue/CI/politique
+d'environnement et le même recheck, avec des décisions et claims distincts.
+
+Le futur marqueur dédié est `<!-- hoben-session-suite-approval:v1 -->`.
+Ses clés exactes sont `schema`, `scenario`, `candidate_sha`, `ci_run_id`,
+`scenarios`, `limits` : scénario `session-suite`, ordre fixe session-300 puis
+session-reconnect-no-pong, plafonds fixes détaillés dans le plan. La décision
+unique doit être authentique, immuable et antérieure à la fusion. DEV ne la
+publie pas. Le claim `hoben-session-suite-<candidate_sha>` lie le contrat entier,
+la décision, PR/CI via cette décision, SHA/run/tentative et politique. Une ancienne
+décision ou référence session-300/H1H2/ha-parity n'est jamais utilisée comme repli.
+
+Le launcher fixe `launch_session_suite.py` lance un unique collecteur
+`run_session_suite.py` qui appelle `observe_suite()` et la vraie implémentation
+partagée. Le parent supervise les plafonds externes 360/600/1020 s, arme le
+second plafond avant son ACK et tue le groupe entier au timeout, à l'annulation
+ou à la fin. Les budgets internes 350+10 et 590+10 restent distincts ; aucun
+commentaire ou input ne fournit de durée libre. Une seconde est réservée au
+SIGKILL/reaping dans chaque plafond. Les tests offline incluent un processus
+résistant à l'annulation asyncio et son descendant dans chacune des phases.
+Le collecteur reçoit seulement l'allowlist de contexte et preuves
+`SESSION_SUITE_*`, avec identité privée : aucun token GitHub/Actions/OIDC,
+fichier de commandes Actions, hook Python ni installation de dépendance libre.
+
+Après validation Python, le rapport exclusif 0600/0700 est borné à 8192 octets.
+Le workflow exporte uniquement après recheck et superviseur réussis. Node
+revalide le double schéma, la provenance et la taille avant transfert base64
+canonique (10924 caractères maximum), puis revalide et matérialise le JSON sur
+un runner séparé sans secret Hoben. L'artefact
+`session-suite-report-<SHA>-<run_id>-a1` conserve sept jours maximum de rétention.
+Le statut `hoben-experimental-session-suite` exige les deux sous-résultats
+admissibles, la collecte et la publication réussies ; rapport absent/incomplet
+ou refusé reste en échec. Les refus pré-secrets annoncent les deux NOT RUN,
+sans fabriquer de rapport de collecte. Les scripts du workflow et cette
+chaîne d'export/publication sont testés hors ligne.
+
+PR #96 est fusionnée au SHA `d382540b056adf189bc7969b3d9905ab7dc8cd8f`, après
+revue du HEAD/CI et décision MANAGER immuable avant merge. Le
+[bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6205715813)
+du run #38828423500 tentative 1 constate collecte/publication réussies, puis
+statut global en échec : `continuous_300s` et `inconclusive/protocol` après
+181042 ms sans EOF ni reconnexion. Les deux scénarios ont tourné ; ce n'est pas
+NOT RUN, et la cause précise reste inconnue. Le rapport v1 ne reçoit aucun
+diagnostic rétrospectif. DEV ne publie aucune décision, ne réserve aucun claim
+réel et ne lance aucun run. Le push après fusion reste
+soumis aux contrôles installés, dont recheck, politique et approbation fraîche
+si requise. La PR ouverte ou fusionnée ne prouve aucun résultat réel.
+La tranche I exporte les seuls phase/catégorie/message/read_slot fermés du second
+scénario : suite et second sous-rapport v2, premier sous-rapport v1 inchangé.
+Les lecteurs Python/Node acceptent aussi l'ancien couple suite/second v1, sans
+ajouter ni accepter silencieusement ces champs. Les catégories CloseClient/
+DataUpdated/autre connu/inconnu désignent le seul octet de tête déjà refusé,
+jamais un message complet ni un sous-code ; refus et retries restent identiques.
+Limites d'export/publication inchangées. Les tests à trois lectures puis refus
+vers 181 s sont synthétiques ; ils n'identifient pas la cause du run réel.
+Aucune nouvelle validation réelle n'est autorisée par la tâche I ; ancien run et
+claim restent consommés, sans rerun. Il faut le premier scénario admissible et
+`recovered_120s` ; absence
+d'EOF, scénario non exercé, résultat inconclusif ou échec bloquent l'étape 8.
+EOF après inhibition n'établit pas sa cause ; `boundary_proven=false` demeure.
+Aucune preuve de frontière OpenedClient ne découle des tests simulés du gate.
+
+## Conception 7/8-K : quarantaine proposée, non installée
+
+Le [bilan MANAGER J](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6207295244)
+consigne le run #38839083483, tentative 1 sur le merge #97
+`991fbb8aefb3e3df9c38cd0eed38944a03e88cc7` : collecte/publication réussies,
+statut global failure ; 300 s continu, puis `inconclusive/protocol` à 181260 ms.
+Le diagnostic v2 `message_classification/protocol/close_client`, `read_slot=3`,
+identifie le refus d'un discriminant, pas un message complet ni un EOF ; aucun
+EOF/reconnexion/stabilité observé. Les deux tests ont tourné, ce n'est pas NOT RUN.
+Le rapport v1 précédent reste inchangé ; causalité serveur non démontrée.
+
+Le [contrat proposé](session-eof-quarantine-proposal.md) étudie une coupure TX
+atomique et une attente passive par le seul propriétaire RX, avec la borne L3
+EOF ET réouverture avant T0+240, uniquement dans le second scénario après T0+120 et inhibition
+effectivement exercée. Aucun Pong/lecture nouveau, aucune réinterprétation du
+suffixe, aucun retry sur le seul discriminant. Seul un EOF transport admissible
+avant arrêt local pourrait précéder une récupération par le lifecycle partagé.
+Courses/TX en vol, silence, TLS sans EOF, dépassement et annulation échouent
+fermés ; nettoyage local ne prouve jamais un EOF. Critères de succès et plafonds
+360/600/1020 s inchangés. **PROPOSÉ / NON INSTALLÉ** : le comportement actif
+reste le refus protocolaire et sa fermeture locale, sans retry protocolaire.
+
+K ne modifie que la documentation et spécifie une matrice offline future. Toute
+implémentation, adaptation de rapport/contrat/gate, installation et activation
+éventuelles exigent des tâches/décisions MANAGER distinctes et des revues/CI
+exactes. Aucun candidat ne s'autorise lui-même ; décisions immuables, approbations,
+anti-rejeu et publication isolée conservés. Aucun run/décision/claim/rerun par DEV,
+aucune réutilisation de l'ancien run/claim. Suite non validée, étape 8 suspendue.
+
+L1 ne fournissait qu'une fondation pure non raccordée et ses tests unitaires.
+L4 autorise uniquement son import par le pont privé défaut-off de V4Session,
+jamais une activation par un consommateur ; aucun EOF réel ni gel TX live attesté.
+Son candidat interne provisoire n'autorise aucun retry. La [portée isolée de L1](session-eof-quarantine-proposal.md#fondation-l1-isolée-api-et-limites)
+ne change ni les gates/rapports ni le comportement installé ; intégration et
+activation demeurent séparées, sans nouveau run/décision/claim par DEV.
+
+## Préalable structurel L2 installé, fondation L3 sans raccordement
+
+L1 est fusionnée par la PR #99 (`c220072d82ec9a34d178a3fa15406ea841ed527a`),
+politique pure toujours non raccordée. L2 installe dans le workflow de suite le
+job initial `quarantine-installation`, sans permission/checkout/action tierce/
+environnement/secret : deux NOT RUN fixes, raison `quarantine_not_installed`,
+puis échec inconditionnel (timeout du job : une minute). `dry-run` en dépend, avec ses
+conditions et contrôles exacts conservés ; admission/réservation et accès aux
+secrets restent inaccessibles après cet échec. Les deux scénarios sont bloqués
+ensemble et aucune décision/commentaire ne peut lever ce préalable.
+
+La PR #100 est fusionnée au SHA `ea08be522c73fcca742c4bacbeafa7df75e8b0c7`.
+Le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209326192)
+confirme le run #38859779145 tentative 1 : préalable failure attendu et tous les
+jobs aval skipped, aucune collecte. Le verrou est installé et reste intact.
+Le [plan](session-suite-plan.md) distingue tests locaux et preuve post-fusion.
+Déclencheur push, nom/mutex/non-annulation,
+autres jobs/conditions/permissions, gates/contrats, budgets, supervision et
+publication/statut restent identiques. Aucun nouveau flag/input/bypass.
+L2 ne modifie aucun runtime ni raccordement L1 ; le futur pont sera une tâche
+distincte après vérification du verrou. Son retrait demandera une activation
+séparée après installation/revue complète. Aucun nouveau résultat live acquis,
+aucune décision/claim/rerun par DEV ; étape 8 suspendue.
+
+L3 ajoute seulement la [fondation temporelle pure](session-eof-quarantine-proposal.md#contrat-temporel-l3-pur-sans-statut-de-réussite-réel)
+non raccordée : T0 à l'acceptation stricte de la première génération du second
+scénario, Pong normaux avant 120 s, inhibition dès 120, diagnostic futur dès 150,
+EOF admissible ET nouvelle ouverture avant 240, puis 120 s stables sur la même
+nouvelle génération avec Pong et lecture corrélée. Fin précoce permise ; 360 s
+est le maximum fonctionnel nominal. EOF seul/ouverture tardive/seconde perte/
+absence d'exercice/ambiguïté ou égalité de deadline ne donnent aucun succès.
+La politique pure borne désormais à min(T0+240, observation, process, suite),
+sans prolongation ni reset. Cette proposition remplace EOF T0+300/attente 180,
+sans réécrire les runs ni modifier moteur/contrat actif. Premier scénario 300 s,
+plafonds 360/600/1020, budgets 350+10/590+10, 3 ouvertures/1 Mio et 6/10 lectures >= 60 s
+restent installés. Ouverture initiale/nettoyage sont séparés du temps fonctionnel
+et sous ces bornes ; 120 s stables impossibles dans le budget => non concluant.
+Un futur contrat d'admission versionné doit lier ces constantes avant usage :
+anciennes approbations/claims/rapports ne valident pas ces sémantiques.
+
+Observation renforcée future dès 150 s : temps relatifs, compteurs/tailles/offsets
+bornés, état/motif/catégorie fermés au point de rejet et origine/absence EOF,
+sans octets RX, hex/base64 de trame, sous-code deviné, données domestiques,
+GUID, exception libre ou capture brute publique/privée autorisée. Clés/version/
+matrice de cohérence Python/Node à spécifier avant toute instrumentation.
+L3 n'a modifié aucun pont RX/TX/lifecycle, diagnostic 150 s ou rapport/validateur/
+gate/runtime ; l'activation reste une tâche ultérieure distincte.
+
+## Pont L4 livré, désactivé et sans raccordement consommateur
+
+La PR #101 est fusionnée au SHA `11b2609ebd7a8f4abde46d8b0f94d8bc57ba0ce8` ;
+le [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6209782800)
+consigne quatre checks/3220 tests offline réussis et le run de push #38862945022
+en échec attendu au verrou L2, tous les jobs aval skipped. L4 ne change pas ce
+verrou ni son graphe, les deux NOT RUN avant secrets sont conservés.
+
+Le [pont privé V4Session](session-eof-quarantine-proposal.md#pont-de-session-l4-livré-capacité-fermée-et-défaut-off)
+est livré par #102 au SHA `4ebee209926ad9d24f6cb3cf3fab4e6a37ebdb2b`,
+quatre checks/3294 tests offline réussis, [bilan MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6210627676).
+Le run #38868819504 s'arrête au verrou L2, tous les jobs aval skipped.
+Le pont reste défaut-off : capacité à usage
+unique liée aux propriétaires EXACTS SessionReconnect/NoPongAfter120, avant
+ouverture, deadlines scalaires bornées injectées. Seuls tests offline l'activent.
+Garde sur l'unique import de politique par session, absence de tout constructeur/
+appel consommateur fournissant la capacité ; aucun flag env/input/commentaire.
+Rejet typé du seul discriminant close_client, sans décodage ou frontière nouvelle ;
+latch sans await, gardes TX sous verrou et refus des TX engagées, signal waiter
+privé sans close/replay, budget/session suspendus sans perte terminale précoce.
+Le même RX poursuit TLS passivement sous la deadline L3, sans framer, capture,
+replay ou double comptage. L'observation privée figée ne devient candidate que
+sur vrai EOF avant arrêt local/deadline ; arrêt/courses/délai/budget/TLS sans
+EOF échouent fermés. Annuler un observateur ne tue pas RX ; close/abort restent
+idempotents. Sans capacité L5, même un candidat laisse le rejet protocolaire
+non réessayable, sans reconnexion ou recovered_120s.
+
+Lifecycle, clients/HA, collecteurs/lanceurs/superviseurs, rapports v1/v2 et
+validateurs/export/publication, gates/contrats/workflows/budgets inchangés.
+Aucune instrumentation 150 s, nouvelle donnée exportée ou capture brute autorisée.
+Lifecycle/collecteur et contrats 150 s/rapports/admission versionnée exigent une
+tranche séparée MANAGER, puis activation distincte revue. Aucun live/décision/
+claim/rerun par DEV ; suite 7 non validée, étape 8 suspendue.
+
+## Lifecycle L5 livré, défaut-off et sans collecteur actif
+
+Le [lifecycle privé livré](session-eof-quarantine-proposal.md#lifecycle-l5-livré-consommation-liée-à-lorigine-et-récupération-bornée)
+lie les propriétaires exacts SessionReconnect/NoPongAfter120 et les deadlines
+L3 dans une capacité privée à usage unique. Seuls tests/factories de test la
+fournissent ; session/lifecycle seuls portent les références revues, jamais les
+clients/HA, collecteurs/launchers/workflows. Aucun env/input/commentaire d'activation.
+
+Notification de quarantaine par événement local, sans autre lecteur ou polling
+réseau ; état/snapshot non CONNECTED, wait_connected suspendu, requests sans
+close/replay. Le lifecycle consomme une seule fois la preuve EOF courante liée à
+la session/génération d'origine, encore candidate avant cleanup. Une copie
+révoquée/périmée/doublée/fausse ne vaut pas preuve. L'origine et l'arrêt restent
+recontrôlés avant/après cleanup et backoff, avant ouverture et adoption/publication d'une nouvelle acceptation. Le cleanup intentionnel ne masque aucun stop
+public concurrent ; courses et annulations prioritaires, révocation au terminal.
+
+La session fraîche réutilise seulement l'identité autorisée et les budgets/
+compteurs/cadence partagés, jamais suffixe/waiter/future/transport ou lecture
+rejouée. EOF ET acceptation avant T0+240 et 120 s encore possibles sous T0+360 et
+observation/process/suite ; borne exacte refusée avant adoption. Timers privés
+des phases, trois ouvertures au plus, Pong normaux rétablis ; toute perte après
+la première nouvelle acceptation est terminale, même avant publication CONNECTED.
+Sans capacité L5, comportements antérieurs inchangés et aucun retry protocolaire.
+
+Fusionné par #103, livré défaut-off, sans consommateur actif.
+Les tests sont synthétiques ; aucun rapport public ou nouveau recovered_120s.
+Collecteur et contrats diagnostic 150 s/rapport/admission versionnée restent
+séparés, puis activation/retrait du verrou après revue complète. Framer, protocole,
+ouverture/identité/TLS/profils, clients/HA, collecteurs/lanceurs/superviseurs,
+rapports v1/v2/validateurs/export, gates/contrats/workflows/budgets inchangés.
+Verrou L2/deux NOT RUN avant secrets conservés, aucun diagnostic 150 s actif,
+brut/live/décision/claim/rerun. Suite 7 non validée, étape 8 suspendue.
+
+## Contrat L6 candidat, sans producteur v3
+
+L5 est fusionnée par #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`,
+quatre checks/3350 tests offline/308 HA réussis. Le [bilan MANAGER L5](https://github.com/Guillaume0385/ha-hoben-community/issues/81#issuecomment-6213829821)
+confirme le run #38889510562 arrêté au verrou L2, sans collecte ni décision live.
+L6 est fusionnée par #104, L6bis par #105 au SHA
+`182daa62177c74bb14dc6412a166e95ad36c8350` : contrat de rapport suite/second v3,
+avec validation et projection
+Python/Node, fixtures communes, chronologie relative 120/150/240/360 et agrégat
+RX fermé. Les couples historiques 1/1 et 2/2 restent strictement inchangés ;
+les producteurs actifs continuent d'émettre v2. Premier sous-rapport v1,
+provenance, 8192 octets/10924 base64, revalidation et publication isolée restent
+requis. Contrat livré sans producteur v3 :
+aucune instrumentation 150 s ni capacité fournie à un consommateur. Le reçu
+valide à sa consommation ne vient jamais d'une copie finale révoquée. Collecteur,
+instrumentation et admission versionnée demandent de nouvelles tranches, puis
+activation distincte après revue/CI ; verrou et graphe inchangés. Suite 7 non
+validée, étape 8 suspendue, aucun live/claim/décision/rerun par DEV.
+
+La tranche L6ter est une correction contractuelle candidate, puis livrée après
+revue/fusion MANAGER. Elle distingue les livraisons non vides first/last_rx des
+décisions réelles de rejet/validation : le parsing peut suivre la dernière
+livraison et référencer des octets conservés avant150, sans les recompter après.
+Un refus antérieur150 peut être observé comme état, sans nouveau rejet inventé.
+La cadence >=60s reste celle des requêtes ; aucune dernière livraison n'est
+extrapolée de leur nombre. Offsets globaux bornés, génération/stabilité et tous
+les critères EOF/reprise/arrêts L6bis restent requis. Voir le
+[contrat normatif](session-suite-plan.md#agrégat-rx-fixe-à-partir-de-t0150000-ms).
+Seuls validateurs/tests/docs changent ; aucun runtime, hook ou activation.
+Le travail local L7 incomplet est préservé, non publié, suspendu jusqu'à fusion
+L6ter et réautorisation distincte ; admission/routage fixe puis retrait du verrou
+restent séparés. Aucune nouvelle preuve réelle ou frontière protocolaire.
+
 ## Admission : provenance, revue et CI exactes
 
 Le premier run provient uniquement d'un `push` sur `refs/heads/experimental`
@@ -105,6 +463,16 @@ l'Issue #54 ; cette éligibilité ne vaut pas autorisation de campagne.
 Un rerun de CI ordinaire ne remplace pas la tentative 1 exigée par ces gates.
 
 ## Décisions MANAGER et preuve de relance complète
+
+La suite `session-suite` réutilise désormais ce même mécanisme H1/H2 : tentative
+1 inchangée, décision v1 de suite avec ses scénarios/budgets fixes toujours
+requise ; pour N>1, marqueur `<!-- hoben-session-suite-approval:v2 -->` et les
+huit champs v2 du tableau ci-dessous, avec `scenario=session-suite`. Claims
+par tentative, jobs courants/précédents, acteur de relance, recheck et approbation
+fraîche restent identiques. Voir le [contrat de suite](session-suite-plan.md#relances-natives-de-la-suite--session-native-rerun-004).
+Un run antérieur à l'installation de ce code, dont #40091399093, conserve son
+ancien workflow lors d'un rerun ; aucune mise à niveau implicite ni nouvelle
+validation réelle n'en découle.
 
 Les commentaires de décision sont réels, authentifiés, uniques pour la cible,
 non modifiés (`created_at == updated_at`), avec uniquement les champs attendus :
@@ -255,3 +623,7 @@ vers `main`. Cette future PR exige CODEX REVIEW, MANAGER, CI et les validations
 conditionnelles applicables au SHA exact. Un résultat expérimental ne remplace
 pas le gate stable ; ses anciennes politiques doivent être revalidées avant
 usage. Cette documentation ne prépare ni n'autorise cette promotion.
+
+## Modalités actuelles de lancement des agents
+
+Voir [le workflow de coordination](manager-dev-workflow.md). Les mentions historiques « CODEX DEV » dans les cycles de développement expérimental décrivent le rôle DEV ; elles n'imposent plus son déclenchement automatique. MANAGER attribue une seule tâche à CHAT DEV (lancement manuel avec prompt fourni au propriétaire) ou exceptionnellement à CODEX DEV pour une complexité élevée, avec activation automatique explicite possible uniquement après autorisation du propriétaire et vérification de l'attribution. Les règles de revue du HEAD, quatre checks CI, gates live et branche `experimental` restent inchangées. L'Issue #112 conserve la référence technique V4 ; l'Issue #81 est historique et ne doit pas être réactivée automatiquement.

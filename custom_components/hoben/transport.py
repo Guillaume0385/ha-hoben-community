@@ -116,8 +116,14 @@ class AsyncTlsTransport:
         except OSError:
             raise TransportError("TLS write failed") from None
 
-    async def read(self, max_bytes: int = 4096) -> bytes:
-        """Return unaltered bytes, or raise TransportEOF on an empty stream read."""
+    async def read(self, max_bytes: int = 4096, *, bounded: bool = True) -> bytes:
+        """Return unaltered bytes, or raise TransportEOF on an empty stream read.
+
+        One-shot reads retain their deadline by default. A persistent RX owner
+        can wait without an application idle deadline using bounded=False;
+        silence alone establishes neither connection loss nor message framing.
+        Cancellation and TLS/stream errors remain effective in either mode.
+        """
         if (
             not isinstance(max_bytes, int)
             or isinstance(max_bytes, bool)
@@ -126,8 +132,10 @@ class AsyncTlsTransport:
             raise ValueError("max_bytes must be a positive integer")
         if self._reader is None:
             raise TransportError("TLS transport is not connected")
+        if not isinstance(bounded, bool):
+            raise ValueError("bounded must be bool")
         try:
-            async with asyncio.timeout(self.read_timeout):
+            async with asyncio.timeout(self.read_timeout if bounded else None):
                 data = await self._reader.read(max_bytes)
         except TimeoutError:
             raise TransportTimeout("read") from None

@@ -29,6 +29,7 @@ from custom_components.hoben.sensor import SENSORS, HobenSensor
 from custom_components.hoben.transport import AsyncTlsTransport
 from custom_components.hoben.v4_state import decode_v4_snapshot
 from scripts.v4_validation_values import build_private_v4_report
+from tests.tls_script import script_transport
 
 # Independent synthetic examples, not actual reference-stove values.
 WORDS = (
@@ -533,6 +534,7 @@ async def test_real_client_entities_cannot_send_control_or_pairing_frames(
         read=AsyncMock(side_effect=[opened, response]),
         close=AsyncMock(),
     )
+    script_transport(transport, openings=[[opened]], reads=[[response]])
     factory = Mock(return_value=transport)
     monkeypatch.setattr("custom_components.hoben.client.AsyncTlsTransport", factory)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -548,6 +550,8 @@ async def test_real_client_entities_cannot_send_control_or_pairing_frames(
     assert opening.args[0][0] == 3
     assert opening.args[0][1:33] == NORMALIZED_USER_GUID.encode()
     assert read.args[0] == bytes.fromhex("0D FF FF 00 00 00 06 01 04 04 00 00 14")
+    transport.close.assert_not_awaited()
+    assert await hass.config_entries.async_unload(entry.entry_id)
     transport.close.assert_awaited_once_with()
     factory.assert_called_once_with()
 

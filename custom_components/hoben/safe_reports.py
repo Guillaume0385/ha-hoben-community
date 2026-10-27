@@ -29,6 +29,7 @@ from .exceptions import (
 )
 from .myhoben import CloseClientReason
 from .profiles import StoveProfile
+from .v4_experiment import ExperimentalCloseClientError
 from .v4_state import V4DecodeError
 
 PROFILES = frozenset(profile.value for profile in StoveProfile)
@@ -50,6 +51,7 @@ _ERROR_CODES = frozenset(
         HobenTimeoutError,
         HobenRefreshExhaustedError,
         HobenClientClosedError,
+        ExperimentalCloseClientError,
     )
 )
 _HA_ERROR_CODES = frozenset(
@@ -60,8 +62,9 @@ _ERROR_TEXT_FIELDS = {
     "reason": frozenset(reason.value for reason in CloseClientReason),
     "profile": PROFILES,
     "failure": _ERROR_CODES,
+    "phase": frozenset({"post_open"}),
 }
-_ERROR_NUMBER_FIELDS = {"exception_code": 255, "attempts": 2}
+_ERROR_NUMBER_FIELDS = {"exception_code": 255, "attempts": 2, "subcode": 255}
 _WRAPPED_ERROR_TEXT_FIELDS = _ERROR_TEXT_FIELDS | {
     "error": _ERROR_CODES | _HA_ERROR_CODES
 }

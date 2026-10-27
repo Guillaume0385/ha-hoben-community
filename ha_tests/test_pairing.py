@@ -555,6 +555,8 @@ async def test_real_client_pairing_emits_exact_existing_handshake_and_no_modbus(
     opened[46:48] = b"\x00\x02"
     probe = Mock(
         spec=AsyncTlsTransport,
+        host="myhoben.fr",
+        port=465,
         connect=AsyncMock(),
         write=AsyncMock(),
         read=AsyncMock(return_value=b"\x2f"),

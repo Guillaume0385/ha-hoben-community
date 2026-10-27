@@ -1,13 +1,275 @@
 # Changelog
 
-## Unreleased — infrastructure Actions (#119, phase 1)
+## En cours — #112, étape 8 tranche C2c
 
-- Retrait des trois anciennes voies live main ; définitions figées conservées
-  hors d'Actions pour leurs régressions offline. Installation du bouton manuel
-  avec quatre scénarios, contrôles acteur/ref/SHA et refus des reruns. Aucun
-  runtime, secret Hoben ni test réel en phase 1 : les choix restent NOT RUN.
-  Report/raccordement experimental après validation/fusion MANAGER de cette PR ;
-  aucune promotion du protocole ni activation main.
+- Refus explicite des identifiants obligatoires absents, sans valeur par défaut
+  ni association : diagnostic catégoriel fermé, code 1 et rapport de session
+  NOT RUN avant superviseur. Export possible malgré l'échec de capture, avec
+  validation indépendante inchangée et échec global conservé.
+- Résultat distinguant job de collecte échoué et preuve de session ; tests
+  offline de l'entrée vide, provenance réelle locale, sorties et arrêts précoces.
+  Aucun test réel, changement de gate, budget ou secret.
+
+## En cours — #112, étape 8 tranche C2b
+
+- Choix manuel hoben-live séparé des scénarios historiques, admission et recheck
+  de propriétaire/ref/SHA/PR/CI/environnement/claim, sans test automatique.
+- Vrai client/coordinator HA dans le superviseur C2a, identifiants par canal
+  mémoire privé, rapport live fermé doublement validé, publication sans secret.
+- 300/360 s, mémoire/processus et budgets historiques conservés ; aucun quota
+  RX hoben-live. Tests offline et plan de promotion minimale du formulaire main
+  seulement ; aucun run réel ni PR main par DEV.
+
+## En cours — #112, étape 8 tranche C2a
+
+- Fondation HA inactive : superviseur externe cgroup/PID namespace, gardien
+  indépendant, délais absolus et cleanup des descendants ; tests sans réseau.
+- Observer du vrai client/coordinator, schéma distinct et validation Python/Node.
+  Aucun quota RX hoben-live, suivant la décision propriétaire du 25/10 ; budgets
+  H1/H2 et session-300 conservés. Aucun workflow, admission ou test réel activé.
+- Correction de revue : achèvement seulement après 300 s monotones et témoin
+  final de session, perte tardive séparée de la continuité, horloges synthétiques
+  identifiées ; marge de cleanup/reaping conservée sous l'échéance de 360 s.
+
+## En cours — #112, étape 8 tranche C1
+
+- Observation publique typée et sans I/O du vrai client/lifecycle, témoins de
+  lecture corrélée, perte et cleanup ; aucun changement de handshake ou retry.
+- Collecteur HA de fixtures, rapport fermé offline et validation indépendante
+  Python/Node, budgets et tests déterministes. Reconnexion INCONCLUSIVE sans
+  perte. Aucun workflow, gate C2, contrôle système actif ni test réel ajouté.
+
+## En cours — #112, étape 8 tranche B
+
+- Véritable HobenClient raccordé au V4Lifecycle persistant partagé : TLS saine
+  réutilisée, lecture sans replay et reconnexion de durée de vie finie, sans
+  reset après refresh. API/snapshots et association initiale conservés.
+- Persistance HA de l'identité acceptée même après erreur de lecture, états
+  unavailable/recovered après réponse corrélée, sous-code CloseClient UInt8
+  expurgé, arrêt et cleanup testés avec le vrai client sous HA hors ligne.
+  Aucun changement de workflow ni test réel hoben-live (tranche C séparée).
+
+## En cours — #112, étape 8 tranche A
+
+- Contrat explicite de session V4 persistante réutilisant le framer/RX partagé,
+  séparé des budgets expérimentaux inchangés ; API d'ouverture, métadonnées et
+  identité privée acceptée, reconnexion finie et arrêt après cleanup en échec.
+- Tests déterministes de réutilisation au-delà de dix lectures, fragmentation,
+  CloseClient, corrélation, EOF/TLS, annulation et limites ; aucun raccordement
+  Home Assistant ou workflow live dans cette tranche, aucune validation HA réelle.
+
+## Unreleased — recherche experimental
+
+- Issue #112, CLOSECLIENT-SESSION-CLOSE-006 : hypothèse expérimentale propriétaire
+  CloseClient de deux octets ; sous-code numérique, réception fragmentée et
+  octets coalescés conservés. Fermeture typée, waiters/nettoyage et reconnexion
+  bornée sans confusion avec EOF. Métadonnée de rapport optionnelle validée
+  Python/Node, anciens rapports préservés. Tests hors ligne uniquement.
+
+- Issue #119, correction de revue #121 : résultat global explicite et états
+  par scénario issus uniquement du rapport validé. Les étapes non démarrées ou
+  non attestées restent NOT RUN après échec/annulation de capture. Régressions
+  hors ligne aux trois points d'interruption de all, sans changement de collecte.
+
+- Issue #119 phase 2 : workflow manuel unique, scénarios H1/H2, session-300,
+  reconnexion et all séquentiel. Retrait des voies automatiques, contrôle manuel
+  propriétaire sans commentaire d'admission, provenance/revue/CI, environnement,
+  approbations fraîches et claim par dispatch. Collecteurs/budgets réutilisés,
+  supervision de groupe, publication anonymisée isolée et résultats distincts.
+  Main inactive ; aucun lancement réel par DEV. Régressions historiques conservées.
+
+
+- Issue #112, UNKNOWN-RX-CONTINUE-005 : consommation exacte de 07/1B après
+  validation MBAP, sans décoder le corps ni interrompre la session expérimentale.
+  Histogrammes anonymisés bornés des types/longueurs dans les diagnostics, avec
+  validation indépendante Python/Node et lecture des anciens rapports conservée.
+  Erreur typée pour les autres types connus sans supposer leur longueur ; types
+  inconnus, CloseClient, EOF, corrélation et budgets restent protégés. Tests
+  synthétiques uniquement, aucune validation réelle ni modification HA.
+
+- Issue #112, SESSION-NATIVE-RERUN-004 : réutilisation du mécanisme natif H1/H2
+  pour les tentatives 2–50 de la suite, avec décision MANAGER v2, preuves de
+  relance complète, claim distinct et approbation fraîche avant secrets.
+  Tentative 1 et contrat de suite conservés ; seul le champ de tentative existant
+  est propagé aux rapports et artefacts. Aucun test réel ou rerun lancé par DEV ;
+  un ancien run conserve le code de son commit d'origine.
+
+- Issue #112, ADMISSION-MINIMAL-003 : retrait du seul arrêt inconditionnel
+  `quarantine-installation` et de sa dépendance de préflight. Admission normale
+  conservée : décision MANAGER, provenance/CI exactes, claim anti-rejeu,
+  environnement et recheck avant secrets. Tests hors ligne ; aucun lancement
+  réel par DEV, aucun changement du scénario, des gates ou des budgets.
+
+- Issue #112, NOPONG-MINIMAL-002 : le collecteur de reconnexion existant exige
+  EOF et nouvelle ouverture avant T+240, puis 120 s sur la même génération,
+  avec fin fonctionnelle au plus T+360 depuis l'acceptation initiale. Tests
+  hors ligne du vrai gestionnaire, frontières, Pong, lectures et refus sûrs.
+  Rapport v2, budgets externes et verrou d'admission conservés ; aucun test réel.
+
+- Issue #81, tranche 7/8-L6ter : correction contractuelle candidate séparant les
+  temps de livraison RX et de décision de parsing/validation, sans nouvelle
+  clé/version. Rejet possible après la dernière livraison ou sur des octets
+  d'avant150, avec offsets globaux bornés et sans double comptage ; refus ancien
+  distinct d'un nouveau rejet. Cadence des requêtes conservée sans inventer une
+  cadence des validations. Fixtures Python/Node communes et reproductions des
+  vrais propriétaires sous TLS/horloge simulés ; les rapports d'échec restent
+  non réussis dans completed et le script result inchangé. Aucun runtime,
+  producteur, hook, workflow, gate ou budget modifié. L6bis fusionnée par #105 ;
+  L7 locale préservée, suspendue jusqu'à fusion L6ter et réautorisation distincte.
+  Aucun test réel, donnée privée, commande, claim, décision live ou fusion DEV.
+
+- Issue #81, tranche 7/8-L6bis : correction contractuelle livrée par #105 du rapport
+  v3 pour un reçu propriétaire historique suivi d'un arrêt public dans la même
+  milliseconde, avant ou après acceptation attestée. Histoire interrupted
+  uniquement, jamais reprise/succès ; ordre entrée/EOF et consommation/acceptation
+  stricts conservés. Fixtures Python/Node communes et reproduction sur les vrais
+  propriétaires avec TLS/horloge simulés, sans hook runtime. L6 fusionnée par
+  #104 ; L7 reste soumise à une réautorisation distincte. Versions
+  historiques, producteurs v2, capacités défaut-off, gates/verrou/budgets intacts.
+  Aucun test réel, donnée privée, commande, claim, décision live ou fusion DEV.
+
+- Issue #81, tranche 7/8-L6 : contrat suite/second v3 candidat, projection et
+  validation Python/Node sur table et fixtures synthétiques communes. Preuve EOF
+  consommée, historique d'arrêt, nouvelle génération et stabilité 120 s séparés
+  du diagnostic causal ; agrégat RX borné après 150 s, sans brut ni contenu libre.
+  Compatibilité stricte v1/v2 et producteurs v2 conservés ; aucun runtime,
+  workflow, gate, budget ou raccordement consommateur changé. L5 fusionnée par
+  #103 au SHA `49d20ed62d2d1f15c09c4b8a873bf2b390fcebac`, défaut-off ; verrou
+  L2 maintenu. Aucun live ni résultat acquis, suite 7 non validée, étape 8 suspendue.
+  Correction de revue : EOF consommable strictement après l'entrée en quarantaine,
+  ordre quantifié égal refusé comme par la politique réelle ; fixtures communes
+  entrée−1/entrée/entrée+1 et vérification du statut final inchangé.
+
+- Issue #81, tranche 7/8-L5 (fusionnée par #103) : lifecycle privé livré, défaut-off, réservé aux
+  tests du second scénario avec capacité à usage unique et deadlines L3.
+  Suspension immédiate/wait_connected, waiter sans cleanup précoce, consommation
+  unique d'EOF encore admissible avant nettoyage et recontrôle de son origine.
+  Cleanup possédé distinct des stops/annulations concurrents ; session fraîche,
+  backoff/tentatives bornés avant 240 avec 120 s encore possibles, maximum 360 et
+  budgets partagés. Deuxième perte terminale, aucun replay ou nouveau rapport/
+  recovered_120s. Tests de courses/timers/cleanup et comportements par défaut.
+  L4 fusionnée par #102 mais tous les consommateurs restent sans capacité ;
+  garde des seules références session/lifecycle et verrou L2 conservés. Clients/
+  HA, collecteurs/launchers/superviseurs, framer/protocole/ouverture/TLS/profils,
+  rapports/gates/contrats/workflows/budgets inchangés. Contrats150 s/rapports/
+  admission versionnée et collecteur, puis activation distincte à revoir séparément.
+  Aucun live/claim/décision/rerun/brut ; suite non validée et étape 8 suspendue.
+
+- Issue #81, tranche 7/8-L4 : pont privé candidat dans V4Session, défaut-off,
+  activé uniquement par les tests offline pour SessionReconnect/NoPongAfter120.
+  Rejet close_client typé sans nouveau framing, latch TX synchrone, distinction
+  TX en file/engagée, waiter privé sans close/replay et RX unique passif sous
+  les échéances L3/budgets existants, sans capture ni double comptage. Observation
+  EOF privée figée/provisoire et refus conservateurs de courses/arrêt/délai.
+  Aucun retry/lifecycle/recovered_120s ; garde du seul import session et de
+  l'absence de fournisseur consommateur, tests de courses/cleanup et régressions.
+  L3 fusionnée par #101, verrou L2 conservé. Après fusion, le pont livré restera
+  désactivé/non raccordé ; lifecycle/collecteur et contrats 150 s/rapports/admission
+  versionnée puis activation distincte à revoir séparément. Aucun live, brut,
+  workflow/gate/rapport/budget/HA modifié, suite non validée et étape 8 suspendue.
+
+- Issue #81, tranche 7/8-L3 : contrat temporel immuable et vérification pure de
+  déclarations, NON RACCORDÉS. Repères 120/150/240/360 s, récupération totale 120 s
+  (EOF et réouverture avant 240), puis 120 s stables ; fin précoce permise.
+  Politique pure bornée à T0+240 au lieu de 300, refus/latch/courses conservés et
+  tests synthétiques étendus, aucun statut réel de succès produit. Verrou L2
+  installé par #100 et vérifié au run #38859779145, conservé intact. Contrats/
+  budgets actifs, runtime, rapports v1/v2 et protocol.md inchangés ; future
+  instrumentation fermée 150 s et admission versionnée à spécifier avant usage,
+  aucune capture brute autorisée. Aucun live, suite 7 non validée, étape 8 suspendue.
+
+- Issue #81, tranche 7/8-L2 : préalable structurel candidat
+  `quarantine-installation` en échec inconditionnel, deux NOT RUN fixes avant
+  admission/secrets, et dépendance de dry-run sans changement de ses conditions.
+  Tests locaux du script/graphe et régressions conservés. L1 est fusionnée mais
+  reste non raccordée ; L2 sera installé seulement après fusion/vérification.
+  Aucun runtime/gate/contrat/budget modifié, aucun nouveau live ; future
+  intégration et activation distinctes, suite non validée et étape 8 suspendue.
+
+- Issue #81, tranche 7/8-L1 : fondation pure de politique de quarantaine,
+  sans I/O et NON RACCORDÉE aux chemins actifs. Éligibilité fixe, latch sans
+  effet TX, échéances injectées réduisant T0+300, refus absorbants et candidat
+  EOF provisoire sans preuve transport ni droit de retry. Tests unitaires
+  déterministes et garde structurelle d'absence de raccordement. Proposition K
+  inchangée dans sa portée : réception NON INSTALLÉE/NON ACTIVÉE, aucun nouveau
+  live, rapport/gate/budget/protocole inchangé et étape 8 suspendue.
+
+- Issue #81, tranche 7/8-K documentaire : bilan sourcé du run #38839083483
+  (300 s continu puis refus message_classification/close_client, aucun EOF ni
+  reconnexion) et proposition de quarantaine bornée jusqu'à EOF, NON INSTALLÉE.
+  Coupure TX, lecture en vol, RX unique, suffixes privés, critères d'EOF/reprise,
+  arrêts sûrs, ordre de revue et matrice offline future décrits. Aucun changement
+  de code/test exécutable/protocole/budget/gate, aucune nouvelle observation réelle
+  ni activation automatique ; suite non validée, étape 8 suspendue.
+
+- Issue #81, tranche 7/8-I offline : diagnostic fermé phase/catégorie/message/
+  lecture du scénario reconnexion, cause initiale conservée après nettoyage
+  secondaire. Le framer reste en refus ; seul le discriminant déjà rejeté est
+  nommé sans payload ni preuve de message complet. Suite/second rapport v2,
+  lecteurs Python/Node compatibles v1 strict, sous-rapport 300 s inchangé.
+  PR #96 effectivement fusionnée ; bilan MANAGER du run #38828423500 :
+  continuous_300s puis inconclusive/protocol à 181042 ms sans EOF/reconnexion,
+  suite non validée (deux scénarios exécutés, pas NOT RUN), cause inconnue.
+  Tests synthétiques, aucune relance ni nouvelle autorisation live, étape 8 suspendue.
+
+- Issue #81, tranche 7/8-H : candidat d'activation limité au retrait du job
+  `suite-installation` et de son `needs`. Conditions push, gates session-suite,
+  contrat, runtime, budgets, publication et statut global conservés ; tests
+  structurels adaptés et régressions de refus offline maintenues. Revue MANAGER
+  du HEAD/CI puis décision immuable distincte requises avant fusion. Aucun run,
+  approbation ou claim réel par DEV ; suite/reconnexion NOT RUN, étape 8 suspendue.
+
+- Issue #81, tranche 7/8-G2 : raccordement du gate session-suite, du moteur partagé
+  et des deux rapports au workflow push existant. Superviseur externe 360/600/
+  1020 s avec ACK avant scénario 2 et arrêt du groupe de processus, tests hors
+  réseau d'un processus bloqué et de ses descendants. Export Python/Node borné,
+  publication isolée et statut global sans succès partiel. Verrou suite-installation
+  conservé à l'identique : aucun accès réel ni nouvelle validation de reconnexion.
+
+- Issue #81, sous-ensemble 7/8-G1 : contrat d'admission `session-suite` fermé,
+  ordre des deux scénarios et plafonds fixes liés à la décision MANAGER immuable
+  et au claim distinct. Réutilisation des contrôles de provenance/revue/CI/
+  environnement/recheck, avec tests GitHub simulés et refus des anciennes décisions
+  et claims. Workflow, launcher et verrou suite-installation inchangés ;
+  raccordement complet et activation restent à réaliser séparément. Aucun live.
+
+- Issue #81, tranche 7/8-F : moteur séquentiel offline `session-300` puis
+  `session-reconnect-no-pong`, budget fixe distinct, mesure de 120 s sur une même
+  génération après EOF observé et inhibition Pong. Deux sous-rapports stricts
+  Python/Node et résultat global refusant tout succès partiel. Tests sur le vrai
+  gestionnaire simulé, nettoyage et deadlines. Verrou suite-installation conservé,
+  aucun raccordement live/launcher, aucune nouvelle validation réelle ni étape HA.
+
+- Issue #81, tranche structurelle 7/8-E : inhibition Pong opt-in à T+120 s sous
+  verrou TX, rétablissement à la génération suivante, compteurs d'EOF observés
+  distincts des fermetures locales. Tests offline du gestionnaire partagé.
+  Verrou du workflow existant : deux résultats NOT RUN, aucun accès Hoben avant
+  installation et revue de la suite complète. Plafonds proposés non activés dans
+  [le plan de suite](docs/session-suite-plan.md). Aucun nouveau test réel par DEV.
+
+- Issue #81, tranche 7/8-D : compteurs RX bornés et diagnostic catégoriel
+  (`failure_phase`, `failure_category`, `message_category`, `read_slot`)
+  dans le rapport `session-300`, validés côté Python et JS. Aucun octet RX,
+  identifiant ou valeur domestique exporté. La cause du run précédent reste
+  inconnue et l'étape 7 non validée ; aucun nouveau run réel par DEV.
+  Les points d'arrêt distinguent classification, frontière, corrélation,
+  validation de réponse et transport, sans exporter de type inconnu numérique.
+  Les compteurs publics saturent à 1 Mio sans changer le budget d'arrêt.
+  Régressions du rapport projeté après dépassement cumulé et chunk >4096 octets,
+  avec validation indépendante Python/Node du même JSON projeté.
+
+- Issue #81, tranche 7/8-C : correction de la création exclusive du rapport
+  `session-300` en mode 0600, avec nettoyage du fichier partiel et fermeture du
+  descripteur en cas d'erreur. Tests hors ligne du writer et de son appel réel
+  depuis `main()` ; aucun changement de protocole, budget, gate ou autorisation.
+  Le run 38729755965 reste **NOT RUN / résultat non vérifiable**.
+- Issue #81, tranche 7/8-B : framing Ping/DataResponse opt-in sous hypothèse
+  `session-300`, avec sonde réutilisant le gestionnaire V4 partagé et voie GitHub
+  dédiée soumise aux gates MANAGER. Budgets 300 s utiles / 360 s globales,
+  trois ouvertures, 1 Mio RX et six lectures fixes au maximum.
+- Rapport à compteurs/catégories stricts, publication isolée et absence de replay.
+  Aucun changement du client HA, des voies H1/H2 ou HA parity ni des commandes.
+  Validation réelle 300 s : **NOT RUN** ; frontière OpenedClient non prouvée.
 
 ## v0.1.0-beta1 — First public beta
 
