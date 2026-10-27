@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, présence du workflow dans l'arbre Git
+
+- Validation séparée du commit épinglé et des trois arbres Git, jusqu'au blob
+  régulier du chemin de campagne fermé ; double parcours/recheck injectés.
+- Une seule famille GET ajoutée : Git trees par SHA complet, sans contenu blob,
+  YAML, enregistrement Actions ni admission. Refus expurgés et tests offline ;
+  workflows, contrats, protections, budgets et protocole inchangés.
+
 ## En cours — #126, HEAD experimental observé
 
 - Lecteur séparé du HEAD de branche : identité dépôt et commit.sha épinglé,

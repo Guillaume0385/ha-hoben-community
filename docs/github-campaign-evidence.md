@@ -81,6 +81,8 @@ sont construites sous `/repos/Guillaume0385/ha-hoben-community`, uniquement :
 dépôt, Git commit candidat, PR, run CI, reviews PR et
 `actions/runs/<id>/attempts/1/jobs`. La tranche 009 ajoute seulement
 `branches/experimental` pour le lecteur de branche séparé décrit plus bas.
+La tranche 010 ajoute uniquement `git/trees/<SHA>` pour le parcours fermé
+de métadonnées décrit en fin de document, sans lecture de blob.
 Aucun lien ou URL du body n'est suivi.
 Le module ne lit aucun environnement, secret ou réglage de protection.
 
@@ -136,8 +138,9 @@ L'origine est fixée à `https://api.github.com`. Aucun argument n'accepte une
 origine alternative, méthode HTTP ou header libre. Les six routes initiales
 restent admises : dépôt, Git commit par SHA hexadécimal complet non nul,
 PR/run par ID entier positif, reviews PR et jobs du run/tentative 1. La tranche
-009 autorise en plus la seule route exacte branches/experimental. Query dans
-path, traversée, encodage de chemin, alias de dépôt, sous-routes et autre hôte
+009 autorise en plus la seule route exacte branches/experimental ; la tranche
+010 ajoute Git trees par SHA complet non nul, sans query ni récursivité. Query
+dans path, traversée, encodage de chemin, alias de dépôt, sous-routes et autre hôte
 refusent avant HTTP. Pour les collections : page 1–10, per_page=100 exactement.
 
 Le jeton opaque ASCII de 8–1024 caractères est **injecté**, jamais découvert via
@@ -326,3 +329,77 @@ les routes voisines. Les suites historiques transport/dispatch/admission sont
 rejouées. Aucun raccordement workflow/gate/collecteur/HA, test GitHub/Hoben réel,
 dispatch/rerun/claim, secret, commande/écriture, changement de budget ou main.
 Les deux campagnes restent inertes et NOT RUN ; livraison puis STOP.
+
+## Présence du workflow dans un arbre épinglé — HOBEN-126-WORKFLOW-TREE-010
+
+Base experimental `cb5d7d06c545b7a7f71c50e200371ee71bf36873`, après #142.
+[github_campaign_workflow_tree.py](../scripts/github_campaign_workflow_tree.py)
+est indépendant des lecteurs HEAD, dispatch et PR/CI. Aucun backend HTTP,
+token, environnement, horloge, CLI, workflow, gate ou consommateur n'est ajouté.
+Les deux shells restent inertes et les contrats d'admission restent inchangés.
+
+`Expected(campaign, sha, repository=..., ref=...)` accepte uniquement les enums
+protocol/ha, le dépôt exact, refs/heads/experimental et un SHA complet non nul
+épinglé indépendamment. Il ne découvre jamais le SHA attendu depuis une réponse.
+Aucun chemin, URL ou branche libre n'est accepté. Les seuls chemins cibles sont
+`.github/workflows/hoben-protocol-manual.yml` et
+`.github/workflows/hoben-ha-manual.yml`, respectivement.
+
+`validate_workflow_tree(expected, repository, commit, root, github, workflows)`
+est pur. Il vérifie le nom/ID/propriétaire du dépôt, le SHA du Git commit égal
+au pin, puis les références SHA de son arbre racine, de `.github` et de
+`workflows`. Les deux composants de dossier exigent type tree/mode 040000 ;
+le fichier final exige type blob/mode **100644** et SHA complet non nul.
+Les URLs des réponses ne sont jamais suivies. Le SHA du blob est une identité
+Git rapportée par la source ; aucun contenu n'est téléchargé ou interprété,
+aucun hash de contenu n'est recalculé.
+
+Chaque arbre doit porter le SHA demandé, `truncated=false` explicite et une
+liste complète d'au plus 10 000 entrées de métadonnées. Chaque entrée a un nom
+simple unique, un SHA valide et un couple type/mode reconnu. Doublon, entrée
+manquante, chemin imbriqué, tree malformé/tronqué, symlink ou submodule : refus.
+Par prudence, les symlinks/submodules sont refusés même parmi les entrées
+voisines. Un blob régulier exécutable 100755 peut être voisin ; il ne peut
+remplacer le YAML cible. Cette borne concerne seulement les métadonnées GitHub,
+sans changement d'un budget Hoben ni ajout de quota RX hoben-live.
+
+`read_workflow_tree(reader, expected, previous=None)` réalise deux parcours
+de cinq GET : dépôt, Git commit épinglé, arbre racine, `.github`, `workflows`.
+Chaque réponse est validée avant de construire la route suivante à partir de
+son SHA. Seul le transport existant reçoit une extension minimale d'allowlist :
+`/repos/Guillaume0385/ha-hoben-community/git/trees/<SHA hexadécimal complet non nul>`.
+Les sept routes précédentes restent inchangées. Aucun paramètre, `recursive`,
+pagination d'arbre, blob, Contents, nouvelle route Actions, branche arbitraire,
+main, protection ou secret n'est autorisé. TLS, redirections, taille, délai et
+refus expurgés du transport sont conservés.
+
+Erreur API/permission, 401/403/404/429/5xx, statut inconnu, next_page non null,
+payload tronqué/malformé ou incohérence de chaîne : **tous les faits UNKNOWN**, y
+compris après un premier parcours positif. Les empreintes des deux parcours
+doivent concorder ; le recheck relit les dix réponses et refuse un changement
+de pin/campagne ou d'identité d'arbre/blob. L'observation figée ne garde que
+des faits/erreurs fermés et empreintes non secrètes, jamais les réponses, URL,
+message de commit ou exception libre. Une empreinte n'est pas une signature.
+
+Seuls **dépôt, commit épinglé, présence du chemin et identité du blob régulier**
+peuvent être attestés. Même en positif : **can_start=false / execution=NOT RUN /
+actions_result=FAILURE**, conversion booléenne false. La validation d'un dict
+n'authentifie pas sa source ; le Reader/transport doit fournir des réponses
+GitHub authentifiées fiables. Les fixtures ne prouvent aucune propriété réelle.
+
+La présence du blob ne prouve **ni son contenu YAML, ni l'enregistrement ou le
+chargement du workflow par Actions**, ni le workflow_ref effectivement exécuté.
+Le pin portant la ref attendue ne prouve pas à lui seul son appartenance à
+experimental ou le HEAD courant : ces liens restent UNKNOWN et relèvent de
+preuves distinctes. Restent aussi UNKNOWN protections, dispatch, PR/CI, revue
+MANAGER, politique/approbations, claim, mutex, anti-rejeu, recheck après approbation,
+UI/main et autorisation. Les lectures concordantes ne constituent pas un
+snapshot atomique ou une preuve de fraîcheur globale et ne complètent aucune
+admission.
+
+Les [tests](../tests/test_github_campaign_workflow_tree.py) utilisent des faux
+Reader/HTTP, avec DNS/sockets interdits : deux chemins, pins et chaîne SHA,
+types/modes, doublons/troncature, erreurs à chaque lecture, recheck, données
+privées, immuabilité, routes encodées/libres et transport existant. Aucun test
+GitHub/Hoben réel, raccordement live, dispatch/rerun/claim, secret, commande,
+écriture Modbus, changement de codec/budget, modification main ou fusion DEV.
