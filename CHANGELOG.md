@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, HEAD experimental observé
+
+- Lecteur séparé du HEAD de branche : identité dépôt et commit.sha épinglé,
+  deux lectures/recheck injectés, observations figées et refus expurgés.
+- Une seule route GET ajoutée : branches/experimental. Protection effective,
+  fraîcheur atomique et admission restent inconnues ; six routes historiques,
+  workflows, budgets et protocole conservés, aucun raccordement live.
+
 ## En cours — #126, faits partiels de dispatch
 
 - Validation pure des métadonnées REST d'un run workflow_dispatch épinglé,

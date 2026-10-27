@@ -79,7 +79,9 @@ et son Link authentifiés ; next_page=null signifie fin vérifiée, jamais
 métadonnée perdue. S'il ne peut établir cette fin, il doit échouer. Les routes
 sont construites sous `/repos/Guillaume0385/ha-hoben-community`, uniquement :
 dépôt, Git commit candidat, PR, run CI, reviews PR et
-`actions/runs/<id>/attempts/1/jobs`. Aucun lien ou URL du body n'est suivi.
+`actions/runs/<id>/attempts/1/jobs`. La tranche 009 ajoute seulement
+`branches/experimental` pour le lecteur de branche séparé décrit plus bas.
+Aucun lien ou URL du body n'est suivi.
 Le module ne lit aucun environnement, secret ou réglage de protection.
 
 Les collections sont paginées par 100, au plus dix pages par lecture. Boucle,
@@ -131,9 +133,10 @@ les imports dans les workflows, collecteurs et autres scripts restent interdits.
 ### Origine, authentification et TLS
 
 L'origine est fixée à `https://api.github.com`. Aucun argument n'accepte une
-origine alternative, méthode HTTP ou header libre. Seules les six routes du
-lecteur sont admises : dépôt, Git commit par SHA hexadécimal complet non nul,
-PR/run par ID entier positif, reviews PR et jobs du run/tentative 1. Query dans
+origine alternative, méthode HTTP ou header libre. Les six routes initiales
+restent admises : dépôt, Git commit par SHA hexadécimal complet non nul,
+PR/run par ID entier positif, reviews PR et jobs du run/tentative 1. La tranche
+009 autorise en plus la seule route exacte branches/experimental. Query dans
 path, traversée, encodage de chemin, alias de dépôt, sous-routes et autre hôte
 refusent avant HTTP. Pour les collections : page 1–10, per_page=100 exactement.
 
@@ -258,6 +261,68 @@ Les [tests](../tests/test_github_campaign_dispatch_evidence.py) sont entièremen
 offline : faux Reader/HTTP, DNS/sockets interdits, cas positifs et refus,
 mutations entre lectures, recheck, immuabilité, troncature et sorties expurgées.
 Ils vérifient les deux chemins YAML et la compatibilité du transport sans le
-raccorder. Les règles PR/CI/self-review, les six routes HTTP, les shells et les
-budgets restent inchangés. Aucun dispatch/rerun, test GitHub/Hoben réel, secret
-Hoben, commande, écriture, PR main ou fusion DEV. Livraison puis STOP.
+raccorder. Cette tranche 008 conserve les règles PR/CI/self-review, les six routes
+HTTP initiales, les shells et les budgets. Aucun dispatch/rerun, test GitHub/Hoben
+réel, secret Hoben, commande, écriture, PR main ou fusion DEV. Livraison puis STOP.
+
+## HEAD de branche observé — HOBEN-126-BRANCH-HEAD-009
+
+Base experimental `f00c4044e3af0a2069e4948828cb212c884e2586`, après #141.
+[github_campaign_branch_evidence.py](../scripts/github_campaign_branch_evidence.py)
+est indépendant du dispatch et du lecteur PR/CI. Il ne contient aucun backend
+HTTP, token, environnement, horloge, CLI ou consommateur live. Le transport est
+étendu d'une seule entrée d'allowlist exacte :
+`/repos/Guillaume0385/ha-hoben-community/branches/experimental`.
+Les six routes précédentes et leurs tests sont conservés. Branches arbitraires,
+main, sous-routes de protection, encodages et paramètres sont refusés avant HTTP.
+TLS, origine, redirections, limites et erreurs du transport sont inchangés.
+
+`Expected(sha, repository=..., ref=...)` épingle indépendamment le dépôt exact,
+refs/heads/experimental et un SHA hexadécimal complet non nul. Mauvais type,
+main, autre dépôt ou pin invalide refusent **avant toute lecture**. Le module
+ne construit jamais cette attente depuis un SHA reçu. Un nouveau pin ne peut
+pas réutiliser une observation précédente comme recheck.
+
+`validate_branch(expected, repository_payload, branch_payload)` est pur. Il
+vérifie le nom/ID/propriétaire du dépôt, puis le nom experimental et commit.sha
+égal au pin. Les identités sont strictes ; booléens substitués aux champs,
+champ manquant, null ou SHA/branche divergents refusent. Un head_sha de run ou
+head_commit.id ne remplace jamais le commit.sha de la réponse de branche.
+La fonction pure ne prouve pas elle-même l'authenticité d'un dict : le Reader
+et le transport doivent fournir une source GitHub authentifiée et fiable.
+
+`read_branch(reader, expected, previous=None)` fait **quatre GET séquentiels** :
+dépôt, branche, dépôt, branche. Le GET dépôt déjà autorisé confirme à chaque
+passage l'identité exacte ; une erreur d'identité arrête avant le GET branche.
+Les deux observations doivent correspondre au même pin et HEAD. Le recheck
+refait les quatre lectures et compare aussi les empreintes antérieures.
+Déplacement entre lectures ou depuis l'observation précédente, erreur/permission
+API, réponse tronquée/malformée ou next_page non null : tous les faits UNKNOWN.
+Aucune réponse partielle valide n'est conservée après un échec ultérieur.
+
+Seuls trois faits peuvent devenir ATTESTED : **dépôt, nom de branche, HEAD
+observé**. L'objet figé contient des enums et empreintes privées, aucun dict,
+payload, URL libre, token ou exception. Même positif : **can_start=false /
+execution=NOT RUN / actions_result=FAILURE**, conversion booléenne false.
+
+`protected`, protection_url, permissions et toute déclaration d'approbation sont
+délibérément ignorés. Un changement de protected avec HEAD stable n'atteste ni
+ne réfute la politique effective : celle-ci reste UNKNOWN. Restent aussi UNKNOWN
+revue MANAGER, politique/approbations d'environnement, workflow_ref/SHA/contenu
+YAML, lien au run/PR/CI, claim, mutex, anti-rejeu, sélection UI/main, recheck
+après approbation et autorisation d'exécution. Aucun endpoint de protection
+n'est lu, autorisé ou modifié.
+
+Les deux réponses HEAD concordantes ne constituent pas un snapshot atomique :
+un mouvement aller-retour entre lectures, une course après lecture ou une
+réponse périmée ne sont pas exclus. Fraîcheur globale et atomicité restent
+UNKNOWN ; les empreintes ne sont pas des signatures. Ce lecteur observe la
+branche aux lectures effectuées et ne complète aucun contrat d'admission.
+
+Les [tests](../tests/test_github_campaign_branch_evidence.py) sont exclusivement
+offline avec faux Reader/HTTP, DNS/sockets interdits, HEAD déplacé, refus/types,
+erreurs et troncature, recheck, confidentialité, immuabilité et refus de toutes
+les routes voisines. Les suites historiques transport/dispatch/admission sont
+rejouées. Aucun raccordement workflow/gate/collecteur/HA, test GitHub/Hoben réel,
+dispatch/rerun/claim, secret, commande/écriture, changement de budget ou main.
+Les deux campagnes restent inertes et NOT RUN ; livraison puis STOP.
