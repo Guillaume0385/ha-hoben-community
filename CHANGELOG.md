@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, contrat statique des shells inertes
+
+- Validateur pur des octets YAML bornés : structure fermée, choix des plans,
+  permissions nulles et séquence de refus entièrement fixée, sans exécution.
+- SafeLoader restreint, refus des doublons/tags/ancres/alias et ambiguïtés,
+  tests offline. Aucun shell, transport, gate, client ou budget modifié ;
+  chargement GitHub, enregistrement et admission restent inconnus.
+
 ## En cours — #126, contrat de métadonnées du registre Actions
 
 - Lecteur indépendant pour les deux seuls noms de workflows de campagne,
