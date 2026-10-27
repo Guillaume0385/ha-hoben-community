@@ -114,7 +114,7 @@ def _route(path, page, per_page):
     suffix, collection, match = path[len(PREFIX) :], None, None
     if suffix in ("", "/branches/experimental"):
         pass
-    elif re.fullmatch(r"/git/commits/[a-f0-9]{40}", suffix):
+    elif re.fullmatch(r"/git/(?:commits|trees)/[a-f0-9]{40}", suffix):
         _need(not suffix.endswith("0" * 40), Failure.REQUEST)
     else:
         for pattern, kind in (
