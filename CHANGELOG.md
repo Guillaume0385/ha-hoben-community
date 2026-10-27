@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, identité du blob de campagne épinglé
+
+- Lecteur séparé lié à la preuve d'arbre typée : base64 et taille vérifiés,
+  identifiant Git recalculé sur 16 Kio maximum, double GET/recheck injectés.
+- Seule extension HTTP : Git blobs par SHA complet. Aucune conservation de
+  contenu, interprétation YAML, admission ou activation ; tests offline,
+  workflows/gates, sécurité et budgets Hoben conservés.
+
 ## En cours — #126, présence du workflow dans l'arbre Git
 
 - Validation séparée du commit épinglé et des trois arbres Git, jusqu'au blob
