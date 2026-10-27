@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, transport GET GitHub isolé
+
+- Transport REST à jeton injecté, origine et six routes fermées, TLS vérifié,
+  redirections refusées, bornes de réponse et validation stricte JSON/Link.
+- Tests HTTP entièrement simulés et compatibilité avec le lecteur de preuves ;
+  aucun raccordement, workflow, admission ou collecte activé. Revue formelle,
+  protections, approbations et autres preuves manquantes restent refusées.
+
 ## En cours — #126, lecteur partiel de preuves GitHub
 
 - Adaptateur GET injecté et validation pure de provenance dépôt/commit/PR,
