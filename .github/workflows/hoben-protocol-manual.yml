@@ -1,0 +1,34 @@
+# Issue #126: inert form only. Collector activation requires a separate task.
+name: Tests expérimentaux MyHOBEN (non activés)
+'on':
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Choix prévu uniquement — tous les scénarios sont NOT RUN
+        required: true
+        type: choice
+        default: tls-only
+        options:
+        - tls-only
+        - session-open
+        - read-v4-state
+        - h1h2
+        - session-300
+        - session-reconnect
+        - all
+permissions: {}
+jobs:
+  not-activated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Refuser toute collecte non activée
+      shell: bash
+      run: |
+        printf '%s\n' '## Tests expérimentaux MyHOBEN — NOT RUN' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Campagne non activée. Tous les choix, y compris all, sont refusés.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Aucun test réel exécuté. Une tâche et une revue distinctes sont nécessaires avant activation.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Résultat global : FAILURE (non activé). Aucune validation protocolaire.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' '::error::NOT RUN: campagne MyHOBEN non activée pour tous les scénarios et toutes les branches.'
+        exit 1
