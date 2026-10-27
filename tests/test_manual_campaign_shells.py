@@ -1,4 +1,4 @@
-"""Closed YAML contracts and execution of the actual inert refusal steps."""
+"""Historical 013 shell fixtures: closed YAML and local inert refusal steps."""
 
 import json
 import re
@@ -34,7 +34,8 @@ SCENARIOS = {
 
 def workflow(name):
     return yaml.load(
-        (ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader
+        (ROOT / "tests/fixtures/campaign_shells_013" / name).read_text(),
+        Loader=yaml.BaseLoader,
     )
 
 

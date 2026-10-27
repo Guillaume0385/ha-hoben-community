@@ -1,5 +1,14 @@
 # Changelog
 
+## En cours — #126, préparation des workflows et admission minimale 014+015
+
+- Contrôles fonctionnels du contexte manuel pour experimental/main, acteur et
+  scénario ; reruns admis sans prérequis PR/revue/CI/comparaison SHA ou claim.
+- Trois jobs par campagne, mutex partagé sans annulation et environnement
+  futur protégé. Aucun collecteur raccordé : NOT RUN / FAILURE pour tous les
+  choix, sans approbation sollicitée pour le refus inerte. Tests offline ;
+  contrats antérieurs conservés comme historiques non raccordés.
+
 ## En cours — #126, contrat statique des shells inertes
 
 - Validateur pur des octets YAML bornés : structure fermée, choix des plans,

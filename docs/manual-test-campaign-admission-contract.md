@@ -1,4 +1,106 @@
-# Contrat offline d'admission des deux campagnes — #126
+# Admission minimale des deux campagnes — #126
+
+## Contrat courant — étapes 014 et 015 regroupées
+
+Décision propriétaire du 27/10/2026 et
+[consigne canonique](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641),
+TASK_ID HOBEN-126-WORKFLOW-ADMISSION-014 ; base experimental
+`59bb0177fc686a1e420b2f00a8fb12aef0b435a4`.
+
+Ce contrat remplace, pour les deux nouvelles campagnes, les conditions
+d'admission strictes développées précédemment. Cinq arbitrages prioritaires :
+
+1. Sélection native **experimental et main**, avec refs exactement
+   refs/heads/experimental ou refs/heads/main ; aucun input libre de branche.
+2. Lancement après **tout commit de la branche choisie**, même documentaire ;
+   aucune PR ou fusion préalable nécessaire.
+3. **Aucune revue MANAGER préalable au lancement**. Les quatre CI restent
+   obligatoires pour développer/revoir/fusionner une PR, pas pour lancer un run.
+4. **Aucune comparaison de SHA PR/merge/arbre/branche ou preuve de provenance
+   cryptographique supplémentaire** à l'admission.
+5. **Rerun/rejeu manuel autorisé**, sans filtre run_attempt ni claim anti-rejeu
+   personnalisé. L'acteur qui relance doit lui aussi être autorisé.
+
+### Contrôles effectivement raccordés
+
+Les deux YAML [protocol](../.github/workflows/hoben-protocol-manual.yml) et
+[HA](../.github/workflows/hoben-ha-manual.yml) définissent trois jobs :
+admission, scenario-slot, result. Le contrôleur Node embarqué dans admission
+lit uniquement les métadonnées du contexte natif GitHub, sans interpolation
+de ces entrées dans du code/shell, API, checkout ou secret. Acteur/ref/événement
+viennent du contexte env ; le scénario vient du fichier GITHUB_EVENT_PATH natif,
+borné à 256 Kio de métadonnées GitHub avant parsing. Une valeur de scénario
+inconnue n'est ainsi pas développée dans l'env du step affiché par Actions.
+
+Il exige le dépôt exact Guillaume0385/ha-hoben-community, workflow_dispatch,
+actor **et triggering_actor** exactement Guillaume0385, une des deux refs,
+et un scénario fermé de la campagne. Valeur absente/inconnue : refus.
+Une admission conforme produit admitted=true ; cela atteste seulement ces
+contrôles de contexte. Les contrôleurs ne consultent jamais PR, revues, CI,
+commit/SHA, registre Actions ou les anciens modèles d'admission.
+
+Le groupe de concurrence workflow est **hoben-read-only-observation**, commun
+aux deux campagnes et au workflow historique : cancel-in-progress=false,
+queue=max. Aucun run actif/pending n'est annulé pour libérer la place. Cette
+concurrence native ne constitue pas une preuve d'exclusion contre une voie
+qui ne participerait pas au groupe ; le workflow historique est inchangé.
+
+### Environnements et absence actuelle de collecteur
+
+scenario-slot dépend du succès d'admission, de admitted=true **et**
+collector_ready=true. Ce dernier output est fixé à **false** dans cette PR,
+pour tous les scénarios, y compris all. Ce verrou d'implémentation est distinct
+de l'admission fonctionnelle. Le point d'insertion garde lui-même un refus
+explicite NOT RUN / exit 1 ; aucun collecteur, client ou réseau Hoben n'y est
+raccordé.
+
+Seul ce job futur porte l'environnement fixe **hoben-experimental** pour
+protocol ou **hoben-live** pour HA. Les approbations/attentes configurées dans
+GitHub restent à satisfaire avant l'exécution de ce job ; aucune auto-approbation,
+requête de bypass ou modification de Settings n'existe. Puisque le job est
+actuellement ignoré avant cette étape, un simple refus inerte ne demande
+**aucune approbation d'environnement**. admission et result n'ont ni
+environnement ni secret. Les politiques effectives ne sont pas attestées par
+les tests offline ; leur configuration devra être applicable aux deux branches
+avant tout futur lancement réel.
+
+Les permissions workflow/jobs sont toutes {}. Aucun checkout n'est ajouté :
+le code de contrôle provient du YAML choisi par Use workflow from, sans
+substitution d'une autre branche. La présence/formulaire sur main n'est pas
+démontrée par ce développement ; une promotion distincte reste à autoriser.
+Les runtimes de contrôle et le stub sont bornés à une minute ; ce ne sont pas
+des budgets de collecteurs et aucun plafond H1/H2/session/HA n'est modifié.
+
+### Résultats et confidentialité
+
+result utilise always() après admission et scenario-slot, sans environnement.
+Il revalide la sélection depuis une allowlist, puis émet uniquement des noms
+fermés, NOT RUN et des causes catégorielles : collector_not_connected ou
+admission_not_verified. Une sélection inconnue n'est jamais recopiée. Pour all,
+tous les points d'insertion individuels sont affichés comme NOT RUN ; cette
+liste n'exécute ni ne modifie les plans/runtimes historiques.
+
+Même quand le contrôle d'admission réussit, le résultat global et le job result
+restent **FAILURE**, execution=NOT RUN ; aucune observation INCONCLUSIVE ou
+réussite de scénario n'est inventée. Aucun stdout/stderr privé, secret, GUID,
+RX, exception libre ou valeur domestique n'est publié. Les sorties GitHub et
+résumés ne contiennent que ces catégories et scénarios publics.
+
+Les [tests offline](../tests/test_campaign_minimal_admission.py) exécutent les
+contrôleurs réellement embarqués avec un contexte synthétique, sans Actions,
+réseau ou collecteur : acteurs/branches/événements/scénarios, main/experimental,
+reruns, absence de PR/revue/CI/SHA, concurrence, environnement conditionnel,
+confidentialité et bilans d'échec. La suite 013 reste couverte par ses fixtures
+historiques. Les collecteurs/raccordements fonctionnels et tests réels restent
+des tâches ultérieures ; aucun dispatch/rerun DEV ni PR main dans cette tâche.
+
+## Historique — contrat strict 003, non raccordé et non bloquant
+
+Le modèle Python et le texte ci-dessous sont conservés pour la traçabilité.
+Leurs restrictions PR/revue/SHA/CI, main/rerun/claim ne s'appliquent **pas** à
+l'admission minimale courante ; ils ne doivent pas y être branchés.
+
+### Contrat offline 003 d'origine
 
 Tranche `HOBEN-126-ADMISSION-CONTRACT-003`, selon la
 [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641).
@@ -6,7 +108,7 @@ Base : `d58071fe4927e2dc9763821930227b24994fbb43`, après fusion de #135.
 Les [deux formulaires](manual-test-campaign-shells.md) restent inertes ;
 l'[inventaire](manual-test-campaign-inventory.md) reste la référence de périmètre.
 
-## Portée et frontière de confiance
+### Historique — portée et frontière de confiance
 
 [manual_campaign_contract.py](../scripts/manual_campaign_contract.py) est un
 **modèle pur non branché** : aucun lecteur GitHub, réseau, environnement,
@@ -38,7 +140,7 @@ L'exécution directe du fichier est refusée avec code 1 sans sortie ; aucune
 CLI d'admission n'existe. Le modèle n'est ni un permis ni un rapport live.
 Le brancher à une décision d'accès aux secrets est exclu de cette tranche.
 
-## Enveloppe fermée et relations vérifiées
+### Historique — enveloppe fermée et relations vérifiées
 
 Chaque clé est obligatoire ; clé inconnue, null inattendu, type approximatif
 (dont booléen à la place d'un entier), preuve non attestée ou incohérence : refus.
@@ -83,7 +185,7 @@ que le même objet claim. Changement de workflow/ref/SHA/scénario, PR/CI/revue,
 politique/approbation, mutex ou claim : refus, même si le nouvel instantané pris
 isolément est cohérent. Un état relu ne prolonge aucun budget.
 
-## Responsabilités différées et limites
+### Historique — responsabilités différées et limites
 
 Un futur adaptateur devra vérifier les réponses GitHub complètes, pagination,
 identités et dates, associations PR/CI, cardinalité des jobs et dernières revues,
@@ -116,7 +218,7 @@ Si une publication main s'avère nécessaire : STOP et demande propriétaire
 distincte, aucune PR main automatique, API/CLI de contournement ou checkout
 substitué. Aucune vérification UI, dispatch ou test réel dans cette tranche.
 
-## Résultats et publication futurs
+### Historique — résultats et publication futurs
 
 Le refus d'admission ou l'absence de preuve donne **NOT RUN / FAILURE Actions**,
 jamais une réussite protocolaire. Après une collecte autorisée distinctement,
