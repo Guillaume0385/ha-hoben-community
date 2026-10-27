@@ -57,3 +57,73 @@ sans contexte secret ni appel Actions. Ils couvrent tous les choix sur
 experimental/main, les permissions nulles, les clés autorisées et une liste
 positive de commandes littérales. Cela prouve le refus local, pas le comportement
 de l'UI GitHub ni une admission sur une branche.
+
+## Contrat statique pur — HOBEN-126-SHELL-SEMANTICS-013
+
+Base experimental `5df31d7d51239adace6466922257a96898cb7591`, après #145.
+[campaign_shell_semantics.py](../scripts/campaign_shell_semantics.py) reçoit
+seulement une enum campaign protocol/ha et des **octets YAML injectés**, immuables,
+UTF-8 sans BOM, de 1 à **16 Kio**. Aucune lecture de fichier, environnement,
+token, HTTP, client HA ou preuve d'admission. Le validateur n'est raccordé à
+aucun workflow, autre lecteur, gate ou collecteur ; son lancement direct sort
+avec code 1 sans CLI ni sortie.
+
+PyYAML est déjà déclaré dans le groupe dev (`PyYAML>=6,<7`) : aucune dépendance
+n'est ajoutée. Une sous-classe locale de SafeLoader contrôle la structure,
+sans modifier les loaders globaux. Avant construction, les tokens sont bornés
+à **512**, avec refus de tout tag, ancre, alias ou directive ; le document unique
+est limité à **128 nœuds / profondeur 12**. Seuls mappings à clés texte uniques,
+listes et scalaires str/int/bool sont construits. Doublons, merge keys, types
+inconnus, null, dates/timestamps implicites ou documents multiples refusent.
+Les booléens ne peuvent être que true/false en minuscules et les entiers de
+petite forme décimale canonique, avant vérification de leur valeur exacte.
+
+Le contrat accepte un sous-ensemble conservateur correspondant aux shells
+actuels, dont la clé **`'on'` citée**. La résolution YAML 1.1 de PyYAML ferait
+de on/yes des booléens : ces formes ambiguës sont refusées plutôt que supposées
+équivalentes à la lecture GitHub. Un refus ne prouve donc pas qu'un autre YAML
+est invalide pour GitHub ; il prouve seulement qu'il n'est pas accepté ici.
+Commentaires, ordre des clés et présentations YAML sûres peuvent varier, à
+condition de produire exactement la structure/littéraux approuvés. Les
+expressions Actions `${{ ... }}` sont refusées, même en commentaire.
+
+Les contrôles fermés portent sur :
+
+- nom de campagne et seul trigger workflow_dispatch ; un seul input scenario,
+  description/type/required/default actuels et liste exacte ordonnée des choix
+  de chaque plan, incluant all sans absence, ajout ou doublon ;
+- permissions exactement `{}` au workflow et au job ; unique job not-activated
+  sur ubuntu-latest, timeout-minutes entier exactement 1 ;
+- une seule étape Bash de refus, nom actuel et clés exactes ; aucune autre clé,
+  environnement, secret, action, checkout, condition, stratégie ou bypass ;
+- **intégralité de la séquence approuvée** : quatre printf de résumé à littéraux
+  vers la seule variable GITHUB_STEP_SUMMARY, un printf d'annotation fixe,
+  puis exit 1. Texte, ordre, redirections et fin de séquence doivent correspondre.
+  Ni présence d'exit 1 dans un programme arbitraire, ni denylist de commandes.
+
+Il s'agit d'analyse statique : aucun YAML, script Bash, action ou collecteur
+n'est exécuté par le validateur. Même positif, le résultat figé reste
+**can_start=false / execution=NOT RUN / actions_result=FAILURE**, conversion
+booléenne false. Seuls cinq faits statiques peuvent être attestés : trigger,
+choix, permissions, job borné inerte et séquence de refus exacte. Toute erreur
+laisse tous les faits UNKNOWN, avec catégorie fermée, sans contenu/script ni
+exception libre. Une empreinte SHA-256 privée lie campagne et octets injectés ;
+elle n'authentifie pas leur source et n'est pas une signature.
+
+Source/identité Git, YAML chargé par GitHub au commit exécuté, workflow_ref,
+enregistrement Actions, UI/main, admission/gates, protections, revues,
+approbations, claims, mutex, anti-rejeu et fraîcheur restent **UNKNOWN**.
+La limitation d'accès au registre Actions (connecteur INVALID_ARGUMENT/400)
+et l'impossibilité de self-APPROVED MANAGER ne sont pas levées. Aucun repli de
+cette preuve statique vers une autorisation réelle.
+
+Les [tests](../tests/test_campaign_shell_semantics.py) injectent les deux
+shells et des mutations synthétiques : déclencheurs, scénarios/plans,
+permissions, environnement/secret, commandes ajoutées ou cachées malgré exit 1,
+jobs/étapes, YAML malformé/ambigu, tags/alias/doublons, bornes et confidentialité.
+DNS/sockets sont interdits ; les tests des tags dangereux interdisent aussi
+I/O/exécution. Aucun nouveau test ne lance le Bash. Les tests historiques de
+refus local et les autres lecteurs sont conservés/rejoués sans modification.
+Les deux shells, transport, autres validateurs, gates, HA, protocole, codecs et
+budgets sont inchangés. Aucun test réel, dispatch/rerun, secret, commande poêle,
+écriture Modbus, PR main ou fusion DEV ; livraison puis STOP.
