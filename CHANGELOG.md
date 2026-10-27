@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, formulaires manuels non activés
+
+- Deux définitions workflow_dispatch séparées pour protocole et HA, choix fermés
+  et all, sans collecteur, environnement ou secret. Chaque choix reste NOT RUN
+  avec échec Actions explicite ; la voie live actuelle reste inchangée.
+- Tests offline du contrat YAML et des refus Bash, documentation des limites
+  UI/main. Aucun test réel ou nouvelle admission activé.
+
 ## En cours — #112, étape 8 tranche C2c
 
 - Refus explicite des identifiants obligatoires absents, sans valeur par défaut

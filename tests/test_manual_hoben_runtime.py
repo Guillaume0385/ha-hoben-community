@@ -48,7 +48,13 @@ def test_manual_gate_with_offline_github_api():
 
 def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
     workflows = {p.name for p in (ROOT / ".github/workflows").glob("*.yml")}
-    assert workflows == {"hoben-manual.yml", "validate.yml", "publish-release.yml"}
+    assert workflows == {
+        "hoben-manual.yml",
+        "hoben-protocol-manual.yml",
+        "hoben-ha-manual.yml",
+        "validate.yml",
+        "publish-release.yml",
+    }
     source = (ROOT / ".github/workflows/hoben-manual.yml").read_text()
     config = yaml.load(source, Loader=yaml.BaseLoader)
     assert set(config["on"]) == {"workflow_dispatch"}
