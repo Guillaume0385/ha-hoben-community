@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, faits partiels de dispatch
+
+- Validation pure des métadonnées REST d'un run workflow_dispatch épinglé,
+  deux lectures GET/recheck injectés, enums figées et refus expurgés.
+- Workflow ref/SHA YAML, inputs, protections, approbations, revue, anti-rejeu
+  et admission restent inconnus. Tests offline ; aucun backend, raccordement,
+  workflow ou budget modifié, aucun pouvoir d'exécution.
+
 ## En cours — #126, transport GET GitHub isolé
 
 - Transport REST à jeton injecté, origine et six routes fermées, TLS vérifié,
