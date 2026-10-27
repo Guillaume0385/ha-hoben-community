@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, plan Home Assistant offline
+
+- Huit choix HA figés, ordre de all, références du vrai client/coordinator et
+  plafonds connus du scénario historique #112, sans le dupliquer ni le raccorder.
+- Six compléments non implémentés, budgets inconnus, préconditions et résultats
+  insuffisants refusés. Tout reste NOT RUN/FAILURE sans capacité de collecte ;
+  workflows, gates, plan protocolaire et runtime inchangés.
+
 ## En cours — #126, plan protocolaire offline
 
 - Plans figés des sept choix protocole, plafonds et références historiques,
