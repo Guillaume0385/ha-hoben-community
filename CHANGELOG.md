@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, contrat offline d'admission
+
+- Modèle pur non branché des preuves campagne/workflow/ref/SHA/environnement,
+  PR/CI/revue, approbation, claim et mutex ; recheck des faits figés et refus
+  main. Tout résultat reste NOT RUN/FAILURE, même avec une fixture cohérente.
+- Tests de refus et documentation des attestations externes encore nécessaires.
+  Shells inertes, voie live et gates inchangés ; aucun test réel ou claim créé.
+
 ## En cours — #126, formulaires manuels non activés
 
 - Deux définitions workflow_dispatch séparées pour protocole et HA, choix fermés
