@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, contrat de métadonnées du registre Actions
+
+- Lecteur indépendant pour les deux seuls noms de workflows de campagne,
+  validation pure, métadonnées bornées et double GET/recheck injectés.
+- Enregistrement réel non attesté : routes refusées par le connecteur, sans
+  contournement. État active sans pouvoir d'exécution ; shells, admission,
+  sécurité et budgets inchangés, tests exclusivement offline.
+
 ## En cours — #126, identité du blob de campagne épinglé
 
 - Lecteur séparé lié à la preuve d'arbre typée : base64 et taille vérifiés,
