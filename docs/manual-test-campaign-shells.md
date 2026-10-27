@@ -1,4 +1,66 @@
-# Deux campagnes manuelles non activées — #126
+# Deux campagnes manuelles préparées, collecteurs non raccordés — #126
+
+## État courant — HOBEN-126-WORKFLOW-ADMISSION-014, étapes 014+015
+
+La [consigne propriétaire actuelle](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641)
+remplace les anciennes contraintes d'admission pour ces deux voies. Le
+[contrat courant](manual-test-campaign-admission-contract.md) décrit les contrôles
+fonctionnels : workflow_dispatch, propriétaire/acteur de rerun autorisés,
+branche native experimental/main et scénario fermé ; aucun prérequis
+PR/fusion/revue MANAGER/CI/comparaison SHA ou claim, rerun autorisé.
+
+Les choix de formulaire restent inchangés : sept pour protocol, huit pour HA,
+dont all. La structure des deux YAML comporte :
+
+- admission : contrôleur Node du contexte, sans checkout, réseau ou secret ;
+- scenario-slot : futur dispatcher, dépendant d'admission et du verrou
+  collector_ready, avec environnement fixe hoben-experimental/hoben-live ;
+- result : bilan catégoriel NOT RUN par choix, exécuté même après échec/skip,
+  résultat global FAILURE obligatoire.
+
+Le contrôle d'admission est fonctionnel ; **aucun collecteur n'est raccordé**.
+collector_ready=false pour toute sélection et scenario-slot est donc ignoré,
+sans demander une approbation d'environnement pour ce refus. Les approbations
+GitHub exigées s'appliqueront au futur job protégé ; elles ne sont ni simulées,
+ni contournées. Le stub de ce job échoue aussi explicitement si exécuté.
+
+Le mutex natif partagé hoben-read-only-observation garde cancel-in-progress=false
+et queue=max, comme hoben-manual.yml inchangé. Tous les jobs ont permissions {}.
+Les contrôleurs et le stub ont une borne d'une minute ; aucun budget de
+collecte, codec ou client n'est touché. Les métadonnées de contexte passent
+par env ; le scénario est lu dans le fichier d'événement GitHub natif, borné
+à 256 Kio. Il n'est pas développé dans les logs env du step. Aucune entrée
+n'est interpolée dans le programme ; sorties et refus ne reprennent aucune
+valeur inconnue ni donnée privée. Ce plafond de métadonnées n'est pas un quota RX.
+
+Use workflow from reste le sélecteur natif. Aucun checkout substitué, input ref,
+publication sur main ou vérification UI n'est réalisé. Les deux branches sont
+acceptées par les contrôles, ce qui ne publie pas ces workflows sur main.
+Toute promotion et tout lancement réel nécessitent leur autorisation distincte.
+DEV ne lance aucun dispatch/rerun, approbation ou test réel.
+
+Les [tests courants](../tests/test_campaign_minimal_admission.py) exécutent
+hors ligne les contrôleurs réellement présents dans le YAML et vérifient les
+chaînes needs/if, sorties d'admission, verrou non raccordé, environnement futur,
+concurrence, refus, reruns et résultats. Le moteur Node de test interdit les
+modules réseau/processus et ne permet d'écrire que dans son dossier temporaire.
+
+### Contrats antérieurs conservés
+
+Les deux shells 002/013 d'origine sont archivés sans modification dans
+[les fixtures 013](../tests/fixtures/campaign_shells_013/hoben-protocol-manual.yml)
+et [HA](../tests/fixtures/campaign_shells_013/hoben-ha-manual.yml). Les tests de
+refus local et de sémantique statique utilisent ces fixtures ; le validateur 013
+reste inchangé et refuse volontairement les nouveaux workflows. Il n'est pas
+un gate de leur admission. Les lecteurs Git/registre et l'ancien modèle strict
+restent historiques non raccordés ; leur indisponibilité ne bloque pas un
+contexte manuel autorisé par le contrat courant.
+
+## Historique — formulaires 002 et sémantique 013
+
+Les sections suivantes décrivent les versions historiques, **pas** les nouveaux
+jobs d'admission. Leurs anciennes conditions de PR/admission/main/rerun ne
+prévalent pas sur le contrat courant ci-dessus.
 
 Tranche `HOBEN-126-SPLIT-SHELLS-002`, selon la
 [consigne MANAGER actuelle](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641).
@@ -35,7 +97,7 @@ Les deux nouveaux fichiers ne demandent pas son mutex, puisqu'ils ne lancent
 aucune observation ; tout futur raccordement devra conserver le verrou partagé
 entre campagnes, l'admission/recheck et toutes les protections existantes.
 
-## Formulaire GitHub et branches
+### Historique — formulaire GitHub et branches
 
 Use workflow from est le sélecteur natif GitHub ; aucun input de ref ni checkout
 de substitution n'est ajouté. La présence de fichiers sur experimental ne
@@ -58,7 +120,7 @@ experimental/main, les permissions nulles, les clés autorisées et une liste
 positive de commandes littérales. Cela prouve le refus local, pas le comportement
 de l'UI GitHub ni une admission sur une branche.
 
-## Contrat statique pur — HOBEN-126-SHELL-SEMANTICS-013
+### Historique — contrat statique pur HOBEN-126-SHELL-SEMANTICS-013
 
 Base experimental `5df31d7d51239adace6466922257a96898cb7591`, après #145.
 [campaign_shell_semantics.py](../scripts/campaign_shell_semantics.py) reçoit

@@ -23,7 +23,9 @@ CAMPAIGNS = tuple(semantics.Campaign)
 
 def source(campaign=semantics.Campaign.PROTOCOL):
     return (
-        ROOT / ".github/workflows" / ("hoben-" + campaign.value + "-manual.yml")
+        ROOT
+        / "tests/fixtures/campaign_shells_013"
+        / ("hoben-" + campaign.value + "-manual.yml")
     ).read_bytes()
 
 
@@ -70,7 +72,7 @@ def refused(result, error=None):
 
 
 @pytest.mark.parametrize("campaign", CAMPAIGNS)
-def test_actual_shell_and_synthetic_reserialization_match_static_contract_only(
+def test_historical_shell_and_reserialization_match_static_contract_only(
     campaign,
 ):
     for data in (source(campaign), encode(document(campaign))):
@@ -100,6 +102,14 @@ def test_actual_shell_and_synthetic_reserialization_match_static_contract_only(
 )
 def test_only_campaign_enum_is_accepted(bad):
     refused(semantics.validate_shell(bad, source()), semantics.Error.CAMPAIGN)
+
+
+@pytest.mark.parametrize("campaign", CAMPAIGNS)
+def test_current_workflow_is_outside_historical_013_contract(campaign):
+    current = (
+        ROOT / ".github/workflows" / ("hoben-" + campaign.value + "-manual.yml")
+    ).read_bytes()
+    refused(semantics.validate_shell(campaign, current))
 
 
 @pytest.mark.parametrize(

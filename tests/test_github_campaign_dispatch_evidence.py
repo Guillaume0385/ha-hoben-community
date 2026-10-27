@@ -142,12 +142,14 @@ def test_pure_and_reader_positive_are_partial_and_never_authorize(campaign, suff
     assert len(observed.facts) == len(dispatch.FactName)
 
 
-def test_closed_campaigns_correspond_to_inert_yaml_and_cannot_be_mutated():
+def test_closed_campaigns_match_manual_unconnected_yaml_and_cannot_be_mutated():
     assert {c.value for c in dispatch.Campaign} == {"protocol", "ha"}
     for campaign, path in PATHS.items():
         data = yaml.load((ROOT / path).read_text(), Loader=yaml.BaseLoader)
         assert set(data["on"]) == {"workflow_dispatch"}
-        assert "not-activated" in data["jobs"]
+        assert set(data["jobs"]) == {"admission", "scenario-slot", "result"}
+        gate = data["jobs"]["admission"]["steps"][0]["run"]
+        assert "collector_ready=false" in gate
         assert dispatch._PATHS[campaign] == path
     with pytest.raises(TypeError):
         dispatch._PATHS[dispatch.Campaign.HA] = ".github/workflows/hoben-manual.yml"
