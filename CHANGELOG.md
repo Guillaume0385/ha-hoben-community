@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, plan protocolaire offline
+
+- Plans figés des sept choix protocole, plafonds et références historiques,
+  ordre de all et refus des préconditions/ACK/résultats non attestés.
+- Reconnexion naturelle non implémentée et toujours NOT RUN ; inhibition Pong
+  historique exclue, anciens CLIs à revoir. Aucun plan ne permet de démarrer
+  une collecte ; workflows, sessions, gates et budgets inchangés.
+
 ## En cours — #126, contrat offline d'admission
 
 - Modèle pur non branché des preuves campagne/workflow/ref/SHA/environnement,
