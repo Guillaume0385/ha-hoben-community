@@ -1,5 +1,13 @@
 # Changelog
 
+## En cours — #126, lecteur partiel de preuves GitHub
+
+- Adaptateur GET injecté et validation pure de provenance dépôt/commit/PR,
+  revue formelle MANAGER et quatre jobs CI au candidat exact, double lecture
+  et recheck ; refus catégoriels expurgés et tests entièrement offline.
+- Protections, approbations, claims, mutex et anti-rejeu restent inconnus.
+  Aucun pouvoir d'admission ou raccordement ; shells, gates et budgets inchangés.
+
 ## En cours — #126, plan Home Assistant offline
 
 - Huit choix HA figés, ordre de all, références du vrai client/coordinator et
