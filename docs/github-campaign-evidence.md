@@ -196,3 +196,68 @@ framing chunked réel sur flux mémoire, JSON, Link et compatibilité avec la do
 lecture/recheck du validateur. Ils ne valident pas les permissions ou une revue
 MANAGER réelle. Protections, approvals, claims, mutex et anti-rejeu restent
 inconnus ; aucune décision, collecte, CLI, promotion main ou test réel n'est ajouté.
+
+## Faits partiels de dispatch — HOBEN-126-DISPATCH-FACTS-008
+
+Base experimental `9353c690ba9d8938a7e53e05ae391bd7409c8c09`, après #140.
+[github_campaign_dispatch_evidence.py](../scripts/github_campaign_dispatch_evidence.py)
+est séparé du lecteur PR/CI et du transport, tous deux inchangés. Il ne contient
+aucun backend HTTP, token, lecture d'environnement, horloge ou CLI. Il n'ajoute
+aucune route et n'est consommé par aucun workflow/gate/collecteur.
+
+`Expected` épingle la campagne fermée protocol/ha, run_id, workflow_id et SHA
+complet, avec cible exclusivement refs/heads/experimental. Les IDs attendus
+doivent venir d'une configuration indépendante fiable ; ils ne sont ni découverts
+dans la réponse puis recopiés comme attentes, ni inventés dans une table locale.
+Les IDs des fixtures sont synthétiques. Le registre des workflows et sa présence
+sur la branche par défaut restent UNKNOWN.
+
+`validate_dispatch(expected, payload)` est pur. Il valide structure et relations
+de champs REST documentés, sans authentifier lui-même l'origine d'un dict. Seul
+un Reader de confiance, notamment le transport injecté de la tranche 007, peut
+fournir les vraies réponses authentifiées. Des booleans attested/approved donnés
+par l'appelant ne constituent aucune preuve et ne sont jamais consommés.
+
+`read_dispatch(reader, expected, previous=None)` réalise **deux GET distincts**
+de `/repos/Guillaume0385/ha-hoben-community/actions/runs/<run_id>`, sans query,
+pagination ou autre appel. Réponse non 200, next_page non null, autorisation/API
+indisponible, réponse tronquée/malformée ou champ requis manquant : refus et
+tous les faits UNKNOWN. Aucune erreur ne conserve body, URL, token ou exception
+libre. Le transport concret conserve son refus des redirections et ses limites.
+
+| Faits attestables depuis ce run | Validation |
+| --- | --- |
+| Dépôt | repository et head_repository : nom/ID/propriétaire exacts du dépôt, identité User. |
+| Run, événement et tentative | id épinglé, workflow_dispatch, run_attempt exactement 1, jamais booléen/rerun. |
+| Workflow rapporté | workflow_id attendu ; path exact de hoben-protocol-manual.yml ou hoben-ha-manual.yml selon la campagne. Le suffixe @refs/heads/experimental est accepté seulement s'il est présent dans path. |
+| SHA et nom de branche rapportés | head_sha et head_commit.id au SHA épinglé ; head_branch exactement experimental. |
+| Acteur et déclencheur rapportés | actor et triggering_actor : Guillaume0385, ID 18246624, type User. Aucune copie de actor pour combler un triggering_actor absent ; cette version refuse alors faute de preuve. |
+
+L'observation figée ne retient que des enums de faits/états/erreurs et des
+empreintes privées. Aucun payload, dict d'entrée, URL, input ou identité libre
+n'est conservé. Même positive, elle reste **can_start=false / execution=NOT RUN /
+actions_result=FAILURE**, conversion booléenne false. Aucun snapshot d'admission
+complet ne peut être produit à partir de ces seuls faits.
+
+Les deux lectures doivent avoir les mêmes faits normalisés. Le recheck relit
+deux fois, compare l'empreinte et exige les mêmes attentes. Modification de
+run/tentative/dépôt/acteur/workflow/path/ref/SHA refuse. La progression de status,
+conclusion ou updated_at est volontairement ignorée : elle ne prouve ni la
+réussite d'un scénario ni une absence d'exécution. Les empreintes ne sont pas des
+signatures et ne prouvent pas une fraîcheur globale ou l'absence d'une course.
+
+Restent UNKNOWN, même si un payload ajoute des champs portant ces noms :
+workflow_ref, workflow_sha, contenu/registre YAML, scénario/inputs, sender,
+contexte runner, HEAD/protection de branche courants, politique/approbations
+d'environnement, revue MANAGER/self-approval, PR/CI, claim, mutex, anti-rejeu,
+recheck après approbation, sélection UI/main, résultat de scénario, fraîcheur et
+autorisation d'exécution. Un path suffixé et head_sha ne deviennent jamais une
+preuve de GITHUB_WORKFLOW_REF ou du SHA du YAML réellement chargé.
+
+Les [tests](../tests/test_github_campaign_dispatch_evidence.py) sont entièrement
+offline : faux Reader/HTTP, DNS/sockets interdits, cas positifs et refus,
+mutations entre lectures, recheck, immuabilité, troncature et sorties expurgées.
+Ils vérifient les deux chemins YAML et la compatibilité du transport sans le
+raccorder. Les règles PR/CI/self-review, les six routes HTTP, les shells et les
+budgets restent inchangés. Aucun dispatch/rerun, test GitHub/Hoben réel, secret
+Hoben, commande, écriture, PR main ou fusion DEV. Livraison puis STOP.
