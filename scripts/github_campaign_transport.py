@@ -112,7 +112,12 @@ def _route(path, page, per_page):
     _need(type(path) is str and len(path) <= 200, Failure.REQUEST)
     _need(path.startswith(PREFIX), Failure.REQUEST)
     suffix, collection, match = path[len(PREFIX) :], None, None
-    if suffix in ("", "/branches/experimental"):
+    if suffix in (
+        "",
+        "/branches/experimental",
+        "/actions/workflows/hoben-protocol-manual.yml",
+        "/actions/workflows/hoben-ha-manual.yml",
+    ):
         pass
     elif re.fullmatch(r"/git/(?:commits|trees|blobs)/[a-f0-9]{40}", suffix):
         _need(not suffix.endswith("0" * 40), Failure.REQUEST)

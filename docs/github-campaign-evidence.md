@@ -85,6 +85,8 @@ La tranche 010 ajoute uniquement `git/trees/<SHA>` pour le parcours fermé
 de métadonnées décrit en fin de document, sans lecture de blob.
 La tranche 011 ajoute `git/blobs/<SHA>` pour le lecteur d'identité séparé,
 uniquement après validation de sa liaison à l'arbre de campagne.
+La tranche 012 ajoute les deux seules routes workflow par nom de fichier fermé,
+pour leurs métadonnées de registre, sans ref ni capacité d'exécution.
 Aucun lien ou URL du body n'est suivi.
 Le module ne lit aucun environnement, secret ou réglage de protection.
 
@@ -497,3 +499,86 @@ Le test de non-raccordement d'arbre admet uniquement ce nouveau lecteur de
 métadonnées ; celui-ci interdit à son tour tout consommateur runtime.
 Aucun test GitHub/Hoben réel, dispatch/rerun/claim, secret, commande, écriture,
 activation, promotion main ou fusion DEV. Livraison puis STOP.
+
+## Métadonnées du registre Actions — HOBEN-126-ACTIONS-REGISTRY-012
+
+Base experimental `2a19df8f05fbea245b011ccef182df65f2f1c566`, après #144.
+[github_campaign_actions_registry.py](../scripts/github_campaign_actions_registry.py)
+est indépendant des lecteurs Git/arbre/blob et du contrat d'admission. Il ne
+contient aucun backend HTTP, token, lecture d'environnement, interpréteur YAML
+ou CLI. Aucun workflow, gate, collecteur ou client HA ne le consomme.
+
+`validate_registry(campaign, payload)` est pur. `read_registry(reader, campaign,
+previous=None)` lit deux fois la même route et peut comparer une observation
+précédente. La campagne est une enum protocol/ha exclusivement ; aucun ID, nom,
+path, ref, branche ou URL libre n'est accepté. Les routes sont fixées par le
+code sous `/repos/Guillaume0385/ha-hoben-community/actions/workflows/` :
+
+- `hoben-protocol-manual.yml` ;
+- `hoben-ha-manual.yml`.
+
+Ce sont les deux seules extensions de l'allowlist GET du transport. La liste
+des workflows, les IDs numériques, validate.yml, tout autre fichier, sous-route
+enable/disable/dispatches/runs, ref/query/pagination, encodage ou redirection
+restent interdits. Les neuf routes historiques et leurs limites/TLS/refus
+restent inchangés ; aucune nouvelle opération Actions n'est exécutée.
+
+La réponse est un objet unique avec id, path, state obligatoires. ID : entier
+strict positif au plus 2^53−1 ; path : chemin `.github/workflows/<fichier>` exact
+de la campagne, sans suffixe ref. Les seuls états REST reconnus sont active,
+deleted, disabled_fork, disabled_inactivity et disabled_manually. Un autre état,
+une valeur approximative, une entrée manquante ou une collection, même de taille
+un, refuse. Doublons de clés JSON : refus du transport existant.
+
+Les champs optionnels acceptés sont name/node_id (256 caractères),
+created_at/updated_at/deleted_at (64), url/html_url/badge_url (2048), tous textes
+sans surrogate ; seul deleted_at peut être null. Ils sont bornés et liés, sans
+interprétation de leurs dates/URLs ou usage comme identité de campagne.
+Aucun lien du body n'est suivi. Tout champ supplémentaire refuse. L'enveloppe
+JSON canonique ASCII est bornée à **16 Kio** ; la borne HTTP JSON préexistante
+de 2 Mio reste imposée en amont. Ces limites concernent les seules métadonnées
+GitHub, sans quota RX Hoben ni changement de budget.
+
+Les deux lectures doivent concorder sur **tous les champs acceptés**, y compris
+optionnels ; ordre des clés indifférent, changement/ajout/disparition refusés.
+Le recheck exige aussi la même campagne, le même état rapporté et la même
+empreinte. 401/403/404/429/5xx, autre statut, pagination, JSON tronqué/ambigu ou
+exception : tous les faits UNKNOWN, état rapporté null, **NOT RUN / FAILURE**.
+Un 404 ne prouve pas la non-existence du workflow ni sa disponibilité sur la
+branche par défaut. Aucun repli vers les fichiers Git ou un autre endpoint.
+
+L'observation figée ne conserve que faits/erreurs/état/campagne en enums et
+empreinte SHA-256 ; aucun ID numérique, nom, URL, body, token, YAML ou exception.
+Seuls entrée de métadonnées rapportée, ID valide, chemin et état rapportés
+peuvent être attestés. deleted atteste une métadonnée historique rapportée,
+pas un workflow disponible ; disabled n'est jamais converti en active.
+**Même active conserve can_start=false / execution=NOT RUN /
+actions_result=FAILURE**, conversion booléenne false.
+
+Une entrée REST ne prouve ni le chargement du YAML au commit/ref épinglé, ni
+workflow_ref/SHA exécutés, sélection UI/main, HEAD/ascendance, dispatch, PR/CI,
+protections, revue MANAGER, approbations, claim, mutex, anti-rejeu, recheck après
+approbation, fraîcheur/atomicité ou autorisation. Tous restent UNKNOWN.
+Le Reader de confiance doit fournir une source GitHub authentifiée ; valider
+un dict synthétique n'en authentifie pas l'origine. L'empreinte n'est pas une
+signature et les deux GET ne constituent pas un snapshot atomique.
+
+### Limite d'accès observée le 27/10/2026
+
+Le connecteur GitHub a refusé chacune des deux routes exactes avec
+`INVALID_ARGUMENT` / HTTP 400 : endpoint public non autorisé par l'outil.
+Ce refus précède toute métadonnée exploitable ; ce n'est pas une réponse
+GitHub 403/404 et il ne prouve ni droits absents ni non-enregistrement.
+**L'enregistrement réel des deux campagnes reste UNKNOWN.** Aucun autre
+endpoint, CLI, requête HTTP directe ou modification de permission n'a été
+utilisé pour contourner ce refus. Livraison limitée au contrat de lecture et
+aux validations vérifiables hors ligne, comme prévu par la consigne MANAGER ;
+la preuve opérationnelle reste bloquée par cette limitation d'accès.
+
+Les [tests](../tests/test_github_campaign_actions_registry.py) utilisent
+seulement faux Reader/HTTP, DNS/sockets interdits : deux campagnes, états connus,
+IDs/chemins/états faux, absence de métadonnées, incohérences et changements,
+erreurs/privé, pagination, doublons/troncature, recheck, bornes, immuabilité,
+routes interdites et non-raccordement. Les lecteurs précédents sont rejoués.
+Aucun réseau Hoben, test réel, dispatch/rerun, secret/environnement, activation,
+changement de workflow/gate, codec ou budget, PR main ou fusion DEV.
