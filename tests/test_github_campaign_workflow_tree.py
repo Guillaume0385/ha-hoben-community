@@ -102,6 +102,7 @@ def refused(result, error=None):
         assert result.error is error
     assert all(f.state is tree.State.UNKNOWN for f in result.facts)
     assert result._binding is result._expected is None
+    assert result._blob is None
 
 
 @pytest.mark.parametrize("campaign", list(tree.Campaign))
@@ -410,6 +411,7 @@ def test_projection_is_immutable_and_retains_no_inputs_or_free_text():
         "error",
         "_binding",
         "_expected",
+        "_blob",
         "can_start",
         "execution",
         "actions_result",
@@ -449,7 +451,7 @@ def test_existing_transport_traverses_metadata_only_and_closes_all_streams(campa
         "/git/trees/" + ROOT_SHA + "?ref=main",
         "/git/trees/" + ROOT_SHA + "#fragment",
         "/git/trees/" + ROOT_SHA + "/",
-        "/git/blobs/" + BLOB_SHA,
+        "/git/blobs/main",
         "/contents/.github/workflows/hoben-ha-manual.yml",
         "/branches/main",
         "/branches/feature",
@@ -539,7 +541,9 @@ def test_module_stdlib_only_no_runtime_caller_backend_io_env_or_cli():
         assert not any(
             "github_campaign_workflow_tree" in p.read_text()
             for p in (ROOT / folder).rglob("*")
-            if p != path and p.is_file() and p.suffix in {".py", ".cjs", ".yml"}
+            if p not in {path, ROOT / "scripts/github_campaign_workflow_blob.py"}
+            and p.is_file()
+            and p.suffix in {".py", ".cjs", ".yml"}
         )
     result = subprocess.run(
         [sys.executable, "-I", str(path)], env={}, capture_output=True, timeout=5

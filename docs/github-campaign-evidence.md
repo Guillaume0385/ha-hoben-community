@@ -83,6 +83,8 @@ dépôt, Git commit candidat, PR, run CI, reviews PR et
 `branches/experimental` pour le lecteur de branche séparé décrit plus bas.
 La tranche 010 ajoute uniquement `git/trees/<SHA>` pour le parcours fermé
 de métadonnées décrit en fin de document, sans lecture de blob.
+La tranche 011 ajoute `git/blobs/<SHA>` pour le lecteur d'identité séparé,
+uniquement après validation de sa liaison à l'arbre de campagne.
 Aucun lien ou URL du body n'est suivi.
 Le module ne lit aucun environnement, secret ou réglage de protection.
 
@@ -139,7 +141,8 @@ origine alternative, méthode HTTP ou header libre. Les six routes initiales
 restent admises : dépôt, Git commit par SHA hexadécimal complet non nul,
 PR/run par ID entier positif, reviews PR et jobs du run/tentative 1. La tranche
 009 autorise en plus la seule route exacte branches/experimental ; la tranche
-010 ajoute Git trees par SHA complet non nul, sans query ni récursivité. Query
+010 ajoute Git trees et la tranche 011 Git blobs par SHA complet non nul,
+sans query ni récursivité. Query
 dans path, traversée, encodage de chemin, alias de dépôt, sous-routes et autre hôte
 refusent avant HTTP. Pour les collections : page 1–10, per_page=100 exactement.
 
@@ -403,3 +406,94 @@ types/modes, doublons/troncature, erreurs à chaque lecture, recheck, données
 privées, immuabilité, routes encodées/libres et transport existant. Aucun test
 GitHub/Hoben réel, raccordement live, dispatch/rerun/claim, secret, commande,
 écriture Modbus, changement de codec/budget, modification main ou fusion DEV.
+
+## Identité des octets du blob — HOBEN-126-WORKFLOW-BLOB-011
+
+Base experimental `e06b469a5c8e28763fb42fd7f80698cfde7cee1e`, après #143.
+[github_campaign_workflow_blob.py](../scripts/github_campaign_workflow_blob.py)
+consomme une preuve d'arbre distincte de la tranche 010 ; aucun lecteur HTTP
+par défaut, token, environnement, interpréteur YAML ou CLI n'est ajouté.
+Il n'est raccordé à aucun workflow, gate, collecteur, client HA ou contrat
+d'admission. Les shells restent inertes et tous les budgets Hoben inchangés.
+
+### Liaison indépendante aux métadonnées d'arbre
+
+L'observation d'arbre reçoit seulement une projection figée supplémentaire
+`BlobIdentity` : attentes fermées commit/campagne/dépôt/ref, SHA du blob choisi,
+trois SHA d'arbre et empreinte de liaison. Aucune réponse ou donnée libre n'est
+retenue. Les règles de validation d'arbre, faits attestables et refus de 010
+restent les mêmes. `blob_identity(observation, expected)` vérifie le type,
+les faits, les pins et recalcule leur liaison avant de livrer cette projection.
+Ce transfert d'identités Git n'est ni une signature ni une autorisation.
+
+Le nouveau `Expected(campaign, commit_sha, blob_sha, repository=..., ref=...)`
+épingle indépendamment les deux SHA complets non nuls, la campagne protocol/ha,
+le dépôt exact et refs/heads/experimental. Le blob attendu ne vient jamais du
+champ sha de sa propre réponse. La preuve d'arbre doit être issue du lecteur
+ou validateur distinct de 010 et sélectionner exactement ce blob pour ce
+commit/campagne. Preuve absente, en erreur, incohérente, sans projection ou
+d'une autre campagne/commit/blob : refus **avant tout GET blob**.
+
+L'API pure `validate_workflow_blob(expected, tree_observation, payload)` valide
+les relations, sans authentifier les objets Python reçus. Le lecteur et
+l'appelant restent responsables de la source GitHub authentifiée de la preuve
+d'arbre et des pins indépendants. Un objet Python construit, même typé et doté
+d'une empreinte cohérente, n'est pas une attestation d'origine. Le module n'élève
+jamais cette preuve partielle vers une admission ou un accès aux secrets.
+
+### Corps JSON, base64 et identifiant Git
+
+La réponse exige exactement les champs sha, size, encoding, content, avec
+url/node_id optionnels bornés et ignorés ; tout autre champ refuse, y compris
+un indicateur truncated. encoding vaut base64, size est un entier strict de
+0 à **16 Kio** inclus, content une chaîne d'au plus **24 Kio** avec retours
+base64 inclus. Les YAML courants font 1 318 et 1 374 octets : ce plafond laisse
+une marge bornée sans prétendre autoriser leur contenu futur.
+
+Le décodage accepte le base64 canonique, non replié ou avec LF/CRLF GitHub ;
+espace/tabulation, CR isolé, ligne vide, alphabet/padding invalide ou bits de
+padding non canoniques refusent. Longueur encodée, taille décodée et size
+doivent concorder. L'identifiant est recalculé selon Git :
+`SHA1(b"blob " + decimal_size_ascii + b"\0" + decoded_bytes)` et doit égaler
+le SHA attendu **et** le sha rapporté. Un hash des seuls octets sans en-tête Git
+ne convient pas. L'identité SHA-1 est celle du format Git, pas une signature ou
+un mécanisme d'autorisation ; une empreinte SHA-256 interne lie aussi les octets
+décodés et les pins pour le recheck.
+
+Les octets restent locaux à la validation et ne sont jamais retournés,
+journalisés, interprétés, persistés ou attachés à l'observation. Le résultat
+ne conserve que faits/erreurs fermés et empreintes, sans JSON, texte YAML,
+URL, token ou exception. Un blob vide/binaire ou un YAML invalide peut posséder
+une identité Git valide : cela n'atteste aucune sémantique ni conformité YAML.
+
+### Lectures, recheck et inconnues
+
+`read_workflow_blob(reader, expected, tree_observation, previous=None)` effectue
+seulement deux GET du même blob prouvé. Recheck : mêmes pins, preuve d'arbre
+cohérente et même liaison. Toute erreur à la seconde lecture invalide aussi
+les faits partiels. Le transport ne gagne qu'une famille exacte supplémentaire :
+`/repos/Guillaume0385/ha-hoben-community/git/blobs/<SHA complet non nul>`.
+Huit routes précédentes préservées ; aucune URL libre, query, branche, Contents,
+récursivité, nouveau endpoint Actions, protection ou secret. Redirections,
+JSON tronqué/ambigu, doublons de clés, erreurs API et pagination refusent.
+Les bornes HTTP/JSON existantes de 2 Mio, délais et TLS vérifié restent imposés
+avant la validation de blob ; cette dernière vérifie ses limites plus basses
+avant le décodage. Aucun quota RX Hoben n'est ajouté.
+
+Seuls **liaison au chemin/commit/campagne prouvé, identité des octets Git et
+taille cohérente bornée** peuvent être attestés. Toujours **can_start=false /
+execution=NOT RUN / actions_result=FAILURE**, conversion booléenne false.
+YAML interprété, workflow enregistré/chargé, workflow_ref exécuté, HEAD/ascendance
+courants, protections, dispatch, revue, PR/CI, approbations, claim, mutex,
+anti-rejeu, fraîcheur/atomicité, UI/main, recheck après approbation et autorisation
+restent UNKNOWN. La preuve d'arbre est un instantané distinct ; la double
+lecture du blob ne la rafraîchit pas et ne crée aucune preuve atomique globale.
+
+Les [tests](../tests/test_github_campaign_workflow_blob.py) sont uniquement
+synthétiques : faux Reader/HTTP, DNS/sockets interdits, vraie validation d'arbre,
+deux campagnes, altérations/pins erronés, tailles/limites, base64/troncature,
+erreurs HTTP et données privées, recheck, immuabilité et routes interdites.
+Le test de non-raccordement d'arbre admet uniquement ce nouveau lecteur de
+métadonnées ; celui-ci interdit à son tour tout consommateur runtime.
+Aucun test GitHub/Hoben réel, dispatch/rerun/claim, secret, commande, écriture,
+activation, promotion main ou fusion DEV. Livraison puis STOP.

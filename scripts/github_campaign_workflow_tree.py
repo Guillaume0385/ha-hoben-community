@@ -105,6 +105,16 @@ class Fact:
     state: State
 
 
+@dataclass(frozen=True, repr=False)
+class BlobIdentity:
+    """Non-secret Git pins selected by tree validation, never an authorization."""
+
+    expected: Expected
+    sha: str
+    tree_shas: tuple[str, str, str]
+    binding: str
+
+
 @dataclass(frozen=True)
 class Observation:
     """Immutable partial facts and non-secret bindings; always NOT RUN/FAILURE."""
@@ -113,6 +123,7 @@ class Observation:
     error: Error | None
     _binding: str | None = field(default=None, repr=False)
     _expected: str | None = field(default=None, repr=False)
+    _blob: BlobIdentity | None = field(default=None, repr=False)
     can_start: bool = field(default=False, init=False)
     execution: str = field(default="NOT RUN", init=False)
     actions_result: str = field(default="FAILURE", init=False)
@@ -255,19 +266,55 @@ def _validated(expected, repository, commit, root, github, workflows):
     blob_sha = _entry(
         workflows, workflows_sha, _FILES[expected.campaign], "100644", "blob"
     )
-    return _digest((_key(expected), root_sha, github_sha, workflows_sha, blob_sha))
+    binding = _digest((_key(expected), root_sha, github_sha, workflows_sha, blob_sha))
+    return BlobIdentity(
+        expected, blob_sha, (root_sha, github_sha, workflows_sha), binding
+    )
 
 
-def _result(error=None, binding=None, key=None):
+def _result(error=None, identity=None, key=None):
     return Observation(
         tuple(
             Fact(n, State.ATTESTED if error is None and n in _PROVEN else State.UNKNOWN)
             for n in FactName
         ),
         error,
-        binding,
+        identity.binding if identity is not None else None,
         key,
+        identity,
     )
+
+
+def blob_identity(observation: Observation, expected: Expected) -> BlobIdentity | None:
+    """Project validated pins for a metadata consumer, without promoting facts.
+
+    This checks linkage/shape of our result, not its external authenticity. A
+    trusted caller must obtain it from the tree reader/validator; a constructed
+    Python object is not a signature or a capability to access credentials.
+    """
+    try:
+        key = _key(expected)
+        _need(type(observation) is Observation, Error.PREVIOUS)
+        identity = observation._blob
+        _need(
+            observation.error is None
+            and observation.facts == _result().facts
+            and observation._expected == key
+            and type(identity) is BlobIdentity
+            and identity.expected == expected
+            and _sha(identity.sha)
+            and type(identity.tree_shas) is tuple
+            and len(identity.tree_shas) == 3
+            and all(_sha(s) for s in identity.tree_shas)
+            and type(identity.binding) is str
+            and re.fullmatch(r"[a-f0-9]{64}", identity.binding) is not None
+            and identity.binding == _digest((key, *identity.tree_shas, identity.sha))
+            and observation._binding == identity.binding,
+            Error.PREVIOUS,
+        )
+        return identity
+    except Exception:
+        return None
 
 
 def validate_workflow_tree(
@@ -281,8 +328,8 @@ def validate_workflow_tree(
     """Pure shape/relationship validation; a dict does not authenticate its source."""
     try:
         key = _key(expected)
-        binding = _validated(expected, repository, commit, root, github, workflows)
-        return _result(binding=binding, key=key)
+        identity = _validated(expected, repository, commit, root, github, workflows)
+        return _result(identity=identity, key=key)
     except _Denied as error:
         return _result(error.args[0])
     except Exception:
@@ -341,11 +388,12 @@ def read_workflow_tree(
                 and previous.facts == _result().facts,
                 Error.PREVIOUS,
             )
-        binding = _read(reader, expected)
-        _need(_read(reader, expected) == binding, Error.CHANGED)
+        identity = _read(reader, expected)
+        _need(_read(reader, expected) == identity, Error.CHANGED)
         if previous is not None:
-            _need(previous._binding == binding, Error.CHANGED)
-        return _result(binding=binding, key=key)
+            _need(previous._binding == identity.binding, Error.CHANGED)
+            _need(previous._blob == identity, Error.CHANGED)
+        return _result(identity=identity, key=key)
     except _Denied as error:
         return _result(error.args[0])
     except Exception:
