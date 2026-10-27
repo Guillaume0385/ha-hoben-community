@@ -625,6 +625,10 @@ def test_readonly_no_live_imports_callers_io_or_cli():
                 and source.suffix in {".py", ".cjs", ".yml"}
                 and source != path
             ):
+                if source == ROOT / "scripts/github_campaign_transport.py":
+                    # TRANSPORT-007 permits only this isolated Reader backend
+                    # to reuse response types; no workflow/collector is wired.
+                    continue
                 assert "github_campaign_evidence" not in source.read_text()
     result = subprocess.run(
         [sys.executable, "-I", str(path)], env={}, capture_output=True, timeout=5

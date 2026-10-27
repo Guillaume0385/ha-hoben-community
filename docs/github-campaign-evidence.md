@@ -1,4 +1,4 @@
-# Preuves GitHub — première étape offline #126
+# Preuves GitHub — lecteur et transport non raccordés #126
 
 Tranche `HOBEN-126-GITHUB-EVIDENCE-006`,
 [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641),
@@ -20,8 +20,8 @@ erreur catégorielle fixe éventuelle et deux empreintes privées. Il ne contien
 ni réponse brute, nom de branche libre, URL, body de revue/PR, token, exception
 libre ou identité d'utilisateur. Sa conversion booléenne vaut toujours false.
 Même avec six faits attestés, il reste **NOT RUN / FAILURE / can_start=false**.
-L'exécution directe se termine avec code 1 sans sortie ; aucune CLI ni
-implémentation HTTP n'est ajoutée.
+L'exécution directe se termine avec code 1 sans sortie ; aucune CLI n'existe.
+Le transport HTTP séparé de la tranche 007 est décrit plus bas, sans raccordement.
 
 | Fait attestable | Vérification depuis les réponses REST |
 | --- | --- |
@@ -66,10 +66,11 @@ restent **unknown** ; aucune approbation de revue complète n'est déduite.
 
 ## Transport injecté et validation pure
 
-`Reader.get(path, page=..., per_page=...)` est la frontière de confiance. Une
-future intégration devra fournir un client GitHub authentifié et fiable,
-TLS vérifié, sans réponse en cache, troncature ou redirection vers une autre
-origine. Les identifiants restent dans ce client ; ils ne traversent ni la
+`Reader.get(path, page=..., per_page=...)` est la frontière de confiance.
+Le transport séparé ci-dessous implémente ce port ; une intégration future devra
+fournir son jeton et un contexte fiable, sans activer une admission implicite.
+TLS vérifié, absence de cache, troncature ou redirection restent requis.
+Les identifiants restent dans ce client ; ils ne traversent ni la
 requête du module, ni l'observation. Un faux transport peut mentir : ces tests
 ne constituent aucune attestation GitHub opérationnelle ou cryptographique.
 
@@ -115,3 +116,83 @@ Workflows, gates, claims, collecteurs, HA, protocole et main sont inchangés.
 Aucun dispatch/rerun/test réel, secret, commande poêle ou écriture Modbus 06/16/22.
 Lecture seule, TLS myhoben.fr:465 et confidentialité restent imposés ; aucune
 hypothèse universelle OpenedClient=48. Livraison de cette tranche puis STOP.
+
+## Transport GET isolé — HOBEN-126-GITHUB-TRANSPORT-007
+
+Base experimental `bf1edfbd6b6f6e140ed3a9b0e434a280f0b69d61`, après #139.
+[github_campaign_transport.py](../scripts/github_campaign_transport.py) fournit
+`GitHubGETTransport(token, client=...)` et le même port get. Le backend stdlib
+effectue uniquement GET ; le client HTTP injectable permet les tests offline.
+Aucun workflow, gate ou script consommateur n'est raccordé. Le lecteur de
+preuves précédent et sa règle de revue formelle sont inchangés. Le test de
+non-raccordement autorise seulement ce nouveau transport à importer PREFIX/Reply ;
+les imports dans les workflows, collecteurs et autres scripts restent interdits.
+
+### Origine, authentification et TLS
+
+L'origine est fixée à `https://api.github.com`. Aucun argument n'accepte une
+origine alternative, méthode HTTP ou header libre. Seules les six routes du
+lecteur sont admises : dépôt, Git commit par SHA hexadécimal complet non nul,
+PR/run par ID entier positif, reviews PR et jobs du run/tentative 1. Query dans
+path, traversée, encodage de chemin, alias de dépôt, sous-routes et autre hôte
+refusent avant HTTP. Pour les collections : page 1–10, per_page=100 exactement.
+
+Le jeton opaque ASCII de 8–1024 caractères est **injecté**, jamais découvert via
+GITHUB_TOKEN, environnement, fichier ou autre identité. Pas de valeur réelle en
+tests. Il n'apparaît pas dans les URLs, repr, Reply ou erreurs ; un écho littéral
+ou échappé JSON dans la réponse refuse. Les bodies REST intermédiaires restent
+des données internes au lecteur : ne jamais les publier comme observations.
+
+Chaque requête reçoit un SSLContext PROTOCOL_TLS_CLIENT avec certificat et
+hostname vérifiés ; aucune option de désactivation n'existe. SSLKEYLOGFILE
+n'active pas la journalisation de clés. Le backend conserve la configuration
+standard des proxys et de confiance CA, sans lire de jeton d'authentification
+dans l'environnement ni changer l'opener global. Un client injecté reste une
+frontière de confiance : il doit respecter TLS, timeout, absence de logs/cache
+et framing. Les mocks n'établissent aucune connexion TLS réelle.
+
+Toute redirection, y compris même origine, est refusée sans seconde requête ;
+l'URL effective doit être exactement celle construite. Un code différent de
+200 ferme le flux sans lire son body, sans retry ni suivi de Location. Les
+exceptions ne conservent aucun contexte/cause privé et n'affichent qu'une enum
+fixe. Le validateur existant réduit ces exceptions à api_unavailable, toujours
+UNKNOWN / NOT RUN / FAILURE ; aucun changement de contrat n'est nécessaire.
+
+### Bornes des métadonnées et complétude
+
+Le timeout I/O transmis au backend est 10 s. Une deadline monotone de 10 s est
+contrôlée après ouverture, entre lectures read1, après corps et après validation.
+Ces contrôles refusent une réponse terminant trop tard ; ils ne préemptent pas
+le résolveur DNS ou un appel système bloqué. Une future intégration nécessitant
+un plafond absolu de processus devra l'imposer extérieurement. Aucune borne
+absolue de processus ou preuve d'admission n'est revendiquée par ce module.
+
+Les seuls nouveaux plafonds portent sur les métadonnées GitHub : corps maximal
+**2 Mio**, headers validés au plus **64 Kio / 100 champs**, Link 8192 caractères,
+profondeur JSON 64 et dix pages de 100 entrées. Les budgets Hoben restent
+inchangés, sans quota RX hoben-live ajouté. Les lectures demandent au plus
+64 Kio et dépassent au maximum d'un octet le plafond pour détecter un excès,
+puis ferment le flux. La longueur annoncée est vérifiée ; framing absent ou
+ambigu Content-Length + Transfer-Encoding refuse. Chunked est décodé par le
+backend stdlib, qui signale une terminaison manquante. Compression refusée.
+
+Content-Type JSON UTF-8 obligatoire ; encoding invalide, JSON tronqué, doublons
+de clés, NaN/infini, surrogate ou forme racine inattendue refusent. Aucun body
+d'erreur, contenu libre ou lien privé n'est imprimé, même lors d'un refus.
+
+Chaque relation Link est unique et doit garder origine, route exacte et query
+fermée page/per_page ; next est exclusivement la page suivante. Boucle, saut,
+fragment, credentials/port dans l'origine, paramètre supplémentaire, alias
+`/repositories/...`, last incohérent ou rel inconnu refusent. L'URL n'est jamais
+suivie : le lecteur reconstruit lui-même chaque GET. Sans next, les reviews
+doivent avoir une page incomplète ; une page pleine sans preuve est refusée.
+Pour les jobs, total_count et cardinalité doivent prouver la page et la présence
+ou absence de next. Ces refus conservateurs ne deviennent pas des listes vides.
+
+Les [tests de transport](../tests/test_github_campaign_transport.py) bloquent
+DNS et sockets, injectent uniquement un faux HTTP et des credentials synthétiques.
+Ils couvrent TLS/redirections/auth, erreurs HTTP/privées, tailles, troncature,
+framing chunked réel sur flux mémoire, JSON, Link et compatibilité avec la double
+lecture/recheck du validateur. Ils ne valident pas les permissions ou une revue
+MANAGER réelle. Protections, approvals, claims, mutex et anti-rejeu restent
+inconnus ; aucune décision, collecte, CLI, promotion main ou test réel n'est ajouté.
