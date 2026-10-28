@@ -72,7 +72,7 @@ class CampaignLimits:
 
     memory_bytes: int
     pids: int
-    useful_ms: int
+    useful_ms: int | None
     process_ms: int
 
     def __post_init__(self):
@@ -83,8 +83,9 @@ class CampaignLimits:
             and self.process_ms in {60000, 90000, 120000, 180000, 360000, 600000}
         )
         need(
-            type(self.useful_ms) is int
-            and self.useful_ms == (300000 if self.process_ms == 360000 else 1)
+            type(self.useful_ms) is int and self.useful_ms == 300000
+            if self.process_ms == 360000
+            else self.useful_ms is None
         )
 
 
@@ -93,7 +94,7 @@ def ha_limits(scenario):
     return CampaignLimits(
         1024**3,
         128,
-        300000 if scenario == "hoben-live" else 1,
+        300000 if scenario == "hoben-live" else None,
         SECONDS["ha"][scenario] * 1000,
     )
 

@@ -48,7 +48,7 @@ function haDetail(s,d) {
   const r=d.supervisor,e=d.evidence;
   object(r,['started','reason','memory_bytes','pids','useful_ms','process_ms','elapsed_ms','oom_killed','pids_limited','reaped','network']);
   for(const k of ['started','oom_killed','pids_limited','reaped'])check(typeof r[k]==='boolean');
-  check(r.memory_bytes===1073741824&&r.pids===128&&r.process_ms===cap('ha',s)&&r.useful_ms===(s==='hoben-live'?300000:1));
+  check(r.memory_bytes===1073741824&&r.pids===128&&r.process_ms===cap('ha',s)&&r.useful_ms===(s==='hoben-live'?300000:null));
   check(int(r.elapsed_ms,0,r.process_ms)&&r.network==='fixed_tls');
   check(['completed','unavailable','cancelled','timeout','memory','processes','worker_failure'].includes(r.reason));
   if(r.reason==='completed')check(r.started&&r.reaped&&!r.oom_killed&&!r.pids_limited);

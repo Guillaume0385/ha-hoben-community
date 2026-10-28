@@ -52,7 +52,12 @@ def validate_detail(scenario, detail):
     for name in ("started", "oom_killed", "pids_limited", "reaped"):
         need(type(r[name]) is bool)
     for name in ("memory_bytes", "pids", "useful_ms", "process_ms"):
-        need(type(r[name]) is int and r[name] == getattr(limits, name))
+        expected = getattr(limits, name)
+        need(
+            r[name] is None
+            if expected is None
+            else type(r[name]) is int and r[name] == expected
+        )
     need(integer(r["elapsed_ms"], 0, limits.process_ms))
     need(
         type(r["reason"]) is str

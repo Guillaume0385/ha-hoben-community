@@ -125,6 +125,8 @@ def run(case, limits, deadline_ns):
         ("useful_ms", USEFUL_MS),
         ("process_ms", limits["process_ms"] if campaign is not None else PROCESS_MS),
     ):
+        if campaign is not None and name == "useful_ms" and limits[name] is None:
+            continue
         require(type(limits[name]) is int and 0 < limits[name] <= maximum)
     observed = metrics()
     require(
@@ -135,25 +137,31 @@ def run(case, limits, deadline_ns):
     require(type(deadline_ns) is int and time.monotonic_ns() < deadline_ns)
     require(deadline_ns - time.monotonic_ns() <= limits["process_ms"] * 1_000_000)
     if stopping:
+        if campaign is not None:
+            from scripts.ha_campaign_evidence import empty
+
+            evidence = empty(campaign)
+        else:
+            evidence = empty_evidence()
         return {
             "started": False,
             "reason": "cancelled",
             "oom_killed": False,
             "pids_limited": False,
-            "evidence": empty_evidence(),
+            "evidence": evidence,
         }
     # The outer deadline was armed before Docker start. Never reset it here.
     started_ns = time.monotonic_ns()
-    end = worker_deadline(limits, deadline_ns, started_ns) / 1e9
+    end = (
+        (deadline_ns - min(20_000, limits["process_ms"] // 4) * 1_000_000) / 1e9
+        if campaign is not None and campaign != "hoben-live"
+        else worker_deadline(limits, deadline_ns, started_ns) / 1e9
+    )
     require(end > time.monotonic())
     if campaign is not None:
         from scripts.ha_campaign_evidence import empty
 
         evidence = empty(campaign)
-        if campaign != "hoben-live":
-            end = (
-                deadline_ns - min(20_000, limits["process_ms"] // 4) * 1_000_000
-            ) / 1e9
     else:
         evidence = empty_evidence()
     reason, output = "worker_failure", bytearray()

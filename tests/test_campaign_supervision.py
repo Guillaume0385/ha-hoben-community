@@ -8,11 +8,12 @@ import subprocess
 import sys
 import tarfile
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
-from scripts.campaign_runtime_contract import HA_CHOICES, SECONDS
+from scripts.campaign_runtime_contract import HA_CHOICES, SECONDS, ha_limits
 from scripts.ha_session_supervisor import SourceBundle, supervise_campaign
 from scripts.run_campaign import execute
 from tests.test_campaign_runtime import ha_detail
@@ -219,3 +220,25 @@ def test_campaign_bundle_reuses_true_worker_and_contains_no_fixture_or_git():
         )
     finally:
         bundle.close()
+
+
+@pytest.mark.parametrize("scenario", HA_CHOICES[:-1])
+def test_guardian_validates_exact_limits_and_cancel_before_worker(
+    scenario, monkeypatch
+):
+    from scripts import ha_session_guard as guard
+
+    monkeypatch.setattr(guard.os, "getpid", lambda: 1)
+    monkeypatch.setattr(guard.os, "getuid", lambda: 0)
+    monkeypatch.setattr(guard.time, "monotonic_ns", lambda: 0)
+    monkeypatch.setattr(guard, "stopping", True)
+    limits = asdict(ha_limits(scenario))
+    monkeypatch.setattr(
+        guard, "metrics", lambda: {"memory_bytes": 1024**3, "pids": 128, "swap": 0}
+    )
+    result = guard.run("campaign/" + scenario, limits, limits["process_ms"] * 1000000)
+    assert not result["started"] and result["reason"] == "cancelled"
+    assert not result["evidence"]["completed"]
+    changed = {**limits, "process_ms": limits["process_ms"] + 1}
+    with pytest.raises(ValueError):
+        guard.run("campaign/" + scenario, changed, changed["process_ms"] * 1000000)

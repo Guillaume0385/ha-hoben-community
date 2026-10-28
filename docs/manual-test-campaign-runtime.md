@@ -47,6 +47,7 @@ TLS et ouverture réutilisent AsyncTlsTransport/V4Lifecycle/V4Session ; la sessi
 ses protections et son calendrier sans changer ses hypothèses historiques.
 Le rapport de campagne en projette seulement les compteurs nécessaires ; les
 chronologies privées ne sont pas publiées par cette voie.
+Les compteurs Ping/Pong non mesurés dans ce résumé H1/H2 restent null.
 
 La nouvelle reconnexion ne reçoit aucune politique NoPongAfter120 et ne force
 aucune perte. EOF, erreur transport et CloseClient ne deviennent pas une cause
@@ -96,6 +97,9 @@ ne sont pas additionnés simultanément entre scénarios. Les délais sont armé
 avant les appels Docker et le démarrage ; chaque appel consomme le délai
 original, transmis au gardien. Les modes historiques restent limités à 360 s ;
 seul le nouveau mode fermé de reconnexion HA accepte 600 s.
+Le champ useful_ms du superviseur reste 300000 pour hoben-live et null pour
+les compléments, qui n’ont pas de fenêtre utile minimale imposée. Aucune durée
+fictive ne remplace cette absence de minimum.
 
 **Aucun quota, compteur ou proxy RX HA.** Les champs réservés aux mesures
 protocolaires sont null dans les métriques HA. Les ouvertures/lectures sont
