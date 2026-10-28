@@ -48,7 +48,13 @@ def test_manual_gate_with_offline_github_api():
 
 def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
     workflows = {p.name for p in (ROOT / ".github/workflows").glob("*.yml")}
-    assert workflows == {"hoben-manual.yml", "validate.yml", "publish-release.yml"}
+    assert workflows == {
+        "hoben-manual.yml",
+        "hoben-protocol-manual.yml",
+        "hoben-ha-manual.yml",
+        "validate.yml",
+        "publish-release.yml",
+    }
     source = (ROOT / ".github/workflows/hoben-manual.yml").read_text()
     config = yaml.load(source, Loader=yaml.BaseLoader)
     assert set(config["on"]) == {"workflow_dispatch"}
@@ -72,6 +78,41 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
                 assert step["with"]["persist-credentials"] == "false"
     assert "environment" not in jobs["publish"]
     assert set(jobs["publish"]["permissions"]) == {"contents"}
+
+
+def test_main_campaign_registration_workflows_are_strictly_inert():
+    # These two entries make Actions navigation possible on main; they must
+    # never accidentally become real collectors without a separate promotion.
+    catalogs = {
+        "hoben-protocol-manual.yml": [
+            "tls-only", "session-open", "read-v4-state", "h1h2",
+            "session-300", "session-reconnect", "all",
+        ],
+        "hoben-ha-manual.yml": [
+            "hoben-live", "open-errors", "refresh-v4", "session-reuse",
+            "session-reconnect", "cleanup", "availability", "all",
+        ],
+    }
+    for filename, scenarios in catalogs.items():
+        source = (ROOT / ".github/workflows" / filename).read_text()
+        config = yaml.load(source, Loader=yaml.BaseLoader)
+        assert set(config["on"]) == {"workflow_dispatch"}
+        assert config["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == scenarios
+        assert config["permissions"] == {}
+        assert set(config["jobs"]) == {"not-activated"}
+        job = config["jobs"]["not-activated"]
+        assert set(job) == {"runs-on", "timeout-minutes", "permissions", "steps"}
+        assert job["permissions"] == {}
+        assert job["timeout-minutes"] == "1"
+        assert len(job["steps"]) == 1
+        step = job["steps"][0]
+        assert set(step) == {"name", "shell", "run"}
+        assert step["shell"] == "bash"
+        assert "NOT RUN" in step["run"]
+        assert "exit 1" in step["run"]
+        assert "secrets." not in source
+        assert "actions/checkout" not in source
+        assert "environment:" not in source
 
 
 @pytest.mark.parametrize(
