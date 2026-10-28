@@ -176,7 +176,7 @@ def execute(
                     need(process.returncode == 0 and started and output)
                     data = validate_stage(json.loads(output), campaign)
                     need(data["scenario"] == scenario)
-                    reason = "observed" if data["started"] else data["reason"]
+                    reason = data["reason"]
                     break
             else:
                 reason = "timeout"

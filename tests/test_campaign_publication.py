@@ -101,11 +101,9 @@ def test_absent_invalid_or_oversized_report_is_not_run_without_any_upload(
         result.returncode == 1 and not (tmp_path / "hoben-campaign-published").exists()
     )
     text = (tmp_path / "summary").read_text()
-    assert (
-        text.count("NOT RUN") == 7
-        and "INCONCLUSIVE" not in text
-        and "SUCCESS" not in text
-    )
+    rows = [line for line in text.splitlines() if line.startswith("| ")][2:]
+    assert len(rows) == 7 and all(" | NOT RUN | " in line for line in rows)
+    assert "Résultat global : **FAILURE**" in text
 
 
 @pytest.mark.parametrize("corrupt", ["extra", "symlink", "oversized", "truncated"])

@@ -141,26 +141,25 @@ jobs:
         }
         const selected = scenario === 'all' ? choices.filter(x => x !== 'all') :
           choices.includes(scenario) ? [scenario] : [];
-        const checked = process.env.ADMISSION_RESULT === 'success' && process.env.ADMITTED === 'true';
-        const reason = checked ? 'collector_not_connected' : 'admission_not_verified';
+        const reason = 'admission_not_verified';
         const report = {
-          admission: checked ? 'checked' : 'not_verified',
+          admission: 'not_verified',
           stages: selected.map(scenario => ({scenario, status: 'NOT RUN', reason})),
           execution: 'NOT RUN',
           actions_result: 'FAILURE',
         };
-        const lines = ['## Campagne non raccordée — NOT RUN', '',
+        const lines = ['## Admission non vérifiée — NOT RUN', '',
           '| Scénario | Résultat |', '| --- | --- |',
           ...selected.map(scenario => '| ' + scenario + ' | NOT RUN |'),
           ...(selected.length ? [] : ['Sélection non attestée : NOT RUN.']),
-          '', 'Résultat global : FAILURE. Aucun test réel exécuté.', ''];
+          '', 'Résultat global : FAILURE. Collecte non admise.', ''];
         try {
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
           console.log(JSON.stringify(report));
         } catch {
           console.error('::error::campaign_summary_unavailable');
         }
-        console.error('::error::NOT RUN: scenarios_not_connected');
+        console.error('::error::NOT RUN: admission_not_verified');
         process.exitCode = 1;
         NODE
       if: needs.admission.result != 'success' || needs.admission.outputs.admitted != 'true'

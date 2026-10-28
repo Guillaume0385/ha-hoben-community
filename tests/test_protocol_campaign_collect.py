@@ -10,8 +10,9 @@ from custom_components.hoben.myhoben import DATA_REQUEST_CLIENT, OPEN_CLIENT
 from custom_components.hoben.transport import TransportEOF
 from custom_components.hoben.v4_lifecycle import V4Lifecycle
 from custom_components.hoben.v4_session import V4Session
-from scripts.campaign_runtime_contract import observed_status
+from scripts.campaign_runtime_contract import observed_status, stage, validate_report
 from scripts.protocol_campaign_collect import collect, h1h2
+from tests.test_campaign_runtime import envelope, node_accepts
 from tests.test_session_300_runtime import Stream, response
 
 IDENTITY = {"user_guid": "a" * 32, "device_guid": "D" * 32}
@@ -68,6 +69,17 @@ def test_real_framer_and_lifecycle_without_live_network(scenario, split):
             assert metrics["useful_ms"] == 300000 and metrics["reads"] == 5
         if scenario == "session-reconnect":
             assert metrics["useful_ms"] == 440000 and metrics["reads"] <= 10
+        value = stage(
+            "protocol",
+            scenario,
+            started=True,
+            reason="observed",
+            elapsed_ms=max(1000, int(now[0] * 1000)),
+            metrics=metrics,
+            detail=detail,
+        )
+        report = envelope("protocol", scenario, [value])
+        assert validate_report(report) and node_accepts(report)
 
     asyncio.run(exercise())
 

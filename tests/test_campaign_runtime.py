@@ -45,6 +45,15 @@ def ha_detail(scenario, *, recovered=False, clock="monotonic"):
     if scenario != "hoben-live":
         evidence["terminal"] = "none"
         evidence["window"]["elapsed_ms"] = 6000
+        count = {
+            "open-errors": 1,
+            "refresh-v4": 2,
+            "session-reuse": 3,
+            "session-reconnect": 6,
+            "cleanup": 1,
+            "availability": 2,
+        }[scenario]
+        evidence["samples"] = evidence["samples"][:count]
         for i, sample in enumerate(evidence["samples"]):
             sample.update(at_ms=i * 1000, available=True, error="none")
     supervisor = receipt(

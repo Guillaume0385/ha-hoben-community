@@ -200,10 +200,14 @@ def project(scenario, detail):
     if w is not None:
         m["loss_kind"] = w["loss_kind"] or "none"
         m["close_client_subcode"] = w["close_client_subcode"]
-    m["available"] = bool(e["samples"]) and (
-        e["samples"][-1]["decoded"]
-        if scenario == "hoben-live"
-        else e["samples"][-1]["available"]
+    m["available"] = (
+        e["window"]["active"]
+        and bool(e["samples"])
+        and (
+            e["samples"][-1]["decoded"]
+            if scenario == "hoben-live"
+            else e["samples"][-1]["available"]
+        )
     )
     if scenario == "hoben-live":
         m["continuous"] = (

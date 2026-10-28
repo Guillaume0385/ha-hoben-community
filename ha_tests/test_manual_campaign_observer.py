@@ -12,10 +12,17 @@ from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
 from custom_components.hoben.transport import TransportEOF
 from ha_tests.test_persistent_client import RESPONSE, assert_stopped
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
-from scripts.campaign_runtime_contract import HA_CHOICES, ha_limits
+from scripts.campaign_runtime_contract import (
+    HA_CHOICES,
+    ha_limits,
+    observed_status,
+    stage,
+    validate_report,
+)
 from scripts.ha_campaign_evidence import project, validate_detail
 from scripts.ha_campaign_observer import SCHEDULES, observe
 from scripts.ha_session_live_worker import collect
+from tests.test_campaign_runtime import envelope, node_accepts
 from tests.test_ha_live_proof import receipt
 
 
@@ -65,6 +72,17 @@ async def test_every_scenario_uses_actual_persistent_client_and_coordinator(
     if scenario == "hoben-live":
         assert evidence["window"]["elapsed_ms"] == 300000
     assert wire.write.await_count == expected + 1  # one OpenClient, read-only reads
+    value = stage(
+        "ha",
+        scenario,
+        started=True,
+        reason="observed",
+        elapsed_ms=d["supervisor"]["elapsed_ms"],
+        metrics=m,
+        detail=d,
+    )
+    report = envelope("ha", scenario, [value])
+    assert validate_report(report) and node_accepts(report)
     assert_private_values_absent(str(d) + caplog.text)
     assert_stopped(peers)
 
@@ -126,6 +144,37 @@ async def test_late_loss_without_another_read_is_not_recovery(hass, entry, peers
         "session-reconnect", detail("session-reconnect", evidence, int(now[0] * 1000))
     )
     assert m["loss_kind"] == "transport" and not m["recovered"] and m["cleanup"]
+    assert_stopped(peers)
+
+
+@pytest.mark.parametrize("scenario", ["refresh-v4", "availability"])
+async def test_earlier_real_read_error_is_not_erased_by_later_coordinator_success(
+    hass, entry, peers, scenario, caplog
+):
+    peers.wire(DEVICE_GUID, [[TransportEOF("PRIVATE_PAYLOAD")]])
+    peers.wire(DEVICE_GUID, [[RESPONSE]])
+    client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
+    coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    now = [0.0]
+
+    async def sleep(delay):
+        now[0] += delay
+        if now[0] >= 60:
+            await peers.backoff.entered.get()
+            peers.backoff.release.put_nowait(None)
+        for _ in range(20):
+            await asyncio.sleep(0)
+
+    e = await observe(coordinator, scenario, clock=lambda: now[0], sleep=sleep)
+    assert [s["decoded"] for s in e["samples"]] == [False, True]
+    d = detail(scenario, e, int(now[0] * 1000))
+    m = project(scenario, d)
+    assert m["error"] == "none" and m["available"] and m["cleanup"]
+    # Even with completion separately attested, these samples cannot validate
+    # an ordinary two-refresh scenario. Synthetic timing itself stays non-live.
+    assert not m["completed"]
+    assert observed_status("ha", scenario, {**m, "completed": True}) == "FAILURE"
+    assert_private_values_absent(str(d) + caplog.text)
     assert_stopped(peers)
 
 

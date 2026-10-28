@@ -252,10 +252,24 @@ def observed_status(campaign, scenario, m):
             else "FAILURE"
         )
     if scenario == "session-reuse":
-        return "SUCCESS" if m["reused"] and m["reads_ok"] >= 2 else "FAILURE"
-    if scenario == "availability":
-        return "SUCCESS" if m["available"] and m["reads_ok"] > 0 else "FAILURE"
-    return "SUCCESS" if m["reads_ok"] > 0 else "FAILURE"
+        if not m["reused"]:
+            return "FAILURE"
+    # Each complementary observer has a fixed schedule. A later successful
+    # refresh cannot erase an earlier error or stand in for missing refreshes.
+    # Natural reconnection above intentionally allows a failed read followed by
+    # owner-attested recovery; ordinary scenarios require every planned read.
+    expected_reads = {
+        "open-errors": 1,
+        "refresh-v4": 2,
+        "session-reuse": 3,
+        "cleanup": 1,
+        "availability": 2,
+    }[scenario]
+    return (
+        "SUCCESS"
+        if m["available"] and m["reads"] == m["reads_ok"] == expected_reads
+        else "FAILURE"
+    )
 
 
 def stage(
