@@ -129,6 +129,24 @@ async def test_late_loss_without_another_read_is_not_recovery(hass, entry, peers
     assert_stopped(peers)
 
 
+async def test_clock_rollback_refuses_proof_and_still_closes_client(hass, entry, peers):
+    peers.wire(DEVICE_GUID, [[RESPONSE]] * 3)
+    client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
+    coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    now = [0.0]
+
+    async def sleep(_):
+        now[0] = -1.0
+        await asyncio.sleep(0)
+
+    evidence = await observe(
+        coordinator, "session-reuse", clock=lambda: now[0], sleep=sleep
+    )
+    assert not evidence["completed"] and evidence["terminal"] == "unexpected"
+    assert evidence["cleanup"]["completed"]
+    assert_stopped(peers)
+
+
 async def test_legitimate_open_read_error_is_categorical_without_invalid_credentials(
     hass, entry, peers, caplog
 ):

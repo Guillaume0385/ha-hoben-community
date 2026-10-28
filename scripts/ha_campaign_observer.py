@@ -161,17 +161,26 @@ async def observe(
     except Exception:
         evidence["terminal"] = "unexpected"
     finally:
-        evidence["window"].update(
-            elapsed_ms=max(0, int((stamp() - start) * 1000)),
-            observation=project_observation(coordinator.client.session_observation),
-            active=coordinator.client.session_observation.active,
-        )
         try:
-            async with asyncio.timeout(10):
-                await coordinator.client.async_close()
-            evidence["cleanup"]["completed"] = True
-        finally:
-            evidence["cleanup"]["observation"] = project_observation(
-                coordinator.client.session_observation
+            try:
+                current = stamp()
+            except Exception:
+                # An invalid clock cannot bypass cleanup or manufacture elapsed
+                # time. Keep the last verified stamp and refuse completion.
+                current = start if last is None else last
+                evidence.update(completed=False, terminal="unexpected")
+            evidence["window"].update(
+                elapsed_ms=max(0, int((current - start) * 1000)),
+                observation=project_observation(coordinator.client.session_observation),
+                active=coordinator.client.session_observation.active,
             )
+        finally:
+            try:
+                async with asyncio.timeout(10):
+                    await coordinator.client.async_close()
+                evidence["cleanup"]["completed"] = True
+            finally:
+                evidence["cleanup"]["observation"] = project_observation(
+                    coordinator.client.session_observation
+                )
     return evidence
