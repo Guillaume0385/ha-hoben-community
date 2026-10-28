@@ -149,6 +149,38 @@ positivement attestées. Rapport absent/invalide : NOT RUN par scénario et
 FAILURE global, aucun upload. NOT RUN signifie absence de preuve suffisante,
 pas preuve qu’aucune tentative réseau n’a pu exister.
 
+La correction 022 distingue les refus du parent avant worker par une projection
+fermée : `context_refused`, `identity_refused`, `worker_failure`,
+`report_refused`. Seul le nom de catégorie est émis dans une annotation d’erreur,
+jamais l’exception, les entrées, des caractéristiques d’identité (présence,
+taille, hash, préfixe), l’environnement ou un RX. Le code de sortie reste 1.
+Ces catégories identifient une phase locale, pas une cause distante Hoben.
+
+Après contexte entièrement validé et création exclusive du dossier privé,
+un échec de préparation produit si possible le même schéma de rapport fermé :
+première étape NOT RUN avec catégorie, suivantes NOT RUN / previous_failure,
+aucune observation, compteurs nuls/non mesurés et cleanup non attesté.
+`collection_result=failure`, `actions_result=FAILURE`. La provenance Actions
+informative existante reste la seule métadonnée ; aucune empreinte d’identité.
+Ce rapport passe les validateurs Python/Node existants ; prepare reste exécuté
+avec `always()` et result peut publier le diagnostic validé sur son runner
+sans secrets, avec verdict global FAILURE et rétention inchangée de sept jours.
+
+Contexte non vérifiable, dossier existant/symlink, écriture impossible ou entrée
+déjà effectuée dans run() : aucun nouveau reçu pré-worker n’est fabriqué.
+Un rapport absent/invalide conserve le refus de publication existant. Aucune
+identité n’est réparée, aucun format n’est assoupli et aucun retry live ajouté.
+Une allocation partielle de pipes est nettoyée avant le retour du parent.
+
+Les quatre runs réels #40705976259, #40706002568, #40706104688 et #40706130906
+sur ef0b7c6 ont admission SUCCESS, capture/prepare/result FAILURE, sans artefact
+ni motif catégoriel exploitable. Les tests synthétiques reproduisent l’absence
+antérieure de rapport/diagnostic sur refus de préparation, ainsi qu’une fuite
+de descripteurs sur échec d’allocation ; ils **n’établissent pas la cause réelle**
+de ces quatre runs. La validation d’identité demeure une hypothèse. Aucun test
+réel, dispatch ou rerun n’est lancé par cette correction ; la prochaine
+validation réelle exige toujours une autorisation distincte du propriétaire.
+
 H1/H2 complet INCONCLUSIVE et reconnexion non observée INCONCLUSIVE peuvent
 laisser continuer all si collection/cleanup sont attestés. FAILURE, NOT RUN,
 dépassement ou cleanup manquant arrêtent la suite ; étapes restantes NOT RUN.

@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #126, diagnostic fermé avant collecte 022
+
+- Catégories fixes de refus avant worker, sans exception ni caractéristique
+  d’identité ; rapport minimal NOT RUN / FAILURE après contexte validé,
+  uniquement dans un dossier nouvellement créé et privé.
+- Conservation du refus en publication indépendante ; aucune preuve de début
+  ou de cleanup inventée, aucun rapport de repli après entrée en collecte.
+- Fermeture des pipes déjà alloués si une allocation suivante échoue ; tests
+  synthétiques hors ligne. Cause des quatre échecs réels encore indéterminée.
+
 ## En cours — #126, consolidation des rapports et validation offline 018+019
 
 - Résumé propriétaire commun : statuts, diagnostics catégoriels, durées,
