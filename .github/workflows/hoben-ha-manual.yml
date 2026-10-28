@@ -1,0 +1,35 @@
+# Registration-only workflow on main. Actual campaign implementation lives on experimental.
+# This workflow is deliberately inert: no secrets, environment, checkout, or network.
+name: Vérification réelle Home Assistant
+'on':
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scénario manuel (exécution sur main non encore activée)
+        required: true
+        type: choice
+        default: hoben-live
+        options:
+        - hoben-live
+        - open-errors
+        - refresh-v4
+        - session-reuse
+        - session-reconnect
+        - cleanup
+        - availability
+        - all
+permissions: {}
+jobs:
+  not-activated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Refuser toute collecte sur main
+      shell: bash
+      run: |
+        printf '%s\n' '## NOT RUN — campagne non activée sur main' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Les collecteurs réels restent sur experimental.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Résultat global : FAILURE.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' '::error::NOT RUN / FAILURE — aucun test réel sur main'
+        exit 1

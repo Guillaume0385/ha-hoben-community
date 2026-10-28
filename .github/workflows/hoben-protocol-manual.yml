@@ -1,0 +1,34 @@
+# Registration-only workflow on main. Actual campaign implementation lives on experimental.
+# This workflow is deliberately inert: no secrets, environment, checkout, or network.
+name: Tests expérimentaux MyHOBEN
+'on':
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Scénario manuel (exécution sur main non encore activée)
+        required: true
+        type: choice
+        default: tls-only
+        options:
+        - tls-only
+        - session-open
+        - read-v4-state
+        - h1h2
+        - session-300
+        - session-reconnect
+        - all
+permissions: {}
+jobs:
+  not-activated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Refuser toute collecte sur main
+      shell: bash
+      run: |
+        printf '%s\n' '## NOT RUN — campagne non activée sur main' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Les collecteurs réels restent sur experimental.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' 'Résultat global : FAILURE.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' '::error::NOT RUN / FAILURE — aucun test réel sur main'
+        exit 1
