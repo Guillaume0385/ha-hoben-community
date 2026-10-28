@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -20,6 +21,33 @@ from tests.test_session_suite import Harness
 from tests.test_session_suite_publication import node
 
 ROOT = Path(__file__).resolve().parents[1]
+MAIN_CAMPAIGNS = {
+    "hoben-protocol-manual.yml": (
+        "Tests expérimentaux MyHOBEN",
+        [
+            "tls-only",
+            "session-open",
+            "read-v4-state",
+            "h1h2",
+            "session-300",
+            "session-reconnect",
+            "all",
+        ],
+    ),
+    "hoben-ha-manual.yml": (
+        "Vérification réelle Home Assistant",
+        [
+            "hoben-live",
+            "open-errors",
+            "refresh-v4",
+            "session-reuse",
+            "session-reconnect",
+            "cleanup",
+            "availability",
+            "all",
+        ],
+    ),
+}
 
 
 def check_cleanup_in_running_loop(monkeypatch, harness):
@@ -83,21 +111,17 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
 def test_main_campaign_registration_workflows_are_strictly_inert():
     # These two entries make Actions navigation possible on main; they must
     # never accidentally become real collectors without a separate promotion.
-    catalogs = {
-        "hoben-protocol-manual.yml": [
-            "tls-only", "session-open", "read-v4-state", "h1h2",
-            "session-300", "session-reconnect", "all",
-        ],
-        "hoben-ha-manual.yml": [
-            "hoben-live", "open-errors", "refresh-v4", "session-reuse",
-            "session-reconnect", "cleanup", "availability", "all",
-        ],
-    }
-    for filename, scenarios in catalogs.items():
+    for filename, (name, scenarios) in MAIN_CAMPAIGNS.items():
         source = (ROOT / ".github/workflows" / filename).read_text()
         config = yaml.load(source, Loader=yaml.BaseLoader)
+        assert set(config) == {"name", "on", "permissions", "jobs"}
+        assert config["name"] == name
         assert set(config["on"]) == {"workflow_dispatch"}
-        assert config["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == scenarios
+        inputs = config["on"]["workflow_dispatch"]["inputs"]
+        assert set(inputs) == {"scenario"}
+        choice = inputs["scenario"]
+        assert choice["options"] == scenarios and choice["default"] == scenarios[0]
+        assert choice["type"] == "choice" and choice["required"] == "true"
         assert config["permissions"] == {}
         assert set(config["jobs"]) == {"not-activated"}
         job = config["jobs"]["not-activated"]
@@ -109,10 +133,55 @@ def test_main_campaign_registration_workflows_are_strictly_inert():
         assert set(step) == {"name", "shell", "run"}
         assert step["shell"] == "bash"
         assert "NOT RUN" in step["run"]
+        assert "FAILURE" in step["run"]
         assert "exit 1" in step["run"]
         assert "secrets." not in source
         assert "actions/checkout" not in source
         assert "environment:" not in source
+
+
+@pytest.mark.parametrize("ref", ["refs/heads/main", "refs/heads/experimental"])
+@pytest.mark.parametrize(
+    "filename,scenario",
+    [(f, s) for f, (_, choices) in MAIN_CAMPAIGNS.items() for s in choices],
+)
+def test_every_registration_choice_fails_closed_offline(
+    filename, scenario, ref, tmp_path
+):
+    # Execute only the inert Bash body locally, never an Actions workflow or
+    # collector. The closed printf/exit language forbids any external command,
+    # substitution or private input interpolation before Bash can see it.
+    config = yaml.load(
+        (ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader
+    )
+    script = config["jobs"]["not-activated"]["steps"][0]["run"]
+    for line in script.splitlines():
+        assert re.fullmatch(
+            r"printf '%s\\n' '[^'\n$`]*'(?: >> \"\$GITHUB_STEP_SUMMARY\")?|exit 1",
+            line,
+        )
+    event, summary = tmp_path / "event.json", tmp_path / "summary"
+    event.write_text(json.dumps({"inputs": {"scenario": scenario}}))
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script],
+        env={
+            "PATH": str(tmp_path / "no-executables"),
+            "GITHUB_EVENT_PATH": str(event),
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": ref,
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=3,
+    )
+    assert result.returncode == 1 and result.stderr == ""
+    assert "::error::NOT RUN / FAILURE" in result.stdout
+    text = summary.read_text()
+    assert "NOT RUN" in text and "Résultat global : FAILURE." in text
+    assert "SUCCESS" not in text + result.stdout
+    assert {p.name for p in tmp_path.iterdir()} == {"event.json", "summary"}
 
 
 @pytest.mark.parametrize(

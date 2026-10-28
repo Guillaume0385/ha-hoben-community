@@ -29,5 +29,6 @@ jobs:
       run: |
         printf '%s\n' '## NOT RUN — campagne non activée sur main' >> "$GITHUB_STEP_SUMMARY"
         printf '%s\n' 'Les collecteurs réels restent sur experimental.' >> "$GITHUB_STEP_SUMMARY"
-        printf '%s\n' '::error::NOT RUN — aucun test réel sur main'
+        printf '%s\n' 'Résultat global : FAILURE.' >> "$GITHUB_STEP_SUMMARY"
+        printf '%s\n' '::error::NOT RUN / FAILURE — aucun test réel sur main'
         exit 1

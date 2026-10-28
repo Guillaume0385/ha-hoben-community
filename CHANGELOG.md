@@ -1,5 +1,12 @@
 # Changelog
 
+## En cours — #126, publication des entrées manuelles sur main
+
+- Deux définitions workflow_dispatch préparées pour l’enregistrement Actions,
+  avec leurs choix de scénarios ; refus explicite NOT RUN / FAILURE sur main.
+- Entrées inertes, sans collecteur, secret, checkout, environnement ni réseau ;
+  tests hors ligne du refus de tous les choix. Aucune campagne réelle activée.
+
 ## En cours — #112, étape 8 tranche C2c
 
 - Refus explicite des identifiants obligatoires absents, sans valeur par défaut
