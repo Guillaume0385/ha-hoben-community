@@ -111,13 +111,22 @@ def run(case, limits, deadline_ns):
     """Attest cgroup bounds before the unprivileged worker can execute."""
     global worker_started
     require(os.getpid() == 1 and os.getuid() == 0)
+    campaign = case.removeprefix("campaign/") if case.startswith("campaign/") else None
+    if campaign is not None:
+        from dataclasses import asdict
+
+        from scripts.campaign_runtime_contract import ha_limits
+
+        require(limits == asdict(ha_limits(campaign)))
     require(set(limits) == {"memory_bytes", "pids", "useful_ms", "process_ms"})
     for name, maximum in (
         ("memory_bytes", MEMORY_BYTES),
         ("pids", PIDS),
         ("useful_ms", USEFUL_MS),
-        ("process_ms", PROCESS_MS),
+        ("process_ms", limits["process_ms"] if campaign is not None else PROCESS_MS),
     ):
+        if campaign is not None and name == "useful_ms" and limits[name] is None:
+            continue
         require(type(limits[name]) is int and 0 < limits[name] <= maximum)
     observed = metrics()
     require(
@@ -128,18 +137,34 @@ def run(case, limits, deadline_ns):
     require(type(deadline_ns) is int and time.monotonic_ns() < deadline_ns)
     require(deadline_ns - time.monotonic_ns() <= limits["process_ms"] * 1_000_000)
     if stopping:
+        if campaign is not None:
+            from scripts.ha_campaign_evidence import empty
+
+            evidence = empty(campaign)
+        else:
+            evidence = empty_evidence()
         return {
             "started": False,
             "reason": "cancelled",
             "oom_killed": False,
             "pids_limited": False,
-            "evidence": empty_evidence(),
+            "evidence": evidence,
         }
     # The outer deadline was armed before Docker start. Never reset it here.
     started_ns = time.monotonic_ns()
-    end = worker_deadline(limits, deadline_ns, started_ns) / 1e9
+    end = (
+        (deadline_ns - min(20_000, limits["process_ms"] // 4) * 1_000_000) / 1e9
+        if campaign is not None and campaign != "hoben-live"
+        else worker_deadline(limits, deadline_ns, started_ns) / 1e9
+    )
     require(end > time.monotonic())
-    evidence, reason, output = empty_evidence(), "worker_failure", bytearray()
+    if campaign is not None:
+        from scripts.ha_campaign_evidence import empty
+
+        evidence = empty(campaign)
+    else:
+        evidence = empty_evidence()
+    reason, output = "worker_failure", bytearray()
     read_fd, write_fd = os.pipe()
     os.set_blocking(read_fd, False)
     started = False
@@ -147,14 +172,23 @@ def run(case, limits, deadline_ns):
     identity_fd = None
     try:
         # Group/cgroup membership and the guardian's absolute timer exist first.
-        live = case == "live"
+        live = case == "live" or campaign is not None
         if live:
             identity_fd = identity_pipe(deadline_ns)
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-I",
-                str(ROOT / "scripts/ha_session_live_worker.py"),
+                str(
+                    ROOT
+                    / "scripts"
+                    / (
+                        "ha_session_live_worker.py"
+                        if campaign is None
+                        else "ha_campaign_worker.py"
+                    )
+                ),
+                *([] if campaign is None else [campaign]),
             ]
             if live
             else [
@@ -169,6 +203,9 @@ def run(case, limits, deadline_ns):
             env={
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "HA_EVIDENCE_FD": str(write_fd),
+                **(
+                    {"HA_DEADLINE_NS": str(deadline_ns)} if campaign is not None else {}
+                ),
                 **({"HA_IDENTITY_FD": str(identity_fd)} if live else {}),
             },
             pass_fds=(write_fd, identity_fd) if live else (write_fd,),
@@ -221,7 +258,18 @@ def run(case, limits, deadline_ns):
                             "reaped": True,
                             "network": "none",
                         }
-                        build_report(PROVENANCE, receipt, candidate)
+                        if campaign is None:
+                            build_report(PROVENANCE, receipt, candidate)
+                        else:
+                            from scripts.ha_campaign_evidence import validate_detail
+
+                            validate_detail(
+                                campaign,
+                                {
+                                    "supervisor": {**receipt, "network": "fixed_tls"},
+                                    "evidence": candidate,
+                                },
+                            )
                         evidence, reason = candidate, "completed"
                     break
             else:
@@ -284,7 +332,13 @@ def main():
         case, limits_json = sys.argv[1:]
         RECEIPT.parent.chmod(0o700)
         received = int((RECEIPT.parent / "deadline").read_text())
-        require(0 < received - time.monotonic_ns() <= PROCESS_MS * 1_000_000)
+        if case.startswith("campaign/"):
+            from scripts.campaign_runtime_contract import ha_limits
+
+            maximum_ms = ha_limits(case.removeprefix("campaign/")).process_ms
+        else:
+            maximum_ms = PROCESS_MS
+        require(0 < received - time.monotonic_ns() <= maximum_ms * 1_000_000)
         deadline = received
         result = run(case, json.loads(limits_json), deadline)
     except Exception:
@@ -296,8 +350,8 @@ def main():
             "evidence": empty_evidence(),
         }
     try:
-        if sys.argv[1] == "live":
-            result["mode"] = "live"
+        if sys.argv[1] == "live" or sys.argv[1].startswith("campaign/"):
+            result["mode"] = sys.argv[1]
         encoded = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
         if len(encoded) > 8192:
             return 1

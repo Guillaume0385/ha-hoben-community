@@ -354,7 +354,30 @@ def test_no_io_imports_live_callers_or_runnable_cli():
                 and source.suffix in {".py", ".cjs", ".yml"}
                 and source != path
             ):
-                assert "protocol_campaign_plan" not in source.read_text()
+                text = source.read_text()
+                if "protocol_campaign_plan" not in text:
+                    continue
+                # 016+017 authorizes catalog reuse, never executing this old
+                # offline plan/transition as admission or a live collector.
+                if source == ROOT / "scripts/campaign_runtime_contract.py":
+                    imports = [
+                        n
+                        for n in ast.walk(ast.parse(text))
+                        if isinstance(n, ast.ImportFrom)
+                        and n.module == "scripts.protocol_campaign_plan"
+                    ]
+                    assert len(imports) == 1
+                    assert [(a.name, a.asname) for a in imports[0].names] == [
+                        ("CHOICES", "PROTOCOL_CHOICES")
+                    ]
+                    assert text.count("protocol_campaign_plan") == 1
+                elif source == ROOT / "scripts/ha_session_supervisor.py":
+                    # The private source bundle must supply that pure module to
+                    # the fixed worker; only its exact filename is referenced.
+                    assert text.count("protocol_campaign_plan") == 1
+                    assert '"protocol_campaign_plan.py"' in text
+                else:
+                    raise AssertionError("Unauthorized planning-model caller")
     result = subprocess.run(
         [sys.executable, "-I", str(path)], env={}, capture_output=True, timeout=5
     )

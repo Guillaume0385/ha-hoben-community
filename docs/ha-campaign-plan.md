@@ -1,5 +1,16 @@
 # Plan Home Assistant offline — #126
 
+## Exécution courante — 016+017
+
+L’arbitrage des budgets dans #126 du 27/10/2026 lève les inconnues ci-dessous.
+Le [contrat runtime courant](manual-test-campaign-runtime.md) décrit les
+scénarios raccordés et leurs limites effectivement appliquées. Le module de
+planification et les sections suivantes restent l’historique offline 004/005,
+sans autorité d’exécution ; leurs catalogues fermés sont réutilisés. Aucun
+ancien None ni ancien gate de preuve ne devient un défaut d’exécution.
+
+## Historique du plan non raccordé
+
 Tranche `HOBEN-126-HA-PLAN-005`, selon la
 [consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641),
 base `d0b0719d1efc9a26195e767d856704e601334afd`.

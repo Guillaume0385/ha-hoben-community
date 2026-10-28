@@ -1,6 +1,30 @@
-# Deux campagnes manuelles préparées, collecteurs non raccordés — #126
+# Deux campagnes manuelles — #126
 
-## État courant — HOBEN-126-WORKFLOW-ADMISSION-014, étapes 014+015
+## Contrat courant — HOBEN-126-CAMPAIGNS-016-017
+
+Les deux workflows ont trois jobs admission → collect → result. Le
+[contrat runtime](manual-test-campaign-runtime.md) détaille les scénarios,
+les budgets explicites arbitrés le 27/10/2026, les rapports et leurs limites.
+Admission minimale inchangée : workflow_dispatch, acteur/triggering_actor
+propriétaire, refs natives experimental/main et choix fermé ; reruns autorisés,
+sans prérequis PR/fusion/revue/CI/comparaison SHA/claim. collector_ready suit
+le catalogue fermé implémenté, avec refus pour toute entrée inconnue.
+
+Collect conserve l’environnement hoben-experimental/hoben-live, les approbations
+natives et le mutex commun. Seule sa dernière phase reçoit les identités ;
+aucun secret dans admission ou result. Checkouts sur github.sha du run, sans
+substitution de branche. Publication JSON fermée sur un runner distinct ;
+rapport absent/invalide ou étape non attestée donne NOT RUN/FAILURE.
+Aucun test réel ou promotion main n’est autorisé par cette préparation.
+
+Les contrôleurs 014 restent archivés byte-identiques dans
+tests/fixtures/campaign_admission_014 ; leurs régressions sont conservées.
+Les tests runtime/publication vérifient les contrôleurs et raccordements actuels.
+Les modèles de preuve et anciens shells restent historiques et non raccordés.
+
+## Historique — admission et points d’insertion 014+015
+
+### État courant — HOBEN-126-WORKFLOW-ADMISSION-014, étapes 014+015
 
 La [consigne propriétaire actuelle](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641)
 remplace les anciennes contraintes d'admission pour ces deux voies. Le
@@ -45,7 +69,7 @@ chaînes needs/if, sorties d'admission, verrou non raccordé, environnement futu
 concurrence, refus, reruns et résultats. Le moteur Node de test interdit les
 modules réseau/processus et ne permet d'écrire que dans son dossier temporaire.
 
-### Contrats antérieurs conservés
+#### Contrats antérieurs conservés
 
 Les deux shells 002/013 d'origine sont archivés sans modification dans
 [les fixtures 013](../tests/fixtures/campaign_shells_013/hoben-protocol-manual.yml)
@@ -56,7 +80,7 @@ un gate de leur admission. Les lecteurs Git/registre et l'ancien modèle strict
 restent historiques non raccordés ; leur indisponibilité ne bloque pas un
 contexte manuel autorisé par le contrat courant.
 
-## Historique — formulaires 002 et sémantique 013
+### Historique — formulaires 002 et sémantique 013
 
 Les sections suivantes décrivent les versions historiques, **pas** les nouveaux
 jobs d'admission. Leurs anciennes conditions de PR/admission/main/rerun ne
@@ -97,7 +121,7 @@ Les deux nouveaux fichiers ne demandent pas son mutex, puisqu'ils ne lancent
 aucune observation ; tout futur raccordement devra conserver le verrou partagé
 entre campagnes, l'admission/recheck et toutes les protections existantes.
 
-### Historique — formulaire GitHub et branches
+#### Historique — formulaire GitHub et branches
 
 Use workflow from est le sélecteur natif GitHub ; aucun input de ref ni checkout
 de substitution n'est ajouté. La présence de fichiers sur experimental ne
@@ -120,7 +144,7 @@ experimental/main, les permissions nulles, les clés autorisées et une liste
 positive de commandes littérales. Cela prouve le refus local, pas le comportement
 de l'UI GitHub ni une admission sur une branche.
 
-### Historique — contrat statique pur HOBEN-126-SHELL-SEMANTICS-013
+#### Historique — contrat statique pur HOBEN-126-SHELL-SEMANTICS-013
 
 Base experimental `5df31d7d51239adace6466922257a96898cb7591`, après #145.
 [campaign_shell_semantics.py](../scripts/campaign_shell_semantics.py) reçoit

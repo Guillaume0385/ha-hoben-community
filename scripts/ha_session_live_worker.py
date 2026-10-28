@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-async def collect(identity):
+async def collect(identity, *, observer=None):
     from homeassistant.config_entries import ConfigEntries, ConfigEntry
     from homeassistant.core import HomeAssistant
 
@@ -53,7 +53,9 @@ async def collect(identity):
         try:
             coordinator = HobenDataUpdateCoordinator(hass, entry, client)
             try:
-                await observe(coordinator, evidence=evidence)  # native clock ONLY
+                await (observe if observer is None else observer)(
+                    coordinator, evidence=evidence
+                )  # live callers always use the native clock
             except asyncio.CancelledError:
                 pass
             return evidence

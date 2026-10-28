@@ -1,0 +1,149 @@
+# Issue #126: admission installed; no collector is connected.
+name: Tests expérimentaux MyHOBEN (non activés)
+'on':
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Choix prévu uniquement — tous les scénarios sont NOT RUN
+        required: true
+        type: choice
+        default: tls-only
+        options:
+        - tls-only
+        - session-open
+        - read-v4-state
+        - h1h2
+        - session-300
+        - session-reconnect
+        - all
+permissions: {}
+concurrency:
+  group: hoben-read-only-observation
+  cancel-in-progress: false
+  queue: max
+env:
+  CAMPAIGN: protocol
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    outputs:
+      admitted: ${{ steps.context.outputs.admitted }}
+      collector_ready: ${{ steps.context.outputs.collector_ready }}
+    steps:
+    - name: Vérifier le contexte manuel autorisé
+      id: context
+      shell: bash
+      env:
+        REQUEST_REPOSITORY: ${{ github.repository }}
+        REQUEST_EVENT: ${{ github.event_name }}
+        REQUEST_ACTOR: ${{ github.actor }}
+        REQUEST_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        REQUEST_REF: ${{ github.ref }}
+      run: |
+        node <<'NODE'
+        const fs = require('node:fs');
+        const catalogs = {
+          protocol: ['tls-only', 'session-open', 'read-v4-state', 'h1h2', 'session-300', 'session-reconnect', 'all'],
+          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all'],
+        };
+        const choices = Object.hasOwn(catalogs, process.env.CAMPAIGN) ? catalogs[process.env.CAMPAIGN] : [];
+        let scenario;
+        try {
+          const file = process.env.GITHUB_EVENT_PATH;
+          if (fs.statSync(file).size <= 256 * 1024) {
+            const event = JSON.parse(fs.readFileSync(file, 'utf8'));
+            scenario = event && event.inputs && event.inputs.scenario;
+          }
+        } catch {
+          // Missing/malformed event metadata never grants admission.
+        }
+        const admitted =
+          process.env.REQUEST_REPOSITORY === 'Guillaume0385/ha-hoben-community' &&
+          process.env.REQUEST_EVENT === 'workflow_dispatch' &&
+          process.env.REQUEST_ACTOR === 'Guillaume0385' &&
+          process.env.REQUEST_TRIGGERING_ACTOR === 'Guillaume0385' &&
+          ['refs/heads/experimental', 'refs/heads/main'].includes(process.env.REQUEST_REF) &&
+          choices.includes(scenario);
+        try {
+          // A valid context never means that a collector has been connected.
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+            'admitted=' + String(admitted) + '\ncollector_ready=false\n');
+          console.log(admitted ? 'admission_context_checked' : '::error::admission_context_refused');
+          process.exitCode = admitted ? 0 : 1;
+        } catch {
+          console.error('::error::admission_output_unavailable');
+          process.exitCode = 1;
+        }
+        NODE
+  scenario-slot:
+    needs: admission
+    if: >-
+      needs.admission.result == 'success' &&
+      needs.admission.outputs.admitted == 'true' &&
+      needs.admission.outputs.collector_ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    environment: hoben-experimental
+    steps:
+    - name: Refuser un point de collecte non raccordé
+      shell: bash
+      run: |
+        printf '%s\n' '::error::NOT RUN: aucun collecteur raccordé à ce point insertion.'
+        exit 1
+  result:
+    needs: [admission, scenario-slot]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+    - name: Publier les résultats NOT RUN et échouer
+      shell: bash
+      env:
+        ADMISSION_RESULT: ${{ needs.admission.result }}
+        ADMITTED: ${{ needs.admission.outputs.admitted }}
+      run: |
+        node <<'NODE'
+        const fs = require('node:fs');
+        const catalogs = {
+          protocol: ['tls-only', 'session-open', 'read-v4-state', 'h1h2', 'session-300', 'session-reconnect', 'all'],
+          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all'],
+        };
+        const choices = Object.hasOwn(catalogs, process.env.CAMPAIGN) ? catalogs[process.env.CAMPAIGN] : [];
+        let scenario;
+        try {
+          const file = process.env.GITHUB_EVENT_PATH;
+          if (fs.statSync(file).size <= 256 * 1024) {
+            const event = JSON.parse(fs.readFileSync(file, 'utf8'));
+            scenario = event && event.inputs && event.inputs.scenario;
+          }
+        } catch {
+          // Missing/malformed event metadata never grants admission.
+        }
+        const selected = scenario === 'all' ? choices.filter(x => x !== 'all') :
+          choices.includes(scenario) ? [scenario] : [];
+        const checked = process.env.ADMISSION_RESULT === 'success' && process.env.ADMITTED === 'true';
+        const reason = checked ? 'collector_not_connected' : 'admission_not_verified';
+        const report = {
+          admission: checked ? 'checked' : 'not_verified',
+          stages: selected.map(scenario => ({scenario, status: 'NOT RUN', reason})),
+          execution: 'NOT RUN',
+          actions_result: 'FAILURE',
+        };
+        const lines = ['## Campagne non raccordée — NOT RUN', '',
+          '| Scénario | Résultat |', '| --- | --- |',
+          ...selected.map(scenario => '| ' + scenario + ' | NOT RUN |'),
+          ...(selected.length ? [] : ['Sélection non attestée : NOT RUN.']),
+          '', 'Résultat global : FAILURE. Aucun test réel exécuté.', ''];
+        try {
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+          console.log(JSON.stringify(report));
+        } catch {
+          console.error('::error::campaign_summary_unavailable');
+        }
+        console.error('::error::NOT RUN: scenarios_not_connected');
+        process.exitCode = 1;
+        NODE

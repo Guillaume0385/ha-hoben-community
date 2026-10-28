@@ -12,6 +12,11 @@ function validateReport(r) {
   object(p,['merge_sha','pr_number','run_id','run_attempt']);
   check(typeof p.merge_sha==='string' && /^[0-9a-f]{40}$/.test(p.merge_sha) &&
     int(p.pr_number,1,Number.MAX_SAFE_INTEGER) && int(p.run_id,1,Number.MAX_SAFE_INTEGER) && p.run_attempt===1);
+  return validateObservation(r);
+}
+
+// Shared logical evidence only; never manufacture historical PR provenance.
+function validateObservation(r, derive=false) {
   const g=r.supervisor;
   object(g,['started','reason','memory_bytes','pids','useful_ms','process_ms',
     'elapsed_ms','oom_killed','pids_limited','reaped','network']);
@@ -85,11 +90,14 @@ function validateReport(r) {
     expected=Object.fromEntries(Object.keys(expected).map(k=>[k,'NOT RUN']));
     if(g.reason!=='unavailable') expected.supervision='FAILURE';
   }
-  object(r.criteria,Object.keys(expected));
-  for(const k of Object.keys(expected)) check(r.criteria[k]===expected[k]);
+  if(!derive) {
+    object(r.criteria,Object.keys(expected));
+    for(const k of Object.keys(expected)) check(r.criteria[k]===expected[k]);
+  }
   const values=Object.values(expected);
   const overall=values.includes('FAILURE') ? 'FAILURE':expected.collection==='NOT RUN' ? 'NOT RUN':
     values.every(v=>v==='SUCCESS') ? 'SUCCESS':'INCONCLUSIVE';
+  if(derive) r={...r,criteria:expected,outcome:overall};
   check(r.outcome===overall && Buffer.byteLength(JSON.stringify(r))<=8192);
   return r;
 }
@@ -102,4 +110,4 @@ function parseReport(text) {
     return r;
   } catch(_) {throw Error('invalid inactive HA live proof');}
 }
-module.exports={validateReport,parseReport};
+module.exports={validateReport,validateObservation,parseReport};

@@ -1,10 +1,10 @@
-# Issue #126: admission installed; no collector is connected.
-name: Tests expérimentaux MyHOBEN (non activés)
+# Issue #126: manual only; native environments and shared mutex remain mandatory.
+name: Tests expérimentaux MyHOBEN
 'on':
   workflow_dispatch:
     inputs:
       scenario:
-        description: Choix prévu uniquement — tous les scénarios sont NOT RUN
+        description: Observation manuelle en lecture seule — scénario individuel ou all séquentiel
         required: true
         type: choice
         default: tls-only
@@ -67,9 +67,9 @@ jobs:
           ['refs/heads/experimental', 'refs/heads/main'].includes(process.env.REQUEST_REF) &&
           choices.includes(scenario);
         try {
-          // A valid context never means that a collector has been connected.
+          // Only the closed implemented catalog can reach the protected collector.
           fs.appendFileSync(process.env.GITHUB_OUTPUT,
-            'admitted=' + String(admitted) + '\ncollector_ready=false\n');
+            'admitted=' + String(admitted) + '\ncollector_ready=' + String(admitted) + '\n');
           console.log(admitted ? 'admission_context_checked' : '::error::admission_context_refused');
           process.exitCode = admitted ? 0 : 1;
         } catch {
@@ -77,30 +77,46 @@ jobs:
           process.exitCode = 1;
         }
         NODE
-  scenario-slot:
+  collect:
     needs: admission
-    if: >-
-      needs.admission.result == 'success' &&
-      needs.admission.outputs.admitted == 'true' &&
-      needs.admission.outputs.collector_ready == 'true'
+    if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true' && needs.admission.outputs.collector_ready
+      == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 1
-    permissions: {}
+    timeout-minutes: 50
+    permissions:
+      contents: read
     environment: hoben-experimental
     steps:
-    - name: Refuser un point de collecte non raccordé
-      shell: bash
-      run: |
-        printf '%s\n' '::error::NOT RUN: aucun collecteur raccordé à ce point insertion.'
-        exit 1
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - id: capture
+      name: Collecte bornée — aucune sortie privée
+      env:
+        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
+      run: python -I scripts/run_campaign.py protocol
+    - id: exports
+      if: always()
+      name: Valider la projection fermée avant transfert
+      run: node .github/scripts/campaign-report.cjs prepare
+    outputs:
+      report_b64: ${{ steps.exports.outputs.report_b64 }}
   result:
-    needs: [admission, scenario-slot]
+    needs:
+    - admission
+    - collect
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 1
-    permissions: {}
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
-    - name: Publier les résultats NOT RUN et échouer
+    - name: Rapport de refus sans checkout ni secret
       shell: bash
       env:
         ADMISSION_RESULT: ${{ needs.admission.result }}
@@ -147,3 +163,23 @@ jobs:
         console.error('::error::NOT RUN: scenarios_not_connected');
         process.exitCode = 1;
         NODE
+      if: needs.admission.result != 'success' || needs.admission.outputs.admitted != 'true'
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true'
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - id: public
+      if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true'
+      name: Validation indépendante et résultat par scénario
+      env:
+        PUBLIC_REPORT_B64: ${{ needs.collect.outputs.report_b64 }}
+        COLLECT_RESULT: ${{ needs.collect.result }}
+      run: node .github/scripts/campaign-report.cjs publish
+    - if: always() && steps.public.outputs.report == 'true'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: protocol-campaign-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ runner.temp }}/hoben-campaign-published/report.json
+        if-no-files-found: error
+        retention-days: 7
