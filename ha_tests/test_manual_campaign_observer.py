@@ -1,7 +1,6 @@
 """Real HA/client/coordinator over deterministic in-memory TLS peers only."""
 
 import asyncio
-from functools import partial
 from unittest.mock import Mock
 
 import pytest
@@ -279,15 +278,14 @@ async def test_legacy_worker_keeps_its_persisted_identity_requirement(peers):
 
 
 async def test_initial_campaign_identity_challenge_never_sends_association(
-    peers, monkeypatch, caplog
+    hass, entry, peers, caplog
 ):
     wire = peers.wire(DEVICE_GUID, [])
     wire.queue = script_transport(wire, openings=[[b"\x2f"]])
-    monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", Mock())
-    evidence = await collect(
-        identity({"HOBEN_USER_GUID": "b" * 32}),
-        allow_initial_identity=True,
-        observer=partial(observe, scenario="open-errors", clock=lambda: 0.0),
+    client = HobenClient(**identity({"HOBEN_USER_GUID": "b" * 32}))
+    coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    evidence = await observe(
+        coordinator, "open-errors", clock=lambda: 0.0, sleep=asyncio.sleep
     )
     assert evidence["cleanup"]["completed"]
     assert evidence["samples"][0]["error"] == "authorization"
