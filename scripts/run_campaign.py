@@ -100,8 +100,11 @@ def execute(
         # The parent owns the capture root, so SIGKILL of an H1/H2 worker cannot
         # bypass deletion of private RX/identity files in the worker's finally.
         private_directory = tempfile.mkdtemp(prefix="hoben-campaign-stage-")
-        pairs = [os.pipe() for _ in range(4)]
-        descriptors.update(fd for pair in pairs for fd in pair)
+        pairs = []
+        for _ in range(4):
+            pair = os.pipe()
+            descriptors.update(pair)  # own each pair even if the next pipe fails
+            pairs.append(pair)
         (
             (identity_r, identity_w),
             (ready_r, ready_w),
@@ -297,36 +300,99 @@ def run(
     return validate_report(report)
 
 
-def main():
-    storage = Path(os.environ["RUNNER_TEMP"]) / "hoben-campaign-public"
-    storage.mkdir(mode=0o700)
-    campaign = sys.argv[1]
-    selection, provenance = context(os.environ, campaign)
-    image = None
-    if campaign == "ha":
-        file = Path(os.environ["RUNNER_TEMP"]) / "hoben-ha-runtime.id"
-        need(file.is_file() and not file.is_symlink() and file.stat().st_size <= 72)
-        image = file.read_text().strip()
-        need(re.fullmatch("sha256:[a-f0-9]{64}", image))
-    private = identity(
-        os.environ, tls_only=campaign == "protocol" and selection == "tls-only"
-    )
-    payload = json.dumps(private, separators=(",", ":")).encode()
-    stopped = False
-
-    def stop(*_):
-        nonlocal stopped
-        stopped = True
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
-    report = run(
-        campaign, selection, provenance, payload, image=image, cancelled=lambda: stopped
-    )
+def write_report(storage, report):
+    """Write only a closed projection, exclusively in a directory we created."""
+    validate_report(report)
     with (storage / "report.json").open("x") as stream:
         os.chmod(stream.fileno(), 0o600)
         json.dump(report, stream, separators=(",", ":"), allow_nan=False)
-    return 0  # The independent result job evaluates SUCCESS/FAILURE, not exit 0.
+
+
+def diagnostic(reason):
+    """Only a fixed phase/category; never inspect or stringify an exception."""
+    need(
+        reason
+        in {"context_refused", "identity_refused", "worker_failure", "report_refused"}
+    )
+    try:
+        os.write(2, ("::error::" + reason + "\n").encode("ascii"))
+    except OSError:
+        pass  # An unavailable diagnostic channel cannot permit collection.
+
+
+def refusal_report(campaign, selection, provenance, reason):
+    """No worker has been entered: no observation, counters or cleanup invented."""
+    return validate_report(
+        {
+            "schema": 1,
+            "campaign": campaign,
+            "selection": selection,
+            "provenance": provenance,
+            "elapsed_ms": 0,
+            "stages": [
+                stage(campaign, name, reason=reason if i == 0 else "previous_failure")
+                for i, name in enumerate(plan(campaign, selection))
+            ],
+            "collection_result": "failure",
+            "actions_result": "FAILURE",
+        }
+    )
+
+
+def main():
+    reason, storage, admitted, before_worker = "context_refused", None, None, True
+    try:
+        need(len(sys.argv) == 2)
+        campaign = sys.argv[1]
+        selection, provenance = context(os.environ, campaign)
+        admitted = campaign, selection, provenance
+        reason = "report_refused"
+        folder = Path(os.environ["RUNNER_TEMP"]) / "hoben-campaign-public"
+        folder.mkdir(mode=0o700)
+        storage = folder  # no reuse/overwrite after a failed exclusive mkdir
+        reason = "worker_failure"
+        image = None
+        if campaign == "ha":
+            file = Path(os.environ["RUNNER_TEMP"]) / "hoben-ha-runtime.id"
+            need(file.is_file() and not file.is_symlink() and file.stat().st_size <= 72)
+            image = file.read_text().strip()
+            need(re.fullmatch("sha256:[a-f0-9]{64}", image))
+        reason = "identity_refused"
+        private = identity(
+            os.environ, tls_only=campaign == "protocol" and selection == "tls-only"
+        )
+        reason = "worker_failure"
+        payload = json.dumps(private, separators=(",", ":")).encode()
+        stopped = False
+
+        def stop(*_):
+            nonlocal stopped
+            stopped = True
+
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+        before_worker = False
+        report = run(
+            campaign,
+            selection,
+            provenance,
+            payload,
+            image=image,
+            cancelled=lambda: stopped,
+        )
+        reason = "report_refused"
+        write_report(storage, report)
+        return 0  # The independent result job still evaluates collected evidence.
+    except BaseException:
+        diagnostic(reason)
+        # Context must be fully admitted and storage exclusively ours. Once run()
+        # has been entered, a missing/invalid report cannot attest a start state.
+        if before_worker and admitted is not None and storage is not None:
+            try:
+                write_report(storage, refusal_report(*admitted, reason))
+            except BaseException:
+                diagnostic("report_refused")
+        return 1
 
 
 if __name__ == "__main__":
