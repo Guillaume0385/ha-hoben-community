@@ -98,7 +98,6 @@ jobs:
       name: Collecte bornée — aucune sortie privée
       env:
         HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
-        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
       run: python -I scripts/run_campaign.py protocol
     - id: exports
       if: always()

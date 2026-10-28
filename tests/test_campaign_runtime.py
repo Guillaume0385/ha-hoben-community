@@ -288,11 +288,39 @@ def test_native_context_allows_reruns_without_a_pr_and_never_compares_sha(
         context(source, campaign)
 
 
-@pytest.mark.parametrize("device", ["", "0" * 32, "invalid", "é" * 32])
-def test_identity_never_defaults_to_association(device):
+@pytest.mark.parametrize("user", ["", "invalid", "é" * 32, "a" * 31])
+def test_invalid_user_cannot_reach_collection(user):
     with pytest.raises(ValueError):
-        identity({"HOBEN_USER_GUID": "a" * 32, "HOBEN_DEVICE_GUID": device})
+        identity({"HOBEN_USER_GUID": user})
     assert identity({}, tls_only=True) == {"user_guid": "", "device_guid": ""}
+
+
+def test_obsolete_device_secret_is_not_read_or_forwarded():
+    class Source(dict):
+        def pop(self, key, *args):
+            assert key == "HOBEN_USER_GUID"
+            return super().pop(key, *args)
+
+    source = Source(HOBEN_USER_GUID="a" * 32, HOBEN_DEVICE_GUID="PRIVATE_PAYLOAD")
+    assert identity(source) == {"user_guid": "a" * 32, "device_guid": "0" * 32}
+    assert "HOBEN_USER_GUID" not in source
+
+
+@pytest.mark.parametrize("campaign", ["protocol", "ha"])
+def test_campaign_only_requests_user_secret_in_protected_capture(campaign):
+    source = (ROOT / f".github/workflows/hoben-{campaign}-manual.yml").read_text()
+    assert "HOBEN_DEVICE_GUID" not in source
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    jobs = workflow["jobs"]
+    capture = next(s for s in jobs["collect"]["steps"] if s.get("id") == "capture")
+    assert capture["env"] == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
+    for job_name, job in jobs.items():
+        for step in job["steps"]:
+            if "secrets." in json.dumps(step):
+                assert job_name == "collect" and step == capture
+    assert jobs["collect"]["environment"] == (
+        "hoben-experimental" if campaign == "protocol" else "hoben-live"
+    )
 
 
 @pytest.mark.parametrize(

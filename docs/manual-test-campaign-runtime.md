@@ -42,7 +42,7 @@ cancel-in-progress=false, queue=max, identique au workflow historique inchangé.
 | Scénario | Plafond absolu, cleanup compris | Opérations et preuve |
 | --- | --- | --- |
 | tls-only | 15 s | TLS système vérifié vers myhoben.fr:465, aucun message applicatif. |
-| session-open | 30 s | Une ouverture V4 avec identité persistée, aucune lecture Modbus. |
+| session-open | 30 s | Une ouverture V4 avec l’identité initiale documentée, aucune lecture Modbus ni association. |
 | read-v4-state | 45 s | Une ouverture et lecture V4 de 20 registres fixes, valeurs jetées. |
 | h1h2 | 1800 s | Collecteur historique : 6 H1 + 6 H2, 90 s et 1 Mio RX par session. Rapport complet borné INCONCLUSIVE, aucune frontière universelle prouvée. |
 | session-300 | 360 s | Observation existante : 300 s utiles, trois ouvertures, six lectures maximum espacées d’au moins 60 s, 1 Mio RX total, Ping/Pong et réponse corrélée. |
@@ -119,7 +119,19 @@ run_campaign.py possède les deadlines monotones par scénario et du parent,
 arme avant ACK, puis réape le groupe avant toute étape suivante. Les identités
 ne vont au worker que par pipe ; aucun token GitHub/Actions/OIDC, fichier de
 commande Actions, secret en argv, Docker Env ou journal privé n’est transmis.
-Une identité absente/invalide ou initiale n’autorise pas d’association.
+Les deux campagnes ne demandent que le secret `HOBEN_USER_GUID`, validé et
+normalisé avant collecte. `HOBEN_DEVICE_GUID` n’est plus un secret d’entrée,
+n’est ni lu ni injecté par ces workflows. Le pipe privé conserve sa structure :
+le DeviceGuid de départ est exclusivement `INITIAL_DEVICE_GUID` (32 zéros),
+valeur normale documentée dans protocol.md §4, jamais une identité attribuée
+fabriquée. Le gestionnaire partagé/le vrai client HA adopte le DeviceGuid d’un
+OpenedClient valide et le réutilise dans la session ; H1/H2 conserve également
+son mécanisme existant de réutilisation entre captures. Aucun GUID n’est exporté.
+Un utilisateur absent/invalide reste refusé ; un défi d’autorisation ne provoque
+aucune association ni envoi de code. L’ancien point d’entrée #112 conserve son
+exigence d’identité persistée ; seule l’entrée des nouvelles campagnes accepte
+la valeur initiale documentée. Cette correction locale ne prouve aucun succès
+d’ouverture réel ni panne TLS/serveur dans le run #40768329824.
 
 Pour H1/H2, le parent possède le dossier privé 0700 et le supprime après
 réapage, y compris si le worker a été tué avant son finally. Les captures et

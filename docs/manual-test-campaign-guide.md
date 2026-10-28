@@ -41,7 +41,7 @@ est historique pour cette procédure, reste inchangé et partage le même mutex.
 | Choix | Ce qu’un résultat positif atteste | Maximum absolu, nettoyage inclus |
 | --- | --- | --- |
 | `tls-only` | TLS vérifié, sans message applicatif. | 15 s |
-| `session-open` | Ouverture V4 existante avec identité persistée, sans association. | 30 s |
+| `session-open` | Ouverture V4 avec l’identité initiale documentée, sans association. | 30 s |
 | `read-v4-state` | Réponse corrélée à une lecture fixe de 20 registres V4 ; aucune valeur publiée. | 45 s |
 | `h1h2` | Douze observations bornées collectées. Résultat scientifique **INCONCLUSIVE**, aucune frontière universelle démontrée. | 1800 s ; 6 H1 + 6 H2, 90 s et 1 Mio RX par session |
 | `session-300` | Fenêtre utile de 300 s du collecteur existant et réponse corrélée. | 360 s ; 3 ouvertures, 6 lectures maximum à cadence ≥60 s, 1 Mio RX total |

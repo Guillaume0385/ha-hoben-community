@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #126, identité utilisateur seule pour les campagnes 025
+
+- Suppression du secret DeviceGuid obsolète des deux nouveaux workflows et de
+  leur précontrôle ; seul HOBEN_USER_GUID est demandé et validé.
+- Valeur initiale du client déjà documentée, puis adoption de l’identité
+  OpenedClient par les chemins existants ; aucun GUID attribué fabriqué,
+  aucune association. Ancienne entrée #112 inchangée.
+- Régressions hors réseau des refus, du chemin protocole/HA et de la
+  confidentialité ; aucun test réel ni modification des budgets ou de main.
+
 ## En cours — #126, diagnostic fermé avant collecte 022
 
 - Catégories fixes de refus avant worker, sans exception ni caractéristique
