@@ -210,7 +210,13 @@ def validate_report(report, proof):
 
 
 async def observe(
-    lifecycle, budget, proof, *, clock=time.monotonic, sleep=asyncio.sleep
+    lifecycle,
+    budget,
+    proof,
+    *,
+    clock=time.monotonic,
+    sleep=asyncio.sleep,
+    _project=None,
 ):
     """Observe exactly one useful window; shared code owns TLS, RX and recovery."""
     start = None
@@ -319,7 +325,7 @@ async def observe(
         and failure_phase not in {"none", "teardown"}
     ):
         failure_phase, _, message_category = budget.failure
-    return validate_report(
+    return (validate_report if _project is None else _project)(
         {
             "schema": 1,
             "scenario": "session-300",

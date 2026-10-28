@@ -147,9 +147,9 @@ def test_closed_campaigns_match_manual_unconnected_yaml_and_cannot_be_mutated():
     for campaign, path in PATHS.items():
         data = yaml.load((ROOT / path).read_text(), Loader=yaml.BaseLoader)
         assert set(data["on"]) == {"workflow_dispatch"}
-        assert set(data["jobs"]) == {"admission", "scenario-slot", "result"}
+        assert set(data["jobs"]) == {"admission", "collect", "result"}
         gate = data["jobs"]["admission"]["steps"][0]["run"]
-        assert "collector_ready=false" in gate
+        assert "collector_ready=" in gate and "String(admitted)" in gate
         assert dispatch._PATHS[campaign] == path
     with pytest.raises(TypeError):
         dispatch._PATHS[dispatch.Campaign.HA] = ".github/workflows/hoben-manual.yml"

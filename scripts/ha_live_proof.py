@@ -66,6 +66,15 @@ def validate_report(report):
         integer(p["pr_number"], 1, 2**53 - 1) and integer(p["run_id"], 1, 2**53 - 1)
     )
     require(type(p["run_attempt"]) is int and p["run_attempt"] == 1)
+    return validate_observation(report)
+
+
+def validate_observation(report):
+    """Shared logical/resource checks, independent of historical PR admission.
+
+    The legacy envelope above still validates every provenance field. New manual
+    campaigns reuse this evidence contract without inventing a PR or merge SHA.
+    """
     r = report["supervisor"]
     keys(
         r,

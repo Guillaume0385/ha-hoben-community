@@ -82,10 +82,16 @@ class _LiveRun:
     identity: bytes = field(repr=False)
 
 
+@dataclass(frozen=True, repr=False)
+class _CampaignRun:
+    scenario: str
+    identity: bytes = field(repr=False)
+
+
 class SourceBundle:
     """Public code snapshot only; never relax checkout permissions or mount .git."""
 
-    def __init__(self, live=False):
+    def __init__(self, live=False, campaign=False):
         self.folder = Path(tempfile.mkdtemp(prefix="hoben-c2a-source-"))
         try:
             paths = list((ROOT / "custom_components/hoben").glob("*.py"))
@@ -99,6 +105,18 @@ class SourceBundle:
                     "ha_session_observer.py",
                 )
             ]
+            if campaign:
+                paths += [
+                    ROOT / "scripts" / name
+                    for name in (
+                        "ha_campaign_worker.py",
+                        "ha_campaign_observer.py",
+                        "ha_campaign_evidence.py",
+                        "campaign_runtime_contract.py",
+                        "ha_campaign_plan.py",
+                        "protocol_campaign_plan.py",
+                    )
+                ]
             paths += [
                 ROOT
                 / (
@@ -207,12 +225,15 @@ class DeadlineEngine:
         remaining = self.deadline - self.clock()
         if remaining <= 0.01:
             raise Unavailable()
+        requested_timeout = kwargs.pop("timeout", 10)
         return self.engine.request(
             method,
             path,
             body,
             timeout=min(
-                10 if path.startswith("/containers/create") else 2, remaining / 2
+                requested_timeout,
+                10 if path.startswith("/containers/create") else 2,
+                remaining / 2,
             ),
             **kwargs,
         )
@@ -264,7 +285,7 @@ def verified_config(container, limits, image_id, live=False, expected=None):
     )
 
 
-def read_receipt(engine, name, live=False):
+def read_receipt(engine, name, live=False, campaign=None):
     blob = engine.request(
         "GET",
         "/containers/" + name + "/archive?path=/run/hoben/receipt.json",
@@ -291,7 +312,9 @@ def read_receipt(engine, name, live=False):
         "evidence",
     } | ({"mode"} if live else set()):
         raise Unavailable()
-    if live and data["mode"] != "live":
+    if live and data["mode"] != (
+        "live" if campaign is None else "campaign/" + campaign
+    ):
         raise Unavailable()
     return data
 
@@ -307,24 +330,55 @@ def supervise(
     clock=time.monotonic,
     sleep=time.sleep,
     _live=None,
+    _campaign=None,
+    _absolute_deadline=None,
 ):
     """Run one fixed offline fixture and return validated, unadmitted evidence.
 
     No environment is inherited by the worker. A missing engine, image, cgroup
     metric or configuration proof refuses before the HA worker starts.
     """
+    from scripts.campaign_runtime_contract import CampaignLimits, ha_limits
+
     if (
         type(case) is not OfflineCase
-        or type(limits) is not Limits
+        or not (
+            type(limits) is Limits
+            and _campaign is None
+            or type(_campaign) is _CampaignRun
+            and type(limits) is CampaignLimits
+            and limits == ha_limits(_campaign.scenario)
+        )
         or type(image_id) is not str
         or not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id)
     ):
         raise ValueError("invalid offline sandbox request")
     if _live is not None and type(_live) is not _LiveRun:
         raise ValueError("invalid live request")
-    live = _live is not None
+    if _campaign is not None and (
+        type(_campaign) is not _CampaignRun or _live is not None
+    ):
+        raise ValueError("invalid campaign request")
+    live = _live is not None or _campaign is not None
+    campaign = None if _campaign is None else _campaign.scenario
+
+    def blank():
+        if campaign is not None:
+            from scripts.ha_campaign_evidence import empty
+
+            return empty(campaign)
+        return empty_evidence()
 
     def make_report(provenance, receipt, evidence):
+        if campaign is not None:
+            from scripts.ha_campaign_evidence import validate_detail
+
+            public = {**receipt, "network": "fixed_tls"}
+            if public["elapsed_ms"] > public["process_ms"]:
+                public.update(elapsed_ms=public["process_ms"], reason="timeout")
+            return validate_detail(
+                campaign, {"supervisor": public, "evidence": evidence}
+            )
         if live:
             from scripts.ha_manual_live_report import build_live_report
 
@@ -345,13 +399,23 @@ def supervise(
         "reaped": False,
         "network": "none",
     }
-    evidence = empty_evidence()
+    evidence = blank()
     provenance = dict(provenance)
     make_report(provenance, receipt, evidence)
     created, attempted_start, stopped = False, False, False
     cancel_sent = False
     bundle = None
     try:
+        # The new campaign deadline includes secret-free preparation as well as
+        # container startup, collection and cleanup. Legacy #112 stays unchanged.
+        if campaign is not None:
+            start = clock()
+            deadline = start + limits.process_ms / 1000
+            if _absolute_deadline is not None:
+                if not start < _absolute_deadline <= deadline:
+                    raise Unavailable()
+                deadline = _absolute_deadline
+            engine = DeadlineEngine(engine, deadline, clock)
         info = engine.request("GET", "/info")
         if not (
             info.get("CgroupVersion") == "2"
@@ -363,7 +427,13 @@ def supervise(
         image = engine.request("GET", "/images/" + quote(image_id, safe=":") + "/json")
         if image.get("Id") != image_id:
             raise Unavailable()
-        bundle = SourceBundle(live=True) if live else SourceBundle()
+        bundle = (
+            SourceBundle(live=True, campaign=True)
+            if campaign is not None
+            else SourceBundle(live=True)
+            if live
+            else SourceBundle()
+        )
         mounts = [
             {
                 "Type": "bind",
@@ -384,7 +454,11 @@ def supervise(
             "Image": image_id,
             "Entrypoint": ["python", "-I", "/source/scripts/ha_session_guard.py"],
             "Cmd": [
-                "live" if live else case.value,
+                "campaign/" + campaign
+                if campaign is not None
+                else "live"
+                if live
+                else case.value,
                 json.dumps(asdict(limits), separators=(",", ":")),
             ],
             "Env": [],
@@ -420,9 +494,10 @@ def supervise(
         if cancelled():
             raise CancelledBeforeStart()
         # Prepare a stopped, secret-free container first. Arm before start.
-        start = clock()
-        deadline = start + limits.process_ms / 1000
-        engine = DeadlineEngine(engine, deadline, clock)
+        if campaign is None:
+            start = clock()
+            deadline = start + limits.process_ms / 1000
+            engine = DeadlineEngine(engine, deadline, clock)
         payload = str(int(deadline * 1e9)).encode()
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w") as stream:
@@ -437,7 +512,7 @@ def supervise(
         attempted_start = True
         engine.request("POST", "/containers/" + name + "/start")
         if live:
-            engine.feed(name, _live.identity)
+            engine.feed(name, (_campaign if campaign is not None else _live).identity)
         receipt["reason"] = "worker_failure"
         ready_data = None
         while clock() < deadline - reserve:
@@ -447,7 +522,7 @@ def supervise(
                 break
             if ready_data is None:
                 try:
-                    ready_data = read_receipt(engine, name, live)
+                    ready_data = read_receipt(engine, name, live, campaign)
                 except Unavailable as error:
                     if str(error) != "http_404":
                         raise
@@ -469,7 +544,7 @@ def supervise(
                 data = (
                     ready_data
                     if ready_data is not None
-                    else read_receipt(engine, name, live)
+                    else read_receipt(engine, name, live, campaign)
                 )
                 for key in ("started", "reason", "oom_killed", "pids_limited"):
                     receipt[key] = data[key]
@@ -481,7 +556,7 @@ def supervise(
                 ):
                     receipt["reason"] = "cancelled"
     except (Exception, KeyboardInterrupt) as error:
-        evidence = empty_evidence()
+        evidence = blank()
         receipt["reason"] = (
             "cancelled"
             if cancel_sent or isinstance(error, CancelledBeforeStart)
@@ -523,7 +598,7 @@ def supervise(
         return make_report(provenance, receipt, evidence)
     except Exception:
         receipt.update(reason="worker_failure", oom_killed=False, pids_limited=False)
-        return make_report(provenance, receipt, empty_evidence())
+        return make_report(provenance, receipt, blank())
 
 
 def supervise_live(image_id, proof, identity, **options):
@@ -545,5 +620,25 @@ def supervise_live(image_id, proof, identity, **options):
         image_id,
         provenance,
         _live=_LiveRun(dict(proof), identity),
+        **options,
+    )
+
+
+def supervise_campaign(image_id, scenario, identity, **options):
+    """Manual #126 adapter; reuses confinement without legacy admission proofs."""
+    from scripts.campaign_runtime_contract import ha_limits, need
+
+    limits = ha_limits(scenario)
+    need(
+        type(identity) is bytes
+        and 0 < len(identity) <= 512
+        and identity.endswith(b"\n")
+    )
+    return supervise(
+        OfflineCase.HEALTHY,
+        image_id,
+        {},
+        limits=limits,
+        _campaign=_CampaignRun(scenario, identity),
         **options,
     )

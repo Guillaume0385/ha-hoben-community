@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #126, raccordement des campagnes manuelles 016+017
+
+- Six scénarios protocolaires et sept scénarios HA, individuels ou all
+  séquentiel, avec admission minimale, environnements et mutex conservés.
+- Collecteurs historiques et vrai worker/client/coordinator HA réutilisés ;
+  reconnexion naturelle sans inhibition Pong ni perte artificielle.
+- Plafonds de conception arbitrés le 27/10, supervision C2a mémoire/PID,
+  délais absolus, cleanup et suppression privée même après arrêt forcé.
+- Rapports fermés validés indépendamment Python/Node, résultat par scénario
+  et verdict Actions lié au job collect ; tests exclusivement offline.
+- Aucun test réel ni promotion main ; les anciennes voies restent inchangées.
+
 ## En cours — #126, préparation des workflows et admission minimale 014+015
 
 - Contrôles fonctionnels du contexte manuel pour experimental/main, acteur et

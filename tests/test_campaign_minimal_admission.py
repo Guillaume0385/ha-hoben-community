@@ -1,4 +1,4 @@
-"""Run the actual embedded controllers offline; no Actions/collector/network."""
+"""Historical #148 controller regressions; preserved on immutable fixtures."""
 
 import json
 import re
@@ -38,7 +38,9 @@ NODE = shutil.which("node")
 
 
 def workflow(name):
-    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+    return yaml.safe_load(
+        (ROOT / "tests/fixtures/campaign_admission_014" / name).read_text()
+    )
 
 
 @pytest.fixture(autouse=True)
