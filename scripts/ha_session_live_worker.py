@@ -12,7 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-async def collect(identity, *, observer=None):
+async def collect(identity, *, observer=None, allow_initial_identity=False):
+    """Reuse the real HA path; only #126 opts into the documented initial GUID.
+
+    The historical #112 entry keeps its persisted-identity requirement. Neither
+    entry calls association; an authorization challenge remains a refusal.
+    """
     from homeassistant.config_entries import ConfigEntries, ConfigEntry
     from homeassistant.core import HomeAssistant
 
@@ -22,7 +27,7 @@ async def collect(identity, *, observer=None):
     from scripts.ha_live_proof import empty_evidence
     from scripts.ha_session_observer import observe
 
-    if identity["device_guid"] == INITIAL_DEVICE_GUID:
+    if identity["device_guid"] == INITIAL_DEVICE_GUID and not allow_initial_identity:
         raise ValueError("persisted identity required")
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)

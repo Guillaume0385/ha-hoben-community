@@ -31,7 +31,6 @@ def source(folder, campaign="protocol", selection="read-v4-state"):
         "GITHUB_RUN_ID": str(PROVENANCE["run_id"]),
         "GITHUB_RUN_ATTEMPT": str(PROVENANCE["run_attempt"]),
         "HOBEN_USER_GUID": "a" * 32,
-        "HOBEN_DEVICE_GUID": "D" * 32,
     }
 
 
@@ -65,19 +64,13 @@ def report(folder):
         ("HOBEN_USER_GUID", ""),
         ("HOBEN_USER_GUID", "PRIVATE_PAYLOAD"),
         ("HOBEN_USER_GUID", "a" * 31),
-        ("HOBEN_DEVICE_GUID", ""),
-        ("HOBEN_DEVICE_GUID", "PRIVATE_PAYLOAD"),
-        ("HOBEN_DEVICE_GUID", "0" * 32),
-        ("HOBEN_DEVICE_GUID", "é" * 32),
+        ("HOBEN_USER_GUID", "é" * 32),
     ],
     ids=[
         "empty-user",
         "invalid-user",
         "short-user",
-        "empty-device",
-        "invalid-device",
-        "initial-device",
-        "non-ascii-device",
+        "non-ascii-user",
     ],
 )
 def test_identity_failure_is_closed_and_has_a_not_run_report(
@@ -193,13 +186,19 @@ def test_worker_preparation_failure_is_not_an_identity_diagnosis(
 
 @pytest.mark.parametrize(
     "user",
-    ["A" * 32, "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"],
+    ["B" * 32, "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"],
     ids=["compact", "canonical"],
 )
-def test_valid_identity_normalization_and_normal_report_are_unchanged(
-    user, entry, tmp_path, monkeypatch, capfd
+@pytest.mark.parametrize("campaign", ["protocol", "ha"])
+def test_user_identity_alone_reaches_collection_without_public_identity(
+    user, campaign, entry, tmp_path, monkeypatch, capfd
 ):
+    selection = "session-open" if campaign == "protocol" else "open-errors"
+    entry.update(source(tmp_path, campaign, selection))
     entry["HOBEN_USER_GUID"] = user
+    monkeypatch.setattr(sys, "argv", ["run_campaign.py", campaign])
+    if campaign == "ha":
+        (tmp_path / "hoben-ha-runtime.id").write_text("sha256:" + "a" * 64)
     seen = []
 
     def collect(campaign, selection, provenance, payload, **kwargs):
@@ -210,9 +209,11 @@ def test_valid_identity_normalization_and_normal_report_are_unchanged(
 
     monkeypatch.setattr(parent, "run", collect)
     assert parent.main() == 0
-    assert seen == [{"user_guid": "a" * 32, "device_guid": "D" * 32}]
+    assert seen == [{"user_guid": "b" * 32, "device_guid": "0" * 32}]
     assert capfd.readouterr() == ("", "")
-    assert report(tmp_path)["stages"][0]["status"] == "SUCCESS"
+    r = report(tmp_path)
+    assert r["stages"][0]["status"] == "SUCCESS"
+    assert "b" * 32 not in json.dumps(r) and "0" * 32 not in json.dumps(r)
 
 
 def test_unexpected_error_after_entering_collection_cannot_invent_a_preflight_report(
@@ -227,7 +228,6 @@ def test_unexpected_error_after_entering_collection_cannot_invent_a_preflight_re
 def test_tls_only_still_requires_no_identity(entry, tmp_path, monkeypatch, capfd):
     entry.update(source(tmp_path, selection="tls-only"))
     entry.pop("HOBEN_USER_GUID")
-    entry.pop("HOBEN_DEVICE_GUID")
 
     def collect(campaign, selection, provenance, payload, **kwargs):
         assert json.loads(payload) == {"user_guid": "", "device_guid": ""}

@@ -33,6 +33,7 @@ def main():
     data = asyncio.run(
         collect(
             identity,
+            allow_initial_identity=True,
             observer=partial(
                 observe,
                 scenario=sys.argv[1],

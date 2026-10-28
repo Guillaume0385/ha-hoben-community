@@ -1,6 +1,7 @@
 """Actual shared V4 ownership over synthetic streams for the manual campaign."""
 
 import asyncio
+import json
 from functools import partial
 
 import pytest
@@ -12,10 +13,41 @@ from custom_components.hoben.v4_lifecycle import V4Lifecycle
 from custom_components.hoben.v4_session import V4Session
 from scripts.campaign_runtime_contract import observed_status, stage, validate_report
 from scripts.protocol_campaign_collect import collect, h1h2
+from scripts.run_campaign import identity
 from tests.test_campaign_runtime import envelope, node_accepts
 from tests.test_session_300_runtime import Stream, response
 
 IDENTITY = {"user_guid": "a" * 32, "device_guid": "D" * 32}
+
+
+@pytest.mark.parametrize("challenge", [False, True])
+def test_user_only_entry_uses_documented_initial_identity_without_association(
+    monkeypatch, challenge
+):
+    from scripts import protocol_campaign_collect as collector
+
+    async def exercise():
+        wire = Stream()
+        if challenge:
+            wire.prefix = b"\x2f"
+
+        def owner(**kwargs):
+            kwargs["session_factory"] = partial(
+                kwargs["session_factory"], transport_factory=lambda: wire
+            )
+            return V4Lifecycle(**kwargs)
+
+        monkeypatch.setattr(collector, "V4Lifecycle", owner)
+        private = identity({"HOBEN_USER_GUID": "b" * 32})
+        metrics, detail = await collect("session-open", private)
+        assert metrics["cleanup"] and metrics["completed"] is not challenge
+        assert metrics["error"] == ("authorization" if challenge else "none")
+        assert len(wire.writes) == 1 and wire.writes[0][0] == OPEN_CLIENT
+        assert wire.writes[0][37:69] == b"0" * 32
+        assert wire.close_count == 1 and not wire.active_reads
+        assert "b" * 32 not in json.dumps([metrics, detail])
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(

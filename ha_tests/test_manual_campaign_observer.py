@@ -1,7 +1,6 @@
 """Real HA/client/coordinator over deterministic in-memory TLS peers only."""
 
 import asyncio
-from functools import partial
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +8,7 @@ from conftest import DEVICE_GUID, assert_private_values_absent
 
 from custom_components.hoben.client import HobenClient
 from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
+from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID
 from custom_components.hoben.transport import TransportEOF
 from ha_tests.test_persistent_client import RESPONSE, assert_stopped
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
@@ -22,8 +22,10 @@ from scripts.campaign_runtime_contract import (
 from scripts.ha_campaign_evidence import project, validate_detail
 from scripts.ha_campaign_observer import SCHEDULES, observe
 from scripts.ha_session_live_worker import collect
+from scripts.run_campaign import identity
 from tests.test_campaign_runtime import envelope, node_accepts
 from tests.test_ha_live_proof import receipt
+from tests.tls_script import script_transport
 
 
 def detail(scenario, evidence, elapsed):
@@ -234,12 +236,12 @@ async def test_cancel_during_actual_read_cleans_up_without_completed_proof(
     assert_stopped(peers)
 
 
-@pytest.mark.parametrize(
-    "scenario",
-    ["open-errors", "refresh-v4", "session-reuse", "cleanup", "availability"],
-)
-async def test_campaign_adapter_reuses_bare_ha_bootstrap(peers, monkeypatch, scenario):
-    peers.wire(DEVICE_GUID, [[RESPONSE]] * 6)
+@pytest.mark.parametrize("scenario", HA_CHOICES[:-1])
+@pytest.mark.parametrize("device", [INITIAL_DEVICE_GUID, DEVICE_GUID])
+async def test_campaign_adapter_reuses_bare_ha_bootstrap(
+    peers, monkeypatch, scenario, device, caplog
+):
+    wire = peers.wire(DEVICE_GUID, [[RESPONSE]] * 6)
     monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", Mock())
     now = [0.0]
 
@@ -247,9 +249,51 @@ async def test_campaign_adapter_reuses_bare_ha_bootstrap(peers, monkeypatch, sce
         now[0] += delay
         await asyncio.sleep(0)
 
+    async def observer(coordinator, **kwargs):
+        evidence = await observe(
+            coordinator, scenario, clock=lambda: now[0], sleep=sleep, **kwargs
+        )
+        assert coordinator.client.device_guid_for_persistence == DEVICE_GUID
+        assert coordinator.config_entry.data["device_guid"] == DEVICE_GUID
+        return evidence
+
     evidence = await collect(
-        {"user_guid": "a" * 32, "device_guid": DEVICE_GUID},
-        observer=partial(observe, scenario=scenario, clock=lambda: now[0], sleep=sleep),
+        {"user_guid": "a" * 32, "device_guid": device},
+        allow_initial_identity=True,
+        observer=observer,
     )
     assert evidence["completed"] and evidence["cleanup"]["completed"]
+    assert wire.write.await_args_list[0].args[0][37:69] == device.encode()
+    assert [c.args[0][0] for c in wire.write.await_args_list] == [3] + [13] * len(
+        evidence["samples"]
+    )
+    assert_private_values_absent(str(evidence) + caplog.text)
+    assert_stopped(peers)
+
+
+async def test_legacy_worker_keeps_its_persisted_identity_requirement(peers):
+    with pytest.raises(ValueError, match="persisted identity required"):
+        await collect({"user_guid": "a" * 32, "device_guid": INITIAL_DEVICE_GUID})
+    peers.factory.assert_not_called()
+
+
+async def test_initial_campaign_identity_challenge_never_sends_association(
+    hass, entry, peers, caplog
+):
+    wire = peers.wire(DEVICE_GUID, [])
+    wire.queue = script_transport(wire, openings=[[b"\x2f"]])
+    client = HobenClient(**identity({"HOBEN_USER_GUID": "b" * 32}))
+    coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    evidence = await observe(
+        coordinator, "open-errors", clock=lambda: 0.0, sleep=asyncio.sleep
+    )
+    assert evidence["cleanup"]["completed"]
+    assert evidence["samples"][0]["error"] == "authorization"
+    metrics = project("open-errors", detail("open-errors", evidence, 1000))
+    assert metrics["error"] == "authorization" and metrics["reads_ok"] == 0
+    assert observed_status("ha", "open-errors", metrics) == "FAILURE"
+    assert [c.args[0][0] for c in wire.write.await_args_list] == [3]
+    assert wire.write.await_args_list[0].args[0][37:69] == b"0" * 32
+    assert_private_values_absent(str(evidence) + caplog.text)
+    assert "b" * 32 not in str(evidence) + caplog.text
     assert_stopped(peers)

@@ -60,21 +60,19 @@ def context(source, campaign):
 
 
 def identity(source, *, tls_only=False):
-    """Never fall back to association or deliberately send invalid credentials."""
+    """User secret only; start with the documented new-client identity (§4).
+
+    INITIAL_DEVICE_GUID is the existing protocol default, not an assigned or
+    invented identity. The shared client adopts only a validated OpenedClient's
+    DeviceGuid. An authorization challenge never triggers association here.
+    """
     from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
 
     user = source.pop("HOBEN_USER_GUID", "")
-    device = source.pop("HOBEN_DEVICE_GUID", "")
     if tls_only:
         return {"user_guid": "", "device_guid": ""}
     user = normalize_user_guid(user)
-    need(
-        type(device) is str
-        and len(device) == 32
-        and device.isascii()
-        and device != INITIAL_DEVICE_GUID
-    )
-    return {"user_guid": user, "device_guid": device}
+    return {"user_guid": user, "device_guid": INITIAL_DEVICE_GUID}
 
 
 def execute(
