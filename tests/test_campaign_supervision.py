@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
     "mode,status,started",
     [
         ("valid", "SUCCESS", True),
+        ("timeout_receipt", "FAILURE", True),
         ("before_ack", "NOT RUN", False),
         ("after_ack", "FAILURE", True),
         ("private", "FAILURE", True),
@@ -61,6 +62,8 @@ def test_actual_parent_ack_bounds_projection_and_reaping(
         "protocol", "tls-only", b'{"device_guid":"synthetic"}', time.monotonic() + 5
     )
     assert value["status"] == status and value["started"] is started
+    if mode == "timeout_receipt":
+        assert value["reason"] == "timeout"
     assert processes and processes[0].poll() is not None
     assert all(not p.exists() for p in private_directories)
     assert "PRIVATE_PAYLOAD" not in json.dumps(value)

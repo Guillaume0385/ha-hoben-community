@@ -488,6 +488,13 @@ DEV ne lance aucun test réel. Les quatre checks CI hors ligne sont conservés.
 
 ### Procédures live historiques de `main` — retirées, ne pas exécuter
 
+La procédure des deux campagnes #126, leurs scénarios et l’interprétation des
+statuts sont décrits dans le
+[guide des campagnes manuelles sur experimental](https://github.com/Guillaume0385/ha-hoben-community/blob/experimental/docs/manual-test-campaign-guide.md).
+Le formulaire `main`, les approbations effectives et les résultats réels ne
+sont pas attestés par les tests hors ligne ; lancement réel et promotion
+demandent une autorisation distincte.
+
 > **AVERTISSEMENT (14 octobre 2026) :** les instructions de validation live
 > ci-dessous (labels `manager-live-hoben`, `live-validation`, dispatch
 > `session-open` / `read-v4-state`, commandes de sonde et configuration des

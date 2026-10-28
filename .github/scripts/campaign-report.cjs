@@ -39,9 +39,9 @@ function status(c,s,m) {
     return m.reads_ok===1?'SUCCESS':'FAILURE';
   }
   if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
-  if(s==='session-reuse')return m.reused&&m.reads_ok>=2?'SUCCESS':'FAILURE';
-  if(s==='availability')return m.available&&m.reads_ok>0?'SUCCESS':'FAILURE';
-  return m.reads_ok>0?'SUCCESS':'FAILURE';
+  if(s==='session-reuse'&&!m.reused)return 'FAILURE';
+  const expected={'open-errors':1,'refresh-v4':2,'session-reuse':3,cleanup:1,availability:2}[s];
+  return m.available&&m.reads===expected&&m.reads_ok===expected?'SUCCESS':'FAILURE';
 }
 function haDetail(s,d) {
   object(d,['supervisor','evidence']);
@@ -97,7 +97,7 @@ function haDetail(s,d) {
   m.reused=e.samples.some((b,i)=>i>0&&e.samples[i-1].decoded&&b.decoded&&e.samples[i-1].observation.read_generation===b.observation.read_generation&&b.observation.read_sequence===e.samples[i-1].observation.read_sequence+1);
   m.recovered=e.samples.some(v=>v.decoded&&v.observation.loss_generation!==null&&v.observation.read_generation>v.observation.loss_generation&&v.observation.cleaned_generation!==null&&v.observation.cleaned_generation>=v.observation.loss_generation&&!v.observation.cleanup_failed);
   if(w){m.loss_kind=w.loss_kind||'none';m.close_client_subcode=w.close_client_subcode;}
-  m.available=e.samples.length>0&&(s==='hoben-live'?e.samples.at(-1).decoded:e.samples.at(-1).available);
+  m.available=e.window.active&&e.samples.length>0&&(s==='hoben-live'?e.samples.at(-1).decoded:e.samples.at(-1).available);
   if(s==='hoben-live')m.continuous=logical.criteria.continuous_300s==='SUCCESS';
   else if(e.terminal!=='none')m.error=e.terminal;
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;
@@ -166,6 +166,53 @@ function prepare(env=process.env) {
   check(Buffer.from(JSON.stringify(r)).equals(raw));
   fs.appendFileSync(env.GITHUB_OUTPUT,'report_b64='+raw.toString('base64')+'\n');
 }
+// Presentation uses only independently validated fields and this fixed catalog.
+// The limits are design ceilings, never minimum durations or success evidence.
+function bounds(c,s) {
+  if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
+  return {
+    'tls-only':'1 TLS ; 0 lecture',
+    'session-open':'1 ouverture ; 0 lecture',
+    'read-v4-state':'1 ouverture ; 1 lecture / 20 registres',
+    h1h2:'6 H1 + 6 H2 ; 90 s / 1 Mio RX par session',
+    'session-300':'300 s utiles ; 3 ouvertures ; 6 lectures / ≥60 s ; 1 Mio RX',
+    'session-reconnect':'3 ouvertures ; 10 lectures / ≥60 s ; 1 Mio RX',
+  }[s];
+}
+function diagnostic(v) {
+  if(!['observed','not_observed'].includes(v.reason))return v.reason;
+  const r=v.detail?.supervisor,m=v.metrics;
+  if(r&&r.reason!=='completed')return r.reason;
+  if(m.error!=='none')return m.error;
+  if(!m.cleanup)return 'cleanup_failed';
+  if(!m.completed||v.status!=='SUCCESS')return 'not_observed';
+  return 'observed';
+}
+function summary(r,env) {
+  const c=env.CAMPAIGN,selectedNames=selected(env),duration=n=>(n/1000).toFixed(3)+' s';
+  const lines=['## '+(c==='ha'?'Vérification réelle Home Assistant':'Tests expérimentaux MyHOBEN'),''];
+  if(r) {
+    const p=r.provenance,counts=['SUCCESS','FAILURE','INCONCLUSIVE','NOT RUN'].map(s=>s+' : '+r.stages.filter(v=>v.status===s).length);
+    lines.push('Sélection : `'+r.selection+'`. Résultat global : **'+r.actions_result+'**. Job collect : `'+r.collection_result+'`.',
+      '',counts.join(' · ')+'.','',
+      'Provenance informative : `'+p.ref+'` · SHA `'+p.sha+'` · run `'+p.run_id+'` · tentative `'+p.run_attempt+'`.',
+      '', 'Durée totale : '+duration(r.elapsed_ms)+' ; plafond absolu : '+duration(cap(r.campaign,r.selection))+' (nettoyage inclus).','');
+  } else lines.push('Résultat global : **FAILURE**. Rapport absent ou refusé : `report_not_attested`. Durée et provenance non attestées.','');
+  lines.push('| Scénario | Résultat | Diagnostic | Durée | Plafond absolu | Lectures réussies / tentées | Nettoyage |',
+    '| --- | --- | --- | --- | --- | --- | --- |');
+  for(const s of selectedNames) {
+    const v=r?.stages.find(v=>v.scenario===s);
+    lines.push('| '+[s,v?.status||'NOT RUN',v?diagnostic(v):'report_not_attested',v?duration(v.elapsed_ms):'non attestée',
+      duration(cap(c,s)),v?.started?v.metrics.reads_ok+' / '+v.metrics.reads:'non attestées',
+      v?.started?(v.metrics.cleanup?'attesté':'non attesté'):'non attesté'].join(' | ')+' |');
+  }
+  if(!selectedNames.length)lines.push('', 'Sélection non attestée : NOT RUN.');
+  lines.push('', 'Bornes de conception (maxima, aucune preuve de succès) :','');
+  for(const s of selectedNames)lines.push('- `'+s+'` : '+bounds(c,s)+'.');
+  lines.push('', 'SUCCESS exige une preuve positive et le nettoyage. INCONCLUSIVE ne valide pas le scénario ; NOT RUN signifie absence de preuve suffisante, sans affirmer qu’aucune connexion n’a eu lieu.',
+    'Une étape localement attestée ne rend pas la campagne réussie si collect échoue. H1/H2 reste une hypothèse, jamais une frontière universelle prouvée.','');
+  return lines.join('\n');
+}
 function publish(env=process.env) {
   let r=null;
   try {
@@ -180,9 +227,8 @@ function publish(env=process.env) {
     fs.writeFileSync(path.join(folder,'report.json'),JSON.stringify(r),{mode:0o600,flag:'wx'});
     fs.appendFileSync(env.GITHUB_OUTPUT,'report=true\n');
   }catch(_){r=null;}
-  const rows=r?r.stages.map(v=>[v.scenario,v.status,v.reason]):selected(env).map(s=>[s,'NOT RUN','report_not_attested']);
   const success=r!==null&&r.actions_result==='SUCCESS'&&env.COLLECT_RESULT==='success';
-  fs.appendFileSync(env.GITHUB_STEP_SUMMARY,'| Scénario | Résultat | Diagnostic |\n| --- | --- | --- |\n'+rows.map(v=>'| '+v.join(' | ')+' |').join('\n')+'\n\nRésultat Actions : '+(success?'SUCCESS':'FAILURE')+'.\n');
+  fs.appendFileSync(env.GITHUB_STEP_SUMMARY,summary(r,env));
   if(!success){process.stderr.write('::error::FAILURE: manual campaign success not attested.\n');process.exitCode=1;}
 }
 if(require.main===module){try{check(process.argv.length===3);if(process.argv[2]==='prepare')prepare();else{check(process.argv[2]==='publish');publish();}}catch(_){process.stderr.write('::error::NOT RUN: closed campaign report refused.\n');process.exitCode=1;}}

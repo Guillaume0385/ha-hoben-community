@@ -40,7 +40,7 @@ value = stage(
     started=True,
     metrics=metrics,
     detail={"rx_bytes": 0, "rx_chunks": 0},
-    reason="observed",
+    reason="timeout" if mode == "timeout_receipt" else "observed",
 )
 if mode == "private":
     value["private"] = "PRIVATE_PAYLOAD"

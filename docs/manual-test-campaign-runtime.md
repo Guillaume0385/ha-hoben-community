@@ -1,5 +1,12 @@
 # Deux campagnes manuelles — contrat d’exécution #126
 
+Pour le choix des scénarios, le formulaire manuel et l’interprétation des
+résultats, consulter le [guide utilisateur](manual-test-campaign-guide.md).
+La consolidation 018+019 ajoute des résumés lisibles et exige toutes les
+lectures planifiées réussies ainsi qu’une session encore active dans les
+compléments HA ordinaires ; seule la reconnexion tolère une lecture échouée
+avant récupération attestée. Elle préserve les plafonds ci-dessous.
+
 Tâche HOBEN-126-CAMPAIGNS-016-017, selon le
 [commentaire MANAGER canonique](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641)
 et l’arbitrage des budgets du 27/10/2026 dans #126. Les plafonds nouveaux sont

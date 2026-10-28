@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #126, consolidation des rapports et validation offline 018+019
+
+- Résumé propriétaire commun : statuts, diagnostics catégoriels, durées,
+  plafonds, provenance informative et verdict global lié au job collect.
+- Compléments HA : toutes les lectures planifiées doivent réussir et la
+  session rester active à la borne observée ; une erreur antérieure ne peut
+  être masquée par le dernier refresh. Reconnexion naturelle distincte.
+- Conservation des diagnostics de timeout attestés par le worker ; correction
+  du libellé d’admission refusée, sans modification des contrôles d’admission.
+- Régressions offline de la chaîne YAML/parent/publication, validation croisée
+  Python/Node et vrai chemin HA simulé ; guide utilisateur des campagnes.
+- Aucun test réel, changement des plafonds, promotion main ou fusion DEV.
+
 ## En cours — #126, raccordement des campagnes manuelles 016+017
 
 - Six scénarios protocolaires et sept scénarios HA, individuels ou all
