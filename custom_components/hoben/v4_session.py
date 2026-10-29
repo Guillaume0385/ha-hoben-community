@@ -917,9 +917,10 @@ class V4Session:
                 raise HobenTlsVerificationError() from None
             except TransportError:
                 raise HobenTransportError() from None
-            except (SessionProtocolError, HobenInvalidInputError):
+            except SessionProtocolError:
                 raise HobenProtocolError() from None
             except (
+                HobenInvalidInputError,
                 HobenProtocolError,
                 HobenAuthorizationRequiredError,
                 HobenClosedError,

@@ -85,6 +85,13 @@ les verrous existants. Un unload annule aussi un refresh attendant le backoff.
 
 Les exceptions internes étaient parfois ramenées au même `HobenProtocolError` ;
 elles reçoivent maintenant un sous-type distinct exclu du test de classe exacte.
+La revue MANAGER #6500290135 a aussi identifié une conversion abusive de
+`HobenInvalidInputError` lors de l'ouverture. Seul `SessionProtocolError` est
+traduit en refus protocolaire ; les gardes d'entrée/identité et de destination
+conservent `invalid_client_inputs`, permanent. Des tests sur le vrai V4Session
+dans les deux modes, puis sur le vrai chemin HA, refusent hôte, port et les deux
+avant toute connexion/écriture/lecture TLS, confirment le cleanup et `SETUP_ERROR`
+sans nouvelle tentative même après 15 minutes d'horloge simulée.
 Le refus de certificat a sa catégorie fixe, séparée de la négociation TLS.
 Les diagnostics restent une allowlist sans historique, octets, identités, valeurs
 domestiques ni texte d'exception libre. Un échec pendant le handoff est conservé

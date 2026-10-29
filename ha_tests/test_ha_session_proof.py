@@ -184,9 +184,22 @@ async def test_cancel_propagates_after_cleanup_with_partial_failure_proof(
 async def test_read_timeout_recovery_is_not_natural_loss_evidence(
     hass, entry, peers, caplog
 ):
-    peers.wire(DEVICE_GUID, [[]])
+    first = peers.wire(DEVICE_GUID, [[]])
     peers.wire(DEVICE_GUID, [[RESPONSE]] * 5)
-    run = collector(hass, entry, read_timeout=0.001)
+    send = first.write.side_effect
+
+    async def expire_first_read(packet):
+        send(packet)
+        if packet[0] == 13:
+            # Expire the real acquisition deadline at a fixed TX await. A
+            # 1 ms wall-clock budget also raced later valid memory responses.
+            deadline = peers.lifecycles[0]._session._read_timeout
+            assert deadline is not None
+            deadline.reschedule(asyncio.get_running_loop().time())
+            await asyncio.Future()
+
+    first.write.side_effect = expire_first_read
+    run = collector(hass, entry)
     task = asyncio.create_task(run.collect())
     assert await peers.backoff.entered.get() == 1.0
     assert peers.factory.call_count == 1

@@ -7,6 +7,8 @@
   prochaine lecture corrélée, sans rejouer le refresh échoué.
 - Même plafond de deux ouvertures ; aucun réarmement après succès. Authentification,
   vérification TLS, défaut interne et nettoyage non confirmé ne sont pas réessayés.
+- Les validations locales d'entrée et de destination restent des erreurs permanentes,
+  sans tentative TLS vers un endpoint refusé ni relance native du setup HA.
 - Régressions offline setup/refresh, budget, annulation, nettoyage et confidentialité ;
   aucun parseur, codec, workflow live ou budget de campagne modifié.
 - Causes des incidents réels toujours inconnues ; aucun test réel exécuté.

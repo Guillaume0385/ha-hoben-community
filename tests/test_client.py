@@ -457,7 +457,9 @@ def test_invalid_returned_identity_never_adopted(tls, monkeypatch):
 
     monkeypatch.setattr(v4_session, "_open_session", AsyncMock(return_value=session))
     client = make_client()
-    with pytest.raises(HobenProtocolError):
+    # An invalid identity in the opening helper's returned model violates its
+    # input contract. Preserve that permanent guard instead of retrying it.
+    with pytest.raises(HobenInvalidInputError):
         asyncio.run(client.async_refresh())
     assert client.device_guid_for_persistence == INITIAL_DEVICE_GUID
     assert client.profile is None

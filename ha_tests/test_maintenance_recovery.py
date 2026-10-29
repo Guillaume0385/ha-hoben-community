@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import DEVICE_GUID, ROTATED_DEVICE_GUID, assert_private_values_absent
@@ -17,6 +18,7 @@ from custom_components.hoben.diagnostics import async_get_config_entry_diagnosti
 from custom_components.hoben.exceptions import HobenClosedError, HobenProtocolError
 from custom_components.hoben.myhoben import CloseClientReason
 from custom_components.hoben.transport import (
+    AsyncTlsTransport,
     TransportCertificateError,
     TransportError,
     TransportTimeout,
@@ -26,6 +28,43 @@ from ha_tests.test_persistent_client import RESPONSE, assert_stopped, load, sens
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
 from ha_tests.test_runtime import advance_poll
 from tests.tls_script import script_transport
+
+
+@pytest.mark.parametrize(
+    "host, port",
+    [("invalid.example", 465), ("myhoben.fr", 1234), ("invalid.example", 1234)],
+)
+async def test_rejected_endpoint_never_uses_tls_or_native_setup_retry(
+    hass, entry, peers, freezer, caplog, monkeypatch, host, port
+):
+    hass.set_state(CoreState.running)
+    # Real transport object and real client/lifecycle/session; intercept only
+    # its I/O so the endpoint guard itself must prevent every TLS attempt.
+    transport = AsyncTlsTransport(host=host, port=port)
+    for method in ("connect", "write", "read"):
+        monkeypatch.setattr(transport, method, AsyncMock())
+    monkeypatch.setattr(transport, "close", AsyncMock(wraps=transport.close))
+    peers.wires.append(transport)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert not hasattr(entry, "runtime_data")
+    assert "error=invalid_client_inputs" in caplog.text
+    assert "malformed_response" not in caplog.text
+    assert_stopped(peers)
+    # Native retry delays cap at 10 min; crossing that bound cannot retry a
+    # permanent local security/configuration failure.
+    freezer.tick(timedelta(minutes=15))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert peers.factory.call_count == 1 and not peers.backoff.delays
+    assert len(peers.lifecycles) == 1
+    for method in (transport.connect, transport.write, transport.read):
+        method.assert_not_awaited()
+    assert_private_values_absent(caplog.text)
+    assert "invalid.example" not in caplog.text
+    assert_stopped(peers)
 
 
 @pytest.mark.parametrize("fragmented", [False, True])
