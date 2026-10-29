@@ -4,7 +4,7 @@ name: Tests expérimentaux MyHOBEN
   workflow_dispatch:
     inputs:
       scenario:
-        description: Observation manuelle en lecture seule — scénario individuel ou all séquentiel
+        description: "Scénario expérimental en lecture seule — session-reconnect : Pong inhibés après 120 s ; all séquentiel"
         required: true
         type: choice
         default: tls-only

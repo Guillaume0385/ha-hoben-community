@@ -45,12 +45,13 @@ est historique pour cette procédure, reste inchangé et partage le même mutex.
 | `read-v4-state` | Réponse corrélée à une lecture fixe de 20 registres V4 ; aucune valeur publiée. | 45 s |
 | `h1h2` | Douze observations bornées collectées. Résultat scientifique **INCONCLUSIVE**, aucune frontière universelle démontrée. | 1800 s ; 6 H1 + 6 H2, 90 s et 1 Mio RX par session |
 | `session-300` | Fenêtre utile de 300 s du collecteur existant et réponse corrélée. | 360 s ; 3 ouvertures, 6 lectures maximum à cadence ≥60 s, 1 Mio RX total |
-| `session-reconnect` | Perte naturelle, nouvelle génération, réponse corrélée puis stabilité de 120 s. Sans ces preuves : INCONCLUSIVE. | 480 s ; 3 ouvertures, 10 lectures maximum à cadence ≥60 s, 1 Mio RX total |
-| `all` | Les six étapes ci-dessus, séquentiellement. | 2820 s ; somme des maxima individuels 2730 s |
+| `session-reconnect` | Test expérimental : Pong inhibés dès 120 s sur la première génération, perte puis réouverture avant 240 s, lecture corrélée, Pong rétablis et 120 s stables. Sans ces preuves : INCONCLUSIVE. | 600 s ; 3 ouvertures, 10 lectures maximum à cadence ≥60 s, 1 Mio RX total |
+| `all` | Les six étapes ci-dessus, séquentiellement, orchestration et nettoyage inclus. | 3000 s (50 min) ; somme des maxima individuels 2850 s, marge 150 s |
 
 `transport` ne démontre ni un EOF TLS ni une cause serveur. `close_client`
-conserve sa catégorie et son sous-code numérique. Aucune perte n’est provoquée,
-aucune inhibition Pong n’est utilisée par la nouvelle reconnexion. Les
+conserve sa catégorie et son sous-code numérique. L’inhibition des seuls Pong
+du client de test est réservée à ce scénario expérimental ; elle ne démontre
+aucune causalité serveur et ne modifie pas la reconnexion HA naturelle. Les
 48 octets d’OpenedClient restent un préfixe décodable, pas une longueur totale
 universelle. La campagne protocole ne valide pas l’intégration HA.
 

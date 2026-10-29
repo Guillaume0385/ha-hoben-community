@@ -65,11 +65,14 @@ def test_real_framer_and_lifecycle_without_live_network(scenario, split):
             for _ in range(5):
                 await asyncio.sleep(0)
 
-        def factory(budget):
+        def factory(budget, policy=None):
             life = V4Lifecycle(
                 **IDENTITY,
                 session_factory=partial(
-                    V4Session, transport_factory=lambda: wire, session_300=budget
+                    V4Session,
+                    transport_factory=lambda: wire,
+                    session_300=budget,
+                    no_pong_after_120=policy,
                 ),
                 retry_delays=(),
                 clock=lambda: now[0],
@@ -87,7 +90,11 @@ def test_real_framer_and_lifecycle_without_live_network(scenario, split):
         assert observed_status("protocol", scenario, metrics) == (
             "INCONCLUSIVE" if scenario == "session-reconnect" else "SUCCESS"
         )
-        assert metrics["pings"] == metrics["pongs"]
+        if scenario == "session-reconnect":
+            assert metrics["pings"] > metrics["pongs"]
+            assert detail["recovery_witness"]["suppressed_pongs"] > 0
+        else:
+            assert metrics["pings"] == metrics["pongs"]
         assert all(
             payload[0] in {OPEN_CLIENT, 11, DATA_REQUEST_CLIENT}
             for payload in wire.writes
@@ -100,7 +107,7 @@ def test_real_framer_and_lifecycle_without_live_network(scenario, split):
         if scenario == "session-300":
             assert metrics["useful_ms"] == 300000 and metrics["reads"] == 5
         if scenario == "session-reconnect":
-            assert metrics["useful_ms"] == 440000 and metrics["reads"] <= 10
+            assert metrics["useful_ms"] == 240000 and metrics["reads"] <= 10
         value = stage(
             "protocol",
             scenario,
@@ -117,7 +124,7 @@ def test_real_framer_and_lifecycle_without_live_network(scenario, split):
 
 
 @pytest.mark.parametrize("loss", [TransportEOF("PRIVATE_PAYLOAD"), b"\x05\x03"])
-def test_natural_recovery_requires_real_new_generation_and_correlated_read(loss):
+def test_prethreshold_loss_cannot_attest_controlled_reconnection(loss):
     async def exercise():
         now = [0.0]
         first, second = Stream([response()]), Stream([response()])
@@ -136,7 +143,7 @@ def test_natural_recovery_requires_real_new_generation_and_correlated_read(loss)
         async def backoff(_):
             await asyncio.sleep(0)
 
-        def factory(budget):
+        def factory(budget, policy=None):
             return V4Lifecycle(
                 **IDENTITY,
                 retry_delays=(1.0,),
@@ -146,6 +153,7 @@ def test_natural_recovery_requires_real_new_generation_and_correlated_read(loss)
                     V4Session,
                     transport_factory=lambda: next(streams),
                     session_300=budget,
+                    no_pong_after_120=policy,
                 ),
             )
 
@@ -156,10 +164,13 @@ def test_natural_recovery_requires_real_new_generation_and_correlated_read(loss)
             clock=lambda: now[0],
             sleep=sleep,
         )
-        assert metrics["recovered"] and metrics["opens"] == 2 and metrics["cleanup"]
-        assert observed_status("protocol", "session-reconnect", metrics) == "SUCCESS"
-        assert detail["recovery_witness"]["stable_ms"] >= 120000
-        assert detail["recovery_witness"]["read_generation"] == 2
+        assert not metrics["recovered"] and metrics["opens"] == 2 and metrics["cleanup"]
+        assert (
+            observed_status("protocol", "session-reconnect", metrics) == "INCONCLUSIVE"
+        )
+        assert detail["recovery_witness"]["suppressed_pongs"] == 0
+        assert detail["recovery_witness"]["loss_generation"] is None
+        assert detail["recovery_witness"]["read_generation"] is None
         assert metrics["loss_kind"] == (
             "transport" if isinstance(loss, Exception) else "close_client"
         )

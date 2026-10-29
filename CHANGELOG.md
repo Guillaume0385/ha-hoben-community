@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #126, parité des collecteurs expérimentaux
+
+- Réutilisation du collecteur historique session-reconnect avec inhibition des
+  seuls Pong après 120 s, reprise avant 240 s, lecture corrélée et stabilité
+  de 120 s ; session-300 et H1/H2 conservent leurs moteurs et limites.
+- Plafonds décidés par le propriétaire : reconnexion 600 s et all 3000 s,
+  orchestration et cleanup inclus ; contrats Python/Node alignés.
+- Preuve structurée de l’inhibition/récupération, sans RX brut ni donnée privée ;
+  une fin de job ou une ouverture seule ne vaut pas SUCCESS.
+- Tests déterministes et documentation de correspondance ; aucun test réel,
+  changement du client HA, de ses campagnes ou de main.
+
 ## En cours — #152, diagnostic structuré et reconnexion périodique Home Assistant
 
 - Diagnostic malformed_response allowlisté : phase, type prouvé, tailles et

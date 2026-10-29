@@ -6,7 +6,7 @@ const baseline=require('../../scripts/ha-live-proof.cjs');
 const files=require('./experimental-report-file.cjs');
 const choices={protocol:['tls-only','session-open','read-v4-state','h1h2','session-300','session-reconnect','all'],
   ha:['hoben-live','open-errors','refresh-v4','session-reuse','session-reconnect','cleanup','availability','all']};
-const seconds={protocol:[15,30,45,1800,360,480,2820],ha:[360,90,120,180,600,60,120,1800]};
+const seconds={protocol:[15,30,45,1800,360,600,3000],ha:[360,90,120,180,600,60,120,1800]};
 const errors=['none','authentication','authorization','transport','protocol','timeout','closed','budget','unexpected'];
 const reasons=['observed','not_observed','not_started','context_refused','identity_refused','worker_failure','timeout',
   'cancelled','cleanup_failed','report_refused','supervisor_refused','memory','processes','previous_failure','budget'];
@@ -103,6 +103,30 @@ function haDetail(s,d) {
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;
   return m;
 }
+function recoveryWitness(w,m) {
+  check(w&&typeof w==='object'&&!Array.isArray(w));
+  const controlled=Object.hasOwn(w,'mode');
+  object(w,['loss_generation','read_generation','read_sequence','stable_ms',
+    ...(controlled?['mode','boundary_proven','outcome','suppressed_pongs','loss_after_ms','reopened_after_ms','recovery_pongs']:[])]);
+  for(const k of ['loss_generation','read_generation'])check(w[k]===null||int(w[k],1,3));
+  check(w.read_sequence===null||int(w.read_sequence,1,10));
+  check(int(w.stable_ms,0,controlled?120000:480000));
+  if(controlled) {
+    check(w.mode==='pong_inhibition_after_120s'&&w.boundary_proven===false);
+    check(['verified','not_exercised','no_disconnect','reopen_failed','stability_lost','timeout',
+      'budget','transport','protocol','internal','closed','first_not_admissible'].includes(w.outcome));
+    check(int(w.suppressed_pongs,0,m.pings-m.pongs)&&int(w.recovery_pongs,0,m.pongs));
+    for(const k of ['loss_after_ms','reopened_after_ms'])check(w[k]===null||int(w[k],0,600000));
+    check(w.read_sequence===null||w.read_sequence<=m.reads_ok);
+  }
+  if(m.recovered) {
+    check(controlled&&w.outcome==='verified');
+    check(w.loss_generation!==null&&w.read_generation!==null&&w.loss_generation<w.read_generation&&w.read_generation<=m.opens);
+    check(w.read_sequence!==null&&w.stable_ms===120000&&w.suppressed_pongs>0&&w.recovery_pongs>0);
+    check(w.loss_after_ms!==null&&w.reopened_after_ms!==null&&120000<=w.loss_after_ms&&w.loss_after_ms<w.reopened_after_ms&&w.reopened_after_ms<240000);
+    check(w.reopened_after_ms+w.stable_ms<=m.useful_ms);
+  }
+}
 function validateStage(v,c) {
   object(v,['scenario','started','elapsed_ms','reason','status','metrics','detail']);
   const s=v.scenario;
@@ -119,12 +143,9 @@ function validateStage(v,c) {
     check(int(d.rx_bytes,0,(s==='h1h2'?12:1)*1048576)&&int(d.rx_chunks,0,d.rx_bytes));
     check(d.rx_bytes>=v.metrics.reads_ok*50+(v.metrics.pings||0));
     if(Object.hasOwn(d,'recovery_witness')) {
-      check(s==='session-reconnect');const w=d.recovery_witness;
-      object(w,['loss_generation','read_generation','read_sequence','stable_ms']);
-      for(const k of ['loss_generation','read_generation'])check(w[k]===null||int(w[k],1,3));
-      check(w.read_sequence===null||int(w.read_sequence,1,10));check(int(w.stable_ms,0,480000));
+      check(s==='session-reconnect');recoveryWitness(d.recovery_witness,v.metrics);
     }
-    if(v.metrics.recovered){const w=d.recovery_witness;check(w&&w.loss_generation!==null&&w.read_generation!==null&&w.read_generation>w.loss_generation&&w.read_sequence!==null&&w.stable_ms>=120000);}
+    if(v.metrics.recovered)check(Object.hasOwn(d,'recovery_witness'));
     if(Object.hasOwn(d,'ignored_messages')) {
       object(d.ignored_messages,['7','27']);let bytes=0;
       for(const t of ['7','27']){const bins=d.ignored_messages[t];check(Array.isArray(bins)&&bins.length===253);
@@ -176,7 +197,7 @@ function bounds(c,s) {
     'read-v4-state':'1 ouverture ; 1 lecture / 20 registres',
     h1h2:'6 H1 + 6 H2 ; 90 s / 1 Mio RX par session',
     'session-300':'300 s utiles ; 3 ouvertures ; 6 lectures / ≥60 s ; 1 Mio RX',
-    'session-reconnect':'3 ouvertures ; 10 lectures / ≥60 s ; 1 Mio RX',
+    'session-reconnect':'Pong inhibés dès 120 s ; reprise <240 s ; stabilité 120 s ; 3 ouvertures ; 1 Mio RX',
   }[s];
 }
 function diagnostic(v) {

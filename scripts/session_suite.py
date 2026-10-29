@@ -250,12 +250,16 @@ def validate_suite(r, proof):
     }
 
 
-async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
+async def _observe_reconnect(
+    life, budget, policy, proof, *, clock, sleep, _project=None
+):
     """Schedule reads only; the shared lifecycle owns TLS, RX, TX and backoff.
 
     Real monotonic callbacks attest EOF/acceptance even between collector ticks.
     No timer closes a transport to manufacture an EOF. Teardown starts only
     after the result decision, cancellation, or a fixed deadline is reached.
+    The current campaign may project the private result into its own closed
+    receipt; legacy callers retain full legacy provenance/schema validation.
     """
     started = clock()
     stop = None
@@ -395,6 +399,16 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
     except Exception:
         result, terminal = "interrupted", "internal"
     finally:
+        # Freeze timing at the result decision: close() deliberately invalidates
+        # the budget's accepted generation/time. Only the current campaign's
+        # private projector consumes this tuple; legacy public schemas stay exact.
+        recovery_timing = (
+            policy.first_opened_at,
+            policy.first_generation,
+            policy.first_loss_after_suppression_at,
+            budget.connected_generation,
+            budget.accepted_at,
+        )
         # Snapshot the causal diagnostic before teardown. A secondary close
         # failure still changes the existing terminal, but cannot erase it.
         diagnostic = (
@@ -413,7 +427,15 @@ async def _observe_reconnect(life, budget, policy, proof, *, clock, sleep):
             if diagnostic[0] == "none":
                 diagnostic = ("teardown", "closed", "unclassified")
     eof_at, first_at = policy.first_eof_after_suppression_at, policy.first_opened_at
-    return validate_second(
+
+    def project(data, source):
+        return (
+            validate_second(data, source)
+            if _project is None
+            else _project(data, source, recovery_timing)
+        )
+
+    return project(
         {
             **second_empty(proof),
             "result": result,

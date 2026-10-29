@@ -25,7 +25,8 @@ from custom_components.hoben.v4_experiment import (
     SessionReconnect,
 )
 from custom_components.hoben.v4_lifecycle import V4Lifecycle
-from custom_components.hoben.v4_session import SessionState, V4Session
+from custom_components.hoben.v4_no_pong import NoPongAfter120
+from custom_components.hoben.v4_session import V4Session
 from scripts.campaign_runtime_contract import SECONDS, empty_metrics, need
 
 
@@ -110,7 +111,10 @@ async def collect(
         else Session300(clock=clock)
     )
     owner = None
-    stable_ms = 0
+    raw = None
+    recovery_timing = None
+    delegated_cleanup = False
+    policy = NoPongAfter120(clock=clock) if scenario == "session-reconnect" else None
     start = clock()
     try:
         # The parent arms its independent absolute deadline BEFORE the worker
@@ -131,13 +135,20 @@ async def collect(
                     owner = V4Lifecycle(
                         **identity,
                         retry_delays=retry_delays,
-                        session_factory=partial(V4Session, session_300=budget),
+                        session_factory=partial(
+                            V4Session, session_300=budget, no_pong_after_120=policy
+                        ),
                     )
                 else:
-                    owner = factory(budget)
+                    owner = (
+                        factory(budget, policy)
+                        if policy is not None
+                        else factory(budget)
+                    )
                 if scenario == "session-300":
                     from scripts.run_session_300 import observe
 
+                    delegated_cleanup = True
                     raw = await observe(
                         owner,
                         budget,
@@ -159,6 +170,39 @@ async def collect(
                             "timeout": "timeout",
                             "closed": "closed",
                         }.get(raw["terminal"], "protocol")
+                elif scenario == "session-reconnect":
+                    from scripts.session_suite import _observe_reconnect
+
+                    delegated_cleanup = True
+                    raw, recovery_timing = await _observe_reconnect(
+                        owner,
+                        budget,
+                        policy,
+                        {},
+                        clock=clock,
+                        sleep=sleep,
+                        _project=lambda data, _, timing: (data, timing),
+                    )
+                    need(raw["boundary_proven"] is False)
+                    m.update(
+                        reads_ok=raw["reads_ok"],
+                        useful_ms=raw["duration_ms"],
+                        completed=raw["result"] in {"recovered_120s", "inconclusive"},
+                        recovered=raw["result"] == "recovered_120s",
+                    )
+                    if raw["terminal"] in {
+                        "timeout",
+                        "budget",
+                        "transport",
+                        "protocol",
+                        "internal",
+                        "closed",
+                    }:
+                        m["error"] = (
+                            "unexpected"
+                            if raw["terminal"] == "internal"
+                            else raw["terminal"]
+                        )
                 else:
                     await owner.connect()
                     if scenario == "session-open":
@@ -173,10 +217,6 @@ async def collect(
                             )
                         )
                         m.update(reads_ok=1, completed=True)
-                    else:
-                        stable_ms = await observe_natural(
-                            owner, budget, m, clock=clock, sleep=sleep
-                        )
     except asyncio.CancelledError:
         raise
     except Exception as error:
@@ -184,8 +224,11 @@ async def collect(
     finally:
         if owner is not None:
             try:
-                async with asyncio.timeout(3 if scenario == "tls-only" else 10):
-                    await owner.close()
+                if not delegated_cleanup:
+                    async with asyncio.timeout(3 if scenario == "tls-only" else 10):
+                        await owner.close()
+                # Both historical session collectors own their bounded teardown.
+                # Never grant a second cleanup timeout after their deadline.
                 m["cleanup"] = True
                 if scenario != "tls-only":
                     o = owner.session_observation
@@ -213,50 +256,48 @@ async def collect(
         )
         detail.update(budget.ignored_diagnostic())
         if scenario == "session-reconnect" and owner is not None:
-            witness = owner.witness
-            detail["recovery_witness"] = {
-                "loss_generation": witness.lost_generation,
-                "read_generation": witness.verified_read_generation,
-                "read_sequence": witness.verified_read_sequence,
-                "stable_ms": stable_ms,
-            }
+            detail["recovery_witness"] = reconnect_witness(
+                raw, recovery_timing, policy, m
+            )
     return m, detail
 
 
-async def observe_natural(owner, budget, m, *, clock, sleep):
-    """No injected loss. Require a fresh correlated read and 120 s stability."""
-    start = clock()
-    end = start + 440  # connection + cleanup still consume the 480 s parent
-    last_read_generation = None
-    while clock() < end:
-        due = max(clock(), budget.next_read_at)
-        if due >= end or budget.requests >= 10:
-            await sleep(max(0, end - clock()))
-            break
-        await sleep(max(0, due - clock()))
-        await owner.wait_connected()
-        try:
-            await owner.request_v4_data(timeout=min(30, end - clock()))
-            m["reads_ok"] += 1
-            last_read_generation = owner.snapshot.attempts
-        except (HobenTransportError, HobenClosedError):
-            # Never replay a failed read. Only the next bounded cadence slot
-            # can establish recovery after the shared manager has cleaned up.
-            pass
-        if (
-            budget.last_lost_generation is not None
-            and last_read_generation is not None
-            and last_read_generation > budget.last_lost_generation
-            and budget.accepted_at is not None
-            and clock() - budget.accepted_at >= 120
-            and owner.state is SessionState.CONNECTED
-            and budget.usable
-        ):
-            m["recovered"] = True
-            break
-    m.update(completed=True, useful_ms=max(0, int((clock() - start) * 1000)))
-    return (
-        0
-        if budget.accepted_at is None
-        else max(0, int((clock() - budget.accepted_at) * 1000))
+def reconnect_witness(raw, timing, policy, metrics):
+    """Project experiment generations and relative times, never server payloads.
+
+    The current campaign's real provenance is added by its admitted parent.
+    No obsolete PR/merge receipt is invented to call the historical collector.
+    """
+    raw = {} if raw is None else raw
+    first, first_generation, loss, accepted_generation, accepted_at = (
+        (None,) * 5 if timing is None else timing
     )
+    generation = raw.get("recovery_generation", 0)
+    reopened = accepted_at if generation == accepted_generation else None
+
+    def relative(instant):
+        return (
+            None
+            if first is None or instant is None
+            else max(0, int((instant - first) * 1000))
+        )
+
+    return {
+        "mode": "pong_inhibition_after_120s",
+        "boundary_proven": False,
+        "outcome": raw.get(
+            "terminal",
+            metrics["error"]
+            if metrics["error"]
+            in {"timeout", "budget", "transport", "protocol", "closed"}
+            else "internal",
+        ),
+        "loss_generation": first_generation if loss is not None else None,
+        "read_generation": generation or None,
+        "read_sequence": raw.get("recovery_reads_ok", 0) or None,
+        "stable_ms": raw.get("stable_ms", 0),
+        "suppressed_pongs": policy.suppressed,
+        "loss_after_ms": relative(loss),
+        "reopened_after_ms": relative(reopened),
+        "recovery_pongs": raw.get("recovery_pongs", 0),
+    }

@@ -1,5 +1,11 @@
 # Inventaire des campagnes manuelles MyHOBEN et Home Assistant
 
+**Archive du 27/10 :** les exclusions d’inhibition Pong et anciens plafonds
+ci-dessous ont été remplacés pour la tâche expérimentale 027 par la décision
+propriétaire du 29/10. Consulter le [contrat courant et sa table de
+correspondance](manual-test-campaign-runtime.md#correspondance-des-collecteurs-et-preuve) :
+reconnexion expérimentale 600 s, all 3000 s ; HA reste séparée.
+
 Audit documentaire du **27 octobre 2026**, tâche `HOBEN-126-AUDIT-001`, selon
 la [consigne MANAGER active de #126][consigne]. Ce document prépare une séparation ;
 il ne change aucune exécution, admission ou autorisation de test réel.
