@@ -32,6 +32,7 @@ from custom_components.hoben.coordinator import (
 from custom_components.hoben.exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
+    HobenClosedError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenModbusError,
@@ -165,6 +166,15 @@ async def test_first_refresh_can_persist_rotation(hass, entry, client_factory, c
         (HobenTransportError(), UpdateFailed),
         (HobenTimeoutError(), UpdateFailed),
         (HobenRefreshExhaustedError(2, HobenTimeoutError()), UpdateFailed),
+        *[
+            (
+                HobenClosedError(reason),
+                UpdateFailed
+                if reason is CloseClientReason.SERVER_MAINTENANCE
+                else ConfigEntryError,
+            )
+            for reason in CloseClientReason
+        ],
         (
             HobenInvalidCredentialsError(CloseClientReason.INVALID_IDENTIFIER),
             ConfigEntryAuthFailed,
@@ -227,6 +237,15 @@ async def test_authentication_failure_stops_polling(
     [
         (HobenTransportError(), ConfigEntryState.SETUP_RETRY),
         (HobenTimeoutError(), ConfigEntryState.SETUP_RETRY),
+        *[
+            (
+                HobenClosedError(reason),
+                ConfigEntryState.SETUP_RETRY
+                if reason is CloseClientReason.SERVER_MAINTENANCE
+                else ConfigEntryState.SETUP_ERROR,
+            )
+            for reason in CloseClientReason
+        ],
         (HobenAuthorizationRequiredError(), ConfigEntryState.SETUP_ERROR),
         (
             HobenInvalidCredentialsError(CloseClientReason.INVALID_IDENTIFIER),

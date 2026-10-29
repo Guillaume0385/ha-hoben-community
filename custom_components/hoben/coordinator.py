@@ -13,13 +13,14 @@ from .client import HobenClient, RawStoveSnapshot
 from .const import CONF_DEVICE_GUID, DOMAIN, UPDATE_INTERVAL
 from .exceptions import (
     HobenAuthorizationRequiredError,
+    HobenClosedError,
     HobenError,
     HobenInvalidCredentialsError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
 from .helpers import log_unexpected_error
-from .myhoben import INITIAL_DEVICE_GUID
+from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason
 from .profiles import StoveProfile
 from .safe_reports import wrap_error
 from .v4_experiment import ExperimentalCloseClientError
@@ -93,6 +94,19 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         except HobenUnsupportedProfileError as error:
             raise wrap_error(
                 ConfigEntryError, "Hoben stove profile is not supported", error
+            ) from None
+        except HobenClosedError as error:
+            # A documented maintenance refusal is temporary, not bad config.
+            # HA converts UpdateFailed on first refresh to ConfigEntryNotReady
+            # and owns setup backoff. Never reset the client's finite budget or
+            # make auth, unknown close reasons or ambiguous framing retryable.
+            error_type = (
+                UpdateFailed
+                if error.reason is CloseClientReason.SERVER_MAINTENANCE
+                else ConfigEntryError
+            )
+            raise wrap_error(
+                error_type, "Hoben protocol response could not be accepted", error
             ) from None
         except HobenError as error:
             raise wrap_error(
