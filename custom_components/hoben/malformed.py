@@ -38,6 +38,11 @@ TEXT_FIELDS = {
             "mbap_header",
             "message_body",
             "close_subcode",
+            "unit_id",
+            "function_code",
+            "byte_count",
+            "exception_code",
+            "register_data",
         }
     ),
     "rejection": frozenset(
@@ -93,7 +98,17 @@ def response_diagnostic(frame: object, phase: str) -> "MalformedDiagnostic":
             if len(frame) >= 7:
                 try:
                     expected = 1 + modbus_tcp_frame_size(frame[1:7])
-                    if len(frame) < expected:
+                    if len(frame) < 8:
+                        missing = "unit_id"
+                    elif len(frame) < 9:
+                        missing = "function_code"
+                    elif frame[8] in {3, 4} and len(frame) < 10:
+                        missing = "byte_count"
+                    elif frame[8] in {0x83, 0x84} and len(frame) < 10:
+                        missing = "exception_code"
+                    elif frame[8] in {3, 4} and len(frame) < 10 + frame[9]:
+                        missing = "register_data"
+                    elif len(frame) < expected:
                         missing = "message_body"
                 except ValueError:
                     pass

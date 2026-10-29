@@ -56,7 +56,7 @@ d'ouverture, du framer et de corrélation/validation remplissent uniquement :
 | `received_length` | Nombre effectivement présent dans le périmètre indiqué ; sinon `not_proven`, jamais une valeur tronquée/clampée. |
 | `expected_length` | Taille du contrat MBAP validé seulement ; sinon `not_proven`. |
 | `length_scope` | Buffer d'ouverture, en-tête MBAP, frame du contrat local ou `not_proven`. Un read TLS n'est jamais une frame. |
-| `missing_fields` | Catégorie structurelle absente (`mbap_header`, `message_body`, `close_subcode`), `none` ou `unknown`. |
+| `missing_fields` | Élément structurel absent (en-tête/corps, sous-code, Unit ID, fonction, byte_count, code d'exception ou données de registres), `none` ou `unknown`. Aucune valeur de registre n'est exportée. |
 
 Le buffer d'ouverture ne prouve jamais la longueur totale d'OpenedClient :
 `expected_length=not_proven`, y compris si le préfixe décodable fait 48 octets.

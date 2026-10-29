@@ -63,6 +63,18 @@ def test_correlation_failure_has_no_transaction_or_register_values():
 
 
 @pytest.mark.parametrize(
+    "function, missing", [(4, "byte_count"), (0x84, "exception_code")]
+)
+def test_complete_mbap_can_still_lack_a_required_pdu_field(function, missing):
+    # MBAP Length=2 includes Unit ID and function, but omits the required field.
+    frame = bytes.fromhex("0effff0000000201") + bytes([function])
+    report = response_diagnostic(frame, "response_validation").safe_report()
+    assert report["received_length"] == report["expected_length"] == 9
+    assert report["missing_fields"] == missing
+    assert report["rejection"] == "invalid_response"
+
+
+@pytest.mark.parametrize(
     "field,value",
     [
         ("phase", "PRIVATE"),
