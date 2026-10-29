@@ -38,6 +38,12 @@ from .exceptions import (
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
+from .malformed import (
+    MalformedDiagnostic,
+    message_name,
+    observed_length,
+    response_diagnostic,
+)
 from .modbus import (
     HOBEN_UNIT_ID,
     READ_INPUT_REGISTERS,
@@ -918,7 +924,17 @@ class V4Session:
             except TransportError:
                 raise HobenTransportError() from None
             except SessionProtocolError:
-                raise HobenProtocolError() from None
+                raise HobenProtocolError(
+                    MalformedDiagnostic(
+                        phase="opening",
+                        message_type=message_name(
+                            self._opening_buffer[0] if self._opening_buffer else None
+                        ),
+                        received_length=observed_length(self._opening_buffer),
+                        length_scope="opening_buffer",
+                        rejection="invalid_opening",
+                    )
+                ) from None
             except (
                 HobenInvalidInputError,
                 HobenProtocolError,
@@ -1029,6 +1045,10 @@ class V4Session:
             first = False
             events = []
             rejected_close = False
+            if not isinstance(data, bytes):
+                # Transport implementations must return bytes. A broken local
+                # contract is permanent, not server data eligible for retry.
+                raise HobenInternalError()
             try:
                 events = self._framer.feed(data, exchange)
             except _RejectedCloseClient:
@@ -1086,6 +1106,8 @@ class V4Session:
             except TransportEOF:
                 if self._no_pong is not None:
                     self._no_pong.peer_closed(self._experiment_generation)
+                if self._framer.partial:
+                    raise self._framer.incomplete_error() from None
                 raise
             if not data:
                 if self._no_pong is not None:
@@ -1095,7 +1117,7 @@ class V4Session:
                         self._experiment.note_failure(
                             "frame_boundary", "protocol", "ambiguous"
                         )
-                    raise HobenProtocolError()
+                    raise self._framer.incomplete_error()
                 if self._experiment is not None:
                     self._experiment.note_failure("tls_read", "transport")
                 raise TransportEOF("eof")
@@ -1287,7 +1309,12 @@ class V4Session:
                 self._experiment.note_failure(
                     failure_phase, "protocol", "data_response"
                 )
-            error = HobenProtocolError()
+            error = HobenProtocolError(
+                response_diagnostic(
+                    event._frame if type(event) is DelimitedV4DataResponse else None,
+                    failure_phase,
+                )
+            )
         except Exception:
             error = HobenInternalError()
         self._rx_error = self._rx_error or error

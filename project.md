@@ -616,6 +616,16 @@ DEV et CI ordinaires restent hors ligne ; aucun live ni promotion main implicite
 
 ## Étape 8, tranche B — véritable client Home Assistant
 
+**Évolution #152 — MALFORMED-DIAGNOSTIC-004 :** l'entrée HA active désormais une
+politique distincte `ha_reconnect=True` sur le gestionnaire partagé : tentatives
+sans plafond cumulatif, attente de 60 s après échec récupérable et nettoyage
+confirmé, logs expurgés par tentative, aucun replay. Le setup garde un seul
+client jusqu'à une acquisition valide ou un arrêt/échec permanent ; les entités
+ne reviennent qu'après une lecture corrélée décodée. Les descriptions du budget
+de deux ouvertures ci-dessous sont historiques pour HA et restent le défaut
+des clients de campagne/config-flow. Aucun budget expérimental ne change.
+Voir le [contrat actuel et les limites](docs/maintenance-recovery-diagnostic.md).
+
 La consigne active de #112 autorise B après fusion de A par #123 au SHA
 `98d87336c31ab64751f5dd9bfbb7cec5682dfcae`. `HobenClient.async_refresh()` utilise
 désormais directement `V4Lifecycle(mode=PERSISTENT)` et les API publiques de A.

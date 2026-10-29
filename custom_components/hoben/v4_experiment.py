@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 
 from .exceptions import HobenClosedError, HobenProtocolError
+from .malformed import MalformedDiagnostic, message_name
 from .modbus import modbus_tcp_frame_size
 from .myhoben import decode_close_client
 from .transport import TransportError
@@ -288,7 +289,56 @@ class ExperimentalV4Framer:
             and self._buffer[0] in UNSUPPORTED_MESSAGE_TYPES
         ):
             raise UnsupportedMessageTypeError(self._buffer[0])
-        raise HobenProtocolError()
+        raise HobenProtocolError(
+            MalformedDiagnostic(
+                phase=phase,
+                message_type=message_name(self._buffer[0] if self._buffer else None),
+                received_length=len(self._buffer),
+                length_scope="mbap_header"
+                if phase == "frame_boundary"
+                else "not_proven",
+                missing_fields="none"
+                if phase == "frame_boundary" and self._buffer
+                else "unknown",
+                rejection="unknown_type"
+                if phase == "message_classification"
+                else "invalid_mbap",
+            )
+        )
+
+    def incomplete_error(self):
+        """Describe an EOF in a partial frame without publishing any buffered byte."""
+        head = self._buffer[0] if self._buffer else self._ignored_type
+        received = len(self._buffer)
+        expected = "not_proven"
+        missing = "mbap_header"
+        scope = "mbap_header"
+        if self._remaining:
+            received = self._ignored_size - self._remaining
+            expected = self._ignored_size
+            missing, scope = "message_body", "frame"
+        elif head == 5:
+            missing, scope = "close_subcode", "not_proven"
+        elif head in {7, 14, 27}:
+            prefix = IGNORED_PREFIXES.get(head, 1)
+            if received >= prefix + 6:
+                expected = prefix + modbus_tcp_frame_size(
+                    bytes(self._buffer[prefix : prefix + 6])
+                )
+                missing, scope = "message_body", "frame"
+        else:
+            missing, scope = "unknown", "not_proven"
+        return HobenProtocolError(
+            MalformedDiagnostic(
+                phase="frame_boundary",
+                message_type=message_name(head),
+                received_length=received,
+                expected_length=expected,
+                length_scope=scope,
+                missing_fields=missing,
+                rejection="incomplete_frame",
+            )
+        )
 
     def clear(self):
         self._buffer.clear()

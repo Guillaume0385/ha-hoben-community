@@ -10,7 +10,6 @@ from conftest import (
     ROTATED_DEVICE_GUID,
     assert_private_values_absent,
 )
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
@@ -178,43 +177,45 @@ async def test_unavailable_until_new_generation_and_valid_read(
     assert_stopped(peers)
 
 
-async def test_first_read_error_persists_accepted_identity_and_cleans_setup(
+async def test_first_read_error_persists_identity_and_can_cancel_setup(
     hass, entry, peers, caplog
 ):
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE[:1] + b"\x00\x00" + RESPONSE[3:]]])
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_RETRY
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    assert await peers.backoff.entered.get() == 60.0
     assert entry.data[CONF_DEVICE_GUID] == ROTATED_DEVICE_GUID
     assert entry.data["future_setting"] == "retained"
+    setup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await setup
     assert not hasattr(entry, "runtime_data")
     assert_stopped(peers)
     assert_private_values_absent(caplog.text)
 
 
-async def test_only_explicit_reload_can_replace_exhausted_lifecycle(hass, entry, peers):
+async def test_repeated_losses_keep_same_lifecycle_until_explicit_reload(
+    hass, entry, peers
+):
     first = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x05\x03"]])
     second = peers.wire(ROTATED_DEVICE_GUID, [[b"\x05\x03"]])
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
+    peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
     coordinator = await load(hass, entry)
-    await coordinator.async_refresh()
-    await peers.backoff.entered.get()
-    peers.backoff.release.put_nowait(None)
     lifecycle = peers.lifecycles[0]
-    await lifecycle.wait_connected()
-    await coordinator.async_refresh()
-    with pytest.raises(v4_lifecycle.LifecycleExhaustedError):
-        await lifecycle.wait_stopped()
-    for _ in range(2):
+    for attempt in (1, 2):
         await coordinator.async_refresh()
-        assert not coordinator.last_update_success
-    assert peers.factory.call_count == 2 and len(peers.lifecycles) == 1
+        assert await peers.backoff.entered.get() == 60.0
+        peers.backoff.release.put_nowait(None)
+        await lifecycle.wait_connected()
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success
+    assert peers.factory.call_count == 3 and len(peers.lifecycles) == 1
     first.close.assert_awaited_once_with()
     second.close.assert_awaited_once_with()
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.runtime_data.coordinator.last_update_success
-    assert len(peers.lifecycles) == 2 and peers.factory.call_count == 3
+    assert len(peers.lifecycles) == 2 and peers.factory.call_count == 4
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
 

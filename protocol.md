@@ -37,6 +37,15 @@ L'application contient également une API HTTP(S) distincte sur le port `5177` (
 
 ## 2. Empilement des protocoles
 
+**Instrumentation locale #152 :** les rejets `malformed_response` portent des
+catégories structurées de phase/type prouvé, tailles observées/attendues lorsque
+leur contrat est établi et éléments structurels manquants. Les faits non prouvés
+restent `unknown`/`not_proven` ; aucun octet, identifiant ou registre n'est exporté.
+Cela ne change aucun codec/framing ni fait de protocole : 48 octets restent un
+préfixe OpenedClient, jamais une preuve de longueur totale. La reconnexion HA
+à 60 s est une politique locale de disponibilité, pas une temporisation serveur
+démontrée. Voir le [contrat du diagnostic](docs/maintenance-recovery-diagnostic.md).
+
 La communication utilisateur suit trois couches :
 
 ```text

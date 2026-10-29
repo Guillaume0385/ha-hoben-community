@@ -15,6 +15,7 @@ from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationCodeError,
     HobenAuthorizationRequiredError,
+    HobenCleanupError,
     HobenClientClosedError,
     HobenClosedError,
     HobenError,
@@ -29,6 +30,7 @@ from .exceptions import (
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
+from .malformed import NUMBER_FIELDS, TEXT_FIELDS
 from .myhoben import CloseClientReason
 from .profiles import StoveProfile
 from .v4_experiment import ExperimentalCloseClientError
@@ -39,6 +41,7 @@ _ERROR_CODES = frozenset(
     error_type.code
     for error_type in (
         HobenError,
+        HobenCleanupError,
         HobenInvalidInputError,
         HobenAuthorizationRequiredError,
         HobenAuthorizationCodeError,
@@ -62,13 +65,19 @@ _HA_ERROR_CODES = frozenset(
     {"authentication_failed", "update_failed", "config_entry_error", "unexpected_error"}
 )
 _ERROR_TEXT_FIELDS = {
+    **TEXT_FIELDS,
     "error": _ERROR_CODES,
     "reason": frozenset(reason.value for reason in CloseClientReason),
     "profile": PROFILES,
     "failure": _ERROR_CODES,
-    "phase": frozenset({"post_open"}),
+    "phase": TEXT_FIELDS["phase"] | {"post_open"},
 }
-_ERROR_NUMBER_FIELDS = {"exception_code": 255, "attempts": 2, "subcode": 255}
+_ERROR_NUMBER_FIELDS = {
+    "exception_code": 255,
+    "attempts": 2,
+    "subcode": 255,
+    **NUMBER_FIELDS,
+}
 _WRAPPED_ERROR_TEXT_FIELDS = _ERROR_TEXT_FIELDS | {
     "error": _ERROR_CODES | _HA_ERROR_CODES
 }
