@@ -1,22 +1,28 @@
-"""Bounded V4 lifecycle ownership, independent of HA and real stream routing.
+"""Shared V4 lifecycle ownership, independent of HA and real stream routing.
 
 Local recovery policy only: a sanitized transport loss or complete experimental
 post-open CloseClient can consume one retry under the same finite budget.
 By default protocol/identity failures and application deadlines stop. The HA
 adapter can opt in to recovering exact acquisition/timeout failures after full
-cleanup, under the same finite budget; this makes no server-behavior claim.
+cleanup. A separate explicit HA policy waits 60 seconds after confirmed cleanup
+and permits unlimited attempts; campaign/quarantine budgets remain finite.
+These are local availability policies, not server-behavior claims.
 A quiet RX owner has no application inactivity timer.
 """
 
 import asyncio
+import logging
 import math
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from itertools import count
 
 from .client import _validate_delay, _validate_device_guid
 from .exceptions import (
+    HobenCleanupError,
     HobenClientClosedError,
+    HobenClosedError,
     HobenError,
     HobenInternalError,
     HobenInvalidInputError,
@@ -38,6 +44,9 @@ from .v4_session import (
     V4SessionMode,
     _QuarantineCapability,
 )
+
+_LOGGER = logging.getLogger(__name__)
+HA_RECONNECT_SECONDS = 60.0
 
 
 class LifecycleStoppedError(HobenClientClosedError):
@@ -82,7 +91,7 @@ class LifecycleSnapshot:
 
     state: SessionState = SessionState.DISCONNECTED
     attempts: int = 0
-    max_attempts: int = 1
+    max_attempts: int | None = 1
     failure: str | None = None
     close_client_subcode: int | None = None
 
@@ -99,7 +108,7 @@ class LifecycleWitness:
 
 
 class V4Lifecycle:
-    """Own fresh V4Session attempts and a finite, non-resetting retry budget.
+    """Own fresh sessions, with a finite default and an explicit HA retry policy.
 
     connect() waits for the first accepted opening. Recovery then runs until an
     explicit stop, non-retryable failure or budget exhaustion. wait_connected()
@@ -112,6 +121,9 @@ class V4Lifecycle:
     The default factory retains V4Session's verified, fixed TLS destination.
     recover_acquisition is an explicit persistent-adapter policy. It never
     changes the default campaign/quarantine policy, framing or attempt budget.
+    ha_reconnect additionally selects unlimited attempts with a fixed >=60 s
+    delay, including recoverable opening failures. It requires persistent mode
+    and recovery opt-in; it cannot be combined with experimental capabilities.
     """
 
     __slots__ = (
@@ -138,6 +150,7 @@ class V4Lifecycle:
         "_observation",
         "_active_generation",
         "_recover_acquisition",
+        "_ha_reconnect",
     )
 
     def __init__(
@@ -152,6 +165,7 @@ class V4Lifecycle:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         recover_acquisition: bool = False,
+        ha_reconnect: bool = False,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
@@ -165,6 +179,11 @@ class V4Lifecycle:
                 raise HobenInvalidInputError()
             if type(recover_acquisition) is not bool or (
                 recover_acquisition and mode is not V4SessionMode.PERSISTENT
+            ):
+                raise HobenInvalidInputError()
+            if type(ha_reconnect) is not bool or (
+                ha_reconnect
+                and (mode is not V4SessionMode.PERSISTENT or not recover_acquisition)
             ):
                 raise HobenInvalidInputError()
             if (
@@ -193,6 +212,7 @@ class V4Lifecycle:
         self._quarantine = _quarantine
         self._mode, self._opening_options = mode, opening_options
         self._recover_acquisition = recover_acquisition
+        self._ha_reconnect = ha_reconnect
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -205,7 +225,9 @@ class V4Lifecycle:
         self._factory = session_factory
         self._sleep = sleep
         self._delays = retry_delays
-        self._snapshot = LifecycleSnapshot(max_attempts=len(retry_delays) + 1)
+        self._snapshot = LifecycleSnapshot(
+            max_attempts=None if ha_reconnect else len(retry_delays) + 1
+        )
         self._session: V4Session | None = None
         self._task: asyncio.Task[HobenError] | None = None
         self._ready: asyncio.Future[HobenError | None] | None = None
@@ -215,6 +237,49 @@ class V4Lifecycle:
 
     def __repr__(self) -> str:
         return f"V4Lifecycle(state={self.state.value})"
+
+    @property
+    def ha_recovery_pending(self) -> bool:
+        """A setup caller may await this same owner; never recreate its budget."""
+        return bool(
+            self._ha_reconnect
+            and not self._stopping
+            and self._task is not None
+            and not self._task.done()
+        )
+
+    def _log_attempt(
+        self, attempt: int, result: str, error: HobenError | None = None
+    ) -> None:
+        """Fixed categories only, even if an injected exception has arbitrary text."""
+        if not self._ha_reconnect:
+            return
+        categories = {
+            HobenTransportError: "transport_unavailable",
+            HobenTimeoutError: "timeout",
+            HobenProtocolError: "malformed_response",
+            HobenClosedError: "server_closed",
+            ExperimentalCloseClientError: "server_closed",
+        }
+        category = (
+            "initial"
+            if error is None
+            else categories.get(type(error), "permanent_error")
+        )
+        _LOGGER.info(
+            "Hoben HA connection attempt=%d accepted_generation=%d "
+            "category=%s result=%s",
+            attempt,
+            self._generation,
+            category,
+            result,
+        )
+        if result == "failed" and type(error) is HobenProtocolError:
+            report = error.diagnostic.safe_report()
+            _LOGGER.warning(
+                "Hoben malformed_response [%s]",
+                ", ".join(f"{key}={value}" for key, value in report.items()),
+            )
 
     @property
     def state(self) -> SessionState:
@@ -337,6 +402,16 @@ class V4Lifecycle:
             raise SessionStateError()
         while True:
             await self._connected.wait()
+            if (
+                self._ha_reconnect
+                and self.state is SessionState.CONNECTED
+                and self._session is not None
+                and self._session.state is not SessionState.CONNECTED
+            ):
+                # RX can publish loss before this owner resumes. A setup retry
+                # must await the owner, not repeatedly reuse the stale event.
+                self._connected.clear()
+                continue
             if self.state is SessionState.CONNECTED:
                 return
             if not self._quarantine or self._task.done() or self._stopping:
@@ -543,7 +618,15 @@ class V4Lifecycle:
     async def _run(self) -> HobenError:
         error: HobenError = LifecycleStoppedError()
         try:
-            for attempt in range(1, self.snapshot.max_attempts + 1):
+            attempts = (
+                count(1)
+                if self._ha_reconnect
+                else range(1, self.snapshot.max_attempts + 1)
+            )
+            for attempt in attempts:
+                if self._stopping or asyncio.current_task().cancelling():
+                    raise LifecycleStoppedError()
+                self._log_attempt(attempt, "started", None if attempt == 1 else error)
                 self._snapshot = replace(
                     self._snapshot,
                     attempts=attempt,
@@ -602,6 +685,7 @@ class V4Lifecycle:
                         self._snapshot, state=SessionState.CONNECTED, failure=None
                     )
                     self._failure = None
+                    self._log_attempt(attempt, "connected")
                     self._connected.set()
                     if not self._ready.done():
                         self._ready.set_result(None)
@@ -614,6 +698,7 @@ class V4Lifecycle:
                 except Exception:
                     error = HobenInternalError()
                 self._failure = error
+                self._log_attempt(attempt, "failed", error)
                 self._connected.clear()
                 if opened:
                     self._note_natural_loss(session, error)
@@ -656,6 +741,15 @@ class V4Lifecycle:
                             CloseClientReason.AUTHORIZATION_REJECTED,
                             CloseClientReason.AUTHORIZATION_TIMEOUT,
                         )
+                if self._ha_reconnect and not opened:
+                    retryable = retryable or type(error) in (
+                        HobenTimeoutError,
+                        HobenProtocolError,
+                    )
+                    retryable = retryable or (
+                        type(error) is HobenClosedError
+                        and error.reason is CloseClientReason.SERVER_MAINTENANCE
+                    )
                 permit = None
                 if self._quarantine is not None:
                     retryable = False
@@ -698,9 +792,11 @@ class V4Lifecycle:
                     # Production never reopens after an unconfirmed cleanup,
                     # including a close error already caught by the RX owner.
                     retryable = retryable and session.cleanup_succeeded
+                    if self._ha_reconnect and not session.cleanup_succeeded:
+                        error = HobenCleanupError()
                 if not retryable:
                     break
-                if attempt == self.snapshot.max_attempts:
+                if not self._ha_reconnect and attempt == self.snapshot.max_attempts:
                     error = LifecycleExhaustedError(error)
                     break
                 if self._quarantine is not None:
@@ -711,7 +807,11 @@ class V4Lifecycle:
                     async with asyncio.timeout(self._check_private_recovery()):
                         await self._sleep(self._delays[attempt - 1])
                 else:
-                    await self._sleep(self._delays[attempt - 1])
+                    await self._sleep(
+                        HA_RECONNECT_SECONDS
+                        if self._ha_reconnect
+                        else self._delays[attempt - 1]
+                    )
                 if self._quarantine is not None:
                     self._check_private_recovery()
         except asyncio.CancelledError:

@@ -1,5 +1,82 @@
 # Diagnostic et correction ciblée — #152
 
+**État courant :** la tâche `HOBEN-152-MALFORMED-DIAGNOSTIC-004`, décrite ci-dessous,
+remplace la politique HA bornée de RECOVERY-002. Les sections #155 et
+RECOVERY-002 conservent les preuves et limites des livraisons antérieures.
+
+## Diagnostic structuré et reconnexion HA — MALFORMED-DIAGNOSTIC-004
+
+Une seule PR regroupe les deux objectifs autorisés par le propriétaire dans le
+commentaire MANAGER #6498620755, réaffirmés par #6508849931. Aucun diagnostic réel
+nouveau ni causalité MyHOBEN n'est établi par cette correction hors ligne.
+
+### Politique propre à l'entrée Home Assistant
+
+`async_setup_entry()` active explicitement `HobenClient(ha_reconnect=True)`.
+Le client utilise le même `V4Lifecycle` persistant, avec un nombre illimité
+d'ouvertures et **60 secondes d'attente après chaque échec récupérable et cleanup
+confirmé**. Il ne réarme ni ne recrée le lifecycle après un succès. Les appels
+de campagne et du config-flow gardent le défaut borné ; H1/H2, session-300,
+quarantaine, workflows et plafonds de #126 ne sont pas modifiés.
+
+Transport/EOF, timeout, `HobenProtocolError` exact et maintenance à l'ouverture
+sont récupérables. Après ouverture, le contrat CloseClient existant reste
+distinct d'EOF ; les refus d'authentification sont exclus. Configuration/identité
+locale invalides, certificat/hostname TLS refusés, profil incompatible, type connu
+non pris en charge, refus d'autorisation, erreurs internes et erreurs métier
+gardent leur traitement permanent. Un cleanup non confirmé devient
+`cleanup_failed`, permanent même au setup : aucune nouvelle connexion ni relance
+native HA ne doit le contourner.
+
+Le setup reste en cours sur son même client jusqu'à une acquisition valide,
+une erreur permanente ou une annulation. Après un premier refresh récupérable
+refusé, une nouvelle acquisition attend la récupération du même propriétaire ;
+elle ne recrée pas un client soumis au délai natif HA plus court. Au refresh,
+l'échec est rendu au coordinator sans replay ; l'ancien snapshot reste conservé,
+les entités indisponibles jusqu'à une **nouvelle lecture V4 corrélée et décodée**.
+Une ouverture seule ne rend pas les entités disponibles. Les verrous existants
+conservent un seul RX, une tentative et un échange à la fois.
+
+Chaque tentative est journalisée avec numéro local, génération, catégorie fixe
+et résultat (`started`, `connected`, `failed`). Ces événements INFO ne contiennent
+aucun texte d'exception ni identifiant ; les rejets malformed ont aussi un
+diagnostic WARNING expurgé. Arrêt HA, unload, annulation et cleanup échoué
+interdisent toute ouverture ultérieure. Le listener d'arrêt est réservé à la
+politique HA et supprimé au shutdown/unload ; les campagnes restent inchangées.
+
+### Contrat du diagnostic
+
+`malformed.py` définit un modèle immuable et validé. Les points de rejet
+d'ouverture, du framer et de corrélation/validation remplissent uniquement :
+
+| Champ | Preuve / limite |
+| --- | --- |
+| `phase`, `rejection` | Catégories fermées, sinon `unknown`. |
+| `message_type` | Nom documenté au discriminant effectivement traité ; type inconnu = `unknown`, jamais son octet numérique. |
+| `received_length` | Nombre effectivement présent dans le périmètre indiqué ; sinon `not_proven`, jamais une valeur tronquée/clampée. |
+| `expected_length` | Taille du contrat MBAP validé seulement ; sinon `not_proven`. |
+| `length_scope` | Buffer d'ouverture, en-tête MBAP, frame du contrat local ou `not_proven`. Un read TLS n'est jamais une frame. |
+| `missing_fields` | Catégorie structurelle absente (`mbap_header`, `message_body`, `close_subcode`), `none` ou `unknown`. |
+
+Le buffer d'ouverture ne prouve jamais la longueur totale d'OpenedClient :
+`expected_length=not_proven`, y compris si le préfixe décodable fait 48 octets.
+Un EOF avec frame fragmentée conserve le type et les tailles démontrables,
+sans resynchronisation ni ignorance d'octets. Les corps 07/1B restent ignorés
+selon leur contrat existant, sans nouveau décodage. Les diagnostics HA et leurs
+wrappers appliquent à nouveau les allowlists de clés, valeurs et types exacts.
+Aucun RX brut/hex/payload, GUID, code, registre, valeur domestique, identifiant
+de transaction ou exception libre n'est publié.
+
+### Vérification
+
+Tests synthétiques du vrai client/lifecycle/coordinator : plus de deux échecs
+au setup et en session, intervalles virtuels de 60 s (aucune ouverture à 59,999 s),
+un événement par tentative/résultat, cleanup avant attente, retour des entités,
+annulation/unload/arrêt et erreurs permanentes. Régressions des frames fragmentées,
+concaténées, inconnues, MBAP invalide et confidentialité. Les anciens contrats
+bornés conservent leurs tests. Les quatre CI sont à attester dans la PR au HEAD
+exact ; ce document ne revendique pas un run réel. **Tests réels : NOT RUN.**
+
 ## Preuves et périmètre
 
 Les incidents des 28 et 29 octobre 2026 sont des observations rapportées dans

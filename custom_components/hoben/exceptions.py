@@ -1,5 +1,6 @@
 """HA-independent client failures with fixed text and allowlisted diagnostics."""
 
+from .malformed import MalformedDiagnostic
 from .myhoben import CloseClientReason
 from .profiles import StoveProfile
 
@@ -71,6 +72,28 @@ class HobenProtocolError(HobenError):
     """Rejected protocol data; never accepted or replayed on the same session."""
 
     code = "malformed_response"
+
+    def __init__(self, diagnostic: MalformedDiagnostic | None = None) -> None:
+        self.diagnostic = (
+            diagnostic
+            if type(diagnostic) is MalformedDiagnostic
+            else MalformedDiagnostic()
+        )
+        super().__init__()
+
+    def safe_report(self) -> dict[str, int | str]:
+        report = super().safe_report()
+        return (
+            report | self.diagnostic.safe_report()
+            if self.code == "malformed_response"
+            else report
+        )
+
+
+class HobenCleanupError(HobenError):
+    """Unconfirmed session teardown; permanent, including during HA setup."""
+
+    code = "cleanup_failed"
 
 
 class HobenInternalError(HobenProtocolError):

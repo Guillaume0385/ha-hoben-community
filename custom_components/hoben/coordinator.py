@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -42,7 +43,7 @@ class HobenCoordinatorData:
 
 
 class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
-    """Poll and decode every 60 seconds; the client alone owns bounded retries."""
+    """Poll/decode every 60 seconds; the shared client alone owns reconnection."""
 
     def __init__(
         self, hass: HomeAssistant, entry: "HobenConfigEntry", client: HobenClient
@@ -57,6 +58,25 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             always_update=False,
         )
         self.client = client
+
+        async def stop_client(_event) -> None:
+            # The one-shot bus listener is already removed before invocation.
+            self._unsub_client_stop = None
+            await self.async_shutdown()
+            await self.client.async_close()
+
+        self._unsub_client_stop = (
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop_client)
+            if client.ha_reconnect_enabled is True
+            else None
+        )
+
+    async def async_shutdown(self) -> None:
+        """Cancel scheduling and the entry's shutdown hook; unload closes the client."""
+        await super().async_shutdown()
+        if self._unsub_client_stop is not None:
+            self._unsub_client_stop()
+            self._unsub_client_stop = None
 
     async def _async_update_data(self) -> HobenCoordinatorData:
         """Decode successful reads; also persist identities accepted before loss."""
@@ -99,7 +119,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         except HobenClosedError as error:
             # Known maintenance/session loss can be temporary. Authentication
             # and unknown refusals stay explicit. HA owns setup backoff; this
-            # mapping never resets the client's finite lifetime attempts.
+            # mapping never recreates the client's lifecycle or replays a read.
             if error.reason in (
                 CloseClientReason.INVALID_IDENTIFIER,
                 CloseClientReason.AUTHORIZATION_REJECTED,

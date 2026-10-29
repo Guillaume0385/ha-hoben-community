@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import DEVICE_GUID, ROTATED_DEVICE_GUID, assert_private_values_absent
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import CoreState
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -15,7 +16,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hoben.const import CONF_DEVICE_GUID
 from custom_components.hoben.diagnostics import async_get_config_entry_diagnostics
-from custom_components.hoben.exceptions import HobenClosedError, HobenProtocolError
+from custom_components.hoben.exceptions import HobenCleanupError, HobenClosedError
 from custom_components.hoben.myhoben import CloseClientReason
 from custom_components.hoben.transport import (
     AsyncTlsTransport,
@@ -23,7 +24,6 @@ from custom_components.hoben.transport import (
     TransportError,
     TransportTimeout,
 )
-from custom_components.hoben.v4_lifecycle import LifecycleExhaustedError
 from ha_tests.test_persistent_client import RESPONSE, assert_stopped, load, sensor
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
 from ha_tests.test_runtime import advance_poll
@@ -68,7 +68,7 @@ async def test_rejected_endpoint_never_uses_tls_or_native_setup_retry(
 
 
 @pytest.mark.parametrize("fragmented", [False, True])
-async def test_setup_maintenance_uses_native_ha_retry_and_fresh_client(
+async def test_setup_maintenance_waits_60s_on_same_owner(
     hass, entry, peers, freezer, caplog, fragmented
 ):
     hass.set_state(CoreState.running)
@@ -77,22 +77,18 @@ async def test_setup_maintenance_uses_native_ha_retry_and_fresh_client(
         first, openings=[[b"\x05", b"\x06"] if fragmented else [b"\x05\x06"]]
     )
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_RETRY
-    assert not hasattr(entry, "runtime_data")
-    assert peers.factory.call_count == 1 and not peers.backoff.delays
-    assert_stopped(peers)
-    # HA, not a new client retry loop, schedules another setup after >=5 s.
-    freezer.tick(timedelta(seconds=2))
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    assert await peers.backoff.entered.get() == 60.0
+    assert entry.state is ConfigEntryState.SETUP_IN_PROGRESS and not setup.done()
+    first.close.assert_awaited_once_with()
+    freezer.tick(timedelta(seconds=59))
     async_fire_time_changed(hass, dt_util.utcnow())
-    await hass.async_block_till_done()
+    await asyncio.sleep(0)
     assert peers.factory.call_count == 1
-    freezer.tick(timedelta(seconds=10))
-    async_fire_time_changed(hass, dt_util.utcnow())
-    await hass.async_block_till_done(wait_background_tasks=True)
+    peers.backoff.release.put_nowait(None)
+    assert await setup
     assert entry.state is ConfigEntryState.LOADED
-    assert peers.factory.call_count == 2 and len(peers.lifecycles) == 2
+    assert len(peers.lifecycles) == 1 and peers.factory.call_count == 2
     assert entry.runtime_data.coordinator.last_update_success
     assert sensor(hass, entry).state != "unavailable"
     assert entry.data[CONF_DEVICE_GUID] == ROTATED_DEVICE_GUID
@@ -122,18 +118,19 @@ async def test_maintenance_refresh_mapping_keeps_normal_poll_cadence(
     assert_private_values_absent(caplog.text)
 
 
-async def test_unload_cancels_pending_native_maintenance_setup_retry(
+async def test_cancel_pending_maintenance_setup_stops_retry(
     hass, entry, peers, freezer
 ):
-    hass.set_state(CoreState.running)
     first = peers.wire(DEVICE_GUID, [])
     script_transport(first, openings=[[b"\x05\x06"]])
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    assert entry.state is ConfigEntryState.SETUP_RETRY
-    assert await hass.config_entries.async_unload(entry.entry_id)
-    freezer.tick(timedelta(seconds=60))
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    assert await peers.backoff.entered.get() == 60.0
+    setup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await setup
+    freezer.tick(timedelta(seconds=600))
     async_fire_time_changed(hass, dt_util.utcnow())
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await hass.async_block_till_done()
     assert peers.factory.call_count == 1
     assert not hasattr(entry, "runtime_data")
     assert_stopped(peers)
@@ -162,7 +159,7 @@ async def test_simulated_concurrent_app_close_during_pending_ha_refresh(
     app_connected.set()
     await phone
     await refresh
-    assert await peers.backoff.entered.get() == 1.0
+    assert await peers.backoff.entered.get() == 60.0
     assert not coordinator.last_update_success and coordinator.data is previous
     assert isinstance(coordinator.last_exception, UpdateFailed)
     assert sensor(hass, entry).state == "unavailable"
@@ -214,7 +211,7 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
     assert report["coordinator"]["last_error"]["error"] == (
         "timeout" if isinstance(reply, TransportTimeout) else "malformed_response"
     )
-    assert await peers.backoff.entered.get() == 1.0
+    assert await peers.backoff.entered.get() == 60.0
     first.close.assert_awaited_once_with()
     assert peers.factory.call_count == 1
     assert first.write.await_count == 3  # no additional OpenClient/read
@@ -234,60 +231,58 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
 
 
 @pytest.mark.parametrize("phase", ["opening", "read"])
-async def test_malformed_setup_retries_natively_after_cleanup(
+async def test_malformed_setup_recovers_on_same_owner_after_cleanup(
     hass, entry, peers, freezer, phase
 ):
-    hass.set_state(CoreState.running)
     first = peers.wire(DEVICE_GUID, [[b"\xff"]])
     if phase == "opening":
         script_transport(first, openings=[[b"\xff"]])
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_RETRY
-    assert not hasattr(entry, "runtime_data")
-    assert_stopped(peers)
-    freezer.tick(timedelta(seconds=2))
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    assert await peers.backoff.entered.get() == 60.0
+    first.close.assert_awaited_once_with()
+    assert not setup.done() and peers.factory.call_count == 1
+    freezer.tick(timedelta(seconds=59))
     async_fire_time_changed(hass, dt_util.utcnow())
-    await hass.async_block_till_done()
+    await asyncio.sleep(0)
     assert peers.factory.call_count == 1
-    freezer.tick(timedelta(seconds=10))
-    async_fire_time_changed(hass, dt_util.utcnow())
-    await hass.async_block_till_done(wait_background_tasks=True)
-    assert entry.state is ConfigEntryState.LOADED
+    peers.backoff.release.put_nowait(None)
+    assert await setup
     assert entry.runtime_data.coordinator.last_update_success
     assert sensor(hass, entry).state != "unavailable"
-    assert peers.factory.call_count == 2
+    assert peers.factory.call_count == 2 and len(peers.lifecycles) == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
 
 
-async def test_repeated_malformed_errors_exhaust_the_same_two_openings(
-    hass, entry, peers
+async def test_repeated_malformed_errors_continue_beyond_two_openings(
+    hass, entry, peers, caplog
 ):
     peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
-    second = peers.wire(ROTATED_DEVICE_GUID, [[b"\xff"]])
-    coordinator = await load(hass, entry)
-    await coordinator.async_refresh()
-    await peers.backoff.entered.get()
-    peers.backoff.release.put_nowait(None)
-    lifecycle = peers.lifecycles[0]
-    await lifecycle.wait_connected()
-    await coordinator.async_refresh()
-    with pytest.raises(LifecycleExhaustedError):
-        await lifecycle.wait_stopped()
     for _ in range(3):
+        peers.wire(ROTATED_DEVICE_GUID, [[b"\xff"]])
+    final = peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
+    coordinator = await load(hass, entry)
+    previous = coordinator.data
+    for attempt in range(1, 5):
         await coordinator.async_refresh()
-    assert not coordinator.last_update_success
-    assert sensor(hass, entry).state == "unavailable"
-    assert peers.factory.call_count == 2 and peers.backoff.delays == [1.0]
-    assert second.write.await_count == 2  # opening + one new scheduled read
-    report = await async_get_config_entry_diagnostics(hass, entry)
-    assert report["coordinator"]["last_error"] == {
-        "error": "refresh_exhausted",
-        "attempts": 2,
-        "failure": "malformed_response",
-    }
+        assert await peers.backoff.entered.get() == 60.0
+        assert not coordinator.last_update_success and coordinator.data is previous
+        assert sensor(hass, entry).state == "unavailable"
+        assert peers.factory.call_count == attempt
+        peers.wires[attempt - 1].close.assert_awaited_once_with()
+        peers.backoff.release.put_nowait(None)
+        await peers.lifecycles[0].wait_connected()
+    await coordinator.async_refresh()
+    assert (
+        coordinator.last_update_success and sensor(hass, entry).state != "unavailable"
+    )
+    assert len(peers.lifecycles) == 1 and peers.factory.call_count == 5
+    assert peers.backoff.delays == [60.0] * 4
+    assert final.write.await_count == 2
+    for attempt in range(1, 6):
+        assert f"attempt={attempt} " in caplog.text
+    assert_private_values_absent(caplog.text)
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
 
@@ -297,6 +292,7 @@ async def test_repeated_malformed_errors_exhaust_the_same_two_openings(
     "failure, wrapper, code",
     [
         (RuntimeError("PRIVATE-PAYLOAD"), ConfigEntryError, "internal_failure"),
+        (42, ConfigEntryError, "internal_failure"),
         (
             TransportCertificateError("PRIVATE-PAYLOAD"),
             ConfigEntryError,
@@ -352,10 +348,78 @@ async def test_failed_cleanup_forbids_recovery_after_malformed(hass, entry, peer
     coordinator = await load(hass, entry)
     first.close.side_effect = TransportError("PRIVATE-PAYLOAD")
     await coordinator.async_refresh()
-    with pytest.raises(HobenProtocolError):
+    with pytest.raises(HobenCleanupError):
         await peers.lifecycles[0].wait_stopped()
     await coordinator.async_refresh()
     assert peers.factory.call_count == 1 and peers.backoff.delays == []
     assert not coordinator.last_update_success
     assert await hass.config_entries.async_unload(entry.entry_id)
+    assert_stopped(peers)
+
+
+@pytest.mark.parametrize("phase", ["opening", "read"])
+async def test_setup_survives_four_failures_on_one_owner(
+    hass, entry, peers, phase, caplog
+):
+    for _ in range(4):
+        wire = peers.wire(DEVICE_GUID, [[b"\xff"]])
+        if phase == "opening":
+            script_transport(wire, openings=[[b"\xff"]])
+    peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    for attempt in range(1, 5):
+        assert await peers.backoff.entered.get() == 60.0
+        assert not setup.done() and peers.factory.call_count == attempt
+        peers.wires[attempt - 1].close.assert_awaited_once_with()
+        assert [
+            call.args[0][0] for call in peers.wires[attempt - 1].write.await_args_list
+        ] == ([3] if phase == "opening" else [3, 13])
+        peers.backoff.release.put_nowait(None)
+    assert await setup
+    assert len(peers.lifecycles) == 1 and peers.factory.call_count == 5
+    assert entry.runtime_data.coordinator.last_update_success
+    assert sensor(hass, entry).state != "unavailable"
+    assert_private_values_absent(caplog.text)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert_stopped(peers)
+
+
+@pytest.mark.parametrize("during_setup", [False, True])
+async def test_ha_stop_cancels_backoff_without_late_opening(
+    hass, entry, peers, freezer, during_setup
+):
+    wire = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    setup = None
+    if during_setup:
+        script_transport(wire, openings=[[b"\x05\x06"]])
+        setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    else:
+        coordinator = await load(hass, entry)
+        await coordinator.async_refresh()
+    assert await peers.backoff.entered.get() == 60.0
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    if setup is not None:
+        with pytest.raises(asyncio.CancelledError):
+            await setup
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=600))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    peers.backoff.release.put_nowait(None)
+    await hass.async_block_till_done()
+    assert peers.factory.call_count == 1
+    assert_stopped(peers)
+
+
+@pytest.mark.parametrize("phase", ["opening", "read"])
+async def test_failed_setup_cleanup_is_permanent(hass, entry, peers, phase, freezer):
+    wire = peers.wire(DEVICE_GUID, [[b"\xff"]])
+    if phase == "opening":
+        script_transport(wire, openings=[[b"\xff"]])
+    wire.close.side_effect = TransportError("PRIVATE")
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    freezer.tick(timedelta(seconds=600))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert peers.factory.call_count == 1 and peers.backoff.delays == []
     assert_stopped(peers)

@@ -358,6 +358,16 @@ async def test_runtime_without_snapshot_uses_the_real_client_safe_contract(
     client_factory.assert_not_called()
 
 
+UNKNOWN_MALFORMED = {
+    "phase": "unknown",
+    "message_type": "unknown",
+    "length_scope": "not_proven",
+    "missing_fields": "unknown",
+    "rejection": "unknown",
+    "received_length": "not_proven",
+    "expected_length": "not_proven",
+}
+
 ERRORS = [
     (HobenError(), {"error": "client_failed"}),
     (HobenInvalidInputError(), {"error": "invalid_client_inputs"}),
@@ -371,7 +381,7 @@ ERRORS = [
         HobenUnsupportedProfileError(StoveProfile.V6),
         {"error": "unsupported_profile", "profile": "v6"},
     ),
-    (HobenProtocolError(), {"error": "malformed_response"}),
+    (HobenProtocolError(), {"error": "malformed_response", **UNKNOWN_MALFORMED}),
     (HobenInternalError(), {"error": "internal_failure"}),
     (HobenTlsVerificationError(), {"error": "tls_verification_failed"}),
     (HobenAmbiguousSessionError(), {"error": "unclassified_opened_client_bytes"}),
@@ -621,7 +631,10 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
         assert client.async_refresh.await_count == 4
         await advance_poll(hass)
         report = await async_get_config_entry_diagnostics(hass, private_entry)
-        assert report["coordinator"]["last_error"] == {"error": "malformed_response"}
+        assert report["coordinator"]["last_error"] == {
+            "error": "malformed_response",
+            **UNKNOWN_MALFORMED,
+        }
         assert client.async_refresh.await_count == 5
         assert (
             len(
@@ -643,8 +656,34 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
 @pytest.mark.parametrize(
     "failure, expected, request_types",
     [
-        ("malformed", {"error": "malformed_response"}, [0x03, 0x0D]),
-        ("ambiguous", {"error": "malformed_response"}, [0x03, 0x0D]),
+        (
+            "malformed",
+            {
+                "error": "malformed_response",
+                "phase": "response_validation",
+                "message_type": "data_response_client",
+                "received_length": 10,
+                "expected_length": 10,
+                "length_scope": "frame",
+                "missing_fields": "none",
+                "rejection": "invalid_response",
+            },
+            [0x03, 0x0D],
+        ),
+        (
+            "ambiguous",
+            {
+                "error": "malformed_response",
+                "phase": "message_classification",
+                "message_type": "unknown",
+                "received_length": 1,
+                "expected_length": "not_proven",
+                "length_scope": "not_proven",
+                "missing_fields": "unknown",
+                "rejection": "unknown_type",
+            },
+            [0x03, 0x0D],
+        ),
         ("modbus", {"error": "modbus_exception", "exception_code": 7}, [0x03, 0x0D]),
         (
             "closed",
@@ -850,7 +889,11 @@ async def test_polling_never_inspects_source_args_text_or_chains(
     client.async_refresh.side_effect = error
     await loaded.coordinator.async_refresh()
     report = await async_get_config_entry_diagnostics(hass, private_entry)
-    assert report["coordinator"]["last_error"] == {"error": expected}
+    assert report["coordinator"]["last_error"] == (
+        {"error": expected, **UNKNOWN_MALFORMED}
+        if expected == "malformed_response"
+        else {"error": expected}
+    )
     assert type(loaded.coordinator.last_exception) is ConfigEntryError
     assert_private_absent(report, private_entry)
     assert_private_absent({"public": caplog.text}, private_entry)
@@ -962,4 +1005,37 @@ async def test_broken_safe_report_contract_fails_closed(
     assert report["client"] == {}
     assert report["snapshot"] == {}
     assert report["coordinator"]["last_error"] == {"error": "unexpected_error"}
+    assert_private_absent(report, private_entry)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("phase", SECRET),
+        ("message_type", SECRET),
+        ("length_scope", SECRET),
+        ("missing_fields", SECRET),
+        ("rejection", SECRET),
+        ("received_length", True),
+        ("received_length", -1),
+        ("expected_length", 4097),
+        ("expected_length", [SECRET]),
+        ("raw_frame", SECRET),
+    ],
+)
+async def test_malformed_wrapper_revalidates_every_new_support_field(
+    hass, private_entry, loaded, field, value
+):
+    from custom_components.hoben.malformed import MalformedDiagnostic
+    from custom_components.hoben.safe_reports import wrap_error
+
+    error = wrap_error(
+        UpdateFailed, "Fixed rejection", HobenProtocolError(MalformedDiagnostic())
+    )
+    error._hoben_safe_report[field] = value
+    loaded.coordinator.last_exception = error
+    loaded.coordinator.last_update_success = False
+    report = await async_get_config_entry_diagnostics(hass, private_entry)
+    assert field not in report["coordinator"]["last_error"]
+    assert report["coordinator"]["last_error"]["error"] == "malformed_response"
     assert_private_absent(report, private_entry)

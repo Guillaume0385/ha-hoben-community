@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #152, diagnostic structuré et reconnexion périodique Home Assistant
+
+- Diagnostic malformed_response allowlisté : phase, type prouvé, tailles et
+  éléments structurels manquants ; aucune trame ou donnée privée exportée.
+- Politique propre à l'entrée HA : reconnexion après cleanup confirmé et au
+  moins 60 s, sans plafond cumulatif, logs par tentative et aucune lecture rejouée.
+- Setup sur un propriétaire unique, retour des entités après lecture corrélée ;
+  erreurs permanentes, cleanup échoué, annulation, unload et arrêt sans retry.
+- Campagnes et leurs budgets inchangés ; tests déterministes uniquement.
+  Cause réelle des incidents toujours inconnue ; aucun test réel exécuté.
+
 ## En cours — #152, reprise bornée après erreur de communication HA
 
 - Le vrai client HA peut récupérer après un refus de réponse/framing ou un

@@ -1,7 +1,7 @@
 """Stateful identity, explicit association and read-only refresh, without HA.
 
 Refreshes reuse the shared persistent V4 lifecycle. Scheduling stays with HA;
-the shared runtime owns framing, RX/TX, finite recovery and terminal cleanup.
+the shared runtime owns framing, RX/TX, recovery and terminal cleanup.
 OpenedClient's complete boundary remains unproven on this experimental branch.
 """
 
@@ -152,6 +152,9 @@ class HobenClient:
     recovery; failed reads return to their caller without replay. Later refreshes
     can use a recovered generation only after a new correlated response. Terminal
     failure requires an explicit new client/config-entry reload.
+    Entry setup explicitly enables ha_reconnect: recoverable failures then use
+    a separate unlimited 60-second policy. Campaign/config-flow callers keep
+    the finite default; neither policy replays a failed acquisition.
     Explicit association uses the same lock and handshake, with one attempt and
     no Modbus read. No control or client-owned polling task.
     """
@@ -167,6 +170,7 @@ class HobenClient:
         read_timeout: float = 30.0,
         build: int = DEFAULT_BUILD,
         device_info: str = DEFAULT_DEVICE_INFO,
+        ha_reconnect: bool = False,
     ) -> None:
         # Validate every field before constructing a transport. Codec validation
         # remains shared with the legacy helpers; its temporary packet is unused.
@@ -189,6 +193,9 @@ class HobenClient:
             raise HobenInvalidInputError()
         _validate_delay(handshake_timeout)
         _validate_delay(read_timeout)
+        if type(ha_reconnect) is not bool:
+            raise HobenInvalidInputError()
+        self._ha_reconnect = ha_reconnect
         self._max_attempts = max_attempts
         self._retry_delay = retry_delay
         self._handshake_timeout = handshake_timeout
@@ -205,6 +212,20 @@ class HobenClient:
     def __repr__(self) -> str:
         """Do not expose either identity or caller-supplied DeviceInfo."""
         return f"HobenClient(profile={self._profile!r}, closed={self._closed})"
+
+    @property
+    def ha_reconnect_enabled(self) -> bool:
+        """Explicit entry policy; campaign/config-flow clients retain their limits."""
+        return self._ha_reconnect
+
+    @property
+    def ha_recovery_pending(self) -> bool:
+        """Only entry setup opts into waiting for another fresh acquisition."""
+        return (
+            not self._closed
+            and self._lifecycle is not None
+            and self._lifecycle.ha_recovery_pending
+        )
 
     @property
     def device_guid_for_persistence(self) -> str:
@@ -378,6 +399,7 @@ class HobenClient:
                     ),
                     sleep=asyncio.sleep,
                     recover_acquisition=True,
+                    ha_reconnect=self._ha_reconnect,
                 )
                 await self._lifecycle.connect()
             else:
