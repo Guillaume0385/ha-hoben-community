@@ -465,7 +465,10 @@ async def test_actual_polling_failure_keeps_typed_metadata_and_private_logs(
         error, (HobenInvalidCredentialsError, HobenAuthorizationRequiredError)
     ):
         wrapper = ConfigEntryAuthFailed
-    elif isinstance(error, HobenTransportError):
+    elif isinstance(error, HobenTransportError) or (
+        isinstance(error, HobenClosedError)
+        and error.reason is CloseClientReason.SERVER_MAINTENANCE
+    ):
         wrapper = UpdateFailed
     else:
         wrapper = ConfigEntryError

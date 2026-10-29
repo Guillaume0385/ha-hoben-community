@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #152, maintenance temporaire au setup Home Assistant
+
+- Classement du seul refus server_maintenance en indisponibilité temporaire :
+  Home Assistant peut relancer le setup avec sa temporisation habituelle.
+- Authentification, autres raisons de fermeture et framing ambigu inchangés ;
+  aucune réinitialisation du budget de reconnexion, aucun parseur modifié.
+- Régressions offline de setup/refresh, reprise, annulation, coexistence simulée
+  et malformed_response ; diagnostic séparant faits, simulations et limites.
+- Aucun test réel ; causalité des incidents réels non démontrée.
+
 ## En cours — #126, identité utilisateur seule pour les campagnes 025
 
 - Suppression du secret DeviceGuid obsolète des deux nouveaux workflows et de
