@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #152, reprise bornée après erreur de communication HA
+
+- Le vrai client HA peut récupérer après un refus de réponse/framing ou un
+  timeout d'acquisition : fermeture complète, délai, puis nouvelle session et
+  prochaine lecture corrélée, sans rejouer le refresh échoué.
+- Même plafond de deux ouvertures ; aucun réarmement après succès. Authentification,
+  vérification TLS, défaut interne et nettoyage non confirmé ne sont pas réessayés.
+- Les validations locales d'entrée et de destination restent des erreurs permanentes,
+  sans tentative TLS vers un endpoint refusé ni relance native du setup HA.
+- Régressions offline setup/refresh, budget, annulation, nettoyage et confidentialité ;
+  aucun parseur, codec, workflow live ou budget de campagne modifié.
+- Causes des incidents réels toujours inconnues ; aucun test réel exécuté.
+
 ## En cours — #152, maintenance temporaire au setup Home Assistant
 
 - Classement du seul refus server_maintenance en indisponibilité temporaire :

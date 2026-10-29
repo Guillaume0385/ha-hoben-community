@@ -181,15 +181,38 @@ async def test_cancel_propagates_after_cleanup_with_partial_failure_proof(
     assert_stopped(peers)
 
 
-async def test_read_timeout_is_not_natural_loss_or_recovery(hass, entry, peers, caplog):
-    peers.wire(DEVICE_GUID, [[]])
-    run = collector(hass, entry, read_timeout=0.001)
-    report = await run.collect()
-    assert report["criteria"]["tls_reuse"] == "FAILURE"
-    assert report["criteria"]["reconnection"] == "INCONCLUSIVE"
-    assert all(not s["decoded"] for s in report["samples"])
-    assert all(s["observation"]["loss_kind"] is None for s in report["samples"])
+async def test_read_timeout_recovery_is_not_natural_loss_evidence(
+    hass, entry, peers, caplog
+):
+    first = peers.wire(DEVICE_GUID, [[]])
+    peers.wire(DEVICE_GUID, [[RESPONSE]] * 5)
+    send = first.write.side_effect
+
+    async def expire_first_read(packet):
+        send(packet)
+        if packet[0] == 13:
+            # Expire the real acquisition deadline at a fixed TX await. A
+            # 1 ms wall-clock budget also raced later valid memory responses.
+            deadline = peers.lifecycles[0]._session._read_timeout
+            assert deadline is not None
+            deadline.reschedule(asyncio.get_running_loop().time())
+            await asyncio.Future()
+
+    first.write.side_effect = expire_first_read
+    run = collector(hass, entry)
+    task = asyncio.create_task(run.collect())
+    assert await peers.backoff.entered.get() == 1.0
     assert peers.factory.call_count == 1
+    peers.wires[0].close.assert_awaited_once_with()
+    peers.backoff.release.put_nowait(None)
+    report = await task
+    # Five valid reads reuse generation 2, but timeout proves no natural loss.
+    assert report["criteria"]["tls_reuse"] == "SUCCESS"
+    assert report["criteria"]["reconnection"] == "INCONCLUSIVE"
+    assert not report["samples"][0]["decoded"]
+    assert all(s["decoded"] for s in report["samples"][1:])
+    assert all(s["observation"]["loss_kind"] is None for s in report["samples"])
+    assert peers.factory.call_count == 2
     assert_private(report, caplog)
     assert_stopped(peers)
 

@@ -2,8 +2,10 @@
 
 Local recovery policy only: a sanitized transport loss or complete experimental
 post-open CloseClient can consume one retry under the same finite budget.
-Protocol/identity failures and application deadlines stop rather than speculate
-about server behavior. A quiet RX owner has no application inactivity timer.
+By default protocol/identity failures and application deadlines stop. The HA
+adapter can opt in to recovering exact acquisition/timeout failures after full
+cleanup, under the same finite budget; this makes no server-behavior claim.
+A quiet RX owner has no application inactivity timer.
 """
 
 import asyncio
@@ -16,12 +18,14 @@ from .client import _validate_delay, _validate_device_guid
 from .exceptions import (
     HobenClientClosedError,
     HobenError,
+    HobenInternalError,
     HobenInvalidInputError,
     HobenProtocolError,
+    HobenTimeoutError,
     HobenTransportError,
 )
 from .modbus import ModbusReadResponse
-from .myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
+from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason, normalize_user_guid
 from .session_observation import SessionLossKind, SessionObservation
 from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
 from .v4_experiment import ExperimentalCloseClientError
@@ -46,6 +50,10 @@ class LifecycleExhaustedError(HobenError):
     """The finite lifetime connection budget was consumed."""
 
     code = "session_lifecycle_exhausted"
+
+    def __init__(self, last_error: HobenError | None = None) -> None:
+        self.last_error = last_error
+        super().__init__()
 
 
 class _LifecycleQuarantineCapability:
@@ -102,6 +110,8 @@ class V4Lifecycle:
     at most eight retries). Positive, finite delays are local policy, not an
     inferred Hoben timing rule. Success never replenishes this lifetime budget.
     The default factory retains V4Session's verified, fixed TLS destination.
+    recover_acquisition is an explicit persistent-adapter policy. It never
+    changes the default campaign/quarantine policy, framing or attempt budget.
     """
 
     __slots__ = (
@@ -127,6 +137,7 @@ class V4Lifecycle:
         "_accepted_device_guid",
         "_observation",
         "_active_generation",
+        "_recover_acquisition",
     )
 
     def __init__(
@@ -140,6 +151,7 @@ class V4Lifecycle:
         session_factory: Callable[..., V4Session] = V4Session,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        recover_acquisition: bool = False,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
@@ -149,6 +161,10 @@ class V4Lifecycle:
             if type(mode) is not V4SessionMode or (
                 opening_options is not None
                 and type(opening_options) is not V4OpeningOptions
+            ):
+                raise HobenInvalidInputError()
+            if type(recover_acquisition) is not bool or (
+                recover_acquisition and mode is not V4SessionMode.PERSISTENT
             ):
                 raise HobenInvalidInputError()
             if (
@@ -176,6 +192,7 @@ class V4Lifecycle:
             _quarantine._claimed = True
         self._quarantine = _quarantine
         self._mode, self._opening_options = mode, opening_options
+        self._recover_acquisition = recover_acquisition
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -584,6 +601,7 @@ class V4Lifecycle:
                     self._snapshot = replace(
                         self._snapshot, state=SessionState.CONNECTED, failure=None
                     )
+                    self._failure = None
                     self._connected.set()
                     if not self._ready.done():
                         self._ready.set_result(None)
@@ -594,7 +612,8 @@ class V4Lifecycle:
                 except HobenError as failure:
                     error = failure
                 except Exception:
-                    error = HobenProtocolError()
+                    error = HobenInternalError()
+                self._failure = error
                 self._connected.clear()
                 if opened:
                     self._note_natural_loss(session, error)
@@ -623,6 +642,20 @@ class V4Lifecycle:
                     and opened
                     and session.close_client_received
                 )
+                if self._recover_acquisition and opened:
+                    # HA opts in to discarding the entire rejected session,
+                    # not its unknown bytes. No read is replayed. The same
+                    # finite lifetime attempts, delay and cleanup gate apply.
+                    retryable = retryable or type(error) in (
+                        HobenProtocolError,
+                        HobenTimeoutError,
+                    )
+                    if type(error) is ExperimentalCloseClientError:
+                        retryable = error.reason not in (
+                            CloseClientReason.INVALID_IDENTIFIER,
+                            CloseClientReason.AUTHORIZATION_REJECTED,
+                            CloseClientReason.AUTHORIZATION_TIMEOUT,
+                        )
                 permit = None
                 if self._quarantine is not None:
                     retryable = False
@@ -668,7 +701,7 @@ class V4Lifecycle:
                 if not retryable:
                     break
                 if attempt == self.snapshot.max_attempts:
-                    error = LifecycleExhaustedError()
+                    error = LifecycleExhaustedError(error)
                     break
                 if self._quarantine is not None:
                     self._check_private_recovery(
@@ -684,7 +717,7 @@ class V4Lifecycle:
         except asyncio.CancelledError:
             error = LifecycleStoppedError()
         except Exception:
-            error = HobenProtocolError()
+            error = HobenInternalError()
         finally:
             if self._quarantine is not None and self._quarantine._origin is not None:
                 self._quarantine._origin._quarantine_stop(Event.CANCEL)

@@ -34,6 +34,7 @@ from custom_components.hoben.v4_session import (
     SessionState,
     SessionStateError,
     V4Session,
+    V4SessionMode,
 )
 
 
@@ -392,15 +393,36 @@ def test_factory_failure_returns_to_disconnected_without_retry():
     assert session._opening_task is None
 
 
-def test_real_transport_with_another_destination_is_rejected_before_network(streams):
+@pytest.mark.parametrize("mode", list(V4SessionMode))
+@pytest.mark.parametrize(
+    "host, port",
+    [("invalid.example", 465), ("myhoben.fr", 1234), ("invalid.example", 1234)],
+)
+def test_real_transport_with_another_destination_is_permanent_before_network(
+    streams, caplog, mode, host, port
+):
+    transport = AsyncTlsTransport(host=host, port=port)
+    factory = Mock(return_value=transport)
     session = V4Session(
         user_guid="b" * 32,
-        transport_factory=lambda: AsyncTlsTransport(host="invalid.example", port=1234),
+        transport_factory=factory,
+        mode=mode,
     )
-    with pytest.raises(HobenProtocolError):
+    with pytest.raises(HobenInvalidInputError) as caught:
         asyncio.run(session.connect())
+    assert type(caught.value) is HobenInvalidInputError
+    assert caught.value.safe_report() == {
+        "state": "error",
+        "error": "invalid_client_inputs",
+    }
+    factory.assert_called_once_with()
     streams.connect.assert_not_called()
+    streams.writer.write.assert_not_called()
+    assert session._transport is None and session._opening_task is None
+    assert session.cleanup_succeeded
     assert session.state is SessionState.DISCONNECTED
+    assert "invalid.example" not in str(caught.value) + caplog.text
+    assert "b" * 32 not in str(caught.value) + caplog.text
 
 
 @pytest.mark.parametrize(

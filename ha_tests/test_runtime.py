@@ -33,12 +33,14 @@ from custom_components.hoben.exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
     HobenClosedError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenModbusError,
     HobenProtocolError,
     HobenRefreshExhaustedError,
     HobenTimeoutError,
+    HobenTlsVerificationError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
@@ -171,6 +173,13 @@ async def test_first_refresh_can_persist_rotation(hass, entry, client_factory, c
                 HobenClosedError(reason),
                 UpdateFailed
                 if reason is CloseClientReason.SERVER_MAINTENANCE
+                else ConfigEntryAuthFailed
+                if reason
+                in (
+                    CloseClientReason.INVALID_IDENTIFIER,
+                    CloseClientReason.AUTHORIZATION_REJECTED,
+                    CloseClientReason.AUTHORIZATION_TIMEOUT,
+                )
                 else ConfigEntryError,
             )
             for reason in CloseClientReason
@@ -181,7 +190,9 @@ async def test_first_refresh_can_persist_rotation(hass, entry, client_factory, c
         ),
         (HobenAuthorizationRequiredError(), ConfigEntryAuthFailed),
         (HobenUnsupportedProfileError(StoveProfile.V6), ConfigEntryError),
-        (HobenProtocolError(), ConfigEntryError),
+        (HobenProtocolError(), UpdateFailed),
+        (HobenInternalError(), ConfigEntryError),
+        (HobenTlsVerificationError(), ConfigEntryError),
         (HobenAmbiguousSessionError(), ConfigEntryError),
         (HobenModbusError(2), ConfigEntryError),
         (RuntimeError(PRIVATE_TEXT), ConfigEntryError),
@@ -255,7 +266,9 @@ async def test_authentication_failure_stops_polling(
             HobenUnsupportedProfileError(StoveProfile.UNKNOWN),
             ConfigEntryState.SETUP_ERROR,
         ),
-        (HobenProtocolError(), ConfigEntryState.SETUP_ERROR),
+        (HobenProtocolError(), ConfigEntryState.SETUP_RETRY),
+        (HobenInternalError(), ConfigEntryState.SETUP_ERROR),
+        (HobenTlsVerificationError(), ConfigEntryState.SETUP_ERROR),
         (HobenModbusError(2), ConfigEntryState.SETUP_ERROR),
         (RuntimeError(PRIVATE_TEXT), ConfigEntryState.SETUP_ERROR),
     ],
