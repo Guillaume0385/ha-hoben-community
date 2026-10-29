@@ -19,6 +19,7 @@ from .exceptions import (
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenProtocolError,
@@ -147,8 +148,9 @@ class HobenClient:
     Refreshes are serialized, including backoff and identity changes. Default:
     two lifetime opening attempts with one 1-second async delay, configurable to
     1..2 attempts and 0..30 seconds. Success never resets that finite budget.
-    Failed reads return to their caller without replay; later refreshes can use
-    a recovered generation only after a new correlated response. Terminal
+    Rejected acquisition/timeout and transport losses close before a bounded
+    recovery; failed reads return to their caller without replay. Later refreshes
+    can use a recovered generation only after a new correlated response. Terminal
     failure requires an explicit new client/config-entry reload.
     Explicit association uses the same lock and handshake, with one attempt and
     no Modbus read. No control or client-owned polling task.
@@ -375,6 +377,7 @@ class HobenClient:
                         V4Session, transport_factory=AsyncTlsTransport
                     ),
                     sleep=asyncio.sleep,
+                    recover_acquisition=True,
                 )
                 await self._lifecycle.connect()
             else:
@@ -393,7 +396,7 @@ class HobenClient:
             ):
                 self._adopt_persistent_identity()
                 await self._lifecycle.close()
-                raise HobenProtocolError()
+                raise HobenInternalError()
             return RawStoveSnapshot(
                 profile=StoveProfile.V4,
                 registers=response.registers,
@@ -403,9 +406,10 @@ class HobenClient:
                 software_minor=opened.software_minor,
                 application_version=opened.application_version,
             )
-        except LifecycleExhaustedError:
+        except LifecycleExhaustedError as error:
             raise HobenRefreshExhaustedError(
-                self._lifecycle.snapshot.attempts, HobenTransportError()
+                self._lifecycle.snapshot.attempts,
+                error.last_error or HobenTransportError(),
             ) from None
         except LifecycleStoppedError:
             raise HobenClientClosedError() from None

@@ -16,6 +16,7 @@ from .exceptions import (
     HobenClosedError,
     HobenError,
     HobenInvalidCredentialsError,
+    HobenProtocolError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
@@ -87,7 +88,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 "Hoben authorization is required; pairing is not supported yet",
                 error,
             ) from None
-        except (HobenTransportError, ExperimentalCloseClientError) as error:
+        except HobenTransportError as error:
             raise wrap_error(
                 UpdateFailed, "Cannot connect to the Hoben service", error
             ) from None
@@ -96,17 +97,32 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 ConfigEntryError, "Hoben stove profile is not supported", error
             ) from None
         except HobenClosedError as error:
-            # A documented maintenance refusal is temporary, not bad config.
-            # HA converts UpdateFailed on first refresh to ConfigEntryNotReady
-            # and owns setup backoff. Never reset the client's finite budget or
-            # make auth, unknown close reasons or ambiguous framing retryable.
-            error_type = (
-                UpdateFailed
-                if error.reason is CloseClientReason.SERVER_MAINTENANCE
-                else ConfigEntryError
-            )
+            # Known maintenance/session loss can be temporary. Authentication
+            # and unknown refusals stay explicit. HA owns setup backoff; this
+            # mapping never resets the client's finite lifetime attempts.
+            if error.reason in (
+                CloseClientReason.INVALID_IDENTIFIER,
+                CloseClientReason.AUTHORIZATION_REJECTED,
+                CloseClientReason.AUTHORIZATION_TIMEOUT,
+            ):
+                error_type = ConfigEntryAuthFailed
+            elif error.reason is CloseClientReason.SERVER_MAINTENANCE or (
+                type(error) is ExperimentalCloseClientError
+            ):
+                error_type = UpdateFailed
+            else:
+                error_type = ConfigEntryError
             raise wrap_error(
                 error_type, "Hoben protocol response could not be accepted", error
+            ) from None
+        except HobenProtocolError as error:
+            # Recovery rejects/closes the old stream; it never validates an
+            # ambiguous frame. Subclasses (internal, unsupported, ambiguous
+            # opening or decoding failures) retain permanent error semantics.
+            raise wrap_error(
+                UpdateFailed if type(error) is HobenProtocolError else ConfigEntryError,
+                "Hoben protocol response could not be accepted",
+                error,
             ) from None
         except HobenError as error:
             raise wrap_error(

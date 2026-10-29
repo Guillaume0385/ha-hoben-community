@@ -28,11 +28,13 @@ from .exceptions import (
     HobenClientClosedError,
     HobenClosedError,
     HobenError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenModbusError,
     HobenProtocolError,
     HobenTimeoutError,
+    HobenTlsVerificationError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
@@ -58,10 +60,17 @@ from .session import (
     AuthorizationRequiredResult,
     ClosedSessionResult,
     OpenSessionResult,
+    SessionProtocolError,
     SessionTimeout,
     _open_session,
 )
-from .transport import AsyncTlsTransport, TransportEOF, TransportError, TransportTimeout
+from .transport import (
+    AsyncTlsTransport,
+    TransportCertificateError,
+    TransportEOF,
+    TransportError,
+    TransportTimeout,
+)
 from .v4_eof_quarantine import (
     MAX_TIME_MS,
     EofQuarantinePolicy,
@@ -755,12 +764,16 @@ class V4Session:
             except asyncio.CancelledError:
                 cancelled = True
                 error = HobenTransportError()
+            except TransportTimeout:
+                error = HobenTimeoutError()
+            except TransportCertificateError:
+                error = HobenTlsVerificationError()
             except TransportError as failure:
                 if self._rx_error is None:
                     self._retryable_loss = not isinstance(failure, TransportTimeout)
                 error = HobenTransportError()
             except Exception:
-                error = HobenProtocolError()
+                error = HobenInternalError()
             if error is not None:
                 # Stop queued TX before releasing the lock for shutdown.
                 self._rx_error = self._rx_error or error
@@ -900,18 +913,23 @@ class V4Session:
                 succeeded = True
             except (TransportTimeout, SessionTimeout):
                 raise HobenTimeoutError() from None
+            except TransportCertificateError:
+                raise HobenTlsVerificationError() from None
             except TransportError:
                 raise HobenTransportError() from None
+            except (SessionProtocolError, HobenInvalidInputError):
+                raise HobenProtocolError() from None
             except (
                 HobenProtocolError,
                 HobenAuthorizationRequiredError,
                 HobenClosedError,
                 HobenAmbiguousSessionError,
                 HobenUnsupportedProfileError,
+                HobenTlsVerificationError,
             ):
                 raise
             except Exception:
-                raise HobenProtocolError() from None
+                raise HobenInternalError() from None
         finally:
             try:
                 if not succeeded:
@@ -953,6 +971,10 @@ class V4Session:
         except asyncio.CancelledError:
             if self.state is not SessionState.CLOSED:
                 self._rx_error = HobenTransportError()
+        except TransportTimeout:
+            self._rx_error = HobenTimeoutError()
+        except TransportCertificateError:
+            self._rx_error = HobenTlsVerificationError()
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             if self._retryable_loss:
@@ -966,7 +988,7 @@ class V4Session:
         except HobenError as failure:
             self._rx_error = failure
         except Exception:
-            self._rx_error = HobenProtocolError()
+            self._rx_error = HobenInternalError()
         finally:
             if self._rx_error is not None:
                 if self._experiment is not None:
@@ -1257,12 +1279,16 @@ class V4Session:
                 pending.set_result(response)
                 self._verified_read_sequence += 1
             return
-        except Exception:
+        except HobenInternalError as failure:
+            error = failure
+        except (HobenProtocolError, ValueError):
             if self._experiment is not None:
                 self._experiment.note_failure(
                     failure_phase, "protocol", "data_response"
                 )
             error = HobenProtocolError()
+        except Exception:
+            error = HobenInternalError()
         self._rx_error = self._rx_error or error
         self._signal_loss()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
@@ -1354,6 +1380,8 @@ class V4Session:
         except (TransportTimeout, TimeoutError):
             self._quarantine_stop(Event.LOCAL_CLOSE)
             error = HobenTimeoutError()
+        except TransportCertificateError:
+            error = HobenTlsVerificationError()
         except TransportError:
             if self._rx_error is None:
                 self._retryable_loss = True
@@ -1367,7 +1395,7 @@ class V4Session:
         except HobenError as failure:
             error = failure
         except Exception:
-            error = HobenProtocolError()
+            error = HobenInternalError()
         finally:
             self._read_timeout = None
             if not pending.done():

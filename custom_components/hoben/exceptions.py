@@ -68,9 +68,21 @@ class HobenUnsupportedProfileError(HobenError):
 
 
 class HobenProtocolError(HobenError):
-    """Malformed, unsupported or uncorrelated protocol data; never retried."""
+    """Rejected protocol data; never accepted or replayed on the same session."""
 
     code = "malformed_response"
+
+
+class HobenInternalError(HobenProtocolError):
+    """Unexpected local failure; excluded from exact-type acquisition recovery."""
+
+    code = "internal_failure"
+
+
+class HobenTlsVerificationError(HobenError):
+    """Certificate/hostname rejection; no reconnect or unverified fallback."""
+
+    code = "tls_verification_failed"
 
 
 class HobenAmbiguousSessionError(HobenProtocolError):
@@ -109,7 +121,7 @@ class HobenRefreshExhaustedError(HobenTransportError):
 
     code = "refresh_exhausted"
 
-    def __init__(self, attempts: int, last_error: HobenTransportError) -> None:
+    def __init__(self, attempts: int, last_error: HobenError) -> None:
         self.attempts = attempts
         self.last_error = last_error
         super().__init__()

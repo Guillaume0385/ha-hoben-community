@@ -34,12 +34,14 @@ from custom_components.hoben.exceptions import (
     HobenClientClosedError,
     HobenClosedError,
     HobenError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenModbusError,
     HobenProtocolError,
     HobenRefreshExhaustedError,
     HobenTimeoutError,
+    HobenTlsVerificationError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
@@ -370,6 +372,8 @@ ERRORS = [
         {"error": "unsupported_profile", "profile": "v6"},
     ),
     (HobenProtocolError(), {"error": "malformed_response"}),
+    (HobenInternalError(), {"error": "internal_failure"}),
+    (HobenTlsVerificationError(), {"error": "tls_verification_failed"}),
     (HobenAmbiguousSessionError(), {"error": "unclassified_opened_client_bytes"}),
     (HobenModbusError(7), {"error": "modbus_exception", "exception_code": 7}),
     (HobenTransportError(), {"error": "transport_unavailable"}),
@@ -461,13 +465,26 @@ async def test_actual_polling_failure_keeps_typed_metadata_and_private_logs(
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["coordinator"]["last_error"] == expected
     assert not report["coordinator"]["last_update_success"]
-    if isinstance(
-        error, (HobenInvalidCredentialsError, HobenAuthorizationRequiredError)
+    if (
+        isinstance(
+            error, (HobenInvalidCredentialsError, HobenAuthorizationRequiredError)
+        )
+        or isinstance(error, HobenClosedError)
+        and error.reason
+        in (
+            CloseClientReason.INVALID_IDENTIFIER,
+            CloseClientReason.AUTHORIZATION_REJECTED,
+            CloseClientReason.AUTHORIZATION_TIMEOUT,
+        )
     ):
         wrapper = ConfigEntryAuthFailed
-    elif isinstance(error, HobenTransportError) or (
-        isinstance(error, HobenClosedError)
-        and error.reason is CloseClientReason.SERVER_MAINTENANCE
+    elif (
+        type(error) is HobenProtocolError
+        or isinstance(error, HobenTransportError)
+        or (
+            isinstance(error, HobenClosedError)
+            and error.reason is CloseClientReason.SERVER_MAINTENANCE
+        )
     ):
         wrapper = UpdateFailed
     else:
@@ -686,7 +703,7 @@ async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["coordinator"]["last_error"] == expected
     assert type(coordinator.last_exception) is (
-        UpdateFailed if failure == "closed" else ConfigEntryError
+        ConfigEntryError if failure == "modbus" else UpdateFailed
     )
     assert coordinator.data is previous
     assert private_entry.data == old_data
@@ -761,7 +778,7 @@ async def test_real_error_mapping_validates_contract_before_logging_and_export(
         assert f"{key}={value}" in caplog.text
 
 
-async def test_broken_error_report_during_polling_is_safe_and_not_retried(
+async def test_broken_error_report_during_polling_is_safe_without_extra_io(
     hass, private_entry, client, loaded, caplog
 ):
     error = HobenProtocolError()
@@ -770,7 +787,7 @@ async def test_broken_error_report_during_polling_is_safe_and_not_retried(
     await loaded.coordinator.async_refresh()
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["coordinator"]["last_error"] == {"error": "unexpected_error"}
-    assert type(loaded.coordinator.last_exception) is ConfigEntryError
+    assert type(loaded.coordinator.last_exception) is UpdateFailed
     assert client.async_refresh.await_count == 2
     error.safe_report.assert_called_once_with()
     assert_private_absent(report, private_entry)

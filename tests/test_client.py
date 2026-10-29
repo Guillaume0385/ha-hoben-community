@@ -16,12 +16,14 @@ from custom_components.hoben.exceptions import (
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
     HobenModbusError,
     HobenProtocolError,
     HobenRefreshExhaustedError,
     HobenTimeoutError,
+    HobenTlsVerificationError,
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
@@ -345,11 +347,13 @@ def test_unsupported_dynamic_profile_fails_without_read_adoption_or_retry(
 
 
 @pytest.mark.parametrize("suffix", [b"PRIVATE", RESPONSE])
-def test_undecidable_or_unsolicited_opening_suffix_fails_without_retry(tls, suffix):
+def test_undecidable_or_unsolicited_suffix_fails_the_current_read(tls, suffix):
     tls.pairs[0].opening = [OPENED + suffix]
-    client = make_client()
-    with pytest.raises(HobenProtocolError):
+    client = make_client(max_attempts=1)
+    with pytest.raises((HobenProtocolError, HobenRefreshExhaustedError)) as caught:
         asyncio.run(client.async_refresh())
+    if isinstance(caught.value, HobenRefreshExhaustedError):
+        assert caught.value.last_error.code == "malformed_response"
     assert client.device_guid_for_persistence == DEVICE_GUID
     assert emitted(tls.pairs[0]) == [OPEN_REQUEST]
     assert_cleanup(tls)
@@ -506,7 +510,7 @@ def test_one_transport_failure_gets_one_async_delay_and_fresh_success(
         tls.pairs[0].writer.drain.side_effect = [None, failure]
 
     async def run():
-        if isinstance(failure, TimeoutError):
+        if isinstance(failure, TimeoutError) and phase in ("connect", "handshake"):
             with pytest.raises(HobenTransportError):
                 await client.async_refresh()
             with pytest.raises(HobenTransportError):
@@ -520,7 +524,7 @@ def test_one_transport_failure_gets_one_async_delay_and_fresh_success(
         await client.async_close()
 
     asyncio.run(run())
-    if isinstance(failure, TimeoutError):
+    if isinstance(failure, TimeoutError) and phase in ("connect", "handshake"):
         assert backoff.delays == []
         return
     assert backoff.delays == [0.25]
@@ -596,6 +600,69 @@ def test_shutdown_failure_cannot_turn_protocol_error_into_retry(tls, backoff):
     assert backoff.delays == []
     tls.pairs[0].writer.transport.abort.assert_called_once_with()
     assert_cleanup(tls)
+
+
+def test_certificate_verification_failure_stays_permanent(tls, backoff):
+    tls.connect.side_effect = ssl.SSLCertVerificationError("PRIVATE-certificate")
+
+    async def run():
+        client = make_client()
+        for _ in range(2):
+            with pytest.raises(HobenTlsVerificationError) as caught:
+                await client.async_refresh()
+            assert caught.value.safe_report() == {
+                "state": "error",
+                "error": "tls_verification_failed",
+            }
+            assert "PRIVATE" not in "".join(traceback.format_exception(caught.value))
+        assert tls.factory.call_count == 1 and backoff.delays == []
+        context = tls.connect.call_args.kwargs["ssl"]
+        assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+        assert tls.connect.call_args.kwargs["server_hostname"] == "myhoben.fr"
+        await client.async_close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "phase", ["factory", "opening", "rx", "tx", "decoder", "typed-decoder"]
+)
+def test_programming_failures_cannot_become_recoverable_protocol_errors(
+    tls, backoff, monkeypatch, phase
+):
+    failure = (
+        HobenInternalError()
+        if phase == "typed-decoder"
+        else RuntimeError("PRIVATE-programming-error")
+    )
+    if phase == "factory":
+        monkeypatch.setattr(
+            client_module, "AsyncTlsTransport", Mock(side_effect=failure)
+        )
+    elif phase == "opening":
+        tls.pairs[0].opening = [failure]
+    elif phase == "rx":
+        tls.pairs[0].responses = [[failure]]
+    elif phase == "tx":
+        tls.pairs[0].writer.drain.side_effect = [None, failure]
+    else:
+        monkeypatch.setattr(
+            "custom_components.hoben.v4_session.decode_read_response",
+            Mock(side_effect=failure),
+        )
+
+    async def run():
+        client = make_client()
+        for _ in range(2):
+            with pytest.raises(HobenInternalError) as caught:
+                await client.async_refresh()
+            assert caught.value.code == "internal_failure"
+            assert "PRIVATE" not in "".join(traceback.format_exception(caught.value))
+        assert len(tls.transports) <= 1 and backoff.delays == []
+        await client.async_close()
+
+    asyncio.run(run())
+    assert_cleanup(tls, 0 if phase == "factory" else 1)
 
 
 def test_failed_later_refresh_keeps_last_successful_snapshot(tls):

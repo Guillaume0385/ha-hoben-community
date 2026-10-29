@@ -28,6 +28,10 @@ class TransportTlsError(TransportError):
     """TLS certificate verification or negotiation failed."""
 
 
+class TransportCertificateError(TransportTlsError):
+    """Certificate or hostname verification failed, distinct from negotiation."""
+
+
 class AsyncTlsTransport:
     """One TLS connection with raw reads and exact writes, without retries.
 
@@ -96,6 +100,10 @@ class AsyncTlsTransport:
                 )
         except TimeoutError:
             raise TransportTimeout("connect") from None
+        except ssl.SSLCertVerificationError:
+            raise TransportCertificateError(
+                "TLS verification or negotiation failed"
+            ) from None
         except ssl.SSLError:
             raise TransportTlsError("TLS verification or negotiation failed") from None
         except OSError:

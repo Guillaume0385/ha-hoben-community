@@ -184,7 +184,7 @@ async def test_first_read_error_persists_accepted_identity_and_cleans_setup(
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE[:1] + b"\x00\x00" + RESPONSE[3:]]])
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.data[CONF_DEVICE_GUID] == ROTATED_DEVICE_GUID
     assert entry.data["future_setting"] == "retained"
     assert not hasattr(entry, "runtime_data")

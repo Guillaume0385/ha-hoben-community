@@ -176,6 +176,49 @@ def test_complete_close_then_correlated_read_on_new_generation(chunks, caplog):
     asyncio.run(scenario())
 
 
+def test_opt_in_recovery_uses_a_new_framer_and_never_replays_old_rx_or_read():
+    async def scenario():
+        factory, backoff = Factory(), Backoff()
+        lifecycle = factory.lifecycle(
+            recover_acquisition=True, retry_delays=(2,), sleep=backoff
+        )
+        await lifecycle.connect()
+        old = factory.sessions[0]
+        old_stream = factory.streams[0]
+        old_stream.chunks = [b"\xff" + response() + b"\x0a"]
+        with pytest.raises(HobenProtocolError):
+            await lifecycle.request_v4_data()
+        assert await backoff.entered.get() == 2
+        assert old.cleanup_succeeded and not old._framer.partial
+        assert old_stream.close_count == 1 and len(factory.sessions) == 1
+        assert lifecycle.witness.lost_generation is None  # no fabricated TLS EOF
+        assert old.verified_read_sequence == 0
+        assert [p[0] for p in old_stream.writes] == [3, 13]
+        backoff.release.put_nowait(None)
+        await lifecycle.wait_connected()
+        fresh = factory.sessions[1]
+        assert fresh._framer is not old._framer
+        assert fresh.verified_read_sequence == 0
+        assert [p[0] for p in factory.streams[1].writes] == [3]
+        assert lifecycle.witness.verified_read_generation is None
+        await lifecycle.request_v4_data()
+        assert lifecycle.witness.verified_read_generation == 2
+        assert fresh.verified_read_sequence == 1
+        assert backoff.delays == [2] and lifecycle.snapshot.attempts == 2
+        await lifecycle.close()
+        factory.assert_clean()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("flag", [1, None, "PRIVATE"])
+def test_recovery_opt_in_requires_a_bool_before_any_factory_call(flag):
+    factory = Factory()
+    with pytest.raises(HobenInvalidInputError):
+        factory.lifecycle(recover_acquisition=flag)
+    assert not factory.sessions
+
+
 @pytest.mark.parametrize(
     "loss", [b"", TransportEOF("private"), TransportTlsError("private")]
 )
