@@ -1,6 +1,6 @@
 """Closed run contracts for #126; no admission API, credentials or network I/O.
 
-The bounds below are design ceilings explicitly decided in #126 on 27 October,
+The bounds below are design ceilings decided in #126 on 27/29 October,
 not measurements of Hoben behavior. Historical planning modules remain archives.
 """
 
@@ -13,7 +13,7 @@ from scripts.protocol_campaign_plan import CHOICES as PROTOCOL_CHOICES
 
 CHOICES = {"protocol": PROTOCOL_CHOICES, "ha": HA_CHOICES}
 SECONDS = {
-    "protocol": dict(zip(PROTOCOL_CHOICES, (15, 30, 45, 1800, 360, 480, 2820))),
+    "protocol": dict(zip(PROTOCOL_CHOICES, (15, 30, 45, 1800, 360, 600, 3000))),
     "ha": dict(zip(HA_CHOICES, (360, 90, 120, 180, 600, 60, 120, 1800))),
 }
 MAX_REPORT_BYTES = 64 * 1024
@@ -346,30 +346,9 @@ def validate_stage(value, campaign):
             )
             if "recovery_witness" in d:
                 need(scenario == "session-reconnect")
-                w = d["recovery_witness"]
-                keys(
-                    w,
-                    (
-                        "loss_generation",
-                        "read_generation",
-                        "read_sequence",
-                        "stable_ms",
-                    ),
-                )
-                for name in ("loss_generation", "read_generation"):
-                    need(w[name] is None or integer(w[name], 1, 3))
-                need(w["read_sequence"] is None or integer(w["read_sequence"], 1, 10))
-                need(integer(w["stable_ms"], 0, 480000))
+                validate_recovery_witness(d["recovery_witness"], value["metrics"])
             if value["metrics"]["recovered"]:
                 need("recovery_witness" in d)
-                w = d["recovery_witness"]
-                need(
-                    w["loss_generation"] is not None
-                    and w["read_generation"] is not None
-                    and w["read_generation"] > w["loss_generation"]
-                    and w["read_sequence"] is not None
-                    and w["stable_ms"] >= 120000
-                )
             if "ignored_messages" in d:
                 from scripts.run_session_300 import valid_ignored_messages
 
@@ -384,6 +363,84 @@ def validate_stage(value, campaign):
         need(value["metrics"]["useful_ms"] <= value["elapsed_ms"])
         need(campaign != "ha" or value["detail"] is not None)
     return value
+
+
+def validate_recovery_witness(w, metrics):
+    """A controlled experiment needs causal receipts, never a completed job alone.
+
+    Historical incomplete receipts remain readable. They cannot attest success
+    under the owner's current inhibition/240 s/120 s experimental contract.
+    """
+    need(type(w) is dict)
+    original = {"loss_generation", "read_generation", "read_sequence", "stable_ms"}
+    controlled = "mode" in w
+    keys(
+        w,
+        original
+        | (
+            {
+                "mode",
+                "boundary_proven",
+                "outcome",
+                "suppressed_pongs",
+                "loss_after_ms",
+                "reopened_after_ms",
+                "recovery_pongs",
+            }
+            if controlled
+            else set()
+        ),
+    )
+    for name in ("loss_generation", "read_generation"):
+        need(w[name] is None or integer(w[name], 1, 3))
+    need(w["read_sequence"] is None or integer(w["read_sequence"], 1, 10))
+    need(integer(w["stable_ms"], 0, 120000 if controlled else 480000))
+    if controlled:
+        need(
+            w["mode"] == "pong_inhibition_after_120s" and w["boundary_proven"] is False
+        )
+        need(
+            type(w["outcome"]) is str
+            and w["outcome"]
+            in {
+                "verified",
+                "not_exercised",
+                "no_disconnect",
+                "reopen_failed",
+                "stability_lost",
+                "timeout",
+                "budget",
+                "transport",
+                "protocol",
+                "internal",
+                "closed",
+                "first_not_admissible",
+            }
+        )
+        need(integer(w["suppressed_pongs"], 0, metrics["pings"] - metrics["pongs"]))
+        need(integer(w["recovery_pongs"], 0, metrics["pongs"]))
+        for name in ("loss_after_ms", "reopened_after_ms"):
+            need(w[name] is None or integer(w[name], 0, 600000))
+        need(w["read_sequence"] is None or w["read_sequence"] <= metrics["reads_ok"])
+    if metrics["recovered"]:
+        need(controlled and w["outcome"] == "verified")
+        need(
+            w["loss_generation"] is not None
+            and w["read_generation"] is not None
+            and w["loss_generation"] < w["read_generation"] <= metrics["opens"]
+        )
+        need(
+            w["read_sequence"] is not None
+            and w["stable_ms"] == 120000
+            and w["suppressed_pongs"] > 0
+            and w["recovery_pongs"] > 0
+        )
+        need(
+            w["loss_after_ms"] is not None
+            and w["reopened_after_ms"] is not None
+            and 120000 <= w["loss_after_ms"] < w["reopened_after_ms"] < 240000
+        )
+        need(w["reopened_after_ms"] + w["stable_ms"] <= metrics["useful_ms"])
 
 
 def validate_report(report):

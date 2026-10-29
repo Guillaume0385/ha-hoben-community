@@ -7,9 +7,11 @@ lectures planifiées réussies ainsi qu’une session encore active dans les
 compléments HA ordinaires ; seule la reconnexion tolère une lecture échouée
 avant récupération attestée. Elle préserve les plafonds ci-dessous.
 
-Tâche HOBEN-126-CAMPAIGNS-016-017, selon le
+Contrat courant : **HOBEN-126-EXPERIMENTAL-TEST-PARITY-027**, selon le
 [commentaire MANAGER canonique](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641)
-et l’arbitrage des budgets du 27/10/2026 dans #126. Les plafonds nouveaux sont
+et la décision propriétaire du **29/10/2026** dans #126. L’arbitrage est clos :
+reconnexion expérimentale 600 s, parent all 3000 s ; les anciennes valeurs
+480/2820 s sont historiques. Les plafonds nouveaux sont
 des décisions de conception testées offline, sans validation réelle revendiquée.
 Les plans 004/005 et contrats de preuve antérieurs restent des archives ; leurs
 catalogues fermés sont réutilisés, leurs admissions historiques ne sont pas
@@ -46,8 +48,8 @@ cancel-in-progress=false, queue=max, identique au workflow historique inchangé.
 | read-v4-state | 45 s | Une ouverture et lecture V4 de 20 registres fixes, valeurs jetées. |
 | h1h2 | 1800 s | Collecteur historique : 6 H1 + 6 H2, 90 s et 1 Mio RX par session. Rapport complet borné INCONCLUSIVE, aucune frontière universelle prouvée. |
 | session-300 | 360 s | Observation existante : 300 s utiles, trois ouvertures, six lectures maximum espacées d’au moins 60 s, 1 Mio RX total, Ping/Pong et réponse corrélée. |
-| session-reconnect | 480 s | Observation naturelle, trois ouvertures, dix lectures maximum à cadence >=60 s, 1 Mio RX total ; perte puis nouvelle génération, lecture corrélée et 120 s de stabilité. Sans perte/récupération prouvée : INCONCLUSIVE. |
-| all | 2820 s | Six scénarios dans l’ordre du formulaire, indépendants et séquentiels ; maxima individuels 2730 s, marge 90 s. |
+| session-reconnect | 600 s | Collecteur historique et NoPongAfter120 : inhibition des seuls Pong du client de test dès T0+120 s sur la première génération. Perte puis réouverture avant T0+240 s, lecture corrélée, Pong rétablis et 120 s stables sur la même génération ; trois ouvertures, dix lectures maximum à cadence >=60 s, 1 Mio RX total. |
+| all | 3000 s | Six scénarios dans l’ordre du formulaire, indépendants et séquentiels ; maxima individuels 2850 s, marge 150 s, orchestration et cleanup inclus. |
 
 TLS et ouverture réutilisent AsyncTlsTransport/V4Lifecycle/V4Session ; la session
 300 réutilise son observateur et ses budgets. H1/H2 réutilise boundary_capture,
@@ -56,13 +58,54 @@ Le rapport de campagne en projette seulement les compteurs nécessaires ; les
 chronologies privées ne sont pas publiées par cette voie.
 Les compteurs Ping/Pong non mesurés dans ce résumé H1/H2 restent null.
 
-La nouvelle reconnexion ne reçoit aucune politique NoPongAfter120 et ne force
-aucune perte. EOF, erreur transport et CloseClient ne deviennent pas une cause
-serveur inventée : loss_kind=transport ne prouve pas un EOF TLS ; CloseClient
-garde sa catégorie et son sous-code numérique. Le témoin de récupération vient
-du gestionnaire partagé. Un timeout local n’est pas une perte naturelle.
-48 octets restent un préfixe décodable d’OpenedClient, jamais une longueur
-totale universelle.
+T0 est la première ouverture strictement acceptée, pas le lancement du processus.
+La politique cesse uniquement de répondre aux Ping par des Pong du client de
+**test expérimental**, puis rétablit les Pong sur une nouvelle génération. Elle
+n'envoie aucune commande au serveur/poêle, ne ferme pas un transport pour
+fabriquer une perte et ne prétend pas prouver une causalité serveur. La voie HA
+naturelle et ses limites restent distinctes et inchangées.
+
+### Correspondance des collecteurs et preuve
+
+| Étape actuelle | Référence historique réutilisée | Orchestration / contrat |
+| --- | --- | --- |
+| session-300 | [run_session_300.py:observe](../scripts/run_session_300.py) | [protocol_campaign_collect.py:collect](../scripts/protocol_campaign_collect.py), vrai V4Lifecycle/V4Session et Session300 ; 300 s utiles, plafond 360 s. |
+| session-reconnect | [session_suite.py:_observe_reconnect](../scripts/session_suite.py) et [NoPongAfter120](../custom_components/hoben/v4_no_pong.py) | Même propriétaire partagé, SessionReconnect, trois ouvertures maximum ; fenêtre fonctionnelle historique de 360 s, plafond absolu 600 s. Aucun appel à observe_natural(). |
+| h1h2 | [boundary_capture.py:run_campaign](../scripts/boundary_capture.py) | Douze captures privées et nettoyage historiques inchangés ; plafond 1800 s. |
+| all / isolement | [run_campaign.py:run/execute](../scripts/run_campaign.py) | ACK après armement de la deadline, min(deadline parent, deadline étape), cleanup/reaping avant la suivante ; parent 3000 s et formulaire workflow_dispatch uniquement. |
+| Projection / publication | [contrat Python](../scripts/campaign_runtime_contract.py) et [validation Node](../.github/scripts/campaign-report.cjs) | Deux validations indépendantes, données fermées, bornes individuelles/globales et interprétation explicite du résultat. |
+
+Le collecteur de reconnexion conserve par défaut sa validation historique.
+Son projecteur privé permet au worker actuel d'utiliser le résultat existant
+sans fabriquer des anciennes preuves PR/merge : la véritable provenance de la
+campagne est ajoutée par son parent admis. Les temps et générations sont figés
+**au moment de la décision, avant cleanup**, qui invalide ensuite ces états.
+Les deux collecteurs historiques possèdent leur teardown ; le wrapper ne leur
+accorde pas un deuxième délai de nettoyage.
+
+Le témoin public porte le mode fermé `pong_inhibition_after_120s`, le résultat
+catégoriel, `boundary_proven=false`, les générations expérimentales, le nombre
+de lectures corrélées sur la génération reprise, les compteurs de Pong inhibés/
+rétablis et les instants relatifs de perte/réouverture. SUCCESS exige une
+inhibition réellement exercée, une perte après au moins 120 s, réouverture
+strictement avant 240 s, 120 s stables, une lecture corrélée et un Pong après
+reprise. Une nouvelle ouverture seule, un job fini, une perte précoce ou une
+exception TLS sans EOF/CloseClient observable ne suffisent pas.
+
+Sans inhibition/perte/récupération attestée : INCONCLUSIVE. Timeout, dépassement
+de budget, protocole refusé ou cleanup échoué : FAILURE. Une étape non commencée
+reste NOT RUN ; le parent interdit tout ACK ultérieur après échec ou échéance.
+Les anciens témoins incomplets restent lisibles mais ne peuvent pas revendiquer
+le succès du nouveau contrat sans preuves d'inhibition et de temporalité.
+`transport` ne prouve ni EOF TLS ni cause serveur ; CloseClient conserve sa
+catégorie et son sous-code. Les 48 octets d'OpenedClient restent un préfixe,
+jamais une longueur totale universelle. Aucun RX brut, identifiant, registre,
+valeur domestique ou texte d'exception libre n'est ajouté au rapport.
+
+Validation uniquement hors ligne : horloges/transports synthétiques, maintien
+300 s, inhibition à 120 s, récupération/stabilité, cas sans perte/Pong, annulation,
+cleanup, deadlines et rejets Python/Node de preuves falsifiées. **Tests réels :
+NOT RUN.** La livraison n'autorise aucun dispatch ou rerun réel.
 
 ## Home Assistant
 
