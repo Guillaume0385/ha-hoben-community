@@ -18,7 +18,95 @@ def empty(scenario):
     evidence = empty_evidence()
     if scenario != "hoben-live":
         evidence["terminal"] = "none"
+    if scenario == "session-reconnect":
+        evidence["recovery"] = empty_recovery()
     return evidence
+
+
+def empty_recovery():
+    return dict(
+        mode="pong_inhibition_after_120s",
+        boundary_proven=False,
+        outcome="not_exercised",
+        accepted_at_ms=None,
+        suppressed_pongs=0,
+        loss_generation=None,
+        loss_after_ms=None,
+        reopened_after_ms=None,
+        read_generation=None,
+        read_sequence=None,
+        recovery_pongs=0,
+        stable_ms=0,
+    )
+
+
+def controlled_recovery(e):
+    """Strict test proof, independent from process success or a natural loss.
+
+    Old reports remain readable, but their natural-reconnection Boolean cannot
+    attest the newly authorized controlled test or its stable final generation.
+    """
+    if "recovery" not in e:
+        return False
+    r = e["recovery"]
+    keys(r, empty_recovery())
+    need(r["mode"] == "pong_inhibition_after_120s" and r["boundary_proven"] is False)
+    need(
+        type(r["outcome"]) is str
+        and r["outcome"]
+        in {
+            "not_exercised",
+            "no_disconnect",
+            "reopen_failed",
+            "stability_lost",
+            "verified",
+            "timeout",
+            "internal",
+            "closed",
+        }
+    )
+    for name in ("accepted_at_ms", "loss_after_ms", "reopened_after_ms"):
+        need(r[name] is None or integer(r[name], 0, 600000))
+    for name in ("loss_generation", "read_generation"):
+        need(r[name] is None or integer(r[name], 1, 2))
+    need(r["read_sequence"] is None or integer(r["read_sequence"], 1, 6))
+    for name in ("suppressed_pongs", "recovery_pongs"):
+        need(integer(r[name], 0, 1048576))
+    need(integer(r["stable_ms"], 0, 120000))
+    w = e["window"]
+    o = w["observation"]
+    proven = (
+        r["accepted_at_ms"] is not None
+        and r["suppressed_pongs"] > 0
+        and r["recovery_pongs"] > 0
+        and r["loss_generation"] == 1
+        and r["read_generation"] == 2
+        and r["read_sequence"] is not None
+        and r["stable_ms"] == 120000
+        and r["loss_after_ms"] is not None
+        and r["reopened_after_ms"] is not None
+        and 120000 <= r["loss_after_ms"] < r["reopened_after_ms"] < 240000
+        and r["accepted_at_ms"] + r["reopened_after_ms"] + 120000 <= w["elapsed_ms"]
+        and w["active"]
+        and o is not None
+        and o["generation"] == o["read_generation"] == 2
+        and o["loss_generation"] == 1
+        and o["loss_kind"] in {"transport", "close_client"}
+        and not o["stopped"]
+        and not o["cleanup_failed"]
+        and any(
+            s["decoded"]
+            and s["available"]
+            and s["at_ms"] >= r["accepted_at_ms"] + r["reopened_after_ms"]
+            and s["observation"]["read_generation"] == 2
+            and s["observation"]["read_sequence"] == r["read_sequence"]
+            and s["observation"]["loss_generation"] == 1
+            and s["observation"]["cleaned_generation"] == 1
+            for s in e["samples"]
+        )
+    )
+    need(r["outcome"] != "verified" or proven)
+    return r["outcome"] == "verified" and proven
 
 
 def logical_baseline(receipt, evidence):
@@ -88,7 +176,15 @@ def validate_detail(scenario, detail):
         keys(e, ("completed", "samples", "window", "cleanup"))
         logical_baseline(r, e)
     else:
-        keys(e, ("completed", "samples", "window", "cleanup", "terminal"))
+        keys(
+            e,
+            {"completed", "samples", "window", "cleanup", "terminal"}
+            | (
+                {"recovery"}
+                if scenario == "session-reconnect" and "recovery" in e
+                else set()
+            ),
+        )
         need(type(e["terminal"]) is str and e["terminal"] in ERRORS)
         need(type(e["completed"]) is bool)
         need(type(e["samples"]) is list and len(e["samples"]) <= 6)
@@ -149,6 +245,8 @@ def validate_detail(scenario, detail):
         observation(e["cleanup"]["observation"])
         if previous is not None:
             progress(previous, e["cleanup"]["observation"])
+        if scenario == "session-reconnect":
+            controlled_recovery(e)
     need(
         len(json.dumps(detail, separators=(",", ":"), allow_nan=False).encode()) <= 8192
     )
@@ -196,6 +294,8 @@ def project(scenario, detail):
         and not o["cleanup_failed"]
         for s in e["samples"]
     )
+    if scenario == "session-reconnect":
+        m["recovered"] = controlled_recovery(e)
     w = e["window"]["observation"]
     if w is not None:
         m["loss_kind"] = w["loss_kind"] or "none"

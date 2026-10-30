@@ -1,6 +1,7 @@
 """Actual coordinator observations for the additional #126 manual scenarios.
 
-No credentials are modified, no disconnect is injected and no client is copied.
+No credentials are modified and no client is copied. Only session-reconnect
+delegates to the owner-authorized, isolated Pong-inhibition test adapter.
 The #112 hoben-live observer remains the sole implementation of its 300 s proof.
 """
 
@@ -23,7 +24,6 @@ SCHEDULES = {
     "open-errors": (0,),
     "refresh-v4": (0, 60),
     "session-reuse": (0, 60, 120),
-    "session-reconnect": (0, 100, 200, 300, 400, 500),
     "cleanup": (0,),
     "availability": (0, 60),
 }
@@ -46,6 +46,35 @@ ERROR_CATEGORIES = {
 }
 
 
+async def take_sample(coordinator, evidence, stamp, start):
+    """Project one real refresh; never publish its data or arbitrary exception."""
+    previous = coordinator.data
+    try:
+        await coordinator.async_refresh()
+    finally:
+        decoded = (
+            coordinator.last_update_success
+            and type(coordinator.data) is HobenCoordinatorData
+            and coordinator.data is not previous
+        )
+        safe = safe_error_report(coordinator.last_exception)
+        evidence["samples"].append(
+            {
+                "ordinal": len(evidence["samples"]) + 1,
+                "at_ms": max(0, int((stamp() - start) * 1000)),
+                "decoded": decoded,
+                "available": coordinator.last_update_success
+                and coordinator.data is not None,
+                "error": "none"
+                if decoded
+                else ERROR_CATEGORIES.get((safe or {}).get("error"), "unexpected"),
+                "observation": project_observation(
+                    coordinator.client.session_observation
+                ),
+            }
+        )
+
+
 async def observe(
     coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
 ):
@@ -53,6 +82,16 @@ async def observe(
         from scripts.ha_session_observer import observe as baseline
 
         return await baseline(coordinator, evidence=evidence, clock=clock, sleep=sleep)
+    if scenario == "session-reconnect":
+        from scripts.ha_reconnect_observer import observe as reconnect
+
+        return await reconnect(
+            coordinator,
+            evidence=evidence,
+            clock=clock,
+            sleep=sleep,
+            absolute_end=absolute_end,
+        )
     need(scenario in SCHEDULES)
     need(
         type(coordinator) is HobenDataUpdateCoordinator
@@ -100,58 +139,11 @@ async def observe(
         await asyncio.sleep(0)
 
     try:
-        recovered = False
         async with asyncio.timeout(SECONDS["ha"][scenario] - 30):
-            for ordinal, offset in enumerate(SCHEDULES[scenario], 1):
+            for offset in SCHEDULES[scenario]:
                 await until(start + offset)
                 need(stamp() < collection_end)
-                previous = coordinator.data
-                try:
-                    await coordinator.async_refresh()
-                finally:
-                    decoded = (
-                        coordinator.last_update_success
-                        and type(coordinator.data) is HobenCoordinatorData
-                        and coordinator.data is not previous
-                    )
-                    safe = safe_error_report(coordinator.last_exception)
-                    category = (
-                        "none"
-                        if decoded
-                        else ERROR_CATEGORIES.get(
-                            (safe or {}).get("error"), "unexpected"
-                        )
-                    )
-                    evidence["samples"].append(
-                        {
-                            "ordinal": ordinal,
-                            "at_ms": max(0, int((stamp() - start) * 1000)),
-                            "decoded": decoded,
-                            "available": coordinator.last_update_success
-                            and coordinator.data is not None,
-                            "error": category,
-                            "observation": project_observation(
-                                coordinator.client.session_observation
-                            ),
-                        }
-                    )
-                o = coordinator.client.session_observation
-                if (
-                    scenario == "session-reconnect"
-                    and decoded
-                    and o.loss_generation is not None
-                    and o.read_generation is not None
-                    and o.read_generation > o.loss_generation
-                    and o.cleaned_generation is not None
-                    and o.cleaned_generation >= o.loss_generation
-                    and not o.cleanup_failed
-                ):
-                    recovered = True
-                    break
-            if scenario == "session-reconnect" and not recovered:
-                # Keep the real RX owner alive until the natural-observation
-                # bound. A late loss without a subsequent read is NOT recovery.
-                await until(collection_end - 1)
+                await take_sample(coordinator, evidence, stamp, start)
             evidence["completed"] = True
     except asyncio.CancelledError:
         evidence["terminal"] = "closed"
