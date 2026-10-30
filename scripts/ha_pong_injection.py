@@ -74,7 +74,12 @@ class PongInjection:
                         need(probe.policy.suppressed <= 1048576)
                         return
                     await self.transport.write(data)
-                    if self.generation != probe.policy.first_generation:
+                    # Opening itself can answer Ping. Only an already accepted
+                    # replacement session can attest a post-recovery keepalive.
+                    if (
+                        probe.reopened_at is not None
+                        and self.generation != probe.policy.first_generation
+                    ):
                         probe.recovery_pongs += 1
                         need(probe.recovery_pongs <= 1048576)
                 else:

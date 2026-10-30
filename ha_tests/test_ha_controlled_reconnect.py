@@ -10,13 +10,14 @@ from custom_components.hoben.client import HobenClient
 from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
 from custom_components.hoben.transport import TransportEOF
 from ha_tests.test_manual_campaign_observer import detail
-from ha_tests.test_persistent_client import RESPONSE, assert_stopped
+from ha_tests.test_persistent_client import RESPONSE, assert_stopped, opening
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
 from scripts.campaign_runtime_contract import observed_status, stage, validate_report
 from scripts.ha_campaign_evidence import project
 from scripts.ha_campaign_observer import observe
 from scripts.ha_pong_injection import PongInjection
 from tests.test_campaign_runtime import envelope, node_accepts
+from tests.tls_script import script_transport
 
 
 async def exercise(hass, entry, peers, case):
@@ -24,6 +25,11 @@ async def exercise(hass, entry, peers, case):
     second = peers.wire(
         DEVICE_GUID, [[b"\xff" if case == "bad_read" else RESPONSE]] * 6
     )
+    if case == "opening_pong_only":
+        for wire in (first, second):
+            wire.queue = script_transport(
+                wire, openings=[[b"\x0a", opening(DEVICE_GUID)]], reads=[[RESPONSE]] * 6
+            )
     client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
     coordinator = HobenDataUpdateCoordinator(hass, entry, client)
     original = v4_lifecycle.V4Lifecycle
@@ -44,7 +50,9 @@ async def exercise(hass, entry, peers, case):
             peers.backoff.release.put_nowait(None)
             released = True
         active = peers.wires[peers.factory.call_count - 1]
-        if case != "no_ping" and not (active is second and case == "no_recovery_pong"):
+        if case != "no_ping" and not (
+            active is second and case in {"no_recovery_pong", "opening_pong_only"}
+        ):
             active.queue.put_nowait(b"\x0a")
         for _ in range(15):
             await asyncio.sleep(0)
@@ -97,6 +105,7 @@ async def exercise(hass, entry, peers, case):
         "bad_read",
         "second_loss",
         "no_recovery_pong",
+        "opening_pong_only",
     ],
 )
 async def test_controlled_ha_reconnect_requires_each_causal_witness(
@@ -144,6 +153,9 @@ async def test_controlled_ha_reconnect_requires_each_causal_witness(
         )
         if case in {"early_loss", "late_reopen", "bad_read", "second_loss"}:
             assert not m["available"]
+        if case == "opening_pong_only":
+            assert r["recovery_pongs"] == 0
+            assert sum(c.args[0] == b"\x0b" for c in second.write.await_args_list) == 1
     assert_private_values_absent(str(d) + caplog.text)
 
 
