@@ -31,7 +31,9 @@ contrats antérieurs. Un en-tête DataUpdated dont le MBAP est invalide déclenc
    invalidation de l’ancien waiter et une seule sonde V4 : lecture existante
    fonction 04, transaction FFFF, unité 1, registres 1024..1043. L’ancien appel
    ne peut recevoir le succès de cette sonde. Une acquisition nouvelle en
-   attente peut observer son résultat validé.
+   attente peut observer son résultat validé ; s’il arrive entre deux appels,
+   l’appel suivant peut le consommer une seule fois, sans lecture supplémentaire
+   ni répétition d’un résultat déjà publié.
 4. Seule une réponse 0x0E complète, liée à ce nouvel échange, avec transaction,
    unité, fonction et vingt registres validés, permet la reprise. Une réponse
    invalide, une exception Modbus ou l’expiration de la sonde ne donne aucun

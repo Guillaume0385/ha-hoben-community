@@ -59,6 +59,12 @@ def test_every_rx_rearms_silence_then_one_probe_uses_the_original_transport(
             assert not life.data_updated_recovering
             assert factory.sessions[0].verified_read_sequence == 1
             assert len(factory.streams) == 1 and stream.close_count == 0
+            assert (await life.request_v4_data()).registers == (17,) * 20
+            assert [w[0] for w in stream.writes] == [3, 13]
+            assert life.witness.verified_read_sequence == 1
+            await life.request_v4_data()
+            assert [w[0] for w in stream.writes] == [3, 13, 13]
+            assert life.witness.verified_read_sequence == 2
         finally:
             await life.close()
             factory.assert_clean()

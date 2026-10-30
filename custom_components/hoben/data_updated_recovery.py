@@ -20,6 +20,7 @@ class DataUpdatedRecovery:
     task: asyncio.Task | None = None
     result: asyncio.Future | None = None
     observer: bool = False
+    consumed: bool = True
     warned: bool = False
     failure_logged: bool = False
 
@@ -30,6 +31,7 @@ class DataUpdatedRecovery:
         loop = asyncio.get_running_loop()
         if not self.active:
             self.result = loop.create_future()
+            self.consumed = False
         self.active = True
         self.probing = False
         self.quiet_since = loop.time()

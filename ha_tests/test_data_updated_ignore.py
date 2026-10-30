@@ -171,3 +171,32 @@ async def test_setup_recovery_can_be_cancelled_without_reconnection_or_orphan_pr
     assert not any(
         t.get_name() == "hoben-dataupdated-probe" for t in asyncio.all_tasks()
     )
+
+
+async def test_setup_consumes_a_completed_probe_once_without_a_third_read(
+    hass, entry, peers, monkeypatch
+):
+    wire = peers.wire(DEVICE_GUID, [[BAD], [RESPONSE]])
+    received = asyncio.Event()
+    original_read = wire.read.side_effect
+
+    async def read(*args, **kwargs):
+        data = await original_read(*args, **kwargs)
+        if data == BAD:
+            received.set()
+        return data
+
+    wire.read.side_effect = read
+    clock = Clock(monkeypatch)
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
+    await received.wait()
+    await pump()
+    await clock.advance(30)
+    assert await setup
+    try:
+        assert entry.runtime_data.coordinator.last_update_success
+        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13, 13]
+        assert peers.factory.call_count == 1
+    finally:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert_stopped(peers)

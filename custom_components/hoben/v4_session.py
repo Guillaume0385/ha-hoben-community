@@ -599,6 +599,7 @@ class V4Session:
                 result = await asyncio.shield(recovery.result)
                 if isinstance(result, HobenError):
                     raise result from None
+                recovery.consumed = True
                 return result
         except TimeoutError:
             if self._rx_error is not None:
@@ -1529,8 +1530,25 @@ class V4Session:
         cannot distinguish a late wire response on a reused transport.
         """
         _validate_delay(timeout)
+        recovery = self._data_updated
+        if not _recovery and recovery.observer:
+            raise HobenDataUpdatedRecoveryError()
         if self.data_updated_recovering and not _recovery:
             return await self._await_data_updated_recovery(timeout)
+        if (
+            not _recovery
+            and not recovery.consumed
+            and self.state is SessionState.CONNECTED
+            and self._rx_error is None
+            and recovery.result is not None
+            and recovery.result.done()
+        ):
+            result = recovery.result.result()
+            if type(result) is ModbusReadResponse:
+                # A real, verified probe may finish between HA poll calls.
+                # Deliver it once; never replay an already published snapshot.
+                recovery.consumed = True
+                return result
         self._require_tx_allowed()
         if self._rx_error is not None:
             raise self._rx_error from None
