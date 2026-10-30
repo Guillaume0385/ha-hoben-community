@@ -70,7 +70,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
                 # Keep one entry-owned lifecycle during setup. The next fresh
                 # acquisition waits for its >=60 s recovery, rather than HA's
                 # shorter native retry creating another client/transport.
-                if client.ha_recovery_pending is not True:
+                if (
+                    client.ha_recovery_pending is not True
+                    and coordinator.data_updated_deferred is not True
+                ):
                     raise
         snapshot = coordinator.data.raw
         dr.async_get(hass).async_get_or_create(

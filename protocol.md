@@ -98,6 +98,20 @@ typée et numéro public ; CloseClient garde son chemin spécifique. Un type inc
 MBAP invalide ou suffixe ambigu ne permet jamais de saut ou resynchronisation.
 Cette règle ne prouve aucune longueur universelle d'OpenedClient.
 
+### Récupération HA après DataUpdated invalide — décision #160
+
+Le propriétaire autorise le 30/10/2026 une [hypothèse de récupération locale](docs/data-updated-recovery.md)
+sur le TLS existant : arrêt du décodage/lectures, RX abandonné sans scan ni
+accumulation, puis purge et une lecture V4 après 30 s consécutives sans octet.
+Chaque RX non vide réarme le silence. Seul un nouvel échange 0x0E strictement
+validé permet la reprise ; aucun registre DataUpdated n'est décodé ou publié.
+Une sonde refusée retourne à la récupération bornée, sans reconnexion provoquée
+par cette seule anomalie. Les dernières valeurs HA restent conservées sans faux
+succès d'acquisition ; les vraies pertes transport/TLS restent distinctes.
+Cette règle est une **hypothèse autorisée, pas une preuve de frontière ou de
+fraîcheur serveur**. Les contrats expérimentaux restent inchangés et aucun
+résultat réel nouveau n'est établi.
+
 ---
 
 ## 3. Types de messages MyHOBEN

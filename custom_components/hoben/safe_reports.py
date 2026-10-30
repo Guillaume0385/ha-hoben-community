@@ -18,6 +18,7 @@ from .exceptions import (
     HobenCleanupError,
     HobenClientClosedError,
     HobenClosedError,
+    HobenDataUpdatedRecoveryError,
     HobenError,
     HobenInternalError,
     HobenInvalidCredentialsError,
@@ -42,6 +43,7 @@ _ERROR_CODES = frozenset(
     for error_type in (
         HobenError,
         HobenCleanupError,
+        HobenDataUpdatedRecoveryError,
         HobenInvalidInputError,
         HobenAuthorizationRequiredError,
         HobenAuthorizationCodeError,

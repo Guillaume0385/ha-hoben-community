@@ -265,7 +265,9 @@ class ExperimentalV4Framer:
     if answering Ping yields and lets another caller register a new request.
     """
 
-    def __init__(self, *, diagnostic=None, _reject_close_client=False):
+    def __init__(
+        self, *, diagnostic=None, _reject_close_client=False, recover_data_updated=False
+    ):
         self._buffer = bytearray()
         self._exchange = None
         self._diagnostic = diagnostic
@@ -274,6 +276,8 @@ class ExperimentalV4Framer:
         self._tail = None
         # Preserve the separate, dormant private EOF-quarantine contract.
         self._reject_close_client = _reject_close_client
+        self._recover_data_updated = recover_data_updated
+        self.invalid_data_updated = None
 
     def _fail(self, phase, message):
         if self._diagnostic is not None:
@@ -346,6 +350,7 @@ class ExperimentalV4Framer:
         self._remaining = 0
         self._ignored_type = self._ignored_size = None
         self._tail = None
+        self.invalid_data_updated = None
 
     @property
     def partial(self):
@@ -403,6 +408,18 @@ class ExperimentalV4Framer:
                         bytes(self._buffer[prefix : prefix + 6])
                     )
                 except (TypeError, ValueError):
+                    if self._buffer[0] == 27 and self._recover_data_updated:
+                        # Only persistent reception opts into owner-authorized
+                        # recovery. No size/boundary is inferred from this header.
+                        length = int.from_bytes(self._buffer[9:11], "big")
+                        self.clear()
+                        self.invalid_data_updated = (
+                            length,
+                            "invalid_length"
+                            if not 2 <= length <= 254
+                            else "invalid_protocol",
+                        )
+                        return []
                     self._fail("frame_boundary", "ambiguous")
                 if self._buffer[0] in IGNORED_PREFIXES:
                     self._ignored_type, self._ignored_size = self._buffer[0], size

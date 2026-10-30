@@ -228,6 +228,24 @@ class HobenClient:
         )
 
     @property
+    def data_updated_transport_alive(self) -> bool:
+        """A value hold cannot hide a genuine transport loss."""
+        return (
+            not self._closed
+            and self._lifecycle is not None
+            and self._lifecycle.data_updated_transport_alive is True
+        )
+
+    @property
+    def data_updated_recovering(self) -> bool:
+        """A bounded acquisition pause; previous snapshots are not refreshed."""
+        return (
+            not self._closed
+            and self._lifecycle is not None
+            and self._lifecycle.data_updated_recovering is True
+        )
+
+    @property
     def device_guid_for_persistence(self) -> str:
         """Sensitive: explicitly retrieve for secure storage, NEVER logs/diagnostics.
 

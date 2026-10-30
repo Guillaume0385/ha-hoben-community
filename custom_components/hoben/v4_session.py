@@ -8,6 +8,7 @@ of a universal boundary. They use the same framer and operation cleanup.
 """
 
 import asyncio
+import logging
 import math
 import time
 from collections.abc import Callable
@@ -22,11 +23,13 @@ from .client import (
     _validate_delay,
     _validate_device_guid,
 )
+from .data_updated_recovery import DataUpdatedRecovery
 from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
+    HobenDataUpdatedRecoveryError,
     HobenError,
     HobenInternalError,
     HobenInvalidCredentialsError,
@@ -95,6 +98,8 @@ from .v4_experiment import (
     _RejectedCloseClient,
 )
 from .v4_no_pong import NoPongAfter120
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class SessionState(StrEnum):
@@ -369,6 +374,8 @@ class V4Session:
         "_mode",
         "_opening_options",
         "_cleanup_failed",
+        "_data_updated",
+        "_read_idle",
     )
 
     def __init__(
@@ -382,6 +389,7 @@ class V4Session:
         session_300: Session300 | None = None,
         no_pong_after_120: NoPongAfter120 | None = None,
         _quarantine: _QuarantineCapability | None = None,
+        recover_data_updated: bool = False,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
@@ -396,6 +404,10 @@ class V4Session:
         ):
             raise HobenInvalidInputError()
         self._mode = mode
+        if type(recover_data_updated) is not bool or (
+            recover_data_updated and mode is not V4SessionMode.PERSISTENT
+        ):
+            raise HobenInvalidInputError()
         self._opening_options = opening_options or V4OpeningOptions()
         self._cleanup_failed = False
         if session_300 is not None and type(session_300) not in (
@@ -437,7 +449,9 @@ class V4Session:
         self._experiment_generation = None
         self._framer = (
             ExperimentalV4Framer(
-                diagnostic=session_300, _reject_close_client=_quarantine is not None
+                diagnostic=session_300,
+                _reject_close_client=_quarantine is not None,
+                recover_data_updated=recover_data_updated,
             )
             if session_300 is not None or mode is V4SessionMode.PERSISTENT
             else None
@@ -452,7 +466,9 @@ class V4Session:
         self._rx_task: asyncio.Task[HobenError | None] | None = None
         self._rx_error: HobenError | None = None
         self._tx_lock = asyncio.Lock()
-        self._pending_read: asyncio.Future[ModbusReadResponse] | None = None
+        self._pending_read: (
+            asyncio.Future[ModbusReadResponse | HobenDataUpdatedRecoveryError] | None
+        ) = None
         self._read_sent = False
         self._loss_event = asyncio.Event()
         self._retryable_loss = False
@@ -461,6 +477,143 @@ class V4Session:
         self._loss_monotonic_ms: int | None = None
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
+        self._data_updated = DataUpdatedRecovery()
+        self._read_idle = asyncio.Event()
+        self._read_idle.set()
+
+    @property
+    def data_updated_recovering(self):
+        """Local acquisition pause, never a claim of a lost/replaced transport."""
+        return self.state is SessionState.CONNECTED and self._data_updated.active
+
+    def _begin_data_updated_recovery(self, diagnostic):
+        length, reason = diagnostic
+        recovery = self._data_updated
+        recovery.begin()
+        if recovery.task is not None:
+            self._fail_pending_read(HobenDataUpdatedRecoveryError())
+        if not recovery.warned:
+            recovery.warned = True
+            _LOGGER.warning(
+                "Hoben DataUpdated invalid_mbap [reason=%s, declared_length=%d, "
+                "recovery=silence_30s_hypothesis]",
+                reason,
+                length,
+            )
+
+    async def _probe_data_updated_recovery(self):
+        """One fixed read after silence; RX remains owned by the original task."""
+        recovery = self._data_updated
+        try:
+            async with asyncio.timeout(30):
+                await self._read_idle.wait()
+            if self.state is not SessionState.CONNECTED:
+                return
+            if not recovery.probing:
+                raise HobenDataUpdatedRecoveryError()
+            result = await self._request_v4_data(timeout=30, _recovery=True)
+            if not recovery.probing:
+                raise HobenDataUpdatedRecoveryError()
+        except asyncio.CancelledError:
+            raise
+        except (HobenDataUpdatedRecoveryError, HobenModbusError, TimeoutError):
+            # A rejected/expired probe never becomes a snapshot or a reconnect.
+            # Require a fresh silence window; one task/one probe at a time.
+            if not recovery.failure_logged:
+                recovery.failure_logged = True
+                _LOGGER.info("Hoben DataUpdated recovery [result=probe_not_verified]")
+        except HobenError:
+            pass  # Genuine transport/TLS/internal failures retain normal cleanup.
+        else:
+            recovery.active = False
+            recovery.warned = recovery.failure_logged = False
+            if recovery.result is not None and not recovery.result.done():
+                recovery.result.set_result(result)
+        finally:
+            recovery.task = None
+            recovery.probing = False
+            timer = recovery.read_deadline
+            if timer is not None and not timer.expired():
+                timer.reschedule(
+                    max(recovery.quiet_since + 30, recovery.probe_started + 30)
+                    if recovery.active
+                    else None
+                )
+
+    async def _read_framed_delivery(self, transport):
+        """Discard during recovery, with bounded deliveries and rolling silence.
+
+        Cancelling only StreamReader.read at a local silence deadline preserves
+        TLS. This coroutine is still the only reader. No byte/signature scanning.
+        """
+        recovery = self._data_updated
+        while True:
+            if not recovery.active:
+                return await transport.read(4096, bounded=False)
+            remaining = (
+                max(
+                    0,
+                    max(recovery.quiet_since + 30, recovery.probe_started + 30)
+                    - asyncio.get_running_loop().time(),
+                )
+                if recovery.active and recovery.task is None
+                else 30
+            )
+            try:
+                async with asyncio.timeout(remaining) as deadline:
+                    recovery.read_deadline = deadline
+                    try:
+                        data = await transport.read(4096, bounded=False)
+                    finally:
+                        recovery.read_deadline = None
+            except TransportTimeout:
+                raise  # Genuine I/O expiry is distinct from our silence timer.
+            except TimeoutError:
+                if not deadline.expired():
+                    raise  # Never classify an inner failure as elapsed silence.
+                if recovery.active and recovery.task is None:
+                    # Purge only under the owner's hypothesis, not wire proof.
+                    self._framer.clear()
+                    self._fail_pending_read(HobenDataUpdatedRecoveryError())
+                    recovery.probe_started = asyncio.get_running_loop().time()
+                    recovery.probing = True
+                    recovery.task = asyncio.create_task(
+                        self._probe_data_updated_recovery(),
+                        name="hoben-dataupdated-probe",
+                    )
+                continue
+            if not isinstance(data, bytes) or len(data) > 4096:
+                raise HobenInternalError()
+            if not data:
+                raise TransportEOF("eof")
+            if recovery.active:
+                recovery.quiet_since = asyncio.get_running_loop().time()
+            if recovery.active and not recovery.probing:
+                data = b""
+                continue  # Drop immediately, never accumulate opaque RX.
+            return data
+
+    async def _await_data_updated_recovery(self, timeout):
+        recovery = self._data_updated
+        if recovery.observer:
+            raise HobenDataUpdatedRecoveryError()
+        recovery.observer = True
+        try:
+            async with asyncio.timeout(timeout):
+                result = await asyncio.shield(recovery.result)
+                if isinstance(result, HobenError):
+                    raise result from None
+                recovery.consumed = True
+                return result
+        except TimeoutError:
+            if self._rx_error is not None:
+                raise self._rx_error from None
+            raise HobenDataUpdatedRecoveryError() from None
+        except asyncio.CancelledError:
+            await self.close()
+            raise
+        finally:
+            recovery.observer = False
 
     @asynccontextmanager
     async def _transmitting(self):
@@ -674,7 +827,10 @@ class V4Session:
         """Complete the sole waiter at most once, without exposing its payload."""
         pending = self._pending_read
         if pending is not None and not pending.done():
-            pending.set_exception(error)
+            if type(error) is HobenDataUpdatedRecoveryError:
+                pending.set_result(error)
+            else:
+                pending.set_exception(error)
 
     def __repr__(self) -> str:
         return f"V4Session(state={self.state.value})"
@@ -1008,6 +1164,9 @@ class V4Session:
             self._rx_error = HobenInternalError()
         finally:
             if self._rx_error is not None:
+                recovery_result = self._data_updated.result
+                if recovery_result is not None and not recovery_result.done():
+                    recovery_result.set_result(self._rx_error)
                 if self._experiment is not None:
                     self._experiment.lost(self._experiment_generation)
                 self._signal_loss()
@@ -1053,6 +1212,19 @@ class V4Session:
                 events = self._framer.feed(data, exchange)
             except _RejectedCloseClient:
                 rejected_close = True
+            except HobenProtocolError as failure:
+                if not self._data_updated.active or type(failure) is HobenInternalError:
+                    raise
+                self._framer.clear()
+                self._data_updated.probing = False
+                self._fail_pending_read(HobenDataUpdatedRecoveryError())
+                events = []
+                data = b""
+            if self._framer.invalid_data_updated is not None:
+                self._begin_data_updated_recovery(self._framer.invalid_data_updated)
+                self._framer.clear()
+                events = []
+                data = b""
             if rejected_close:
                 if self._quarantine_policy is None:
                     raise HobenProtocolError()
@@ -1102,7 +1274,7 @@ class V4Session:
                     if self._experiment is not None:
                         self._experiment.responses += 1
             try:
-                data = await transport.read(4096, bounded=False)
+                data = await self._read_framed_delivery(transport)
             except TransportEOF:
                 if self._no_pong is not None:
                     self._no_pong.peer_closed(self._experiment_generation)
@@ -1317,6 +1489,14 @@ class V4Session:
             )
         except Exception:
             error = HobenInternalError()
+        if (
+            self._data_updated.active
+            and self._data_updated.task is not None
+            and type(error) is HobenProtocolError
+        ):
+            self._data_updated.probing = False
+            self._fail_pending_read(HobenDataUpdatedRecoveryError())
+            return
         self._rx_error = self._rx_error or error
         self._signal_loss()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
@@ -1343,7 +1523,9 @@ class V4Session:
             self._operations.pop(task, None)
             done.set_result(None)
 
-    async def _request_v4_data(self, *, timeout: float) -> ModbusReadResponse:
+    async def _request_v4_data(
+        self, *, timeout: float, _recovery=False
+    ) -> ModbusReadResponse:
         """Send the sole fixed V4 read and await a delimited contract response.
 
         Conservative RX has no dispatch; the explicit routing modes opt in. The total
@@ -1352,6 +1534,25 @@ class V4Session:
         cannot distinguish a late wire response on a reused transport.
         """
         _validate_delay(timeout)
+        recovery = self._data_updated
+        if not _recovery and recovery.observer:
+            raise HobenDataUpdatedRecoveryError()
+        if self.data_updated_recovering and not _recovery:
+            return await self._await_data_updated_recovery(timeout)
+        if (
+            not _recovery
+            and not recovery.consumed
+            and self.state is SessionState.CONNECTED
+            and self._rx_error is None
+            and recovery.result is not None
+            and recovery.result.done()
+        ):
+            result = recovery.result.result()
+            if type(result) is ModbusReadResponse:
+                # A real, verified probe may finish between HA poll calls.
+                # Deliver it once; never replay an already published snapshot.
+                recovery.consumed = True
+                return result
         self._require_tx_allowed()
         if self._rx_error is not None:
             raise self._rx_error from None
@@ -1364,14 +1565,20 @@ class V4Session:
         transport = self._transport
         pending = asyncio.get_running_loop().create_future()
         self._pending_read = pending
+        self._read_idle.clear()
         self._read_sent = False
         error: HobenError | None = None
         cancelled = False
+        tx_completed = False
         try:
             self._read_timeout = asyncio.timeout(timeout)
             async with self._read_timeout:
                 async with self._transmitting():
                     self._require_tx_allowed()
+                    if self.data_updated_recovering and (
+                        not _recovery or not self._data_updated.probing
+                    ):
+                        raise HobenDataUpdatedRecoveryError()
                     if pending.done():
                         pending.result()
                     if self._rx_error is not None:
@@ -1392,20 +1599,29 @@ class V4Session:
                     self._tx_in_flight = True
                     try:
                         await transport.write(request)
+                        tx_completed = True
                     finally:
                         self._tx_in_flight = False
-                response = await asyncio.shield(pending)
+                # A private probe has no external cancellation owner; letting
+                # its deadline cancel the waiter avoids abandoned shield logs.
+                response = await pending if _recovery else await asyncio.shield(pending)
+                if type(response) is HobenDataUpdatedRecoveryError:
+                    raise response
                 self._require_tx_allowed()
                 if self._rx_error is not None:
                     raise self._rx_error from None
                 return response
-        except _QuarantinedRead:
+        except (HobenDataUpdatedRecoveryError, _QuarantinedRead):
             raise  # Dispose the waiter/timeout below without closing RX.
         except asyncio.CancelledError:
+            if _recovery:
+                raise  # The closing session owns this private probe's cleanup.
             self._quarantine_stop(Event.CANCEL)
             cancelled = True
             error = HobenTransportError()
         except (TransportTimeout, TimeoutError):
+            if self.data_updated_recovering and tx_completed:
+                raise HobenDataUpdatedRecoveryError() from None
             self._quarantine_stop(Event.LOCAL_CLOSE)
             error = HobenTimeoutError()
         except TransportCertificateError:
@@ -1433,6 +1649,7 @@ class V4Session:
             if self._pending_read is pending:
                 self._pending_read = None
                 self._read_sent = False
+                self._read_idle.set()
         self._rx_error = self._rx_error or error
         self._signal_loss()
         self._snapshot = replace(self._snapshot, rx_error=self._rx_error.code)
@@ -1458,6 +1675,13 @@ class V4Session:
         self._fail_pending_read(HobenClientClosedError())
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
+        recovery = self._data_updated
+        recovery.active = False
+        if recovery.result is not None and not recovery.result.done():
+            recovery.result.set_result(HobenClientClosedError())
+        if recovery.task is not None and recovery.task is not asyncio.current_task():
+            recovery.task.cancel()
+            await asyncio.gather(recovery.task, return_exceptions=True)
         task = self._opening_task
         if task is not None and task is not asyncio.current_task():
             if not task.cancelling():

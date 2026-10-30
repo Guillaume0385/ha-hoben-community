@@ -15,6 +15,7 @@ from .const import CONF_DEVICE_GUID, DOMAIN, UPDATE_INTERVAL
 from .exceptions import (
     HobenAuthorizationRequiredError,
     HobenClosedError,
+    HobenDataUpdatedRecoveryError,
     HobenError,
     HobenInvalidCredentialsError,
     HobenProtocolError,
@@ -58,6 +59,9 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             always_update=False,
         )
         self.client = client
+        self.data_updated_hold = False
+        self.data_updated_deferred = False
+        self._notify_data_updated_failure = False
 
         async def stop_client(_event) -> None:
             # The one-shot bus listener is already removed before invocation.
@@ -79,6 +83,42 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             self._unsub_client_stop = None
 
     async def _async_update_data(self) -> HobenCoordinatorData:
+        """Retain values during recovery without reporting a successful read."""
+        was_holding = self.data_updated_hold
+        self._notify_data_updated_failure = False
+        if was_holding and self.client.data_updated_transport_alive is not True:
+            self.data_updated_hold = False
+            self.async_update_listeners()
+        try:
+            data = await self._async_update_once()
+        except HobenDataUpdatedRecoveryError as error:
+            self.data_updated_deferred = True
+            self.data_updated_hold = self.data is not None
+            raise wrap_error(
+                UpdateFailed, "Hoben DataUpdated recovery pending", error
+            ) from None
+        except BaseException:
+            self.data_updated_deferred = False
+            self.data_updated_hold = False
+            self._notify_data_updated_failure = was_holding
+            raise
+        self.data_updated_hold = False
+        self.data_updated_deferred = False
+        return data
+
+    def async_update_listeners(self) -> None:
+        """Do not report old sensor values as freshly acquired during a hold."""
+        if not self.data_updated_hold:
+            super().async_update_listeners()
+
+    def _async_refresh_finished(self) -> None:
+        """A genuine failure ends the value hold even after repeated deferrals."""
+        super()._async_refresh_finished()
+        if self._notify_data_updated_failure and not self.last_update_success:
+            self._notify_data_updated_failure = False
+            self.async_update_listeners()
+
+    async def _async_update_once(self) -> HobenCoordinatorData:
         """Decode successful reads; also persist identities accepted before loss."""
         try:
             try:
@@ -98,6 +138,8 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             state = decode_v4_snapshot(snapshot)
             self._persist_identity()
             return HobenCoordinatorData(raw=snapshot, state=state)
+        except HobenDataUpdatedRecoveryError:
+            raise
         except HobenInvalidCredentialsError as error:
             raise wrap_error(
                 ConfigEntryAuthFailed, "Hoben identifier was rejected", error
