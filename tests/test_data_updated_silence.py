@@ -6,7 +6,12 @@ import logging
 import pytest
 
 from custom_components.hoben.exceptions import HobenDataUpdatedRecoveryError
-from custom_components.hoben.transport import TransportEOF
+from custom_components.hoben.transport import (
+    TransportCertificateError,
+    TransportEOF,
+    TransportTimeout,
+    TransportTlsError,
+)
 from custom_components.hoben.v4_session import SessionState
 from tests.test_session_300_runtime import response
 from tests.test_v4_persistent import Factory
@@ -173,7 +178,19 @@ def test_failed_probe_returns_to_bounded_recovery_without_reconnect(
     asyncio.run(scenario())
 
 
-def test_real_eof_during_recovery_still_stops_the_old_generation(monkeypatch):
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TransportEOF("synthetic transport loss"),
+        TransportTimeout("read"),
+        TransportCertificateError("synthetic certificate failure"),
+        TransportTlsError("synthetic TLS failure"),
+        TimeoutError("synthetic unexpected I/O expiry"),
+    ],
+)
+def test_real_transport_failure_during_recovery_still_stops_the_old_generation(
+    monkeypatch, failure
+):
     async def scenario():
         Clock(monkeypatch)
         factory = Factory()
@@ -183,7 +200,7 @@ def test_real_eof_during_recovery_still_stops_the_old_generation(monkeypatch):
             stream = factory.streams[0]
             stream.queue.put_nowait(BAD)
             await pump()
-            stream.queue.put_nowait(TransportEOF("synthetic transport loss"))
+            stream.queue.put_nowait(failure)
             await pump()
             assert factory.sessions[0].state is SessionState.CLOSED
             assert stream.close_count == 1

@@ -566,7 +566,11 @@ class V4Session:
                         data = await transport.read(4096, bounded=False)
                     finally:
                         recovery.read_deadline = None
+            except TransportTimeout:
+                raise  # Genuine I/O expiry is distinct from our silence timer.
             except TimeoutError:
+                if not deadline.expired():
+                    raise  # Never classify an inner failure as elapsed silence.
                 if recovery.active and recovery.task is None:
                     # Purge only under the owner's hypothesis, not wire proof.
                     self._framer.clear()
