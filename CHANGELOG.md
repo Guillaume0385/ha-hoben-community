@@ -1,5 +1,12 @@
 # Changelog
 
+## En cours — #152, champs PDU absents dans le diagnostic MBAP
+
+- Une réponse MBAP complète de Length=2 signale le champ `byte_count` ou
+  `exception_code` absent uniquement pour une fonction de lecture reconnue.
+- Régressions hors ligne, confidentialité et propagation HA ; aucun changement
+  de codec, framing, reconnexion ou campagne et aucun test réel.
+
 ## En cours — #126, parité des collecteurs expérimentaux
 
 - Réutilisation du collecteur historique session-reconnect avec inhibition des

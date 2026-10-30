@@ -38,6 +38,8 @@ TEXT_FIELDS = {
             "mbap_header",
             "message_body",
             "close_subcode",
+            "byte_count",
+            "exception_code",
         }
     ),
     "rejection": frozenset(
@@ -95,6 +97,16 @@ def response_diagnostic(frame: object, phase: str) -> "MalformedDiagnostic":
                     expected = 1 + modbus_tcp_frame_size(frame[1:7])
                     if len(frame) < expected:
                         missing = "message_body"
+                    elif len(frame) == expected == 9:
+                        # Complete MBAP Length=2 proves only Unit ID + function.
+                        # Infer the absent PDU field only for documented reads;
+                        # never inspect a suffix outside this exact frame.
+                        missing = {
+                            3: "byte_count",
+                            4: "byte_count",
+                            0x83: "exception_code",
+                            0x84: "exception_code",
+                        }.get(frame[8], "unknown")
                 except ValueError:
                     pass
     return MalformedDiagnostic(

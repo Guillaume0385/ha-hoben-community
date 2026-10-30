@@ -3,6 +3,8 @@
 **État courant :** la tâche `HOBEN-152-MALFORMED-DIAGNOSTIC-004`, décrite ci-dessous,
 remplace la politique HA bornée de RECOVERY-002. Les sections #155 et
 RECOVERY-002 conservent les preuves et limites des livraisons antérieures.
+Le complément ciblé `HOBEN-152-MBAP-MISSING-FIELDS-005` précise uniquement le
+diagnostic des champs PDU absents, sans changement de cette politique.
 
 ## Diagnostic structuré et reconnexion HA — MALFORMED-DIAGNOSTIC-004
 
@@ -56,7 +58,7 @@ d'ouverture, du framer et de corrélation/validation remplissent uniquement :
 | `received_length` | Nombre effectivement présent dans le périmètre indiqué ; sinon `not_proven`, jamais une valeur tronquée/clampée. |
 | `expected_length` | Taille du contrat MBAP validé seulement ; sinon `not_proven`. |
 | `length_scope` | Buffer d'ouverture, en-tête MBAP, frame du contrat local ou `not_proven`. Un read TLS n'est jamais une frame. |
-| `missing_fields` | Catégorie structurelle absente (`mbap_header`, `message_body`, `close_subcode`), `none` ou `unknown`. |
+| `missing_fields` | Catégorie structurelle absente (`mbap_header`, `message_body`, `close_subcode`, `byte_count`, `exception_code`), `none` ou `unknown`. |
 
 Le buffer d'ouverture ne prouve jamais la longueur totale d'OpenedClient :
 `expected_length=not_proven`, y compris si le préfixe décodable fait 48 octets.
@@ -66,6 +68,14 @@ selon leur contrat existant, sans nouveau décodage. Les diagnostics HA et leurs
 wrappers appliquent à nouveau les allowlists de clés, valeurs et types exacts.
 Aucun RX brut/hex/payload, GUID, code, registre, valeur domestique, identifiant
 de transaction ou exception libre n'est publié.
+
+Pour une trame DataResponseClient de neuf octets exactement, dont le MBAP valide
+annonce `Length=2` (Unit ID + fonction), le second octet PDU manque : `byte_count`
+pour les lectures 03/04, `exception_code` pour leurs exceptions 83/84. Seul le
+nom du champ absent est publié, jamais un code ou une valeur. Une fonction non
+reconnue laisse ce champ `unknown`. Cette précision exige le contrat MBAP et la
+complétude exacte ; elle n'utilise ni fragments ni suffixes pour inférer un champ
+et ne modifie aucun codec, framing ou refus de réponse. Tests réels : NOT RUN.
 
 ### Vérification
 

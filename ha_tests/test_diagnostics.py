@@ -1009,6 +1009,29 @@ async def test_broken_safe_report_contract_fails_closed(
 
 
 @pytest.mark.parametrize(
+    "function, missing", [(4, "byte_count"), (0x84, "exception_code")]
+)
+async def test_missing_pdu_field_survives_ha_wrapper_and_diagnostics(
+    hass, private_entry, loaded, function, missing
+):
+    from custom_components.hoben.malformed import response_diagnostic
+    from custom_components.hoben.safe_reports import wrap_error
+
+    frame = bytes.fromhex("0effff0000000201") + bytes([function])
+    source = HobenProtocolError(response_diagnostic(frame, "response_validation"))
+    error = wrap_error(UpdateFailed, "Fixed rejection", source)
+    loaded.coordinator.last_exception = error
+    loaded.coordinator.last_update_success = False
+    report = await async_get_config_entry_diagnostics(hass, private_entry)
+    detail = report["coordinator"]["last_error"]
+    assert len(detail) == 8 and detail["missing_fields"] == missing
+    assert detail["received_length"] == detail["expected_length"] == 9
+    assert f"missing_fields={missing}" in str(error)
+    assert frame.hex() not in json.dumps(report) + str(error)
+    assert_private_absent(report, private_entry)
+
+
+@pytest.mark.parametrize(
     "field, value",
     [
         ("phase", SECRET),
