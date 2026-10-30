@@ -63,6 +63,95 @@ def test_correlation_failure_has_no_transaction_or_register_values():
 
 
 @pytest.mark.parametrize(
+    "function, missing",
+    [
+        (3, "byte_count"),
+        (4, "byte_count"),
+        (0x83, "exception_code"),
+        (0x84, "exception_code"),
+    ],
+)
+def test_complete_mbap_can_still_lack_a_required_pdu_field(function, missing):
+    # Length=2 proves Unit ID + function, without the second required PDU byte.
+    frame = bytes.fromhex("0effff0000000201") + bytes([function])
+    report = response_diagnostic(frame, "response_validation").safe_report()
+    assert report["received_length"] == report["expected_length"] == 9
+    assert report["missing_fields"] == missing
+    assert report["rejection"] == "invalid_response"
+
+
+def test_missing_field_inference_has_closed_cardinality_for_unknown_functions():
+    reports = set()
+    for function in range(256):
+        frame = bytes.fromhex("0effff0000000201") + bytes([function])
+        diagnostic = response_diagnostic(frame, "response_validation")
+        report = HobenProtocolError(diagnostic).safe_report()
+        assert len(report) == 9
+        expected = (
+            "byte_count"
+            if function in {3, 4}
+            else "exception_code"
+            if function in {0x83, 0x84}
+            else "unknown"
+        )
+        assert report["missing_fields"] == expected
+        assert report["message_type"] == "data_response_client"
+        assert report["received_length"] == report["expected_length"] == 9
+        reports.add(json.dumps(report, sort_keys=True))
+    assert len(reports) == 3  # No function/code, identifier or payload escapes.
+
+
+@pytest.mark.parametrize("function", [4, 0x84])
+@pytest.mark.parametrize(
+    "header, suffix, missing, expected",
+    [
+        ("0effff00000003", b"", "message_body", 10),
+        ("0effff00010002", b"", "none", "not_proven"),
+        ("0effff00000002", b"PRIVATE_PAYLOAD", "none", 9),
+    ],
+)
+def test_missing_pdu_field_needs_an_exact_validated_frame(
+    function, header, suffix, missing, expected
+):
+    frame = bytes.fromhex(header) + b"\x01" + bytes([function]) + suffix
+    report = response_diagnostic(frame, "response_validation").safe_report()
+    assert report["expected_length"] == expected
+    assert report["missing_fields"] == missing
+    assert "PRIVATE" not in json.dumps(report)
+
+
+@pytest.mark.parametrize(
+    "function, missing", [(4, "byte_count"), (0x84, "exception_code")]
+)
+@pytest.mark.parametrize("split", range(1, 9))
+def test_real_session_reports_missing_pdu_field_after_fragmentation_and_concatenation(
+    function, missing, split, caplog
+):
+    import asyncio
+
+    from tests.test_v4_persistent import Factory
+
+    async def scenario():
+        factory = Factory()
+        lifecycle = factory.lifecycle(retry_delays=())
+        await lifecycle.connect()
+        frame = bytes.fromhex("0effff0000000201") + bytes([function])
+        factory.streams[0].chunks = [frame[:split], frame[split:] + b"\x0a"]
+        with pytest.raises(HobenProtocolError) as caught:
+            await lifecycle.request_v4_data()
+        report = caught.value.safe_report()
+        assert report["phase"] == "response_validation"
+        assert report["missing_fields"] == missing
+        assert report["received_length"] == report["expected_length"] == 9
+        assert len(report) == 9 and caught.value.args == ("malformed_response",)
+        assert frame.hex() not in json.dumps(report) + caplog.text
+        await lifecycle.close()
+        factory.assert_clean()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
     "field,value",
     [
         ("phase", "PRIVATE"),
