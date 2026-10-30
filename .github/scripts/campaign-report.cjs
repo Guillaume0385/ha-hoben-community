@@ -43,6 +43,28 @@ function status(c,s,m) {
   const expected={'open-errors':1,'refresh-v4':2,'session-reuse':3,cleanup:1,availability:2}[s];
   return m.available&&m.reads===expected&&m.reads_ok===expected?'SUCCESS':'FAILURE';
 }
+function haControlled(e) {
+  if(!Object.hasOwn(e,'recovery'))return false;
+  const r=e.recovery,w=e.window,o=w.observation;
+  object(r,['mode','boundary_proven','outcome','accepted_at_ms','suppressed_pongs',
+    'loss_generation','loss_after_ms','reopened_after_ms','read_generation','read_sequence','recovery_pongs','stable_ms']);
+  check(r.mode==='pong_inhibition_after_120s'&&r.boundary_proven===false);
+  check(['not_exercised','no_disconnect','reopen_failed','stability_lost','verified','timeout','internal','closed'].includes(r.outcome));
+  for(const k of ['accepted_at_ms','loss_after_ms','reopened_after_ms'])check(r[k]===null||int(r[k],0,600000));
+  for(const k of ['loss_generation','read_generation'])check(r[k]===null||int(r[k],1,2));
+  check(r.read_sequence===null||int(r.read_sequence,1,6));
+  for(const k of ['suppressed_pongs','recovery_pongs'])check(int(r[k],0,1048576));
+  check(int(r.stable_ms,0,120000));
+  const proven=r.accepted_at_ms!==null&&r.suppressed_pongs>0&&r.recovery_pongs>0&&
+    r.loss_generation===1&&r.read_generation===2&&r.read_sequence!==null&&r.stable_ms===120000&&
+    r.loss_after_ms!==null&&r.reopened_after_ms!==null&&120000<=r.loss_after_ms&&r.loss_after_ms<r.reopened_after_ms&&r.reopened_after_ms<240000&&
+    r.accepted_at_ms+r.reopened_after_ms+120000<=w.elapsed_ms&&w.active&&o!==null&&
+    o.generation===2&&o.read_generation===2&&o.loss_generation===1&&['transport','close_client'].includes(o.loss_kind)&&!o.stopped&&!o.cleanup_failed&&
+    e.samples.some(s=>s.decoded&&s.available&&s.at_ms>=r.accepted_at_ms+r.reopened_after_ms&&
+      s.observation.read_generation===2&&s.observation.read_sequence===r.read_sequence&&s.observation.loss_generation===1&&s.observation.cleaned_generation===1);
+  check(r.outcome!=='verified'||proven);
+  return r.outcome==='verified'&&proven;
+}
 function haDetail(s,d) {
   object(d,['supervisor','evidence']);
   const r=d.supervisor,e=d.evidence;
@@ -59,7 +81,7 @@ function haDetail(s,d) {
     object(e,['completed','samples','window','cleanup']);
     logical=baseline.validateObservation({supervisor:{...r,network:'none'},...e},true);
   } else {
-    object(e,['completed','samples','window','cleanup','terminal']);
+    object(e,['completed','samples','window','cleanup','terminal',...(s==='session-reconnect'&&Object.hasOwn(e,'recovery')?['recovery']:[])]);
     check(errors.includes(e.terminal)&&typeof e.completed==='boolean'&&Array.isArray(e.samples)&&e.samples.length<=6);
     check(r.started||e.samples.length===0);
     let previous=null,at=-1;
@@ -88,6 +110,7 @@ function haDetail(s,d) {
     check(!e.completed||e.samples.length>0&&e.terminal==='none'&&w.observation!==null);
     object(e.cleanup,['completed','observation']);check(typeof e.cleanup.completed==='boolean');
     inspect(e.cleanup.observation);if(previous)progress(previous,e.cleanup.observation);
+    if(s==='session-reconnect')haControlled(e);
   }
   check(Buffer.byteLength(JSON.stringify(d))<=8192);
   const m=blank('ha'),o=e.cleanup.observation,w=e.window.observation;
@@ -96,6 +119,7 @@ function haDetail(s,d) {
     cleanup:r.reaped&&e.cleanup.completed&&o.stopped&&!o.cleanup_failed&&o.cleaned_generation===o.generation});
   m.reused=e.samples.some((b,i)=>i>0&&e.samples[i-1].decoded&&b.decoded&&e.samples[i-1].observation.read_generation===b.observation.read_generation&&b.observation.read_sequence===e.samples[i-1].observation.read_sequence+1);
   m.recovered=e.samples.some(v=>v.decoded&&v.observation.loss_generation!==null&&v.observation.read_generation>v.observation.loss_generation&&v.observation.cleaned_generation!==null&&v.observation.cleaned_generation>=v.observation.loss_generation&&!v.observation.cleanup_failed);
+  if(s==='session-reconnect')m.recovered=haControlled(e);
   if(w){m.loss_kind=w.loss_kind||'none';m.close_client_subcode=w.close_client_subcode;}
   m.available=e.window.active&&e.samples.length>0&&(s==='hoben-live'?e.samples.at(-1).decoded:e.samples.at(-1).available);
   if(s==='hoben-live')m.continuous=logical.criteria.continuous_300s==='SUCCESS';
@@ -190,7 +214,7 @@ function prepare(env=process.env) {
 // Presentation uses only independently validated fields and this fixed catalog.
 // The limits are design ceilings, never minimum durations or success evidence.
 function bounds(c,s) {
-  if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
+  if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':s==='session-reconnect'?'Pong de test inhibés dès 120 s ; reprise <240 s ; stabilité 120 s ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
   return {
     'tls-only':'1 TLS ; 0 lecture',
     'session-open':'1 ouverture ; 0 lecture',

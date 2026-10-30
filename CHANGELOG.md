@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #126, reconnexion HA avec inhibition Pong de banc
+
+- Simulation isolée du seul scénario session-reconnect HA : Pong filtrés après
+  120 s sur la première génération, sans fermeture locale ni changement au
+  client HA installé ; vrai client, lifecycle et coordinator conservés.
+- Preuves de perte, reprise avant 240 s, lecture corrélée, Pong rétablis et
+  stabilité 120 s vérifiées indépendamment en Python/Node ; bornes et cleanup
+  conservés, anciens témoins naturels insuffisants pour SUCCESS.
+- Tests offline uniquement. La cause historique de session-reuse reste inconnue
+  et sa correction est reportée ; aucun test réel ni changement H1/H2 ou main.
+
 ## En cours — #160, DataUpdated et récupération locale sur le même TLS
 
 - Notifications valides ignorées sans décodage, snapshot ou résolution du waiter.

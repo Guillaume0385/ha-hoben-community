@@ -7,6 +7,12 @@ lectures planifiées réussies ainsi qu’une session encore active dans les
 compléments HA ordinaires ; seule la reconnexion tolère une lecture échouée
 avant récupération attestée. Elle préserve les plafonds ci-dessous.
 
+La tâche **028**, arbitrée le 30/10/2026, remplace la seule simulation HA
+session-reconnect par une [inhibition Pong de banc isolée](ha-controlled-reconnect.md)
+après 120 s, reprise avant 240 s et stabilité 120 s. Le code HA installé et ses
+Pong ne changent pas. La cause historique du défaut session-reuse reste inconnue ;
+sa correction est reportée conformément au périmètre de première livraison.
+
 Contrat courant : **HOBEN-126-EXPERIMENTAL-TEST-PARITY-027**, selon le
 [commentaire MANAGER canonique](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641)
 et la décision propriétaire du **29/10/2026** dans #126. L’arbitrage est clos :
@@ -63,7 +69,7 @@ La politique cesse uniquement de répondre aux Ping par des Pong du client de
 **test expérimental**, puis rétablit les Pong sur une nouvelle génération. Elle
 n'envoie aucune commande au serveur/poêle, ne ferme pas un transport pour
 fabriquer une perte et ne prétend pas prouver une causalité serveur. La voie HA
-naturelle et ses limites restent distinctes et inchangées.
+de production et ses limites restent distinctes et inchangées.
 
 ### Correspondance des collecteurs et preuve
 
@@ -115,7 +121,7 @@ NOT RUN.** La livraison n'autorise aucun dispatch ou rerun réel.
 | open-errors | 90 s | Premier refresh du vrai coordinator et catégorie de son éventuelle erreur ; aucun credential volontairement invalide. |
 | refresh-v4 | 120 s | Deux refreshs et nouveaux objets HobenCoordinatorData issus du décodage V4. |
 | session-reuse | 180 s | Trois refreshs, même génération et séquences corrélées successives. |
-| session-reconnect | 600 s | Six refreshs maximum ; perte naturelle, cleanup de l’ancienne génération et nouvelle lecture corrélée. Arrêt après récupération prouvée, sinon observation bornée puis INCONCLUSIVE. |
+| session-reconnect | 600 s | Banc HA isolé : Pong de la première génération inhibés après 120 s, perte effective puis réouverture avant 240 s, lecture corrélée, Pong rétablis et stabilité 120 s. Deux ouvertures, six refreshs maximum ; aucune panne par fermeture locale. Sans preuve complète : INCONCLUSIVE. |
 | cleanup | 60 s | Ouverture/lecture puis fermeture effective, état arrêté et génération nettoyée. |
 | availability | 120 s | Deux refreshs, état last_update_success/data du vrai coordinator et catégories d’erreur ; aucune disponibilité fictive. |
 | all | 1800 s | Sept exécutions indépendantes, cleanup entre elles ; maxima individuels 1530 s, marge 270 s. |

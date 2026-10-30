@@ -58,7 +58,13 @@ async def test_every_scenario_uses_actual_persistent_client_and_coordinator(
             await asyncio.sleep(0)
 
     evidence = await observe(coordinator, scenario, clock=lambda: now[0], sleep=sleep)
-    expected = 6 if scenario == "hoben-live" else len(SCHEDULES[scenario])
+    expected = (
+        6
+        if scenario == "hoben-live"
+        else 4
+        if scenario == "session-reconnect"
+        else len(SCHEDULES[scenario])
+    )
     assert len(evidence["samples"]) == expected and all(
         s["decoded"] for s in evidence["samples"]
     )
@@ -90,7 +96,7 @@ async def test_every_scenario_uses_actual_persistent_client_and_coordinator(
 
 
 @pytest.mark.parametrize("loss", [TransportEOF("PRIVATE_PAYLOAD"), b"\x05\x07"])
-async def test_natural_ha_reconnection_recovers_actual_coordinator_data(
+async def test_loss_before_test_inhibition_cannot_attest_controlled_reconnection(
     hass, entry, peers, loss, caplog
 ):
     peers.wire(DEVICE_GUID, [[RESPONSE], [loss]])
@@ -115,9 +121,11 @@ async def test_natural_ha_reconnection_recovers_actual_coordinator_data(
     )
     d = detail("session-reconnect", evidence, int(now[0] * 1000))
     m = project("session-reconnect", d)
-    assert m["recovered"] and m["opens"] == 2 and m["cleanup"]
+    assert not m["recovered"] and m["cleanup"]
+    assert evidence["recovery"]["outcome"] == "not_exercised"
+    assert evidence["recovery"]["suppressed_pongs"] == 0
     assert evidence["samples"][1]["decoded"] is False
-    assert evidence["samples"][-1]["decoded"] is True
+    assert evidence["samples"][-1]["decoded"] is False
     assert m["loss_kind"] == (
         "transport" if isinstance(loss, Exception) else "close_client"
     )
@@ -134,7 +142,7 @@ async def test_late_loss_without_another_read_is_not_recovery(hass, entry, peers
 
     async def sleep(delay):
         now[0] += delay
-        if now[0] > 500:
+        if now[0] >= 239:
             wire.queue.put_nowait(TransportEOF("PRIVATE_PAYLOAD"))
         for _ in range(20):
             await asyncio.sleep(0)

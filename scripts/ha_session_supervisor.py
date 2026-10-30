@@ -112,6 +112,8 @@ class SourceBundle:
                         "ha_campaign_worker.py",
                         "ha_campaign_observer.py",
                         "ha_campaign_evidence.py",
+                        "ha_pong_injection.py",
+                        "ha_reconnect_observer.py",
                         "campaign_runtime_contract.py",
                         "ha_campaign_plan.py",
                         "protocol_campaign_plan.py",

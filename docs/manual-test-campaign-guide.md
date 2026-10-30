@@ -63,7 +63,7 @@ universelle. La campagne protocole ne valide pas l’intégration HA.
 | `open-errors` | Un refresh d’ouverture/lecture réussi, ou son erreur catégorielle. Ne provoque aucune erreur d’identifiants. | 90 s |
 | `refresh-v4` | Deux refreshs décodés successifs, tous deux réussis. | 120 s |
 | `session-reuse` | Trois refreshs réussis, réutilisation de génération et nouvelles séquences corrélées. | 180 s |
-| `session-reconnect` | Perte naturelle, nettoyage de l’ancienne génération et nouvelle lecture corrélée ; sinon INCONCLUSIVE. | 600 s |
+| `session-reconnect` | Test HA isolé : inhibition des seuls Pong après 120 s, perte effective, réouverture avant 240 s, lecture corrélée puis 120 s stables avec Pong rétablis ; sinon INCONCLUSIVE. Aucun changement aux Pong du client HA installé. | 600 s ; 2 ouvertures, 6 refreshs maximum |
 | `cleanup` | Un refresh puis fermeture effectivement attestée. | 60 s |
 | `availability` | Deux refreshs réussis et disponibilité constatée du coordinator à la fin de l’observation. | 120 s |
 | `all` | Les sept étapes ci-dessus, indépendantes et séquentielles. | 1800 s ; somme des maxima individuels 1530 s |
