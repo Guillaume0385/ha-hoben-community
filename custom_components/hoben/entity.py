@@ -27,6 +27,11 @@ class HobenEntity(CoordinatorEntity[HobenDataUpdateCoordinator]):
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.unique_id)})
 
     @property
+    def available(self) -> bool:
+        """Keep last values during the explicitly authorized local recovery."""
+        return self.coordinator.data_updated_hold is True or super().available
+
+    @property
     def stove_state(self) -> V4StoveState:
         """Read only memory; entity properties cannot reach the protocol client."""
         return self.coordinator.data.state

@@ -18,6 +18,12 @@ class HobenError(Exception):
         return {"state": "error", "error": self.code}
 
 
+class HobenDataUpdatedRecoveryError(HobenError):
+    """Acquisition deferred by the owner's explicit 30 s recovery hypothesis."""
+
+    code = "data_updated_recovery"
+
+
 class HobenInvalidInputError(HobenError, ValueError):
     """Invalid local identity/settings, rejected before any transport creation."""
 

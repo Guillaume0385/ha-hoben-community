@@ -394,6 +394,23 @@ class V4Lifecycle:
         if error is not None:
             raise error from None
 
+    @property
+    def data_updated_transport_alive(self):
+        return (
+            self.state is SessionState.CONNECTED
+            and self._session is not None
+            and self._session.state is SessionState.CONNECTED
+        )
+
+    @property
+    def data_updated_recovering(self):
+        """Same-session acquisition recovery, independent of reconnect policy."""
+        return (
+            self.state is SessionState.CONNECTED
+            and self._session is not None
+            and self._session.data_updated_recovering
+        )
+
     async def wait_connected(self) -> None:
         """Wait for recovery, or raise its terminal result without cancelling it."""
         if self._stopping:
@@ -497,6 +514,8 @@ class V4Lifecycle:
         # Omit new options for existing injected factories and campaign paths.
         if self._mode is V4SessionMode.PERSISTENT:
             kwargs["mode"] = self._mode
+        if self._ha_reconnect:
+            kwargs["recover_data_updated"] = True
         if self._opening_options is not None:
             kwargs["opening_options"] = self._opening_options
         if cap is not None:

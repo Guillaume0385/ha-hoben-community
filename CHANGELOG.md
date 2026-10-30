@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #160, DataUpdated et récupération locale sur le même TLS
+
+- Notifications valides ignorées sans décodage, snapshot ou résolution du waiter.
+- Politique HA option B : WARNING expurgé, abandon RX borné et silence glissant
+  de 30 s avant une seule lecture V4 strictement validée ; aucune reconnexion
+  pour cette seule anomalie, ni resynchronisation par recherche de signature.
+- Dernières valeurs HA conservées pendant le différé sans faux rafraîchissement ;
+  vraies pertes transport/TLS, annulation et nettoyage préservés.
+- Tests offline à horloge simulée et documentation des limites de l'hypothèse ;
+  codecs, campagnes et budgets inchangés. Tests réels NOT RUN.
+
 ## En cours — #152, champs PDU absents dans le diagnostic MBAP
 
 - Une réponse MBAP complète de Length=2 signale le champ `byte_count` ou
