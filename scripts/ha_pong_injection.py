@@ -5,6 +5,7 @@ session factory is decorated, while the original lifecycle/session algorithms
 remain in charge. No packet is parsed, forged, replayed or retained here.
 """
 
+import asyncio
 from contextlib import contextmanager
 from functools import partial
 
@@ -115,6 +116,7 @@ class PongInjection:
             need(
                 self.enabled
                 and client._lifecycle is None
+                and client._active_operation is asyncio.current_task()
                 and options.get("mode") is V4SessionMode.PERSISTENT
                 and options.get("ha_reconnect") is False
             )

@@ -201,6 +201,9 @@ async def test_production_policy_and_overlapping_injector_are_refused(entry, pee
             pytest.fail("production HA policy must never be instrumented")
     client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
     with PongInjection(lambda: 0, 600).install(client):
+        other = HobenClient(entry.data["user_guid"], DEVICE_GUID)
+        with pytest.raises(ValueError, match="campaign_contract_refused"):
+            await other.async_refresh()
         with pytest.raises(ValueError, match="campaign_contract_refused"):
             with PongInjection(lambda: 0, 600).install(client):
                 pytest.fail("overlap must be refused")
