@@ -3,12 +3,14 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .client import HobenClient, RawStoveSnapshot
 from .const import CONF_DEVICE_GUID, DOMAIN, UPDATE_INTERVAL
@@ -25,7 +27,7 @@ from .exceptions import (
 from .helpers import log_unexpected_error
 from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason
 from .profiles import StoveProfile
-from .safe_reports import wrap_error
+from .safe_reports import safe_error_report, wrap_error
 from .v4_experiment import ExperimentalCloseClientError
 from .v4_state import V4StoveState, decode_v4_snapshot
 
@@ -61,7 +63,10 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         self.client = client
         self.data_updated_hold = False
         self.data_updated_deferred = False
-        self._notify_data_updated_failure = False
+        self.last_successful_read_at: datetime | None = None
+        self._snapshot_hold = False
+        self._hold_loss_generation = None
+        self._notify_held_failure = False
 
         async def stop_client(_event) -> None:
             # The one-shot bus listener is already removed before invocation.
@@ -78,44 +83,102 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def async_shutdown(self) -> None:
         """Cancel scheduling and the entry's shutdown hook; unload closes the client."""
         await super().async_shutdown()
+        self._snapshot_hold = self.data_updated_hold = False
+        self.async_update_listeners()
         if self._unsub_client_stop is not None:
             self._unsub_client_stop()
             self._unsub_client_stop = None
 
+    @property
+    def last_snapshot_held(self) -> bool:
+        """Availability of old validated values is never connection/freshness."""
+        observation = self.client.session_observation
+        return (
+            self._snapshot_hold
+            and not self._shutdown_requested
+            and self.data is not None
+            and self.last_successful_read_at is not None
+            and observation.stopped is not True
+            and observation.loss_generation == self._hold_loss_generation
+            and (
+                self.client.data_updated_transport_alive is True
+                or self.client.acquisition_recovery_pending is True
+            )
+        )
+
+    @property
+    def snapshot_available(self) -> bool:
+        """A shutdown or terminal failure cannot be covered by retained data."""
+        return (
+            not self._shutdown_requested
+            and self.client.session_observation.stopped is not True
+            and self.data is not None
+            and (self.last_update_success or self.last_snapshot_held)
+        )
+
     async def _async_update_data(self) -> HobenCoordinatorData:
         """Retain values during recovery without reporting a successful read."""
-        was_holding = self.data_updated_hold
-        self._notify_data_updated_failure = False
-        if was_holding and self.client.data_updated_transport_alive is not True:
-            self.data_updated_hold = False
+        was_holding = self._snapshot_hold
+        self._notify_held_failure = False
+        if was_holding and not self.last_snapshot_held:
+            self._snapshot_hold = self.data_updated_hold = False
             self.async_update_listeners()
+            was_holding = False  # Already notified before any potentially slow I/O.
         try:
+            if (
+                self.data is not None
+                and self.client.ha_recovery_pending is True
+                and self.client.data_updated_transport_alive is not True
+            ):
+                # A pending owner is not an acquisition. Return to HA's normal
+                # poll instead of waiting forever through repeated open failures.
+                source = (
+                    self.last_exception
+                    if self.last_snapshot_held and self.last_exception is not None
+                    else HobenTransportError()
+                )
+                raise wrap_error(UpdateFailed, "Hoben session recovery pending", source)
             data = await self._async_update_once()
         except HobenDataUpdatedRecoveryError as error:
             self.data_updated_deferred = True
-            self.data_updated_hold = self.data is not None
+            self._snapshot_hold = self.data_updated_hold = self.data is not None
+            self._hold_loss_generation = self.client.session_observation.loss_generation
             raise wrap_error(
                 UpdateFailed, "Hoben DataUpdated recovery pending", error
             ) from None
+        except Exception as error:
+            self.data_updated_deferred = self.data_updated_hold = False
+            category = (safe_error_report(error) or {}).get("error")
+            self._snapshot_hold = category in {
+                "malformed_response",
+                "timeout",
+                "invalid_v4_snapshot",
+            }
+            self._hold_loss_generation = self.client.session_observation.loss_generation
+            self._snapshot_hold = self.last_snapshot_held
+            self._notify_held_failure = was_holding and not self._snapshot_hold
+            raise
         except BaseException:
             self.data_updated_deferred = False
-            self.data_updated_hold = False
-            self._notify_data_updated_failure = was_holding
+            self._snapshot_hold = self.data_updated_hold = False
+            # Cancellation closes the real client's owner; notify even though
+            # HA re-raises before its usual refresh-finished listener callback.
+            self.async_update_listeners()
             raise
-        self.data_updated_hold = False
+        self._snapshot_hold = self.data_updated_hold = False
         self.data_updated_deferred = False
         return data
 
     def async_update_listeners(self) -> None:
         """Do not report old sensor values as freshly acquired during a hold."""
-        if not self.data_updated_hold:
+        if not self.last_snapshot_held:
             super().async_update_listeners()
 
     def _async_refresh_finished(self) -> None:
         """A genuine failure ends the value hold even after repeated deferrals."""
         super()._async_refresh_finished()
-        if self._notify_data_updated_failure and not self.last_update_success:
-            self._notify_data_updated_failure = False
+        if self._notify_held_failure and not self.last_update_success:
+            self._notify_held_failure = False
             self.async_update_listeners()
 
     async def _async_update_once(self) -> HobenCoordinatorData:
@@ -137,6 +200,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 raise HobenUnsupportedProfileError(snapshot.profile)
             state = decode_v4_snapshot(snapshot)
             self._persist_identity()
+            self.last_successful_read_at = dt_util.utcnow()
             return HobenCoordinatorData(raw=snapshot, state=state)
         except HobenDataUpdatedRecoveryError:
             raise

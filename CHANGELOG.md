@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #163 A1, continuité des dernières valeurs HA validées
+
+- Maintien des états/disponibilités pendant les erreurs d'acquisition
+  récupérables, sans faux succès, listener de valeur ni rafraîchissement inventé.
+- Dernière lecture validée horodatée dans les diagnostics, âge croissant pendant
+  les échecs ; vraie perte transport, erreur permanente et arrêt restent distincts.
+- Reprise sur nouvelle acquisition complète, même propriétaire et temporisation
+  HA conservés ; contrat DataUpdated inchangé, aucun capteur A2 ajouté.
+- Régressions unitaires/HA hors ligne et documentation de la sémantique ; aucun
+  test réel, changement de codec/parseur, commande poêle, workflow ou main.
+
 ## En cours — #126, reconnexion HA avec inhibition Pong de banc
 
 - Simulation isolée du seul scénario session-reconnect HA : Pong filtrés après

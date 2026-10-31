@@ -890,3 +890,34 @@ def test_failed_transport_cleanup_cannot_reopen_from_later_refresh(tls):
 
     asyncio.run(run())
     tls.pairs[0].writer.transport.abort.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        (None, True),
+        ("malformed_response", True),
+        ("timeout", True),
+        ("transport_unavailable", False),
+        ("tls_verification_failed", False),
+        ("invalid_credentials", False),
+        ("cleanup_failed", False),
+        ("internal_failure", False),
+    ],
+)
+def test_pending_acquisition_hint_cannot_hide_later_transport_or_permanent_failure(
+    failure, expected
+):
+    client = make_client(ha_reconnect=True)
+    assert not client.acquisition_recovery_pending
+    client._lifecycle = SimpleNamespace(
+        ha_recovery_pending=True,
+        data_updated_transport_alive=False,
+        snapshot=SimpleNamespace(failure=failure),
+    )
+    assert client.acquisition_recovery_pending is expected
+    client._lifecycle.ha_recovery_pending = False
+    assert not client.acquisition_recovery_pending
+    client._lifecycle.ha_recovery_pending = True
+    client._closed = True
+    assert not client.acquisition_recovery_pending

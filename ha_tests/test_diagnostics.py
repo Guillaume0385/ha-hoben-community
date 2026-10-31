@@ -193,7 +193,7 @@ async def loaded(hass, private_entry, client_factory, client, snapshot):
 
 
 async def test_loaded_diagnostics_schema_is_private_deterministic_and_read_only(
-    hass, private_entry, client_factory, client, loaded, caplog
+    hass, private_entry, client_factory, client, freezer, loaded, caplog
 ):
     """The adapter may read only metadata and must not even schedule work."""
     coordinator = loaded.coordinator
@@ -235,6 +235,11 @@ async def test_loaded_diagnostics_schema_is_private_deterministic_and_read_only(
                 "last_update_success": True,
                 "update_interval_seconds": 60,
                 "snapshot_available": True,
+                "snapshot_held": False,
+                "last_successful_read_at": (
+                    coordinator.last_successful_read_at.isoformat()
+                ),
+                "last_successful_read_age": 0,
                 "last_error": None,
             },
             "snapshot": {

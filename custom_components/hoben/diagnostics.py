@@ -8,6 +8,7 @@ the public HA export. Do not inspect exception chains or serialize whole objects
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from . import HobenConfigEntry, HobenRuntimeData
 from .client import RawStoveSnapshot
@@ -62,6 +63,24 @@ async def async_get_config_entry_diagnostics(
         "last_update_success": coordinator.last_update_success is True,
         "update_interval_seconds": int(UPDATE_INTERVAL.total_seconds()),
         "snapshot_available": snapshot_available,
+        "snapshot_held": coordinator.last_snapshot_held,
+        "last_successful_read_at": (
+            coordinator.last_successful_read_at.isoformat()
+            if coordinator.last_successful_read_at is not None
+            else None
+        ),
+        "last_successful_read_age": (
+            max(
+                0,
+                int(
+                    (
+                        dt_util.utcnow() - coordinator.last_successful_read_at
+                    ).total_seconds()
+                ),
+            )
+            if coordinator.last_successful_read_at is not None
+            else None
+        ),
         "last_error": (
             safe_error_report(coordinator.last_exception)
             if coordinator.last_update_success is not True
