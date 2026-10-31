@@ -8,6 +8,7 @@ No register interpretation, Home Assistant or research capture lives here.
 import time
 from dataclasses import dataclass, field
 
+from .error_phases import error_boundary
 from .exceptions import HobenClosedError, HobenProtocolError
 from .malformed import MalformedDiagnostic, message_name
 from .modbus import modbus_tcp_frame_size
@@ -404,9 +405,10 @@ class ExperimentalV4Framer:
                 if len(self._buffer) < prefix + 6:
                     continue
                 try:
-                    size = prefix + modbus_tcp_frame_size(
-                        bytes(self._buffer[prefix : prefix + 6])
-                    )
+                    with error_boundary("mbap_header"):
+                        size = prefix + modbus_tcp_frame_size(
+                            bytes(self._buffer[prefix : prefix + 6])
+                        )
                 except (TypeError, ValueError):
                     if self._buffer[0] == 27 and self._recover_data_updated:
                         # Only persistent reception opts into owner-authorized

@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #163 B1, phases prouvées du diagnostic d'erreur V4
+
+- Provenance fermée pour lecture TLS, message/framing/MBAP, décodage PDU/modèle,
+  stockage et cleanup ; catégories et classes d'exception informatives préservées.
+- Propagation aux wrappers/diagnostics HA, au capteur A2 et aux logs expurgés ;
+  unknown sans preuve, aucun traceback ni chemin privé exporté par les logs.
+- Tests déterministes sur les vrais composants, setup/refresh, sécurité et A1 ;
+  [chemins, limites et prérequis B2](docs/error-phase-diagnostic.md) documentés.
+- Aucun changement de retries/backoff, codec/framing, politique DataUpdated,
+  workflow ou main ; aucune commande poêle ni test réel exécuté.
+
 ## En cours — #163 A2, capteur de diagnostic de session HA
 
 - Un capteur Session enum traduit distingue connected, recovering, reconnecting

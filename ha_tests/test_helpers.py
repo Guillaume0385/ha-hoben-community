@@ -51,7 +51,8 @@ async def test_error_logging_with_empty_source_cache_never_reads_disk(
         source_lines.assert_not_called()
         assert linecache.cache == {}
 
-    assert "stack locations" in caplog.text
-    assert __file__ in caplog.text
-    assert "in _raise_private_error" in caplog.text
+    assert "error=unexpected_error, phase=unknown" in caplog.text
+    assert "stack locations" not in caplog.text
+    assert __file__ not in caplog.text
+    assert "_raise_private_error" not in caplog.text
     assert_private_values_absent(caplog.text)
