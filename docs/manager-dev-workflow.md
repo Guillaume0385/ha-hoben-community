@@ -52,6 +52,67 @@ Modèle de prompt à remettre :
 
 MANAGER évite les notifications répétées d'une même version de tâche ; si la preuve d'une notification antérieure manque, il ne l'invente pas. Une tâche corrigée ou une nouvelle intervention manuelle nécessaire justifie une nouvelle notification.
 
+
+## Modèles et reprogrammation des automatisations MANAGER / CODEX DEV
+
+Cette section s'applique aux automatisations **existantes** du propriétaire, et non à des workflows GitHub Actions. Elle ne crée aucune autorisation implicite de développement. Une demande explicite du propriétaire de **lancer, reprendre ou poursuivre un développement identifié** autorise MANAGER à préparer la tâche correspondante et à reprogrammer les agents sans que le propriétaire ait à redemander les horaires. MANAGER vérifie auparavant la tâche, l'absence de conflit et les règles de sécurité.
+
+### Paramètres de programmation
+
+- **CODEX DEV** : activer et reprogrammer sa tâche existante pour une exécution **5 minutes après la préparation et la vérification GitHub** d'une consigne autorisée en `state:ready`.
+- **MANAGER** : activer et reprogrammer sa tâche existante pour une exécution **30 minutes après l'exécution prévue de CODEX DEV**, soit **35 minutes après la préparation** dans le cas nominal.
+- Utiliser les identifiants d'automatisation existants et leur fuseau horaire ; ne pas créer de doublons, ne pas modifier les autres tâches. Reprogrammer par délai relatif calculé au moment de l'action, et vérifier les confirmations retournées. Si l'heure réelle du lancement CODEX diffère ou est inconnue, ne pas prétendre que MANAGER est exactement 30 minutes après son exécution effective : le décalage concerne l'horaire **prévu**.
+- **Aucune tâche de développement autorisée** : désactiver l'automatisation CODEX DEV existante, vérifier le résultat ; laisser MANAGER actif pour le suivi, sans attribuer artificiellement une tâche.
+- Si une PR est en cours ou en revue, ne pas attribuer de deuxième développement ; MANAGER peut reprogrammer sa propre surveillance sans réactiver DEV pour une nouvelle tâche.
+- Toute erreur, permission manquante ou confirmation absente est rapportée explicitement ; aucune programmation n'est déclarée réussie sans preuve.
+
+### Modèle de prompt — MANAGER
+
+```text
+MANAGER — dépôt Guillaume0385/ha-hoben-community.
+Issue de référence : #<ISSUE> ; tâche active : <TASK_ID>.
+Lire AGENTS.md, project.md, protocol.md et docs/experimental-protocol-workflow.md
+sur experimental, puis l'Issue, le commentaire actif, les PR et les CI.
+Vérifier l'autorisation propriétaire, les dépendances, les labels state:*,
+la base experimental, le HEAD exact, le diff, les quatre checks
+tests/ha-tests/hacs/hassfest et les règles lecture seule/confidentialité.
+Une seule petite PR de développement active ; revue, correction sur même PR,
+fusion seulement si conforme ; bilan GitHub et tâche suivante.
+Après publication et vérification d'une nouvelle consigne CODEX DEV autorisée
+en state:ready : activer/reprogrammer CODEX DEV existant dans 5 minutes,
+puis activer/reprogrammer MANAGER existant 30 minutes après l'horaire prévu
+de CODEX DEV (35 minutes après préparation nominale).
+Sans nouvelle tâche autorisée : désactiver CODEX DEV et confirmer ;
+MANAGER conserve le suivi. Ne jamais créer d'automatisation en doublon.
+Aucun test réel ni commande poêle sans autorisation et mécanisme dédiés.
+```
+
+### Modèle de prompt — CODEX DEV
+
+```text
+CODEX DEV — dépôt Guillaume0385/ha-hoben-community.
+Prendre exclusivement l'Issue #<ISSUE> et TASK_ID <TASK_ID> si state:ready,
+TASK_OWNER: CODEX_DEV, TARGET_BRANCH: experimental et autorisation vérifiée.
+Lire les quatre documents obligatoires sur experimental et la consigne active.
+Vérifier qu'aucune autre tâche de développement n'est active.
+Passer à state:in-progress, travailler uniquement sur la petite tâche attribuée,
+tests hors ligne, une PR vers experimental, jamais main.
+À livraison : state:review, HEAD exact, tests et limites ; ne pas fusionner.
+Si bloqué, rapporter le motif ; aucune tâche de remplacement auto-attribuée.
+Lecture seule V4, TLS vérifié, aucune commande poêle, aucun secret/GUID/RX brut,
+aucun test réel depuis DEV ou CI ordinaire.
+La programmation de l'agent est gérée par MANAGER, pas par CODEX DEV.
+```
+
+### Procédure lors d'une demande du propriétaire
+
+1. Identifier l'Issue et la tâche autorisée ; si la demande est ambiguë, demander une clarification plutôt que choisir une autre Issue.
+2. Mettre à jour **les prompts des deux automatisations existantes** en suivant les modèles, avec Issue, TASK_ID, branche, périmètre et contraintes à jour ; conserver les identifiants existants et les consignes de sécurité.
+3. Publier/actualiser l'unique commentaire de tâche active sur GitHub, vérifier les critères, l'absence de conflit et `state:ready`.
+4. Activer/reprogrammer CODEX DEV à +5 min, puis MANAGER à +35 min (30 min après l'heure prévue de CODEX) ; vérifier les deux retours d'outil et les états activés.
+5. Après chaque fusion et préparation de tâche suivante, répéter la mise à jour des prompts et des horaires **automatiquement**, sans nouvelle demande d'horaire. Si aucune tâche suivante n'est autorisée, désactiver CODEX DEV.
+6. Rendre compte des modifications effectives et des échecs ; aucune mise à jour d'automatisation ne constitue une validation de CI ou de tests réels.
+
 ## Revue, fusion et suite
 
 Pour toute PR, vérifier `base.ref == experimental`, la correspondance avec la tâche active, le diff complet, le HEAD SHA exact, les remarques ouvertes, l'architecture, la confidentialité et les tests pertinents. Les quatre checks `tests`, `ha-tests`, `hacs`, `hassfest` doivent être réussis sur le HEAD examiné. Un check manquant, en attente ou en échec interdit la fusion.
