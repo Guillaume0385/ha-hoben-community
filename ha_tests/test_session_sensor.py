@@ -196,6 +196,9 @@ async def test_rejected_data_updated_probe_updates_error_without_a_new_episode(
         [[RESPONSE], [bytes.fromhex("0effff00000003018402")], [RESPONSE]],
     )
     coordinator = await load(hass, entry)
+    # Advancing to the second probe also reaches HA's ordinary 60 s poll.
+    # Isolate session notifications from that separate, genuine acquisition.
+    coordinator._async_unsub_refresh()
     stamp, before = coordinator.last_successful_read_at, measures(hass, entry)
     clock = Clock(monkeypatch)
     wire.queue.put_nowait(BAD)
