@@ -106,11 +106,11 @@ def registry_entities(hass, entry):
 
 
 def states(hass, entry):
-    """Return loaded states, excluding entities disabled in the entity registry."""
+    """Read-back values only; session diagnostics have an independent channel."""
     return {
         key: hass.states.get(entity.entity_id)
         for key, entity in registry_entities(hass, entry).items()
-        if entity.disabled_by is None
+        if entity.disabled_by is None and key != "session"
     }
 
 
@@ -144,7 +144,9 @@ async def test_setup_forwards_only_read_platforms_and_uses_one_refresh(
     forward.assert_awaited_once_with(entry, ("sensor", "binary_sensor"))
     client.async_refresh.assert_awaited_once_with()
     entities = registry_entities(hass, entry)
-    assert set(entities) == set(SENSOR_EXPECTATIONS) | set(BINARY_EXPECTATIONS)
+    assert set(entities) == set(SENSOR_EXPECTATIONS) | set(BINARY_EXPECTATIONS) | {
+        "session"
+    }
     assert {entity.domain for entity in entities.values()} == {
         "sensor",
         "binary_sensor",

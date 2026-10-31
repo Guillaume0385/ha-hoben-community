@@ -104,6 +104,15 @@
       },
       "derogation_duration": {
         "name": "Durée de dérogation"
+      },
+      "session": {
+        "name": "Session",
+        "state": {
+          "connected": "Connecté",
+          "recovering": "Récupération",
+          "reconnecting": "Reconnexion",
+          "disconnected": "Déconnecté"
+        }
       }
     },
     "binary_sensor": {

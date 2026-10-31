@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #163 A2, capteur de diagnostic de session HA
+
+- Un capteur Session enum traduit distingue connected, recovering, reconnecting
+  et disconnected sur les événements réels, indépendamment des mesures A1.
+- Sept attributs expurgés : erreur/phase/date, dernière acquisition validée et
+  âge local, compteurs de reconnexions acceptées et d'épisodes de récupération.
+- Aucun faux rafraîchissement des valeurs conservées ni poll réseau ajouté ;
+  callbacks/horloge locale retirés à l'unload et compteurs inconnus sans preuve.
+- Tests unitaires/HA déterministes, documentation des transitions et limites ;
+  aucun test réel, changement de retry/codec/framing, commande poêle ou main.
+  Voir [le contrat du capteur](docs/session-sensor.md).
+
 ## En cours — #163 A1, continuité des dernières valeurs HA validées
 
 - Maintien des états/disponibilités pendant les erreurs d'acquisition

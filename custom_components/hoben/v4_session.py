@@ -73,6 +73,7 @@ from .session import (
     SessionTimeout,
     _open_session,
 )
+from .session_monitor import SessionEvent, error_event, notify_status
 from .transport import (
     AsyncTlsTransport,
     TransportCertificateError,
@@ -337,6 +338,7 @@ class V4Session:
 
     __slots__ = (
         "_snapshot",
+        "_status_callback",
         "_transport_factory",
         "_transport",
         "_opening_task",
@@ -478,6 +480,7 @@ class V4Session:
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
         self._data_updated = DataUpdatedRecovery()
+        self._status_callback = None
         self._read_idle = asyncio.Event()
         self._read_idle.set()
 
@@ -490,6 +493,10 @@ class V4Session:
         length, reason = diagnostic
         recovery = self._data_updated
         recovery.begin()
+        notify_status(
+            self._status_callback,
+            SessionEvent("recovery", "malformed_response", "mbap_header"),
+        )
         if recovery.task is not None:
             self._fail_pending_read(HobenDataUpdatedRecoveryError())
         if not recovery.warned:
@@ -516,16 +523,25 @@ class V4Session:
                 raise HobenDataUpdatedRecoveryError()
         except asyncio.CancelledError:
             raise
-        except (HobenDataUpdatedRecoveryError, HobenModbusError, TimeoutError):
+        except (HobenDataUpdatedRecoveryError, HobenModbusError, TimeoutError) as error:
             # A rejected/expired probe never becomes a snapshot or a reconnect.
             # Require a fresh silence window; one task/one probe at a time.
+            if not isinstance(error, HobenDataUpdatedRecoveryError):
+                notify_status(
+                    self._status_callback,
+                    SessionEvent("error", "timeout")
+                    if isinstance(error, TimeoutError)
+                    else error_event(error),
+                )
             if not recovery.failure_logged:
                 recovery.failure_logged = True
                 _LOGGER.info("Hoben DataUpdated recovery [result=probe_not_verified]")
-        except HobenError:
-            pass  # Genuine transport/TLS/internal failures retain normal cleanup.
+        except HobenError as error:
+            # Genuine transport/TLS/internal failures retain normal cleanup.
+            notify_status(self._status_callback, error_event(error))
         else:
             recovery.active = False
+            notify_status(self._status_callback, SessionEvent("recovered"))
             recovery.warned = recovery.failure_logged = False
             if recovery.result is not None and not recovery.result.done():
                 recovery.result.set_result(result)
@@ -858,6 +874,7 @@ class V4Session:
         ):
             raise SessionStateError()
         self._snapshot = replace(self._snapshot, state=target)
+        notify_status(self._status_callback)
 
     @property
     def device_guid_for_persistence(self) -> str:

@@ -28,6 +28,7 @@ from .helpers import log_unexpected_error
 from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason
 from .profiles import StoveProfile
 from .safe_reports import safe_error_report, wrap_error
+from .session_monitor import SessionEvent, report_event
 from .v4_experiment import ExperimentalCloseClientError
 from .v4_state import V4StoveState, decode_v4_snapshot
 
@@ -85,9 +86,15 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         await super().async_shutdown()
         self._snapshot_hold = self.data_updated_hold = False
         self.async_update_listeners()
+        self._session_event()
         if self._unsub_client_stop is not None:
             self._unsub_client_stop()
             self._unsub_client_stop = None
+
+    def _session_event(self, event=SessionEvent()) -> None:
+        """Diagnostic channel, independent from measure listeners and their hold."""
+        if type(self.client) is HobenClient:
+            self.client.session_monitor.emit(event)
 
     @property
     def last_snapshot_held(self) -> bool:
@@ -119,6 +126,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def _async_update_data(self) -> HobenCoordinatorData:
         """Retain values during recovery without reporting a successful read."""
         was_holding = self._snapshot_hold
+        pending_owner = False
         self._notify_held_failure = False
         if was_holding and not self.last_snapshot_held:
             self._snapshot_hold = self.data_updated_hold = False
@@ -137,6 +145,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                     if self.last_snapshot_held and self.last_exception is not None
                     else HobenTransportError()
                 )
+                pending_owner = True
                 raise wrap_error(UpdateFailed, "Hoben session recovery pending", source)
             data = await self._async_update_once()
         except HobenDataUpdatedRecoveryError as error:
@@ -157,6 +166,18 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             self._hold_loss_generation = self.client.session_observation.loss_generation
             self._snapshot_hold = self.last_snapshot_held
             self._notify_held_failure = was_holding and not self._snapshot_hold
+            if not pending_owner:
+                # A model rejection is degraded even before A1 has a cache.
+                self._session_event(
+                    report_event(
+                        safe_error_report(error),
+                        recovering=self._snapshot_hold
+                        or (
+                            category == "invalid_v4_snapshot"
+                            and self.client.data_updated_transport_alive is True
+                        ),
+                    )
+                )
             raise
         except BaseException:
             self.data_updated_deferred = False
@@ -164,6 +185,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             # Cancellation closes the real client's owner; notify even though
             # HA re-raises before its usual refresh-finished listener callback.
             self.async_update_listeners()
+            self._session_event(SessionEvent("ended"))
             raise
         self._snapshot_hold = self.data_updated_hold = False
         self.data_updated_deferred = False
@@ -177,6 +199,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     def _async_refresh_finished(self) -> None:
         """A genuine failure ends the value hold even after repeated deferrals."""
         super()._async_refresh_finished()
+        self._session_event()
         if self._notify_held_failure and not self.last_update_success:
             self._notify_held_failure = False
             self.async_update_listeners()
@@ -201,6 +224,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             state = decode_v4_snapshot(snapshot)
             self._persist_identity()
             self.last_successful_read_at = dt_util.utcnow()
+            self._session_event(SessionEvent("read_succeeded"))
             return HobenCoordinatorData(raw=snapshot, state=state)
         except HobenDataUpdatedRecoveryError:
             raise
