@@ -71,6 +71,7 @@ async def enter_hold(hass, entry, peers, monkeypatch):
     coordinator = await load(hass, entry)
     previous = coordinator.data
     previous_sensor = sensor(hass, entry)
+    previous_read_at = coordinator.last_successful_read_at
     clock = Clock(monkeypatch)
     wire.queue.put_nowait(BAD)
     await pump()
@@ -82,6 +83,7 @@ async def enter_hold(hass, entry, peers, monkeypatch):
     await clock.advance(10)
     await deferred
     assert coordinator.data is previous and not coordinator.last_update_success
+    assert coordinator.last_successful_read_at == previous_read_at
     assert sensor(hass, entry) is previous_sensor
     assert coordinator.data_updated_hold and sensor(hass, entry).state != "unavailable"
     assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
@@ -129,8 +131,11 @@ async def test_genuine_transport_loss_ends_value_hold_and_preserves_normal_retry
         refresh = asyncio.create_task(coordinator.async_refresh())
         await pump()
         assert sensor(hass, entry).state == "unavailable"
-        peers.backoff.release.put_nowait(None)
         await refresh
+        assert not coordinator.last_update_success
+        peers.backoff.release.put_nowait(None)
+        await peers.lifecycles[0].wait_connected()
+        await coordinator.async_refresh()
         assert (
             coordinator.last_update_success
             and sensor(hass, entry).state != "unavailable"

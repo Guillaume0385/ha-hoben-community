@@ -205,7 +205,8 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
     await coordinator.async_refresh()
     assert isinstance(coordinator.last_exception, UpdateFailed)
     assert not coordinator.last_update_success and coordinator.data is previous
-    assert sensor(hass, entry).state == "unavailable"
+    assert sensor(hass, entry).state != "unavailable"
+    assert coordinator.last_snapshot_held  # Old values, never a successful read.
     report = await async_get_config_entry_diagnostics(hass, entry)
     assert report["client"]["state"] == "ready"  # object is not explicitly closed
     assert report["coordinator"]["last_error"]["error"] == (
@@ -268,7 +269,8 @@ async def test_repeated_malformed_errors_continue_beyond_two_openings(
         await coordinator.async_refresh()
         assert await peers.backoff.entered.get() == 60.0
         assert not coordinator.last_update_success and coordinator.data is previous
-        assert sensor(hass, entry).state == "unavailable"
+        assert sensor(hass, entry).state != "unavailable"
+        assert coordinator.last_snapshot_held
         assert peers.factory.call_count == attempt
         peers.wires[attempt - 1].close.assert_awaited_once_with()
         peers.backoff.release.put_nowait(None)
@@ -325,7 +327,7 @@ async def test_permanent_failures_never_reconnect(
     assert_stopped(peers)
 
 
-async def test_unload_cancels_malformed_backoff_and_a_waiting_refresh(
+async def test_unload_cancels_malformed_backoff_without_parking_a_refresh(
     hass, entry, peers
 ):
     peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
@@ -333,12 +335,12 @@ async def test_unload_cancels_malformed_backoff_and_a_waiting_refresh(
     await coordinator.async_refresh()
     await peers.backoff.entered.get()
     pending = asyncio.create_task(coordinator.async_refresh())
-    # Wait until the actual client owns this second caller, waiting for recovery.
-    while entry.runtime_data.client._active_operation is not pending:
-        await asyncio.sleep(0)
+    # A1 returns an acquisition failure to the normal poll while the same owner
+    # keeps its backoff; no refresh may park indefinitely through open failures.
+    await pending
+    assert not coordinator.last_update_success and coordinator.last_snapshot_held
+    assert entry.runtime_data.client._active_operation is None
     assert await hass.config_entries.async_unload(entry.entry_id)
-    with pytest.raises(asyncio.CancelledError):
-        await pending
     assert peers.factory.call_count == 1
     assert_stopped(peers)
 

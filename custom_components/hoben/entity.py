@@ -29,7 +29,7 @@ class HobenEntity(CoordinatorEntity[HobenDataUpdateCoordinator]):
     @property
     def available(self) -> bool:
         """Keep last values during the explicitly authorized local recovery."""
-        return self.coordinator.data_updated_hold is True or super().available
+        return self.coordinator.snapshot_available
 
     @property
     def stove_state(self) -> V4StoveState:

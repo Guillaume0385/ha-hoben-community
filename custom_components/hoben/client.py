@@ -246,6 +246,21 @@ class HobenClient:
         )
 
     @property
+    def acquisition_recovery_pending(self) -> bool:
+        """Read-only HA hint; never hide a later transport/permanent failure.
+
+        None covers the short transition before the owner publishes the typed
+        failure. Only HA's already-running owner may recover an acquisition;
+        this property creates no retry, task or transport.
+        """
+        return (
+            self.ha_recovery_pending
+            and not self.data_updated_transport_alive
+            and self._lifecycle.snapshot.failure
+            in (None, HobenProtocolError.code, HobenTimeoutError.code)
+        )
+
+    @property
     def device_guid_for_persistence(self) -> str:
         """Sensitive: explicitly retrieve for secure storage, NEVER logs/diagnostics.
 
