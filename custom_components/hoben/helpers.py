@@ -2,8 +2,8 @@
 
 import hashlib
 import logging
-import traceback
 
+from .error_phases import phase_of
 from .myhoben import normalize_user_guid
 
 
@@ -19,15 +19,8 @@ def user_guid_fingerprint(user_guid: str) -> str:
 
 
 def log_unexpected_error(logger: logging.Logger, error: Exception) -> None:
-    """Log frame locations only, without messages, source lines, locals or chains.
-
-    logger.exception/format_exception can disclose arbitrary exception payloads
-    and chained errors. Unexpected failures still need actionable stack context.
-    Walk raw frames: extract_tb() also reads source files through linecache,
-    blocking HA's event loop even when the source lines are never logged.
-    """
-    context = "\n".join(
-        f"  {frame.f_code.co_filename}:{lineno} in {frame.f_code.co_name}"
-        for frame, lineno in traceback.walk_tb(error.__traceback__)
+    """Fixed category/phase only: no private paths, traceback traversal or I/O."""
+    logger.error(
+        "Unexpected Hoben client failure [error=unexpected_error, phase=%s]",
+        phase_of(error) or "unknown",
     )
-    logger.error("Unexpected Hoben client failure; stack locations:\n%s", context)

@@ -401,7 +401,10 @@ ERRORS = [
     (UpdateFailed(SECRET), {"error": "update_failed"}),
     (ConfigEntryAuthFailed(SECRET), {"error": "authentication_failed"}),
     (ConfigEntryError(SECRET), {"error": "config_entry_error"}),
-    (RuntimeError(SECRET, RAW_PACKET, CODE, WORDS), {"error": "unexpected_error"}),
+    (
+        RuntimeError(SECRET, RAW_PACKET, CODE, WORDS),
+        {"error": "unexpected_error", "phase": "unknown"},
+    ),
 ] + [
     (HobenClosedError(reason), {"error": "server_closed", "reason": reason.value})
     for reason in CloseClientReason
@@ -547,7 +550,10 @@ async def test_v4_decode_failure_keeps_category_and_recovers_on_normal_timer(
         report = await async_get_config_entry_diagnostics(hass, private_entry)
         assert type(coordinator.last_exception) is ConfigEntryError
         assert not report["coordinator"]["last_update_success"]
-        assert report["coordinator"]["last_error"] == {"error": "invalid_v4_snapshot"}
+        assert report["coordinator"]["last_error"] == {
+            "error": "invalid_v4_snapshot",
+            "phase": "model_decode",
+        }
         assert "error=invalid_v4_snapshot" in str(coordinator.last_exception)
         assert "error=invalid_v4_snapshot" in caplog.text
         assert all(
@@ -689,7 +695,11 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
             },
             [0x03, 0x0D],
         ),
-        ("modbus", {"error": "modbus_exception", "exception_code": 7}, [0x03, 0x0D]),
+        (
+            "modbus",
+            {"error": "modbus_exception", "exception_code": 7, "phase": "pdu_decode"},
+            [0x03, 0x0D],
+        ),
         (
             "closed",
             {
@@ -766,11 +776,14 @@ async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
 @pytest.mark.parametrize(
     "unsafe_report, expected",
     [
-        (None, {"error": "unexpected_error"}),
-        ([SECRET, USER_GUID, CODE], {"error": "unexpected_error"}),
-        ({SECRET: RAW_PACKET}, {"error": "unexpected_error"}),
-        ({"error": SECRET, "reason": USER_GUID}, {"error": "unexpected_error"}),
-        ({"error": True}, {"error": "unexpected_error"}),
+        (None, {"error": "unexpected_error", "phase": "unknown"}),
+        ([SECRET, USER_GUID, CODE], {"error": "unexpected_error", "phase": "unknown"}),
+        ({SECRET: RAW_PACKET}, {"error": "unexpected_error", "phase": "unknown"}),
+        (
+            {"error": SECRET, "reason": USER_GUID},
+            {"error": "unexpected_error", "phase": "unknown"},
+        ),
+        ({"error": True}, {"error": "unexpected_error", "phase": "unknown"}),
         (
             {
                 "error": "malformed_response",
@@ -830,7 +843,10 @@ async def test_broken_error_report_during_polling_is_safe_without_extra_io(
     client.async_refresh.side_effect = error
     await loaded.coordinator.async_refresh()
     report = await async_get_config_entry_diagnostics(hass, private_entry)
-    assert report["coordinator"]["last_error"] == {"error": "unexpected_error"}
+    assert report["coordinator"]["last_error"] == {
+        "error": "unexpected_error",
+        "phase": "unknown",
+    }
     assert type(loaded.coordinator.last_exception) is UpdateFailed
     assert client.async_refresh.await_count == 2
     error.safe_report.assert_called_once_with()
@@ -987,7 +1003,10 @@ async def test_invalid_scalar_report_fields_are_omitted_without_coercion(
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["client"] == {}
     assert report["snapshot"] == {}
-    assert report["coordinator"]["last_error"] == {"error": "unexpected_error"}
+    assert report["coordinator"]["last_error"] == {
+        "error": "unexpected_error",
+        "phase": "unknown",
+    }
     assert_private_absent(report, private_entry)
 
 
@@ -1009,7 +1028,10 @@ async def test_broken_safe_report_contract_fails_closed(
     report = await async_get_config_entry_diagnostics(hass, private_entry)
     assert report["client"] == {}
     assert report["snapshot"] == {}
-    assert report["coordinator"]["last_error"] == {"error": "unexpected_error"}
+    assert report["coordinator"]["last_error"] == {
+        "error": "unexpected_error",
+        "phase": "unknown",
+    }
     assert_private_absent(report, private_entry)
 
 

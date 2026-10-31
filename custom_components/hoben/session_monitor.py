@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .malformed import TEXT_FIELDS
+from .error_phases import PHASES
 
 _CATEGORIES = frozenset(
     {
@@ -35,7 +35,7 @@ _CATEGORIES = frozenset(
         "data_updated_recovery",
     }
 )
-_PHASES = TEXT_FIELDS["phase"] | {"post_open", "mbap_header"}
+_PHASES = PHASES
 
 
 @dataclass(frozen=True, slots=True)

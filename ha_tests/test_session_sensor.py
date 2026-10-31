@@ -102,7 +102,7 @@ async def test_eof_and_reopening_update_session_without_refreshing_measurements(
         state = session_state(hass, entry)
         assert state.state == "reconnecting"
         assert state.attributes["last_error_category"] == "transport_unavailable"
-        assert state.attributes["last_error_phase"] is None
+        assert state.attributes["last_error_phase"] == "tls_read"
         assert state.attributes["last_error_at"] is not None
         assert state.attributes["reconnect_count"] == 0
         assert state.attributes["recovery_count"] == 0
@@ -207,7 +207,7 @@ async def test_rejected_data_updated_probe_updates_error_without_a_new_episode(
     state = session_state(hass, entry)
     assert state.state == "recovering"
     assert state.attributes["last_error_category"] == "modbus_exception"
-    assert state.attributes["last_error_phase"] is None
+    assert state.attributes["last_error_phase"] == "pdu_decode"
     assert state.attributes["recovery_count"] == 1
     assert state.attributes["reconnect_count"] == 0
     assert coordinator.last_successful_read_at == stamp

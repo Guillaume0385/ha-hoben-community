@@ -615,6 +615,7 @@ def test_certificate_verification_failure_stays_permanent(tls, backoff):
             assert caught.value.safe_report() == {
                 "state": "error",
                 "error": "tls_verification_failed",
+                "phase": "opening",
             }
             assert "PRIVATE" not in "".join(traceback.format_exception(caught.value))
         assert tls.factory.call_count == 1 and backoff.delays == []

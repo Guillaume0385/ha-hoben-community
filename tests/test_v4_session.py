@@ -414,6 +414,7 @@ def test_real_transport_with_another_destination_is_permanent_before_network(
     assert caught.value.safe_report() == {
         "state": "error",
         "error": "invalid_client_inputs",
+        "phase": "opening",
     }
     factory.assert_called_once_with()
     streams.connect.assert_not_called()

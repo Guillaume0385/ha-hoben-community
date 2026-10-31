@@ -11,6 +11,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .client import HobenClient, RawStoveSnapshot
+from .error_phases import PHASES, phase_of
 from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationCodeError,
@@ -72,7 +73,7 @@ _ERROR_TEXT_FIELDS = {
     "reason": frozenset(reason.value for reason in CloseClientReason),
     "profile": PROFILES,
     "failure": _ERROR_CODES,
-    "phase": TEXT_FIELDS["phase"] | {"post_open"},
+    "phase": PHASES,
 }
 _ERROR_NUMBER_FIELDS = {
     "exception_code": 255,
@@ -154,7 +155,7 @@ def safe_error_report(error: Exception | None) -> dict[str, str | int | bool] | 
         if isinstance(error, UpdateFailed):
             return {"error": "update_failed"}
         return {"error": "config_entry_error"}
-    return {"error": "unexpected_error"}
+    return {"error": "unexpected_error", "phase": phase_of(error) or "unknown"}
 
 
 def wrap_error[ErrorT: Exception](
