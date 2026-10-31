@@ -1,4 +1,4 @@
-# Workflow MANAGER automatique / CHAT DEV manuel / CODEX DEV expert
+# Workflow MANAGER automatique / CODEX DEV automatique par défaut / CHAT DEV manuel facultatif
 
 ## Portée et sources
 
@@ -19,9 +19,9 @@ Le choix all est séquentiel et les résultats sont explicites par scénario.
 
 ## Responsabilités
 
-- **MANAGER (automatique)** : constate l'état réel de GitHub, prépare une petite tâche seulement après autorisation explicite du propriétaire, publie ou met à jour une consigne unique, vérifie les PR, demande les corrections et fusionne seulement les PR conformes sur `experimental`. Il ne lance ni ne reprogramme automatiquement CHAT DEV. Pour CODEX DEV uniquement, MANAGER peut activer ou reprogrammer explicitement l'automatisation existante lorsqu'une tâche complexe est autorisée par le propriétaire, attribuée à CODEX DEV et vérifiée sur GitHub ; il confirme alors l'état réel de l'automatisation. Ce mécanisme ne constitue pas une autorisation de développement implicite.
-- **CHAT DEV (manuel, par défaut)** : le propriétaire colle le prompt fourni par MANAGER dans une conversation interactive disposant des permissions GitHub nécessaires. CHAT DEV développe la tâche assignée, exécute les tests hors ligne et ouvre ou corrige une PR ; il ne fusionne jamais.
-- **CODEX DEV (exceptionnel)** : réservé aux tâches réellement complexes (architecture, concurrence asynchrone, protocole difficile), après décision motivée de MANAGER. Même limites de branche, de sécurité et de livraison que CHAT DEV. Aucune exécution automatique implicite : toute activation de CODEX DEV nécessite une attribution explicite et une autorisation de tâche vérifiée.
+- **MANAGER (automatique)** : constate l'état réel de GitHub, prépare une petite tâche seulement après autorisation explicite du propriétaire, publie ou met à jour une consigne unique, vérifie les PR, demande les corrections et fusionne seulement les PR conformes sur `experimental`. Il ne lance ni ne reprogramme automatiquement CHAT DEV. Pour CODEX DEV, agent de développement par défaut, MANAGER active et reprogramme l'automatisation existante lorsqu'un développement est explicitement demandé par le propriétaire, attribué à CODEX DEV et vérifié sur GitHub ; il confirme alors l'état réel de l'automatisation. Ce mécanisme ne constitue pas une autorisation de développement implicite.
+- **CHAT DEV (manuel, sur demande explicite)** : le propriétaire colle le prompt fourni par MANAGER dans une conversation interactive disposant des permissions GitHub nécessaires. CHAT DEV développe la tâche assignée, exécute les tests hors ligne et ouvre ou corrige une PR ; il ne fusionne jamais.
+- **CODEX DEV (automatique par défaut)** : prend les tâches de développement explicitement autorisées et attribuées par MANAGER, qu'elles soient simples ou complexes. Même limites de branche, de sécurité et de livraison que CHAT DEV. Aucune exécution automatique implicite par le seul label : toute activation nécessite une demande du propriétaire, une attribution explicite et une autorisation de tâche vérifiée.
 
 ## Contrat de tâche actif
 
@@ -42,9 +42,9 @@ PR: <numéro ou aucune>
 
 Le commentaire actif doit être identifiable sans relire tout l'historique. Les anciennes décisions sont conservées comme historique et ne sont pas des tâches concurrentes. MANAGER vérifie qu'une seule étiquette `state:*` est présente, sans retirer les autres labels.
 
-## Notification et lancement manuel
+## Lancement automatique CODEX DEV et option CHAT DEV manuelle
 
-Après publication **et vérification GitHub** de la tâche `CHAT_DEV` en `state:ready`, MANAGER notifie le propriétaire et fournit un prompt complet, prêt à copier, comprenant l'Issue, le `TASK_ID`, la branche cible, le lien vers le commentaire canonique et les exclusions. Il ne prétend pas avoir lancé CHAT DEV.
+Lorsque le propriétaire choisit exceptionnellement `CHAT_DEV`, après publication **et vérification GitHub** de la tâche `CHAT_DEV` en `state:ready`, MANAGER notifie le propriétaire et fournit un prompt complet, prêt à copier, comprenant l'Issue, le `TASK_ID`, la branche cible, le lien vers le commentaire canonique et les exclusions. Il ne prétend pas avoir lancé CHAT DEV.
 
 Modèle de prompt à remettre :
 
@@ -129,4 +129,4 @@ Sécurité absolue : lecture seule, TLS vérifié vers `myhoben.fr:465`, aucune 
 
 ## Compte rendu MANAGER
 
-Rapport concis : Issue de travail, étape, TASK_ID, agent, état GitHub, PR, HEAD, quatre checks, tests réels (exécutés / NOT RUN / en attente), décision, prochaine action et nécessité de lancer manuellement CHAT DEV ou CODEX DEV. Aucun succès sans preuve GitHub.
+Rapport concis : Issue de travail, étape, TASK_ID, agent, état GitHub, PR, HEAD, quatre checks, tests réels (exécutés / NOT RUN / en attente), décision, prochaine action et confirmation de programmation CODEX DEV/MANAGER ou nécessité de lancer CHAT DEV manuellement. Aucun succès sans preuve GitHub.
