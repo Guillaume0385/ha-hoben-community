@@ -91,7 +91,7 @@ async def test_setup_runtime_and_safe_device(
     assert device.sw_version == "8.2"
     assert "Osmose" not in device.model
     assert (
-        len(er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)) == 16
+        len(er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)) == 17
     )
     assert_private_values_absent(
         caplog.text + repr(device) + repr(coordinator) + repr(entry.runtime_data)

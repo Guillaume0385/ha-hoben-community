@@ -45,6 +45,7 @@ from .session import (
     SessionTimeout,
     _open_session,
 )
+from .session_monitor import SessionEvent, SessionMonitor
 from .session_observation import SessionObservation
 from .transport import AsyncTlsTransport, TransportError, TransportTimeout
 
@@ -208,6 +209,7 @@ class HobenClient:
         self._active_operation: asyncio.Task | None = None
         self._closed = False
         self._lifecycle: V4Lifecycle | None = None
+        self.session_monitor = SessionMonitor(tracked=ha_reconnect)
 
     def __repr__(self) -> str:
         """Do not expose either identity or caller-supplied DeviceInfo."""
@@ -293,6 +295,21 @@ class HobenClient:
         if self._lifecycle is None:
             return SessionObservation(stopped=self._closed)
         return self._lifecycle.session_observation
+
+    @property
+    def session_state(self) -> str:
+        """Local owner state; connected attests neither server health nor age."""
+        from .v4_session import SessionState
+
+        if self._closed or self._lifecycle is None:
+            return "disconnected"
+        if self._lifecycle.state is SessionState.RECONNECTING:
+            return "reconnecting"
+        if not self.data_updated_transport_alive:
+            return "disconnected"
+        if self.data_updated_recovering or self.session_monitor.recovering:
+            return "recovering"
+        return "connected"
 
     def safe_report(self) -> dict[str, str | bool | int]:
         """Allowlisted diagnostics; no dataclass/session or generic identity export."""
@@ -391,6 +408,7 @@ class HobenClient:
         all shared background ownership; unload awaits both cleanup paths.
         """
         self._closed = True
+        self.session_monitor.emit(SessionEvent("stop"))
         self._adopt_persistent_identity()
         if self._active_operation is not None:
             self._active_operation.cancel()
@@ -433,6 +451,9 @@ class HobenClient:
                     sleep=asyncio.sleep,
                     recover_acquisition=True,
                     ha_reconnect=self._ha_reconnect,
+                    _status_callback=(
+                        self.session_monitor.emit if self._ha_reconnect else None
+                    ),
                 )
                 await self._lifecycle.connect()
             else:

@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import HobenConfigEntry
 from .entity import HobenEntity
+from .session_sensor import HobenSessionSensor
 from .v4_state import (
     V4OperationMode,
     V4OperationState,
@@ -147,7 +148,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Subscribe all sensors to the already refreshed shared coordinator."""
-    async_add_entities(HobenSensor(entry, description) for description in SENSORS)
+    async_add_entities(
+        [
+            *(HobenSensor(entry, description) for description in SENSORS),
+            HobenSessionSensor(entry),
+        ]
+    )
 
 
 class HobenSensor(HobenEntity, SensorEntity):

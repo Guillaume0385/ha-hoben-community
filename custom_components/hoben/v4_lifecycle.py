@@ -32,6 +32,7 @@ from .exceptions import (
 )
 from .modbus import ModbusReadResponse
 from .myhoben import INITIAL_DEVICE_GUID, CloseClientReason, normalize_user_guid
+from .session_monitor import SessionEvent, error_event, notify_status
 from .session_observation import SessionLossKind, SessionObservation
 from .v4_eof_quarantine import STABLE_FOR_MS, Event, RecoveryTiming
 from .v4_experiment import ExperimentalCloseClientError
@@ -151,6 +152,7 @@ class V4Lifecycle:
         "_active_generation",
         "_recover_acquisition",
         "_ha_reconnect",
+        "_status_callback",
     )
 
     def __init__(
@@ -166,6 +168,7 @@ class V4Lifecycle:
         clock: Callable[[], float] = time.monotonic,
         recover_acquisition: bool = False,
         ha_reconnect: bool = False,
+        _status_callback=None,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
@@ -185,6 +188,8 @@ class V4Lifecycle:
                 ha_reconnect
                 and (mode is not V4SessionMode.PERSISTENT or not recover_acquisition)
             ):
+                raise HobenInvalidInputError()
+            if _status_callback is not None and not callable(_status_callback):
                 raise HobenInvalidInputError()
             if (
                 not isinstance(retry_delays, tuple)
@@ -213,6 +218,7 @@ class V4Lifecycle:
         self._mode, self._opening_options = mode, opening_options
         self._recover_acquisition = recover_acquisition
         self._ha_reconnect = ha_reconnect
+        self._status_callback = _status_callback
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -535,6 +541,7 @@ class V4Lifecycle:
             )
         ):
             raise HobenInvalidInputError()
+        session._status_callback = self._status_callback
         if cap is not None:
             if (
                 type(session) is not V4Session
@@ -653,6 +660,7 @@ class V4Lifecycle:
                     if attempt == 1
                     else SessionState.RECONNECTING,
                 )
+                notify_status(self._status_callback)
                 opened = False
                 session = None
                 try:
@@ -704,6 +712,10 @@ class V4Lifecycle:
                         self._snapshot, state=SessionState.CONNECTED, failure=None
                     )
                     self._failure = None
+                    notify_status(
+                        self._status_callback,
+                        SessionEvent("accepted", generation=self._generation),
+                    )
                     self._log_attempt(attempt, "connected")
                     self._connected.set()
                     if not self._ready.done():
@@ -717,6 +729,7 @@ class V4Lifecycle:
                 except Exception:
                     error = HobenInternalError()
                 self._failure = error
+                notify_status(self._status_callback, error_event(error))
                 self._log_attempt(attempt, "failed", error)
                 self._connected.clear()
                 if opened:
@@ -795,6 +808,7 @@ class V4Lifecycle:
                     if retryable
                     else SessionState.DISCONNECTED,
                 )
+                notify_status(self._status_callback)
                 try:
                     if permit is not None:
                         async with asyncio.timeout(self._check_private_recovery()):
@@ -818,6 +832,12 @@ class V4Lifecycle:
                 if not self._ha_reconnect and attempt == self.snapshot.max_attempts:
                     error = LifecycleExhaustedError(error)
                     break
+                if opened and type(error) in (HobenProtocolError, HobenTimeoutError):
+                    observed = error_event(error)
+                    notify_status(
+                        self._status_callback,
+                        SessionEvent("recovery", observed.category, observed.phase),
+                    )
                 if self._quarantine is not None:
                     self._check_private_recovery(
                         delay_ms=math.ceil(self._delays[attempt - 1] * 1000)
@@ -854,6 +874,9 @@ class V4Lifecycle:
             )
             self._user_guid = None
             self._device_guid = INITIAL_DEVICE_GUID
+            if not self._stopping:
+                notify_status(self._status_callback, error_event(error))
+            notify_status(self._status_callback, SessionEvent("ended"))
             self._connected.set()  # Wake observers on terminal failure too.
             if not self._ready.done():
                 self._ready.set_result(error)
@@ -865,6 +888,7 @@ class V4Lifecycle:
         if self._quarantine is not None and self._quarantine._origin is not None:
             self._quarantine._origin._quarantine_stop(Event.CANCEL)
         self._snapshot = replace(self._snapshot, state=SessionState.CLOSED)
+        notify_status(self._status_callback, SessionEvent("ended"))
         task = self._task
         if task is not None:
             if not task.done() and not task.cancelling():

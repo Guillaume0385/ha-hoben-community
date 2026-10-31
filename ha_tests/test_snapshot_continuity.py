@@ -29,6 +29,7 @@ def states(hass, entry):
         e.entity_id: hass.states.get(e.entity_id)
         for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
         if hass.states.get(e.entity_id) is not None
+        and e.unique_id != f"{entry.unique_id}_session"
     }
 
 
