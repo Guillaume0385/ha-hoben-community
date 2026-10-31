@@ -158,8 +158,9 @@ async def test_client_errors_are_sanitized_and_close(
     client.async_close.assert_awaited_once_with()
     assert_private_values_absent(repr(result) + caplog.text)
     if expected == "unknown":
-        assert "stack locations" in caplog.text
-        assert "_async_validate_connection" in caplog.text
+        assert "error=unexpected_error, phase=unknown" in caplog.text
+        assert "stack locations" not in caplog.text
+        assert "_async_validate_connection" not in caplog.text
 
 
 @pytest.mark.parametrize(

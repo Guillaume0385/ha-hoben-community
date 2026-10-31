@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 
 from .client import _validate_delay, _validate_device_guid
+from .error_phases import phase_of, with_phase
 from .exceptions import (
     HobenCleanupError,
     HobenClientClosedError,
@@ -272,13 +273,15 @@ class V4Lifecycle:
             if error is None
             else categories.get(type(error), "permanent_error")
         )
+        phase = error_event(error).phase if error is not None else None
         _LOGGER.info(
             "Hoben HA connection attempt=%d accepted_generation=%d "
-            "category=%s result=%s",
+            "category=%s result=%s phase=%s",
             attempt,
             self._generation,
             category,
             result,
+            phase or "unknown",
         )
         if result == "failed" and type(error) is HobenProtocolError:
             report = error.diagnostic.safe_report()
@@ -496,10 +499,10 @@ class V4Lifecycle:
                     await session.abort()
             except asyncio.CancelledError:
                 raise  # Keep ownership so explicit close can finish cancellation.
-            except Exception:
+            except Exception as failure:
                 self._observation = replace(self._observation, cleanup_failed=True)
                 self._session = None
-                raise
+                raise with_phase(failure, "cleanup")
             else:
                 if session.cleanup_succeeded:
                     if self._active_generation is not None:
@@ -726,8 +729,10 @@ class V4Lifecycle:
                         await self._wait_private_loss(session)
                 except HobenError as failure:
                     error = failure
-                except Exception:
-                    error = HobenInternalError()
+                except Exception as failure:
+                    error = with_phase(
+                        HobenInternalError(), phase_of(failure) or "unknown"
+                    )
                 self._failure = error
                 notify_status(self._status_callback, error_event(error))
                 self._log_attempt(attempt, "failed", error)
@@ -826,7 +831,7 @@ class V4Lifecycle:
                     # including a close error already caught by the RX owner.
                     retryable = retryable and session.cleanup_succeeded
                     if self._ha_reconnect and not session.cleanup_succeeded:
-                        error = HobenCleanupError()
+                        error = with_phase(HobenCleanupError(), "cleanup")
                 if not retryable:
                     break
                 if not self._ha_reconnect and attempt == self.snapshot.max_attempts:
@@ -855,8 +860,8 @@ class V4Lifecycle:
                     self._check_private_recovery()
         except asyncio.CancelledError:
             error = LifecycleStoppedError()
-        except Exception:
-            error = HobenInternalError()
+        except Exception as failure:
+            error = with_phase(HobenInternalError(), phase_of(failure) or "unknown")
         finally:
             if self._quarantine is not None and self._quarantine._origin is not None:
                 self._quarantine._origin._quarantine_stop(Event.CANCEL)

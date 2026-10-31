@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from .client import HobenClient, RawStoveSnapshot
 from .const import CONF_DEVICE_GUID, DOMAIN, UPDATE_INTERVAL
+from .error_phases import error_boundary
 from .exceptions import (
     HobenAuthorizationRequiredError,
     HobenClosedError,
@@ -215,14 +216,17 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 # replacing the original error if storage itself fails.
                 if self.client.profile is StoveProfile.V4:
                     try:
-                        self._persist_identity()
+                        with error_boundary("identity_storage"):
+                            self._persist_identity()
                     except Exception as storage_error:
                         log_unexpected_error(_LOGGER, storage_error)
                 raise
             if snapshot.profile is not StoveProfile.V4:
                 raise HobenUnsupportedProfileError(snapshot.profile)
-            state = decode_v4_snapshot(snapshot)
-            self._persist_identity()
+            with error_boundary("model_decode"):
+                state = decode_v4_snapshot(snapshot)
+            with error_boundary("identity_storage"):
+                self._persist_identity()
             self.last_successful_read_at = dt_util.utcnow()
             self._session_event(SessionEvent("read_succeeded"))
             return HobenCoordinatorData(raw=snapshot, state=state)

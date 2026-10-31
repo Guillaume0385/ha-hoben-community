@@ -1,5 +1,6 @@
 """HA-independent client failures with fixed text and allowlisted diagnostics."""
 
+from .error_phases import phase_of
 from .malformed import MalformedDiagnostic
 from .myhoben import CloseClientReason
 from .profiles import StoveProfile
@@ -15,7 +16,11 @@ class HobenError(Exception):
 
     def safe_report(self) -> dict[str, int | str]:
         """Export a stable code suitable for diagnostics and future HA mapping."""
-        return {"state": "error", "error": self.code}
+        report = {"state": "error", "error": self.code}
+        phase = phase_of(self)
+        if phase is not None:
+            report["phase"] = phase
+        return report
 
 
 class HobenDataUpdatedRecoveryError(HobenError):
@@ -89,11 +94,12 @@ class HobenProtocolError(HobenError):
 
     def safe_report(self) -> dict[str, int | str]:
         report = super().safe_report()
-        return (
-            report | self.diagnostic.safe_report()
-            if self.code == "malformed_response"
-            else report
-        )
+        if self.code != "malformed_response":
+            return report
+        detail = self.diagnostic.safe_report()
+        if detail["phase"] == "unknown" and "phase" in report:
+            detail["phase"] = report["phase"]
+        return report | detail
 
 
 class HobenCleanupError(HobenError):

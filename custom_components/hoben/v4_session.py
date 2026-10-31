@@ -24,6 +24,7 @@ from .client import (
     _validate_device_guid,
 )
 from .data_updated_recovery import DataUpdatedRecovery
+from .error_phases import error_boundary, phase_of, with_phase
 from .exceptions import (
     HobenAmbiguousSessionError,
     HobenAuthorizationRequiredError,
@@ -565,7 +566,8 @@ class V4Session:
         recovery = self._data_updated
         while True:
             if not recovery.active:
-                return await transport.read(4096, bounded=False)
+                with error_boundary("tls_read"):
+                    return await transport.read(4096, bounded=False)
             remaining = (
                 max(
                     0,
@@ -579,7 +581,8 @@ class V4Session:
                 async with asyncio.timeout(remaining) as deadline:
                     recovery.read_deadline = deadline
                     try:
-                        data = await transport.read(4096, bounded=False)
+                        with error_boundary("tls_read"):
+                            data = await transport.read(4096, bounded=False)
                     finally:
                         recovery.read_deadline = None
             except TransportTimeout:
@@ -601,7 +604,7 @@ class V4Session:
             if not isinstance(data, bytes) or len(data) > 4096:
                 raise HobenInternalError()
             if not data:
-                raise TransportEOF("eof")
+                raise with_phase(TransportEOF("eof"), "tls_read")
             if recovery.active:
                 recovery.quiet_since = asyncio.get_running_loop().time()
             if recovery.active and not recovery.probing:
@@ -892,7 +895,7 @@ class V4Session:
                     self._cleanup_failed = True
                     if self.close_client_received:
                         self._rx_error._cleanup_failed = True
-                    raise HobenTransportError() from None
+                    raise with_phase(HobenTransportError(), "cleanup") from None
 
     async def _handle_delimited_ping(self, message: DelimitedV4Message) -> bool:
         """Track the sender so lifecycle shutdown can abort an in-flight write."""
@@ -1091,11 +1094,11 @@ class V4Session:
                 )
                 succeeded = True
             except (TransportTimeout, SessionTimeout):
-                raise HobenTimeoutError() from None
+                raise with_phase(HobenTimeoutError(), "opening") from None
             except TransportCertificateError:
-                raise HobenTlsVerificationError() from None
+                raise with_phase(HobenTlsVerificationError(), "opening") from None
             except TransportError:
-                raise HobenTransportError() from None
+                raise with_phase(HobenTransportError(), "opening") from None
             except SessionProtocolError:
                 raise HobenProtocolError(
                     MalformedDiagnostic(
@@ -1116,10 +1119,10 @@ class V4Session:
                 HobenAmbiguousSessionError,
                 HobenUnsupportedProfileError,
                 HobenTlsVerificationError,
-            ):
-                raise
+            ) as failure:
+                raise with_phase(failure, "opening")
             except Exception:
-                raise HobenInternalError() from None
+                raise with_phase(HobenInternalError(), "opening") from None
         finally:
             try:
                 if not succeeded:
@@ -1146,11 +1149,12 @@ class V4Session:
             if self._framer is not None:
                 await self._receive_experimental(transport)
             else:
-                data = await transport.read(4096, bounded=False)
+                with error_boundary("tls_read"):
+                    data = await transport.read(4096, bounded=False)
                 if not isinstance(data, bytes):
                     raise HobenProtocolError()
                 if not data:
-                    raise TransportEOF("eof")
+                    raise with_phase(TransportEOF("eof"), "tls_read")
                 self._opening_buffer.extend(data)
                 self._snapshot = replace(
                     self._snapshot,
@@ -1161,10 +1165,14 @@ class V4Session:
         except asyncio.CancelledError:
             if self.state is not SessionState.CLOSED:
                 self._rx_error = HobenTransportError()
-        except TransportTimeout:
-            self._rx_error = HobenTimeoutError()
-        except TransportCertificateError:
-            self._rx_error = HobenTlsVerificationError()
+        except TransportTimeout as failure:
+            self._rx_error = with_phase(
+                HobenTimeoutError(), phase_of(failure) or "unknown"
+            )
+        except TransportCertificateError as failure:
+            self._rx_error = with_phase(
+                HobenTlsVerificationError(), phase_of(failure) or "unknown"
+            )
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             if self._retryable_loss:
@@ -1174,11 +1182,15 @@ class V4Session:
                         self._loss_monotonic_ms = int(instant * 1000)
                 except (TypeError, ValueError, OverflowError):
                     pass
-            self._rx_error = HobenTransportError()
+            self._rx_error = with_phase(
+                HobenTransportError(), phase_of(failure) or "unknown"
+            )
         except HobenError as failure:
             self._rx_error = failure
-        except Exception:
-            self._rx_error = HobenInternalError()
+        except Exception as failure:
+            self._rx_error = with_phase(
+                HobenInternalError(), phase_of(failure) or "unknown"
+            )
         finally:
             if self._rx_error is not None:
                 recovery_result = self._data_updated.result
@@ -1195,9 +1207,9 @@ class V4Session:
                     and not self._quarantine_owner_stopped
                 ):
                     await self._release_transport()
-            except HobenTransportError:
+            except HobenTransportError as failure:
                 if self._rx_error is None and self.state is not SessionState.CLOSED:
-                    self._rx_error = HobenTransportError()
+                    self._rx_error = failure
             finally:
                 self._snapshot = replace(
                     self._snapshot,
@@ -1224,9 +1236,10 @@ class V4Session:
             if not isinstance(data, bytes):
                 # Transport implementations must return bytes. A broken local
                 # contract is permanent, not server data eligible for retry.
-                raise HobenInternalError()
+                raise with_phase(HobenInternalError(), "tls_read")
             try:
-                events = self._framer.feed(data, exchange)
+                with error_boundary("frame_boundary"):
+                    events = self._framer.feed(data, exchange)
             except _RejectedCloseClient:
                 rejected_close = True
             except HobenProtocolError as failure:
@@ -1285,9 +1298,11 @@ class V4Session:
                     if self._experiment is not None:
                         self._experiment.pongs += sent
                 else:
-                    await self._handle_delimited_data_response(
-                        DelimitedV4DataResponse(event.payload, exchange=event.exchange)
-                    )
+                    with error_boundary("message_type"):
+                        delivery = DelimitedV4DataResponse(
+                            event.payload, exchange=event.exchange
+                        )
+                    await self._handle_delimited_data_response(delivery)
                     if self._experiment is not None:
                         self._experiment.responses += 1
             try:
@@ -1309,7 +1324,7 @@ class V4Session:
                     raise self._framer.incomplete_error()
                 if self._experiment is not None:
                     self._experiment.note_failure("tls_read", "transport")
-                raise TransportEOF("eof")
+                raise with_phase(TransportEOF("eof"), "tls_read")
 
     @staticmethod
     def _quarantine_time(seconds):
@@ -1476,7 +1491,10 @@ class V4Session:
             ):
                 raise HobenProtocolError()
             failure_phase = "response_validation"
-            response = decode_read_response(decode_data_response_client(event._frame))
+            with error_boundary("pdu_decode"):
+                response = decode_read_response(
+                    decode_data_response_client(event._frame)
+                )
             if (
                 response.transaction_id != 0xFFFF
                 or response.unit_id != HOBEN_UNIT_ID
@@ -1486,7 +1504,9 @@ class V4Session:
             ):
                 raise HobenProtocolError()
             if isinstance(response, ModbusExceptionResponse):
-                pending.set_exception(HobenModbusError(response.exception_code))
+                pending.set_exception(
+                    with_phase(HobenModbusError(response.exception_code), "pdu_decode")
+                )
             else:
                 pending.set_result(response)
                 self._verified_read_sequence += 1
@@ -1504,8 +1524,8 @@ class V4Session:
                     failure_phase,
                 )
             )
-        except Exception:
-            error = HobenInternalError()
+        except Exception as failure:
+            error = with_phase(HobenInternalError(), phase_of(failure) or "unknown")
         if (
             self._data_updated.active
             and self._data_updated.task is not None
