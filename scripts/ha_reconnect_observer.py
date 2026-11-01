@@ -72,6 +72,17 @@ async def observe(
                     )
                     o = coordinator.client.session_observation
                     owner = coordinator.client._lifecycle
+                    interruption = probe.diagnostic["interruption"]
+                    if interruption is not None:
+                        evidence["terminal"] = "closed"
+                        outcome = (
+                            "not_exercised"
+                            if interruption["generation"] == 1
+                            else "reopen_failed"
+                            if probe.reopened_at is None
+                            else "stability_lost"
+                        )
+                        break
                     if owner is not None and owner._task.done() and not o.active:
                         evidence["terminal"], outcome = "closed", "closed"
                         break
@@ -186,12 +197,26 @@ async def observe(
                     active=coordinator.client.session_observation.active,
                 )
             finally:
+                probe.tearing_down = True
                 try:
                     async with asyncio.timeout(10):
                         await coordinator.client.async_close()
                     evidence["cleanup"]["completed"] = True
+                except Exception as error:
+                    # Preserve the bounded failure report for the worker. A
+                    # later idempotent close cannot certify this failed close.
+                    evidence.update(
+                        completed=False,
+                        terminal="timeout"
+                        if isinstance(error, TimeoutError)
+                        else "unexpected",
+                    )
+                    if probe.attempts:
+                        probe.note("cleanup", error, "observer_cleanup", probe.attempts)
                 finally:
                     evidence["cleanup"]["observation"] = project_observation(
                         coordinator.client.session_observation
                     )
+                    # Copy only bounded scalar diagnostics, never an exception.
+                    witness["diagnostic"] = probe.diagnostic.copy()
     return evidence

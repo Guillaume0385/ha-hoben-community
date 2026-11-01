@@ -47,7 +47,21 @@ function haControlled(e) {
   if(!Object.hasOwn(e,'recovery'))return false;
   const r=e.recovery,w=e.window,o=w.observation;
   object(r,['mode','boundary_proven','outcome','accepted_at_ms','suppressed_pongs',
-    'loss_generation','loss_after_ms','reopened_after_ms','read_generation','read_sequence','recovery_pongs','stable_ms']);
+    'loss_generation','loss_after_ms','reopened_after_ms','read_generation','read_sequence','recovery_pongs','stable_ms',
+    ...(Object.hasOwn(r,'diagnostic')?['diagnostic']:[])]);
+  if(Object.hasOwn(r,'diagnostic')) {
+    object(r.diagnostic,['interruption','cleanup']);
+    for(const [slot,v] of Object.entries(r.diagnostic)) {
+      if(v===null)continue;
+      object(v,['category','owner','generation','inhibition_exercised','subcode']);
+      check(['eof','timeout','tls','transport','close_client','closed','cancelled','internal','protocol'].includes(v.category));
+      check((slot==='cleanup'?['transport_close','observer_cleanup']:['transport_read','transport_write','opening','session']).includes(v.owner));
+      check(int(v.generation,1,2)&&typeof v.inhibition_exercised==='boolean');
+      check(v.category==='close_client'?int(v.subcode,0,255):v.subcode===null);
+    }
+    check(r.diagnostic.interruption===null||r.outcome!=='verified');
+    check(r.diagnostic.cleanup===null||e.cleanup.observation.cleanup_failed||!e.cleanup.completed);
+  }
   check(r.mode==='pong_inhibition_after_120s'&&r.boundary_proven===false);
   check(['not_exercised','no_disconnect','reopen_failed','stability_lost','verified','timeout','internal','closed'].includes(r.outcome));
   for(const k of ['accepted_at_ms','loss_after_ms','reopened_after_ms'])check(r[k]===null||int(r[k],0,600000));

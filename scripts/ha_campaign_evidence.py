@@ -49,7 +49,54 @@ def controlled_recovery(e):
     if "recovery" not in e:
         return False
     r = e["recovery"]
-    keys(r, empty_recovery())
+    keys(r, set(empty_recovery()) | ({"diagnostic"} if "diagnostic" in r else set()))
+    if "diagnostic" in r:
+        diagnostic = r["diagnostic"]
+        keys(diagnostic, ("interruption", "cleanup"))
+        for slot, value in diagnostic.items():
+            if value is None:
+                continue
+            keys(
+                value,
+                ("category", "owner", "generation", "inhibition_exercised", "subcode"),
+            )
+            need(
+                type(value["category"]) is str
+                and value["category"]
+                in {
+                    "eof",
+                    "timeout",
+                    "tls",
+                    "transport",
+                    "close_client",
+                    "closed",
+                    "cancelled",
+                    "internal",
+                    "protocol",
+                }
+            )
+            need(
+                type(value["owner"]) is str
+                and value["owner"]
+                in (
+                    {"transport_close", "observer_cleanup"}
+                    if slot == "cleanup"
+                    else {"transport_read", "transport_write", "opening", "session"}
+                )
+            )
+            need(integer(value["generation"], 1, 2))
+            need(type(value["inhibition_exercised"]) is bool)
+            need(
+                integer(value["subcode"], 0, 255)
+                if value["category"] == "close_client"
+                else value["subcode"] is None
+            )
+        need(diagnostic["interruption"] is None or r["outcome"] != "verified")
+        need(
+            diagnostic["cleanup"] is None
+            or e["cleanup"]["observation"]["cleanup_failed"]
+            or not e["cleanup"]["completed"]
+        )
     need(r["mode"] == "pong_inhibition_after_120s" and r["boundary_proven"] is False)
     need(
         type(r["outcome"]) is str
