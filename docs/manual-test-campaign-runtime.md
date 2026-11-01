@@ -279,6 +279,10 @@ quarante-deux lectures au plus, dans les maxima globaux existants 15/42,
 Les validateurs Python et Node refusent indépendamment tout enchaînement après
 une étape dont ces preuves de sûreté manquent.
 
+La [correction de fermeture #126/031](ha-controlled-reconnect.md#fermeture-suspendue-après-perte--correction-031)
+attend le close déjà engagé avant une reprise normale et conserve toute preuve
+d'annulation réelle. Elle ne modifie ni ces critères, ni les plafonds, ni les gates.
+
 Le résultat global est SUCCESS uniquement si chaque étape est SUCCESS et le
 job collect a réussi. FAILURE, INCONCLUSIVE ou NOT RUN ne sont jamais effacés
 par une réussite ultérieure. Un rapport unique conserve les sept lignes HA,

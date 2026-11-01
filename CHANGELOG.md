@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #126 / 031, fermeture après reconnexion HA
+
+- Attendre le close déjà engagé par RX avant une reprise ordinaire ; une
+  déconnexion signalée ne signifie pas que le transport a fini de fermer.
+- Conserver l'échec si close est réellement annulé, et distinguer l'annulation
+  du lecteur d'une nouvelle annulation de l'appelant pendant le nettoyage.
+- Course reproduite rouge avec et sans adaptateur de banc ; tests HA offline
+  des deux générations, cinq lectures, erreurs, délais et annulations concurrentes.
+- Aucun diagnostic effacé, nouveau close, délai/retry augmenté, changement
+  de codec, politique Pong ou gate ; aucune exécution réelle.
+
 ## En cours — #126 / 030, verdicts et continuation sûre des campagnes
 
 - H1/H2 : SUCCESS opérationnel pour 6+6 sessions, 12/12 lectures, cleanup et

@@ -893,10 +893,12 @@ class V4Session:
             if transport is not None:
                 try:
                     await transport.close()
-                except Exception:
+                except (Exception, asyncio.CancelledError) as failure:
                     self._cleanup_failed = True
                     if self.close_client_received:
                         self._rx_error._cleanup_failed = True
+                    if isinstance(failure, asyncio.CancelledError):
+                        raise  # Detachment never proves an interrupted close.
                     raise with_phase(HobenTransportError(), "cleanup") from None
 
     async def _handle_delimited_ping(self, message: DelimitedV4Message) -> bool:
@@ -1779,15 +1781,39 @@ class V4Session:
                 pass  # The opening caller receives its sanitized failure.
         reader = self._rx_task
         cancelled = False
+        cancellations = asyncio.current_task().cancelling()
+        reader_was_cancelled = reader is not None and reader.cancelled()
         if reader is not None and reader is not asyncio.current_task():
-            if not reader.done() and not reader.cancelling():
+            if (
+                not reader.done()
+                and not reader.cancelling()
+                and (self._transport is not None or asyncio.current_task().cancelling())
+            ):
+                # Loss is signalled before RX teardown. Once RX has detached
+                # the transport, await its existing bounded close rather than
+                # cancelling that close during ordinary lifecycle recovery.
+                # An explicit stop still interrupts it and keeps failure proof.
                 reader.cancel()
             try:
-                await reader
+                # Keep a caller's cancellation distinguishable from a reader
+                # that handles cancellation while doing its own finally.
+                await asyncio.shield(reader)
             except asyncio.CancelledError:
                 # A task cancelled before its first instruction has no finally.
                 # close still owns transport cleanup; preserve caller cancellation.
-                cancelled = bool(asyncio.current_task().cancelling())
+                # A previously cancelled reader raises without suspending. Do
+                # not redeliver a caller cancellation already handled in its
+                # finally; preserve new/queued requests on an active reader.
+                cancelled = bool(asyncio.current_task().cancelling()) and (
+                    not reader_was_cancelled
+                    or asyncio.current_task().cancelling() > cancellations
+                )
+                if cancelled and not reader.done():
+                    reader.cancel()  # Forward immediately; never outlive a timeout.
+                    try:
+                        await reader
+                    except asyncio.CancelledError:
+                        pass  # The original caller cancellation is raised below.
         try:
             await self._release_transport()
         finally:

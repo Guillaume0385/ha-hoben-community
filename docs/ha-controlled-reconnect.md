@@ -1,4 +1,4 @@
-# Reconnexion HA avec inhibition Pong de test — #126 / 028–029
+# Reconnexion HA avec inhibition Pong de test — #126 / 028–031
 
 Décision propriétaire du 30/10/2026, [consigne MANAGER active](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641).
 Première livraison ciblée : **session-reconnect** de la campagne HA uniquement.
@@ -9,7 +9,9 @@ Fiabilisation 029 : [consigne canonique MANAGER](https://github.com/Guillaume038
 
 Le worker privé possède un seul vrai HomeAssistant/ConfigEntry, HobenClient,
 V4Lifecycle, V4Session et coordinator. L'intégration distribuée sous
-custom_components/hoben ne change pas et n'importe aucun de ces scripts.
+custom_components/hoben n'importe aucun de ces scripts. Les tranches 028–029
+ne la modifiaient pas ; la correction partagée de fermeture 031, prouvée aussi
+sans instrumentation, est décrite ci-dessous.
 
 Pour ce seul scénario, ha_pong_injection décore temporairement la factory de
 session du client frais. Le contexte refuse une seconde installation et la
@@ -94,6 +96,63 @@ observateur #112. Les autres scénarios, dont session-reuse sans panne injectée
 gardent leur chemin antérieur. La cause du closed du run #41016459980 reste
 **inconnue** : cette simulation ne l'explique pas et ne la corrige pas.
 Sa correction/diagnostic complémentaire est reporté à un arbitrage MANAGER.
+
+## Fermeture suspendue après perte — correction 031
+
+[Consigne MANAGER #6559839377](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6559839377),
+base `6e835541d4cda011219b886eaf74bf652bbde4c5` après #170. Le run propriétaire
+#41317930747 atteste cinq lectures, une reprise et 120 s stables, mais conserve
+`cancelled / transport_close / generation=1` et un échec de cleanup. Aucun
+nouveau test réel n'est lancé pour cette correction.
+
+Chemin causal local reproduit avec les vrais client/coordinator/session :
+
+1. `V4Session._receive_unproven_handoff` signale la perte avant son finally de
+   fermeture ; `wait_lost` réveille donc le lifecycle avant la fin du close.
+2. `_release_transport` détache le transport sous le verrou TX puis attend
+   `transport.close()`. Le TLS réel peut suspendre sur `wait_closed()` ; les
+   anciens doubles de tests fermant sans suspension ne reproduisaient pas la course.
+3. `V4Lifecycle._cleanup` appelle `session.abort()` puis `_close`. L'ancien
+   `_close` annulait RX même lorsque RX fermait déjà le transport : la fermeture
+   était réellement interrompue, pas seulement la lecture RX annulée normalement.
+4. `_release_transport` ne mémorisait pas cette `CancelledError`, contrairement
+   aux autres erreurs de close. Un transport détaché pouvait donc sembler nettoyé.
+   Une annulation déjà reçue par l'appelant pouvait aussi être propagée à tort
+   une seconde fois à l'attente d'un lecteur lui-même annulé, interrompant la
+   libération du propriétaire dans le finally.
+
+La correction reste dans `v4_session.py`, car le test rouge identique **sans
+PongInjection** démontre que la course n'est pas créée par le banc. Aucun code
+de lifecycle, transport TLS, observateur, diagnostic ou validateur n'est remplacé.
+La reprise ordinaire attend RX si le transport a déjà été détaché pour fermer ;
+elle peut toujours interrompre une lecture active. Un arrêt explicite conserve
+sa faculté d'interruption et toute annulation réelle du close est mémorisée
+comme échec. Si le lecteur était déjà annulé avant l'attente, la demande
+antérieure traitée dans le finally n'est pas relancée comme une nouvelle erreur.
+Les nouvelles demandes ainsi que celles déjà programmées avant l'attente d'un
+lecteur actif continuent de se propager.
+
+Aucune tâche de close secondaire ni seconde fermeture idempotente pour attester
+un succès. L'attente protégée du lecteur distingue sa propre annulation de celle
+de l'appelant ; toute annulation réelle de l'appelant est immédiatement transmise
+au lecteur et son arrêt attendu, sans close laissé en arrière-plan. Le timeout TLS existant et les
+deadlines du parent restent appliqués ; aucune prolongation/retry ou modification
+de la politique permanente #163/C1. Les témoins d'échec restent persistants et
+les rapports Python/Node ainsi que l'arrêt sûr HA/all sont inchangés.
+
+Les tests `ha_tests/test_reconnect_cleanup_031.py` injectent uniquement transports,
+horloge et ordonnancement. Le chemin nominal présente deux Pong inhibés,
+CloseClient à +180,550 s, réouverture à +183,534 s, cinq lectures corrélées,
+120 s stables et les **deux appels originaux** de close terminés avant
+`cleanup=true`. Une réouverture retardée attend aussi le premier close.
+La matrice couvre les générations 1/2 : close annulé avant/pendant/après,
+erreur transport, timeout, annulation de l'observateur avant/pendant/après close,
+double annulation concurrente et refus d'effacer l'échec par un close ultérieur.
+Les preuves restent `synthetic` : elles ne deviennent jamais une complétion live.
+Les suites de régression conservent TX en vol, H1/H2, les sept scénarios HA/all,
+DataUpdated 30 s, logs B3, confinement et réapage. Cette reproduction démontre
+un défaut local compatible avec le symptôme, sans attribuer de causalité au
+serveur ni prétendre identifier toutes les circonstances du run distant.
 
 ## Bornes et résultats
 
