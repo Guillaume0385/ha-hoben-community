@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #163 B3, en-têtes et tailles des messages V4
+
+- DEBUG par en-tête logique, attendu uniquement après contrat fixe/MBAP validé ;
+  OpenedClient reste un préfixe de 48 octets avec total inconnu.
+- WARNING expurgé par erreur avec compteur réellement attribuable à la trame,
+  provenance, génération locale et catégorie ; aucun RX ni exception libre.
+- Tests déterministes framing/HA, fragmentation, concaténation, EOF et erreurs
+  internes ; [contrat et instruction DEBUG temporaire](docs/frame-header-diagnostic.md).
+- Retry, codecs, A1/A2/B1, DataUpdated 30 s, H1/H2 et #126 préservés ; aucune
+  correction fonctionnelle spéculative ni exécution réelle.
+
 ## En cours — #126 / 029, preuves du banc HA session-reconnect
 
 - Arrêt typé d'une interruption avant inhibition, sans reprise silencieuse sur

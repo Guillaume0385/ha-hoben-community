@@ -169,7 +169,19 @@ def test_failed_probe_returns_to_bounded_recovery_without_reconnect(
             assert not life.data_updated_recovering
             assert factory.sessions[0].verified_read_sequence == 1
             assert len(factory.streams) == 1 and stream.close_count == 0
-            assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+            # B3 adds separate per-frame diagnostics; the recovery transition
+            # itself must still warn only once for this episode.
+            assert (
+                len(
+                    [
+                        r
+                        for r in caplog.records
+                        if r.levelno == logging.WARNING
+                        and r.name == "custom_components.hoben.v4_session"
+                    ]
+                )
+                == 1
+            )
             assert "PRIVATE" not in caplog.text
         finally:
             await life.close()

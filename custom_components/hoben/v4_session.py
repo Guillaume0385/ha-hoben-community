@@ -42,6 +42,7 @@ from .exceptions import (
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
+from .frame_diagnostic import FrameEvidence
 from .malformed import (
     MalformedDiagnostic,
     message_name,
@@ -174,13 +175,14 @@ class DelimitedV4DataResponse:
     Only session-300 currently routes RX under its named experimental hypothesis.
     """
 
-    __slots__ = ("_frame", "_exchange")
+    __slots__ = ("_frame", "_exchange", "_frame_evidence")
 
     def __init__(self, frame: bytes, *, exchange: object) -> None:
         if not isinstance(frame, bytes):
             raise HobenProtocolError()
         self._frame = frame
         self._exchange = exchange
+        self._frame_evidence = None
 
     def __repr__(self) -> str:
         return "DelimitedV4DataResponse()"
@@ -1040,6 +1042,14 @@ class V4Session:
                         raise HobenInvalidCredentialsError(result.reason)
                     raise HobenClosedError(result.reason)
                 assert isinstance(result, OpenSessionResult)
+                if self._framer is not None:
+                    # Only the accepted prefix is known, never a message total
+                    # or the length of a coalesced/tardy OpenedClient suffix.
+                    FrameEvidence(
+                        generation=self._framer.frame_log.generation,
+                        message_type="opened_client",
+                        received_bytes=48,
+                    ).emit("header", phase="opening")
                 self._snapshot = replace(
                     self._snapshot, unclassified_bytes=result.unclassified_bytes
                 )
@@ -1236,13 +1246,16 @@ class V4Session:
             if not isinstance(data, bytes):
                 # Transport implementations must return bytes. A broken local
                 # contract is permanent, not server data eligible for retry.
-                raise with_phase(HobenInternalError(), "tls_read")
+                failure = with_phase(HobenInternalError(), "tls_read")
+                self._framer.frame_log.failure(failure, phase="tls_read")
+                raise failure
             try:
                 with error_boundary("frame_boundary"):
                     events = self._framer.feed(data, exchange)
             except _RejectedCloseClient:
                 rejected_close = True
             except HobenProtocolError as failure:
+                self._framer.frame_log.failure(failure)
                 if not self._data_updated.active or type(failure) is HobenInternalError:
                     raise
                 self._framer.clear()
@@ -1250,6 +1263,9 @@ class V4Session:
                 self._fail_pending_read(HobenDataUpdatedRecoveryError())
                 events = []
                 data = b""
+            except Exception as failure:
+                self._framer.frame_log.failure(failure)
+                raise
             if self._framer.invalid_data_updated is not None:
                 self._begin_data_updated_recovery(self._framer.invalid_data_updated)
                 self._framer.clear()
@@ -1278,7 +1294,11 @@ class V4Session:
                         self._experiment.note_close_client(subcode)
                     if self._no_pong is not None:
                         self._no_pong.client_closed(self._experiment_generation)
-                    raise ExperimentalCloseClientError(subcode)
+                    failure = ExperimentalCloseClientError(subcode)
+                    event.evidence.failure(
+                        failure, phase="post_open", status="complete"
+                    )
+                    raise failure
                 elif event.payload == b"\x0a":
                     if self._experiment is not None:
                         self._experiment.pings += 1
@@ -1287,6 +1307,9 @@ class V4Session:
                             DelimitedV4Message.PING
                         )
                     except HobenError as failure:
+                        event.evidence.failure(
+                            failure, phase="unknown", status="complete"
+                        )
                         category = (
                             "transport"
                             if isinstance(failure, HobenTransportError)
@@ -1298,20 +1321,35 @@ class V4Session:
                     if self._experiment is not None:
                         self._experiment.pongs += sent
                 else:
-                    with error_boundary("message_type"):
-                        delivery = DelimitedV4DataResponse(
-                            event.payload, exchange=event.exchange
+                    try:
+                        with error_boundary("message_type"):
+                            delivery = DelimitedV4DataResponse(
+                                event.payload, exchange=event.exchange
+                            )
+                            delivery._frame_evidence = event.evidence
+                        await self._handle_delimited_data_response(delivery)
+                    except Exception as failure:
+                        event.evidence.failure(
+                            failure, phase="response_validation", status="invalid"
                         )
-                    await self._handle_delimited_data_response(delivery)
+                        raise
                     if self._experiment is not None:
                         self._experiment.responses += 1
             try:
                 data = await self._read_framed_delivery(transport)
-            except TransportEOF:
+            except TransportEOF as failure:
                 if self._no_pong is not None:
                     self._no_pong.peer_closed(self._experiment_generation)
                 if self._framer.partial:
                     raise self._framer.incomplete_error() from None
+                self._framer.frame_log.failure(failure, phase="tls_read")
+                raise
+            except Exception as failure:
+                self._framer.frame_log.failure(
+                    failure,
+                    phase="tls_read",
+                    status="partial" if self._framer.partial else "unknown",
+                )
                 raise
             if not data:
                 if self._no_pong is not None:
@@ -1324,7 +1362,9 @@ class V4Session:
                     raise self._framer.incomplete_error()
                 if self._experiment is not None:
                     self._experiment.note_failure("tls_read", "transport")
-                raise with_phase(TransportEOF("eof"), "tls_read")
+                failure = with_phase(TransportEOF("eof"), "tls_read")
+                self._framer.frame_log.failure(failure, phase="tls_read")
+                raise failure
 
     @staticmethod
     def _quarantine_time(seconds):
@@ -1479,6 +1519,9 @@ class V4Session:
         """Deliver one complete, exchange-bound response; never read the socket."""
         self._require_tx_allowed()
         pending = self._pending_read
+        _frame_evidence = (
+            event._frame_evidence if type(event) is DelimitedV4DataResponse else None
+        )
         error: HobenError | None = None
         failure_phase = "request_correlation"
         try:
@@ -1504,9 +1547,14 @@ class V4Session:
             ):
                 raise HobenProtocolError()
             if isinstance(response, ModbusExceptionResponse):
-                pending.set_exception(
-                    with_phase(HobenModbusError(response.exception_code), "pdu_decode")
+                error = with_phase(
+                    HobenModbusError(response.exception_code), "pdu_decode"
                 )
+                if _frame_evidence is not None:
+                    _frame_evidence.failure(
+                        error, phase="pdu_decode", status="complete"
+                    )
+                pending.set_exception(error)
             else:
                 pending.set_result(response)
                 self._verified_read_sequence += 1
@@ -1531,6 +1579,8 @@ class V4Session:
             and self._data_updated.task is not None
             and type(error) is HobenProtocolError
         ):
+            if _frame_evidence is not None:
+                _frame_evidence.failure(error, phase=failure_phase, status="invalid")
             self._data_updated.probing = False
             self._fail_pending_read(HobenDataUpdatedRecoveryError())
             return

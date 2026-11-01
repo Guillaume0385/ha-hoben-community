@@ -545,6 +545,8 @@ class V4Lifecycle:
         ):
             raise HobenInvalidInputError()
         session._status_callback = self._status_callback
+        if session._framer is not None:
+            session._framer.frame_log.generation = attempt
         if cap is not None:
             if (
                 type(session) is not V4Session
