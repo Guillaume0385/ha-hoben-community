@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.campaign_runtime_contract import (  # noqa: E402
     SECONDS,
+    continuation_stop_reason,
     empty_metrics,
     need,
     plan,
@@ -249,18 +250,15 @@ def run(
     validate_context(provenance)
     start = clock()
     deadline = start + SECONDS[campaign][selection]
-    stages, stopped = [], False
+    stages, stopped = [], None
     for name in names:
-        if stopped or cancelled() or clock() >= deadline - 2:
-            value = stage(
-                campaign,
-                name,
-                reason="cancelled"
-                if cancelled()
-                else "previous_failure"
-                if stopped
-                else "timeout",
-            )
+        if stopped is None:
+            if cancelled():
+                stopped = "cancelled"
+            elif clock() >= deadline - 2:
+                stopped = "timeout"
+        if stopped is not None:
+            value = stage(campaign, name, reason=stopped)
         else:
             value = executor(
                 campaign,
@@ -273,10 +271,7 @@ def run(
             )
             validate_stage(value, campaign)
             need(value["scenario"] == name)
-            stopped = (
-                value["status"] in {"FAILURE", "NOT RUN"}
-                or not value["metrics"]["cleanup"]
-            )
+            stopped = continuation_stop_reason(value, campaign)
         stages.append(value)
     elapsed = max(0, int((clock() - start) * 1000))
     if elapsed > SECONDS[campaign][selection] * 1000:

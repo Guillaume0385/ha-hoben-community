@@ -270,19 +270,19 @@ def test_h1h2_reuses_exact_historical_schedule_and_removes_private_capture(tmp_p
                 {
                     "mode": "H1" if i < 6 else "H2",
                     "boundary_proven": False,
-                    "rx_bytes": 50,
+                    "rx_bytes": 50 if i < 6 else 100,
                     "read_calls": 1,
-                    "v4_requests": 0 if i < 6 else 1,
-                    "correlated_responses": 0 if i < 6 else 1,
+                    "v4_requests": 0 if i < 6 else 2,
+                    "correlated_responses": 0 if i < 6 else 2,
                 }
                 for i in range(12)
             ]
             return {"sessions": sessions, "stopped_early": False}
 
         metrics, detail = await h1h2(IDENTITY, directory=tmp_path, runner=runner)
-        assert observed_status("protocol", "h1h2", metrics) == "INCONCLUSIVE"
+        assert observed_status("protocol", "h1h2", metrics) == "SUCCESS"
         assert metrics["h1_sessions"] == metrics["h2_sessions"] == 6
-        assert detail["rx_bytes"] == 600 and not captured[0].exists()
+        assert detail["rx_bytes"] == 900 and not captured[0].exists()
 
         async def fail(directory, **kwargs):
             captured.append(directory)

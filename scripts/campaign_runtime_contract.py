@@ -219,7 +219,10 @@ def observed_status(campaign, scenario, m):
         return "FAILURE"
     if scenario == "h1h2":
         return (
-            "INCONCLUSIVE" if m["h1_sessions"] == m["h2_sessions"] == 6 else "FAILURE"
+            "SUCCESS"
+            if m["h1_sessions"] == m["h2_sessions"] == 6
+            and m["opens"] == m["reads"] == m["reads_ok"] == 12
+            else "FAILURE"
         )
     if scenario == "session-reconnect":
         return (
@@ -443,6 +446,39 @@ def validate_recovery_witness(w, metrics):
         need(w["reopened_after_ms"] + w["stable_ms"] <= metrics["useful_ms"])
 
 
+def continuation_stop_reason(value, campaign):
+    """For an already validated stage, return a closed stop reason or None.
+
+    HA functional failure is independent of the next observer only after the
+    parent received/reaped its worker normally (observed) and the confined
+    supervisor proved termination/removal and client cleanup. Metrics alone
+    cannot attest isolation. Protocol/all keeps its historical stop policy.
+    """
+    if campaign != "ha":
+        return (
+            "previous_failure"
+            if value["status"] in {"FAILURE", "NOT RUN"}
+            or not value["metrics"]["cleanup"]
+            else None
+        )
+    if not value["started"] or value["reason"] != "observed":
+        return (
+            value["reason"]
+            if value["reason"] not in {"observed", "not_observed", "not_started"}
+            else "supervisor_refused"
+        )
+    if value["detail"] is None:
+        return "supervisor_refused"
+    r = value["detail"]["supervisor"]
+    if not r["reaped"] or not value["metrics"]["cleanup"]:
+        return "cleanup_failed"
+    if r["reason"] != "completed":
+        return "supervisor_refused" if r["reason"] == "unavailable" else r["reason"]
+    if value["metrics"]["error"] == "budget":
+        return "budget"
+    return None
+
+
 def validate_report(report):
     keys(
         report,
@@ -469,7 +505,7 @@ def validate_report(report):
         validate_stage(value, campaign)
         if stopped:
             need(not value["started"] and value["status"] == "NOT RUN")
-        stopped |= value["status"] in {"FAILURE", "NOT RUN"}
+        stopped |= continuation_stop_reason(value, campaign) is not None
     need(sum(s["elapsed_ms"] for s in report["stages"]) <= report["elapsed_ms"])
     if campaign == "ha":
         need(sum(s["metrics"]["opens"] for s in report["stages"]) <= 15)

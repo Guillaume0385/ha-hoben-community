@@ -57,9 +57,7 @@ def test_prepare_and_fresh_runner_publication_have_truthful_per_scenario_results
         (publisher / "hoben-campaign-published/report.json").read_text()
     )
     validate_report(public)
-    expected = (
-        "FAILURE" if scenario in {"all", "h1h2", "session-reconnect"} else "SUCCESS"
-    )
+    expected = "FAILURE" if scenario in {"all", "session-reconnect"} else "SUCCESS"
     assert public["actions_result"] == expected and result.returncode == (
         0 if expected == "SUCCESS" else 1
     )

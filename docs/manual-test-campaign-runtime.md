@@ -52,7 +52,7 @@ cancel-in-progress=false, queue=max, identique au workflow historique inchangé.
 | tls-only | 15 s | TLS système vérifié vers myhoben.fr:465, aucun message applicatif. |
 | session-open | 30 s | Une ouverture V4 avec l’identité initiale documentée, aucune lecture Modbus ni association. |
 | read-v4-state | 45 s | Une ouverture et lecture V4 de 20 registres fixes, valeurs jetées. |
-| h1h2 | 1800 s | Collecteur historique : 6 H1 + 6 H2, 90 s et 1 Mio RX par session. Rapport complet borné INCONCLUSIVE, aucune frontière universelle prouvée. |
+| h1h2 | 1800 s | Collecteur historique : 6 H1 + 6 H2, 90 s et 1 Mio RX par session. SUCCESS opérationnel exige 12/12 lectures, collecte complète sans erreur et cleanup ; aucune frontière universelle prouvée. |
 | session-300 | 360 s | Observation existante : 300 s utiles, trois ouvertures, six lectures maximum espacées d’au moins 60 s, 1 Mio RX total, Ping/Pong et réponse corrélée. |
 | session-reconnect | 600 s | Collecteur historique et NoPongAfter120 : inhibition des seuls Pong du client de test dès T0+120 s sur la première génération. Perte puis réouverture avant T0+240 s, lecture corrélée, Pong rétablis et 120 s stables sur la même génération ; trois ouvertures, dix lectures maximum à cadence >=60 s, 1 Mio RX total. |
 | all | 3000 s | Six scénarios dans l’ordre du formulaire, indépendants et séquentiels ; maxima individuels 2850 s, marge 150 s, orchestration et cleanup inclus. |
@@ -242,14 +242,53 @@ de ces quatre runs. La validation d’identité demeure une hypothèse. Aucun te
 réel, dispatch ou rerun n’est lancé par cette correction ; la prochaine
 validation réelle exige toujours une autorisation distincte du propriétaire.
 
-H1/H2 complet INCONCLUSIVE et reconnexion non observée INCONCLUSIVE peuvent
-laisser continuer all si collection/cleanup sont attestés. FAILURE, NOT RUN,
-dépassement ou cleanup manquant arrêtent la suite ; étapes restantes NOT RUN.
+### Contrat courant #126/030 : verdict opérationnel et continuation sûre
+
+H1/H2 est SUCCESS uniquement pour six sessions de chaque mode, douze ouvertures,
+douze lectures tentées et douze réponses corrélées, `completed=true`,
+`cleanup=true`, `error=none`, dans les plafonds validés. Toute session/lecture
+manquante, erreur ou preuve de nettoyage absente donne FAILURE. C'est un
+**succès opérationnel de la collecte, hypothèses inchangées** : aucun total
+OpenedClient n'est déduit. `boundary_proven=false` et `h2_hypothesis_only`
+restent inchangés dans les preuves historiques applicables. Le plan historique
+`protocol_campaign_plan.py` et les collecteurs/timelines ne changent pas de
+contrat scientifique ; le verdict courant Python/Node porte sur la campagne.
+
+`protocol/all` garde son arrêt après FAILURE ou NOT RUN ; une reconnexion
+INCONCLUSIVE avec cleanup peut laisser continuer, sans valider la campagne.
+
+`ha/all` tente les sept scénarios dans l'ordre même après un FAILURE fonctionnel
+(par exemple deux lectures valides sur six), exclusivement après reçu parent
+`observed` et preuves validées : superviseur `started`, `reason=completed`,
+`reaped=true`, isolation `network=fixed_tls` et plafonds exacts, sans OOM ni
+limite PID ; cleanup client terminé, propriétaire arrêté, génération courante
+nettoyée et aucun échec de cleanup. Le parent accepte `observed` seulement après
+fin normale/réapage du worker externe et suppression du dossier privé. Un
+simple booléen cleanup sans détail propriétaire/superviseur ne suffit pas.
+Le scénario conserve son FAILURE et ses compteurs, indépendamment des suivants.
+
+Refus/admission, worker non terminé, isolation non attestée, cleanup absent,
+annulation ou limite épuisée arrêtent la suite : scénarios restants NOT RUN
+avec catégorie fermée (`supervisor_refused`, `cleanup_failed`, `worker_failure`,
+`timeout`, `cancelled`, `memory`, `processes`, `budget`, ou refus parent).
+Le parent vérifie encore annulation et deadline absolue avant chaque lancement,
+avec sa réserve de deux secondes ; il n'alloue aucun budget supplémentaire.
+Les plafonds par scénario limitent sept workers à quatorze ouvertures et
+quarante-deux lectures au plus, dans les maxima globaux existants 15/42,
+1800 s, 1 Gio et 128 PID par worker isolé. Aucun chevauchement n'est autorisé.
+Les validateurs Python et Node refusent indépendamment tout enchaînement après
+une étape dont ces preuves de sûreté manquent.
+
 Le résultat global est SUCCESS uniquement si chaque étape est SUCCESS et le
-job collect a réussi. Ainsi all protocole reste globalement FAILURE tant que
-H1/H2 reste scientifiquement INCONCLUSIVE ; une collecte complète n’est pas une
-validation de framing. Rapport JSON seul, rétention sept jours, runner sans
-environnement Hoben ; aucun upload depuis collect.
+job collect a réussi. FAILURE, INCONCLUSIVE ou NOT RUN ne sont jamais effacés
+par une réussite ultérieure. Un rapport unique conserve les sept lignes HA,
+diagnostics, compteurs et durées expurgés ; JSON seul, rétention sept jours,
+runner sans environnement Hoben, aucun upload depuis collect.
+
+Les fixtures offline #126/030 démontrent les refus antérieurs puis les verdicts
+attendus en Python/Node, la continuation après chacun des sept échecs isolés,
+les arrêts sûrs, la publication et les sept succès. Elles ne prouvent aucune
+propriété nouvelle du serveur et n'autorisent aucune campagne réelle.
 
 ## Validation et limites de livraison
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #126 / 030, verdicts et continuation sûre des campagnes
+
+- H1/H2 : SUCCESS opérationnel pour 6+6 sessions, 12/12 lectures, cleanup et
+  budgets validés ; hypothèses de framing historiques inchangées.
+- HA/all : sept scénarios séquentiels malgré un échec fonctionnel isolé, après
+  fin du worker, réapage, isolation et cleanup prouvés ; arrêt sûr sinon.
+- Verdict global FAILURE conservé dès un échec ou une absence de succès ;
+  validateurs Python/Node alignés et fixtures rouges/vertes hors ligne.
+- Client HA distribué, retries, Pong, admission et plafonds inchangés ; aucun
+  test réel, dispatch/rerun ni modification d'automatisation.
+
 ## En cours — #163 B3, en-têtes et tailles des messages V4
 
 - DEBUG par en-tête logique, attendu uniquement après contrat fixe/MBAP validé ;
