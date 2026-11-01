@@ -71,7 +71,9 @@ def observed(campaign, scenario, *, recovered=False):
         metrics = empty_metrics(campaign, scenario)
         metrics.update(completed=True, cleanup=True, opens=1)
         if scenario == "h1h2":
-            metrics.update(opens=12, h1_sessions=6, h2_sessions=6)
+            metrics.update(
+                opens=12, h1_sessions=6, h2_sessions=6, reads=12, reads_ok=12
+            )
         elif scenario not in {"tls-only", "session-open"}:
             metrics.update(reads=1, reads_ok=1)
         if scenario == "session-300":
@@ -142,7 +144,7 @@ def test_each_closed_report_has_independent_python_and_node_validation(
     assert validate_report(value) == value and node_accepts(value)
     assert "pr_number" not in json.dumps(value) and "merge_sha" not in json.dumps(value)
     assert value["actions_result"] == (
-        "FAILURE" if scenario in {"all", "h1h2", "session-reconnect"} else "SUCCESS"
+        "FAILURE" if scenario in {"all", "session-reconnect"} else "SUCCESS"
     )
 
 

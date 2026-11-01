@@ -31,7 +31,7 @@ function metrics(m,c,s) {
 }
 function status(c,s,m) {
   if(!m.cleanup||!m.completed||m.error!=='none')return 'FAILURE';
-  if(s==='h1h2')return m.h1_sessions===6&&m.h2_sessions===6?'INCONCLUSIVE':'FAILURE';
+  if(s==='h1h2')return m.h1_sessions===6&&m.h2_sessions===6&&m.opens===12&&m.reads===12&&m.reads_ok===12?'SUCCESS':'FAILURE';
   if(s==='session-reconnect')return m.recovered&&m.reads_ok>0&&m.opens>1&&m.loss_kind!=='none'?'SUCCESS':'INCONCLUSIVE';
   if(c==='protocol') {
     if(['tls-only','session-open'].includes(s))return m.opens===1?'SUCCESS':'FAILURE';
@@ -197,6 +197,16 @@ function validateStage(v,c) {
   if(['SUCCESS','INCONCLUSIVE'].includes(v.status))check(v.metrics.useful_ms<=v.elapsed_ms&&(c!=='ha'||v.detail!==null));
   return v;
 }
+function continuationStopReason(v,c) {
+  // Independent of the Python gate: a functional KO does not prove isolation.
+  if(c!=='ha')return ['FAILURE','NOT RUN'].includes(v.status)||!v.metrics.cleanup?'previous_failure':null;
+  if(!v.started||v.reason!=='observed')return ['observed','not_observed','not_started'].includes(v.reason)?'supervisor_refused':v.reason;
+  if(v.detail===null)return 'supervisor_refused';
+  const r=v.detail.supervisor;
+  if(!r.reaped||!v.metrics.cleanup)return 'cleanup_failed';
+  if(r.reason!=='completed')return r.reason==='unavailable'?'supervisor_refused':r.reason;
+  return v.metrics.error==='budget'?'budget':null;
+}
 function validate(r) {
   object(r,['schema','campaign','selection','provenance','elapsed_ms','stages','collection_result','actions_result']);
   check(r.schema===1);
@@ -207,7 +217,7 @@ function validate(r) {
   let stopped=false;
   r.stages.forEach((v,i)=>{check(v.scenario===selected[i]);validateStage(v,r.campaign);
     if(stopped)check(!v.started&&v.status==='NOT RUN');
-    stopped=stopped||['FAILURE','NOT RUN'].includes(v.status);});
+    stopped=stopped||continuationStopReason(v,r.campaign)!==null;});
   check(r.stages.reduce((n,v)=>n+v.elapsed_ms,0)<=r.elapsed_ms);
   if(r.campaign==='ha')check(r.stages.reduce((n,v)=>n+v.metrics.opens,0)<=15&&r.stages.reduce((n,v)=>n+v.metrics.reads,0)<=42);
   check(['pending','success','failure','cancelled','skipped','unattested'].includes(r.collection_result));
