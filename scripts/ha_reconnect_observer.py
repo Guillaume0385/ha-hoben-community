@@ -78,6 +78,8 @@ async def observe(
                         outcome = (
                             "not_exercised"
                             if interruption["generation"] == 1
+                            else "reopen_failed"
+                            if probe.reopened_at is None
                             else "stability_lost"
                         )
                         break

@@ -69,6 +69,8 @@ génération avec `terminal=closed`, `outcome=not_exercised`, et refuse son retr
 avant ouverture du transport suivant. Une perte de génération 2 invalide la
 stabilité. Aucune session n'est fermée artificiellement pour fabriquer la perte.
 L'arrêt explicite intervient uniquement après décision d'échec du scénario.
+Un refus avant acceptation de la génération 2 reste `reopen_failed`, distinct
+de `stability_lost` après acceptation effective de cette génération.
 
 `recovery.diagnostic`, optionnel pour lire les anciens rapports, contient deux
 emplacements bornés : `interruption` et `cleanup`. Chaque emplacement conserve

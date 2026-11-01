@@ -9,6 +9,7 @@ from custom_components.hoben import v4_lifecycle
 from custom_components.hoben.client import HobenClient
 from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
 from custom_components.hoben.transport import (
+    TransportCertificateError,
     TransportEOF,
     TransportError,
     TransportTimeout,
@@ -33,6 +34,8 @@ async def exercise(hass, entry, peers, case, *, opening_delay=0, worker=False):
         second.close.side_effect = TransportError("PRIVATE_PAYLOAD")
     if case == "timeout_cleanup":
         second.close.side_effect = TransportTimeout("PRIVATE_PAYLOAD")
+    if case == "failed_reopen":
+        second.connect.side_effect = TransportCertificateError("PRIVATE_PAYLOAD")
     pong_blocked = asyncio.Event()
     if case == "concurrent_cleanup":
         original_write = second.write.side_effect
@@ -185,6 +188,20 @@ async def test_acceptance_not_worker_start_anchors_threshold_and_stability(
     assert r["reopened_after_ms"] == 132000 and r["stable_ms"] == 120000
     assert pongs[119] == 119 and pongs[120] == 119
     assert r["outcome"] == "verified" and elapsed >= 37.25 + 132 + 120
+
+
+async def test_rejected_reopening_is_distinct_from_losing_a_stable_replacement(
+    hass, entry, peers
+):
+    e, elapsed, _, _, _ = await exercise(hass, entry, peers, "failed_reopen")
+    r = e["recovery"]
+    assert r["reopened_after_ms"] is None and r["outcome"] == "reopen_failed"
+    assert r["diagnostic"]["interruption"]["category"] == "tls"
+    assert r["diagnostic"]["interruption"]["owner"] == "opening"
+    assert r["diagnostic"]["interruption"]["generation"] == 2
+    assert not project(
+        "session-reconnect", detail("session-reconnect", e, int(elapsed * 1000))
+    )["recovered"]
 
 
 @pytest.mark.parametrize("case", ["success", "failed_cleanup", "early_protocol"])
