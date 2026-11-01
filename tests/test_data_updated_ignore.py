@@ -143,7 +143,26 @@ def test_invalid_dataupdated_length_warns_without_immediate_close_or_reconnect(
                 await asyncio.sleep(0)
             assert factory.sessions[0].state is SessionState.CONNECTED
             assert stream.close_count == 0 and len(factory.streams) == 1
-            assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+            warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+            assert (
+                len(
+                    [
+                        r
+                        for r in warnings
+                        if r.name == "custom_components.hoben.v4_session"
+                    ]
+                )
+                == 1
+            )
+            (frame,) = [
+                r.hoben_frame
+                for r in warnings
+                if r.name == "custom_components.hoben.frame_diagnostic"
+            ]
+            assert (
+                frame["received_bytes"] == 11
+                and frame["expected_total_bytes"] == "unknown"
+            )
             assert "PRIVATE" not in caplog.text
         finally:
             await life.close()

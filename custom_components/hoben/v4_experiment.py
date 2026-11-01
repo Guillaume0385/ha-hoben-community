@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from .error_phases import error_boundary
 from .exceptions import HobenClosedError, HobenProtocolError
+from .frame_diagnostic import FrameDiagnostic, FrameEvidence
 from .malformed import MalformedDiagnostic, message_name
 from .modbus import modbus_tcp_frame_size
 from .myhoben import decode_close_client
@@ -256,6 +257,9 @@ class ExperimentalFrame:
 
     payload: bytes = field(repr=False)
     exchange: object = field(repr=False)
+    evidence: FrameEvidence = field(
+        default_factory=FrameEvidence, repr=False, compare=False
+    )
 
 
 class ExperimentalV4Framer:
@@ -279,8 +283,11 @@ class ExperimentalV4Framer:
         self._reject_close_client = _reject_close_client
         self._recover_data_updated = recover_data_updated
         self.invalid_data_updated = None
+        self.frame_log = FrameDiagnostic()
 
     def _fail(self, phase, message):
+        self.frame_log.failure_phase = phase
+        self.frame_log.header()
         if self._diagnostic is not None:
             self._diagnostic.note_failure(phase, "protocol", message)
         if (
@@ -333,7 +340,7 @@ class ExperimentalV4Framer:
                 missing, scope = "message_body", "frame"
         else:
             missing, scope = "unknown", "not_proven"
-        return HobenProtocolError(
+        error = HobenProtocolError(
             MalformedDiagnostic(
                 phase="frame_boundary",
                 message_type=message_name(head),
@@ -344,6 +351,8 @@ class ExperimentalV4Framer:
                 rejection="incomplete_frame",
             )
         )
+        self.frame_log.failure(error, status="partial")
+        return error
 
     def clear(self):
         self._buffer.clear()
@@ -352,12 +361,23 @@ class ExperimentalV4Framer:
         self._ignored_type = self._ignored_size = None
         self._tail = None
         self.invalid_data_updated = None
+        self.frame_log.clear()
 
     @property
     def partial(self):
         return bool(self._buffer) or self._remaining > 0 or self._tail is not None
 
     def feed(self, data: bytes, exchange: object):
+        try:
+            return self._feed(data, exchange)
+        except Exception as error:
+            self.frame_log.failure(
+                error,
+                status="invalid" if isinstance(error, HobenProtocolError) else None,
+            )
+            raise
+
+    def _feed(self, data: bytes, exchange: object):
         if not isinstance(data, bytes) or len(data) > 4096:
             self._fail("frame_boundary", "unclassified")
         if self._tail is not None:
@@ -372,22 +392,35 @@ class ExperimentalV4Framer:
             if self._remaining:
                 # Consume exactly the validated body; never retain or decode it.
                 self._remaining -= 1
+                self.frame_log.received()
                 if not self._remaining and self._diagnostic is not None:
                     self._diagnostic.note_ignored(
                         self._ignored_type, self._ignored_size
                     )
+                if not self._remaining:
+                    self.frame_log.finish()
                 continue
             if not self._buffer:
                 self._exchange = exchange
+                self.frame_log.start(byte)
             self._buffer.append(byte)
+            self.frame_log.received()
             if self._buffer[0] == 10:
-                events.append(ExperimentalFrame(b"\x0a", self._exchange))
+                self.frame_log.header(1, provenance="fixed_contract", scope="frame")
+                events.append(
+                    ExperimentalFrame(b"\x0a", self._exchange, self.frame_log.finish())
+                )
                 self._buffer.clear()
             elif self._buffer[0] == 5 and not self._reject_close_client:
+                self.frame_log.header(
+                    2, provenance="fixed_contract", scope="post_open_hypothesis"
+                )
                 # Owner-authorized hypothesis (#6395141200), not wire proof.
                 if len(self._buffer) == 2:
                     events.append(
-                        ExperimentalFrame(bytes(self._buffer), self._exchange)
+                        ExperimentalFrame(
+                            bytes(self._buffer), self._exchange, self.frame_log.finish()
+                        )
                     )
                     self._buffer.clear()
                     if index + 1 < len(data):
@@ -410,6 +443,10 @@ class ExperimentalV4Framer:
                             bytes(self._buffer[prefix : prefix + 6])
                         )
                 except (TypeError, ValueError):
+                    self.frame_log.header()
+                    self.frame_log.failure(
+                        HobenProtocolError(), phase="mbap_header", status="invalid"
+                    )
                     if self._buffer[0] == 27 and self._recover_data_updated:
                         # Only persistent reception opts into owner-authorized
                         # recovery. No size/boundary is inferred from this header.
@@ -423,6 +460,9 @@ class ExperimentalV4Framer:
                         )
                         return []
                     self._fail("frame_boundary", "ambiguous")
+                self.frame_log.header(
+                    size, provenance="validated_header", scope="frame"
+                )
                 if self._buffer[0] in IGNORED_PREFIXES:
                     self._ignored_type, self._ignored_size = self._buffer[0], size
                     self._remaining = size - len(self._buffer)
@@ -431,7 +471,9 @@ class ExperimentalV4Framer:
                     continue
                 if len(self._buffer) == size:
                     events.append(
-                        ExperimentalFrame(bytes(self._buffer), self._exchange)
+                        ExperimentalFrame(
+                            bytes(self._buffer), self._exchange, self.frame_log.finish()
+                        )
                     )
                     self._buffer.clear()
         return events
