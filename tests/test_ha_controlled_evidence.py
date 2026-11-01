@@ -114,3 +114,59 @@ def test_isolated_campaign_source_has_injector_but_original_baseline_does_not():
                     assert path.stat().st_mode & 0o777 == 0o444
         finally:
             bundle.close()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("category", "PRIVATE_PAYLOAD"),
+        ("owner", "PRIVATE_PAYLOAD"),
+        ("generation", True),
+        ("generation", 3),
+        ("inhibition_exercised", 1),
+        ("subcode", "PRIVATE_PAYLOAD"),
+        ("private", "PRIVATE_PAYLOAD"),
+    ],
+)
+def test_closed_cleanup_diagnostic_rejects_untrusted_fields_in_both_validators(
+    field, value
+):
+    d = controlled()
+    e = d["evidence"]
+    e["cleanup"]["observation"]["cleanup_failed"] = True
+    e["recovery"]["diagnostic"] = {
+        "interruption": None,
+        "cleanup": {
+            "category": "transport",
+            "owner": "transport_close",
+            "generation": 2,
+            "inhibition_exercised": True,
+            "subcode": None,
+        },
+    }
+    r = report(d)
+    assert r["stages"][0]["status"] == "FAILURE"
+    assert validate_report(r) and node_accepts(r)
+    r["stages"][0]["detail"]["evidence"]["recovery"]["diagnostic"]["cleanup"][field] = (
+        value
+    )
+    with pytest.raises(ValueError):
+        validate_report(r)
+    assert not node_accepts(r)
+
+
+@pytest.mark.parametrize("slot", ["interruption", "cleanup"])
+def test_diagnostic_cannot_coexist_with_a_fictitious_success(slot):
+    r = report(controlled())
+    diagnostic = dict(interruption=None, cleanup=None)
+    diagnostic[slot] = dict(
+        category="transport",
+        owner="transport_close" if slot == "cleanup" else "transport_read",
+        generation=1,
+        inhibition_exercised=False,
+        subcode=None,
+    )
+    r["stages"][0]["detail"]["evidence"]["recovery"]["diagnostic"] = diagnostic
+    with pytest.raises(ValueError):
+        validate_report(r)
+    assert not node_accepts(r)

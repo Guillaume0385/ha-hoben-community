@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #126 / 029, preuves du banc HA session-reconnect
+
+- Arrêt typé d'une interruption avant inhibition, sans reprise silencieuse sur
+  une autre génération ; refus d'ouverture si retry et refresh se concurrencent.
+- Diagnostic expurgé du propriétaire/génération et des erreurs de cleanup ;
+  preuve d'échec conservée après finalisation idempotente du worker.
+- Parité PR #158 documentée, frontières non prouvées conservées false, budgets
+  et critères stricts inchangés ; tests offline sur horloges, erreurs et concurrence.
+- Aucun changement au client HA distribué, H1/H2, autres scénarios, workflows
+  ou main ; aucun test réel ni dispatch/rerun exécuté.
+
 ## En cours — #163 B1, phases prouvées du diagnostic d'erreur V4
 
 - Provenance fermée pour lecture TLS, message/framing/MBAP, décodage PDU/modèle,

@@ -1,8 +1,9 @@
-# Reconnexion HA avec inhibition Pong de test — #126 / 028
+# Reconnexion HA avec inhibition Pong de test — #126 / 028–029
 
 Décision propriétaire du 30/10/2026, [consigne MANAGER active](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641).
 Première livraison ciblée : **session-reconnect** de la campagne HA uniquement.
 La tâche expérimentale 027 / PR #158 est terminée. H1/H2 reste inchangé.
+Fiabilisation 029 : [consigne canonique MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6549641918).
 
 ## Isolation et chemin réel
 
@@ -36,6 +37,55 @@ installation globale ne survit au contexte du banc isolé.
 | Réponse corrélée à la nouvelle génération | Vrai refresh du coordinator, données nouvellement décodées et séquence propriétaire ; aucune sonde indépendante. |
 | 120 s stables, Pong rétablis | Génération finale active inchangée, perte suivante absente, lecture corrélée et au moins un Pong réellement transmis après réouverture. |
 | Cleanup et rapport fermé | Temps/état figés avant fermeture explicite, génération nettoyée, validation Python et Node indépendantes. |
+
+La comparaison 029 porte sur `_observe_reconnect` de `session_suite.py`, son
+appel dans `protocol_campaign_collect.py`, et le chemin
+`ha_campaign_worker` → `ha_session_live_worker.collect` →
+`ha_reconnect_observer.observe` / `ha_pong_injection` :
+
+| Point vérifié | Expérimental PR #158 | HA 029 |
+| --- | --- | --- |
+| Origine des 120 s | `NoPongAfter120.accepted`, après `V4Session.connect` | Même politique, même retour strict ; délai d'ouverture exclu, horloge monotone vérifiée. |
+| Durée de la première génération | Ordinal initial conservé jusqu'à perte ; aucune nouvelle origine après réouverture | Ordinal initial conservé ; interruption non provoquée terminale, même si le retry concurrence le refresh. |
+| Pong effectivement inhibé | Compteur `policy.suppressed`, filtre interne opt-in expérimental | Même compteur, filtre du seul transport de test, sous verrou TX existant. |
+| Perte admissible | EOF ou CloseClient complet après inhibition, témoin propriétaire | Mêmes événements et témoin ; EOF vide ou levé distinct de fermeture locale/timeout/erreur protocole. |
+| Réouverture | Acceptation avant T0+240 s | Même échéance ; vraie génération 2 du client/coordinator, pas de replay du read échoué. |
+| Lecture corrélée | Séquence de lecture du propriétaire, budget de génération | Nouveau décodage du coordinator, génération/séquence et ancienne génération nettoyée. |
+| Pong restaurés / stabilité | Nouvelle génération active, ≥1 Pong transmis après acceptation, 120 s | Mêmes exigences ; un Pong pendant l'ouverture ne suffit pas. |
+| Frontière | Hypothèse persistante, `boundary_proven=false` | Même hypothèse, même champ false ; un succès fonctionnel ne prouve pas une longueur universelle OpenedClient. |
+| Cleanup | État figé avant `close`, arrêt et dernière génération nettoyée, aucun échec | Idem ; échec/expiration conservé dans le rapport avant finalisation idempotente du worker. |
+| Plafonds existants | Processus 600 s, observation 590 s, horizon fonctionnel T0+360 s, 3 opens / 10 reads | Processus 600 s, observation ≤570 s et deadline parent −40 s, reprise <240 s + stabilité 120 s ; 2 opens / 6 refreshs. Aucun plafond augmenté. |
+
+## Interruption précoce et nettoyage — 029
+
+Les artefacts expurgés des runs `41242880445` et `41243780903` ont été lus.
+Le premier porte `cleanup_failed=true` et `cleaned_generation=1` après une
+reprise sur génération 2 : il s'agit d'un échec propriétaire conservé, pas d'un
+succès que le banc pourrait réattester. Le second montre une génération 2 sans
+Pong inhibé ni perte admissible. Les causes historiques restent **inconnues**.
+
+Le banc arrête désormais une interruption non admissible de la première
+génération avec `terminal=closed`, `outcome=not_exercised`, et refuse son retry
+avant ouverture du transport suivant. Une perte de génération 2 invalide la
+stabilité. Aucune session n'est fermée artificiellement pour fabriquer la perte.
+L'arrêt explicite intervient uniquement après décision d'échec du scénario.
+
+`recovery.diagnostic`, optionnel pour lire les anciens rapports, contient deux
+emplacements bornés : `interruption` et `cleanup`. Chaque emplacement conserve
+le premier événement observé : catégorie typée, propriétaire local
+(`transport_read`, `transport_write`, `opening`, `session`, `transport_close`
+ou `observer_cleanup`), génération ordinale, inhibition déjà exercée ou non,
+et sous-code CloseClient uniquement s'il est reconnu par le vrai propriétaire.
+Les mêmes scalaires sont journalisés ; aucun texte d'exception ni cause distante
+déduite. Les validateurs Python et Node refusent les champs libres, types faux
+et diagnostics incompatibles avec une preuve de succès.
+
+Une erreur transport de fermeture reste `cleanup=false`. Si la fermeture de
+l'observateur échoue ou expire, son rapport d'échec est conservé pour la
+finalisation du worker ; un second close idempotent ne réécrit pas cette preuve.
+Le transport de production, ses délais et ses erreurs ne sont pas modifiés.
+Les tests synthétiques couvrent aussi un Pong en vol lors du teardown, un retry
+concurrent, une ouverture retardée et les validations négatives Python/Node.
 
 Le socle hoben-live conserve sa preuve de six lectures sur 300 s et son
 observateur #112. Les autres scénarios, dont session-reuse sans panne injectée,

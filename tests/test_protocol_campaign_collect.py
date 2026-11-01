@@ -182,6 +182,61 @@ def test_prethreshold_loss_cannot_attest_controlled_reconnection(loss):
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("opening_delay", [0, 37.25])
+def test_experimental_reference_keeps_acceptance_origin_and_strict_cleanup(
+    opening_delay,
+):
+    from tests.test_session_suite import Harness
+
+    async def exercise():
+        h = Harness()
+
+        def factory(budget, policy):
+            life = h.make(budget, policy)
+            make_session = life._factory
+
+            def session(**options):
+                value = make_session(**options)
+                if len(h.streams) == 1:
+                    connect = h.streams[0].connect
+
+                    async def delayed():
+                        h.now += opening_delay
+                        await connect()
+
+                    h.streams[0].connect = delayed
+                return value
+
+            life._factory = session
+            return life
+
+        metrics, detail = await collect(
+            "session-reconnect", IDENTITY, factory=factory, clock=h.clock, sleep=h.sleep
+        )
+        h.assert_closed()
+        r = detail["recovery_witness"]
+        assert h.policy.first_opened_at == opening_delay
+        assert r["loss_after_ms"] == 160000 and r["reopened_after_ms"] == 161000
+        assert r["loss_generation"] == 1 and r["read_generation"] == 2
+        assert r["suppressed_pongs"] > 0 and r["recovery_pongs"] > 0
+        assert r["stable_ms"] == 120000 and r["boundary_proven"] is False
+        assert metrics["recovered"] and metrics["cleanup"]
+        assert metrics["useful_ms"] >= int((opening_delay + 161 + 120) * 1000)
+        value = stage(
+            "protocol",
+            "session-reconnect",
+            started=True,
+            reason="observed",
+            elapsed_ms=int(h.now * 1000),
+            metrics=metrics,
+            detail=detail,
+        )
+        report = envelope("protocol", "session-reconnect", [value])
+        assert validate_report(report) and node_accepts(report)
+
+    asyncio.run(exercise())
+
+
 def test_tls_only_has_no_protocol_write_and_closes_on_failure():
     async def exercise():
         closed = []
