@@ -58,6 +58,33 @@ Pour toute PR, vérifier `base.ref == experimental`, la correspondance avec la t
 
 En cas de défaut : commentaires factuels, `state:in-progress`, correction sur **la même PR**, puis nouvelle revue du nouveau HEAD. Si conforme : fusion par MANAGER uniquement, confirmation du SHA intégré à `experimental`, bilan bref et préparation d'une seule tâche suivante. Aucune PR `main` sans nouvelle demande explicite. Ne pas fermer une Issue de chantier avant tous ses critères validés.
 
+### Revue CODEX automatique des PR vers `main`
+
+Sur toute PR **explicitement autorisée** ciblant exactement `main`, prête
+à être revue et non brouillon, MANAGER lance lui-même CODEX REVIEW, **sans
+demander une nouvelle instruction au propriétaire**, en publiant un
+commentaire de conversation GitHub contenant **exactement** `@codex review`
+et rien d'autre. Ce contrôle fait partie de chaque intervention MANAGER et
+de son suivi programmé. La commande n'est jamais publiée sur `experimental`.
+
+Avant publication, relire le HEAD SHA et les commentaires, `Codex Review
+Summary`, reçus de revue, reviews GitHub et threads. Ne publier **qu'une
+commande par HEAD** : si la revue est déjà demandée, en cours ou terminée
+sur ce SHA, la suivre au lieu de la redemander. Lors d'un nouveau commit ou
+rebase, attendre que le nouveau HEAD soit prêt, vérifier qu'aucune commande
+n'existe pour lui, puis demander une nouvelle revue. Après une erreur GitHub
+ambiguë, revérifier les commentaires avant de retenter pour éviter un doublon.
+
+Confirmer que CODEX REVIEW a réellement terminé sur le **HEAD exact**,
+analyser les remarques, demander les corrections sur la même PR puis relancer
+la revue si le SHA change. **La présence du commentaire, un résumé terminé
+ou l'absence de remarques ne remplacent pas une approbation indépendante
+vérifiable** ni le passage requis en `state:validate`. MANAGER ne fusionne
+pas sur `main` sans approbation conforme, quatre CI vertes et éventuelle
+validation réelle exigée. Si une condition manque, garder la PR ouverte et
+documenter le blocage. Aucune nouvelle tâche CODEX DEV et aucune automation
+en doublon pour lancer cette revue.
+
 ## Échecs, tests réels et sécurité
 
 Un échec GitHub transitoire peut être vérifié puis retenté une fois. Un refus explicite de permission ou de sécurité n'est jamais contourné ; ne pas annoncer une écriture non confirmée. La surveillance MANAGER peut se poursuivre sans autoriser de développement supplémentaire.

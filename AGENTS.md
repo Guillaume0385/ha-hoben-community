@@ -590,6 +590,33 @@ CODEX DEV moves `state:ready → state:in-progress`, works on a dedicated branch
 updates the same linked PR, and moves the Issue to `state:review` when ready for
 independent review.
 
+### Automatic CODEX REVIEW request for PRs targeting `main`
+
+When an authorized, non-draft PR with base exactly `main` reaches
+`state:review` (or an expressly owner-authorized documentation-only PR is
+ready for review), MANAGER **must autonomously request CODEX REVIEW** by posting
+one top-level PR Conversation comment whose complete body is exactly
+`@codex review`. This is part of every MANAGER intervention and scheduled
+review cycle; the owner does **not** need to ask separately. Never post this
+request for a PR targeting `experimental`.
+
+Before posting, read the PR's exact current HEAD SHA, existing comments
+(including Codex Review Summary and receipt), review submissions and open
+threads. If a Codex review for that same SHA has already been requested or is
+running/completed, do not post a duplicate. After any new commit, including a
+small fix or rebase, the old review is stale: request **one** review on the new
+HEAD when review-ready, after rechecking for an existing request. If posting
+returns an ambiguous error, refetch the comments before retrying.
+
+A posted `@codex review` comment only **requests** a review; it does not
+prove that the bot ran or approved it. MANAGER checks the receipt/result and
+exact SHA, handles all findings on the same PR, and retains the independent
+CODEX REVIEW approval, `state:validate`, four successful CI checks and any
+required real-validation gate before merging. A completed summary or
+no-findings receipt must not be misreported as a GitHub `APPROVED` review.
+If the required approval cannot be verified, leave the PR open and report the
+blocker rather than bypassing the review process.
+
 For PRs targeting `main`, CODEX REVIEW reviews implementations only on
 `state:review`. It verifies the
 exact current PR HEAD, Issue requirements, full diff, tests, CI, documentation,
