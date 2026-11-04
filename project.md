@@ -1120,6 +1120,18 @@ CODEX DEV leaves implementation PRs open and never self-approves, adds
 
 ## Independent review — CODEX REVIEW (PRs targeting `main` only)
 
+MANAGER automatically requests this review without a second owner prompt:
+on each review-ready, non-draft PR with base exactly `main`, verify the
+current HEAD and existing Codex review requests/results, then post a top-level
+PR comment consisting solely of `@codex review` if no request for that
+HEAD already exists. Do not duplicate an in-progress or completed review.
+A new HEAD invalidates the old result and requires a fresh, deduplicated
+request. Track the returned Codex review and findings on the exact HEAD.
+Posting the command, receiving a completed summary or seeing no findings
+does not itself constitute the independent approval required for
+`state:validate` or a merge. This mechanism never applies to PRs targeting
+`experimental` and does not relax CI, live gates or merge authorization.
+
 For PRs with base `main` only, CODEX REVIEW reviews implementations from
 `state:review` and independently
 verifies the exact current PR HEAD rather than trusting the developer summary.
