@@ -18,6 +18,7 @@ name: Vérification réelle Home Assistant
         - cleanup
         - availability
         - all
+        - dual-session-observation
 permissions: {}
 jobs:
   not-activated:
