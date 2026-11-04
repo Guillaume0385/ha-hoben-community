@@ -222,7 +222,11 @@ async def observe(
             ):
                 break
 
-    with tracker.install(client):
+    with (
+        tracker.install(client),
+        tracker.diagnostic.logs(),
+        tracker.diagnostic.refreshes(coordinator),
+    ):
         try:
             tracker.guard("a")
             async with asyncio.timeout(max(0, end - stamp())):
@@ -270,4 +274,5 @@ async def observe(
                     except (Exception, asyncio.CancelledError):
                         tracker.fail(role, "closed", "cleanup")
             e["completed"] = positive(e)
+            e.update(diagnostic_schema=1, diagnostic=tracker.diagnostic.snapshot())
     return e

@@ -85,6 +85,7 @@ function haDetail(s,d) {
   if(s===dual)return require('./ha-dual-evidence.cjs').project(d,blank);
   object(d,['supervisor','evidence']);
   const r=d.supervisor,e=d.evidence;
+  const incident=require('./ha-incident-evidence.cjs');
   object(r,['started','reason','memory_bytes','pids','useful_ms','process_ms','elapsed_ms','oom_killed','pids_limited','reaped','network']);
   for(const k of ['started','oom_killed','pids_limited','reaped'])check(typeof r[k]==='boolean');
   check(r.memory_bytes===1073741824&&r.pids===128&&r.process_ms===cap('ha',s)&&r.useful_ms===(s==='hoben-live'?300000:null));
@@ -95,10 +96,10 @@ function haDetail(s,d) {
   if(r.pids_limited&&!r.oom_killed)check(r.reason==='processes');
   let logical;
   if(s==='hoben-live') {
-    object(e,['completed','samples','window','cleanup']);
+    object(e,['completed','samples','window','cleanup',...incident.extra(e)]);
     logical=baseline.validateObservation({supervisor:{...r,network:'none'},...e},true);
   } else {
-    object(e,['completed','samples','window','cleanup','terminal',...(s==='session-reconnect'&&Object.hasOwn(e,'recovery')?['recovery']:[])]);
+    object(e,['completed','samples','window','cleanup','terminal',...incident.extra(e),...(s==='session-reconnect'&&Object.hasOwn(e,'recovery')?['recovery']:[])]);
     check(errors.includes(e.terminal)&&typeof e.completed==='boolean'&&Array.isArray(e.samples)&&e.samples.length<=6);
     check(r.started||e.samples.length===0);
     let previous=null,at=-1;
@@ -129,6 +130,7 @@ function haDetail(s,d) {
     inspect(e.cleanup.observation);if(previous)progress(previous,e.cleanup.observation);
     if(s==='session-reconnect')haControlled(e);
   }
+  incident.validate(e,r);
   check(Buffer.byteLength(JSON.stringify(d))<=8192);
   const m=blank('ha'),o=e.cleanup.observation,w=e.window.observation;
   Object.assign(m,{opens:o.attempts,reads:e.samples.length,reads_ok:e.samples.filter(v=>v.decoded).length,useful_ms:e.window.elapsed_ms,
@@ -278,6 +280,17 @@ function summary(r,env) {
     lines.push('| '+[s,v?.status||'NOT RUN',v?diagnostic(v):'report_not_attested',v?duration(v.elapsed_ms):'non attestée',
       duration(cap(c,s)),v?.started?v.metrics.reads_ok+' / '+v.metrics.reads:'non attestées',
       v?.started?(v.metrics.cleanup?'attesté':'non attesté'):'non attesté'].join(' | ')+' |');
+  }
+  for(const v of r?.stages||[]) {
+    const e=v.detail?.evidence;
+    if(e?.diagnostic_schema!==1)continue;
+    const d=e.diagnostic;
+    lines.push('', 'Diagnostic HA-F1 — '+v.scenario+' (temps relatifs au début de collecte) :');
+    for(const [key,label] of [['first','Premier incident'],['terminal','Erreur terminale'],['cleanup','Erreur de nettoyage']]) {
+      const x=d[key];
+      lines.push('- '+label+' : '+(x?x[0]+' / génération '+x[1]+' / '+x[3]+' / '+x[4]+' / '+x[5]+' à '+x[2]+' ms ; sous-code '+x[6]:'aucun événement attesté')+'.');
+    }
+    for(const o of d.owners)lines.push('- Owner '+o.role+' / tentative '+o.generation+' / génération acceptée '+o.accepted_generation+' : accepté '+o.accepted+' ; étape '+o.stage+' ; fermeture demandée '+o.close[0]+' / close transport début '+o.close[1]+' / retour '+o.close[2]+' / cleanup attesté '+o.close[3]+' ms ; dernière lecture '+(o.last_read?'séquence '+o.last_read[0]+' à '+o.last_read[1]+' ms, âge '+o.last_read[2]+' ms':'non attestée')+'.');
   }
   for(const v of r?.stages||[]) {
     if(v.scenario!==dual||!v.detail)continue;

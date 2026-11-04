@@ -5,6 +5,8 @@ import json
 from custom_components.hoben.error_phases import PHASES
 from custom_components.hoben.malformed import TEXT_FIELDS
 from scripts.campaign_runtime_contract import ERRORS, empty_metrics, integer, keys, need
+from scripts.ha_incident_evidence import extra_keys
+from scripts.ha_incident_evidence import validate as validate_diagnostic
 
 SCENARIO = "dual-session-observation"
 ROLES = ("a", "b")
@@ -329,7 +331,7 @@ def validate_frame(frame):
 
 def validate(e):
     modern = e.get("schema") == 2
-    keys(e, empty() if modern else _empty_v1())
+    keys(e, set(empty() if modern else _empty_v1()) | extra_keys(e))
     need(type(e["schema"]) is int and e["schema"] in {1, 2})
     need(e["boundary_proven"] is False)
     need(e["clock"] in {"unattested", "synthetic", "monotonic"})
@@ -745,6 +747,7 @@ def validate_detail(detail):
     need(not r["oom_killed"] or r["reason"] == "memory")
     need(not r["pids_limited"] or r["oom_killed"] or r["reason"] == "processes")
     validate(e)
+    validate_diagnostic(e, r, dual=True)
     need(
         r["started"]
         or not e["reads"]

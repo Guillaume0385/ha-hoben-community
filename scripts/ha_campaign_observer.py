@@ -79,6 +79,50 @@ async def observe(
     coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
 ):
     if scenario == "dual-session-observation":
+        return await _observe(
+            coordinator,
+            scenario,
+            evidence=evidence,
+            clock=clock,
+            sleep=sleep,
+            absolute_end=absolute_end,
+        )
+    from scripts.ha_incident_observer import Recorder
+
+    e = empty("hoben-live") if evidence is None else evidence
+    diagnostic = Recorder(clock or time.monotonic)
+    try:
+        with diagnostic.install(coordinator):
+            return await _observe(
+                coordinator,
+                scenario,
+                evidence=e,
+                clock=clock,
+                sleep=sleep,
+                absolute_end=absolute_end,
+            )
+    except (Exception, asyncio.CancelledError) as error:
+        session = diagnostic.sessions[-1] if diagnostic.sessions else None
+        diagnostic.error(session, error, "cleanup", "observer")
+        if diagnostic.terminal is None:
+            diagnostic.event(
+                session,
+                "cancelled"
+                if isinstance(error, asyncio.CancelledError)
+                else "internal",
+                "cleanup",
+                "observer",
+                terminal=True,
+            )
+        raise
+    finally:
+        e.update(diagnostic_schema=1, diagnostic=diagnostic.snapshot())
+
+
+async def _observe(
+    coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
+):
+    if scenario == "dual-session-observation":
         from scripts.ha_dual_observer import observe as dual_observe
 
         return await dual_observe(
