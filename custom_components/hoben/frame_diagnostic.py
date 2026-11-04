@@ -38,7 +38,15 @@ class FrameEvidence:
     length_scope: str = "unproven"
     provenance: str = "unproven"
 
-    def emit(self, event, *, category="none", phase="frame_boundary", status=None):
+    def emit(
+        self,
+        event,
+        *,
+        category="none",
+        phase="frame_boundary",
+        status=None,
+        _rejected_type_byte=None,
+    ):
         """Revalidate every scalar before both structured and rendered output."""
         fields = {
             "event": event
@@ -129,19 +137,40 @@ class FrameEvidence:
             and status in {"complete", "partial", "invalid", "unknown"}
             else "unknown"
         )
+        message = (
+            "Hoben V4 frame event=%s generation=%s message_type=%s "
+            "expected_total_bytes=%s received_bytes=%s length_scope=%s "
+            "provenance=%s phase=%s category=%s status=%s"
+        )
+        values = tuple(fields.values())
+        if (
+            fields["event"] == "error"
+            and fields["category"] == "protocol"
+            and fields["status"] == "invalid"
+            and fields["received_bytes"] == 1
+            and fields["expected_total_bytes"] == "unknown"
+            and fields["phase"] in {"message_classification", "frame_boundary"}
+            and _number(_rejected_type_byte, 255)
+            and _rejected_type_byte not in {5, 7, 10, 14, 27, 47, 48}
+            and fields["message_type"] == message_name(_rejected_type_byte)
+        ):
+            # B5 exception: one framer-proven discriminator, text WARNING only.
+            # Never add it to FrameEvidence, hoben_frame, exceptions or exports.
+            message += " message_type_byte=0x%02X"
+            values += (_rejected_type_byte,)
         try:
             _LOGGER.log(
                 logging.DEBUG if fields["event"] == "header" else logging.WARNING,
-                "Hoben V4 frame event=%s generation=%s message_type=%s "
-                "expected_total_bytes=%s received_bytes=%s length_scope=%s "
-                "provenance=%s phase=%s category=%s status=%s",
-                *fields.values(),
+                message,
+                *values,
                 extra={"hoben_frame": fields.copy()},
             )
         except Exception:
             pass  # A broken logging handler must not change protocol/retry policy.
 
-    def failure(self, error, *, phase="frame_boundary", status=None):
+    def failure(
+        self, error, *, phase="frame_boundary", status=None, _rejected_type_byte=None
+    ):
         category = "unexpected_error"
         if isinstance(error, HobenInternalError):
             pass
@@ -158,7 +187,11 @@ class FrameEvidence:
         elif isinstance(error, HobenClosedError):
             category = "closed"
         self.emit(
-            "error", category=category, phase=phase_of(error) or phase, status=status
+            "error",
+            category=category,
+            phase=phase_of(error) or phase,
+            status=status,
+            _rejected_type_byte=_rejected_type_byte,
         )
 
 
@@ -173,6 +206,17 @@ class FrameDiagnostic:
         self.evidence = FrameEvidence(generation=self.generation)
         self.header_logged = self.failed = False
         self.failure_phase = "frame_boundary"
+        self._rejected_type_byte = None
+
+    def rejected_type(self, discriminator):
+        """Only the framer's single-byte classification rejection calls this."""
+        self._rejected_type_byte = None
+        if (
+            _number(discriminator, 255)
+            and type(self.evidence.received_bytes) is int
+            and self.evidence.received_bytes == 1
+        ):
+            self._rejected_type_byte = discriminator
 
     def start(self, discriminator):
         self.clear()
@@ -204,6 +248,11 @@ class FrameDiagnostic:
     def failure(self, error, *, phase=None, status=None):
         if not self.failed:
             self.evidence.failure(
-                error, phase=phase or self.failure_phase, status=status
+                error,
+                phase=phase or self.failure_phase,
+                status=status,
+                _rejected_type_byte=self._rejected_type_byte
+                if self.failure_phase == "message_classification"
+                else None,
             )
             self.failed = True

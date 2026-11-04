@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #163 / B5, discriminant V4 rejeté
+
+- Ajouter au seul texte WARNING `message_type_byte=0xNN` lorsque le vrai framer
+  rejette un discriminant inconnu/non pris en charge après un seul octet examiné.
+- Valider le scalaire exact 0–255 ; aucun suffixe, corps, header ou deuxième
+  octet publié, aucun ajout aux exceptions, safe_reports, métadonnées ou artefacts.
+- Tests rouges/verts de fragmentation, concaténation, longueur 1, types, refus
+  et confidentialité ; parsing, codec, B4/retry, DataUpdated et CloseClient inchangés.
+  Aucun test réel, dispatch/rerun, commande poêle ou changement d'automatisation.
+
 ## En cours — #126 / 033, timeout et reprise du banc dual-session
 
 - Distinguer le premier incident A (CloseClient complet, EOF ou véritable
