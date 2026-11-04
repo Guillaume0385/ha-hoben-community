@@ -45,6 +45,7 @@ MAIN_CAMPAIGNS = {
             "cleanup",
             "availability",
             "all",
+            "dual-session-observation",
         ],
     ),
 }
