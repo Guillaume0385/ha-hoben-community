@@ -299,6 +299,7 @@ class ExperimentalV4Framer:
         self.boundary_failure = None
         self.invalid_data_updated = None
         self.frame_log = FrameDiagnostic()
+        self._type_log_open = True  # Diagnostic eligibility, no parser policy.
 
     def _fail(self, phase, message):
         self.frame_log.failure_phase = phase
@@ -319,6 +320,12 @@ class ExperimentalV4Framer:
             if self._buffer[0] == 48:
                 # No post-open framing/authorization contract for this marker.
                 raise UnsupportedMessageTypeError(48)
+        if (
+            phase == "message_classification"
+            and len(self._buffer) == 1
+            and self._type_log_open
+        ):
+            self.frame_log.rejected_type(self._buffer[0])
         unsupported = (
             phase == "message_classification"
             and self._buffer[0] in UNSUPPORTED_MESSAGE_TYPES
@@ -404,6 +411,7 @@ class ExperimentalV4Framer:
         self.invalid_data_updated = None
         self.boundary_failure = None
         self.frame_log.clear()
+        self._type_log_open = True
 
     @property
     def partial(self):
@@ -470,6 +478,9 @@ class ExperimentalV4Framer:
                         )
                     )
                     self._buffer.clear()
+                    # A terminal close's retained tail is not another proven
+                    # message discriminator, even if a caller drains it later.
+                    self._type_log_open = False
                     if index + 1 < len(data):
                         self._tail = (data[index + 1 :], exchange)
                     return events  # Never scan/process bytes past terminal RX.

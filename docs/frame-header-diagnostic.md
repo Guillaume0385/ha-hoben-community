@@ -8,7 +8,7 @@ disponibilité. B2 reste un précédent bloqué ; C/D ne sont pas commencées.
 ## Un message logique, pas un read TLS
 
 `ExperimentalV4Framer._feed` compte les octets effectivement attribués au
-préfixe/corps courant. Le helper `frame_diagnostic.py` ne reçoit aucun octet,
+préfixe/corps courant. Le helper `frame_diagnostic.py` ne reçoit aucun buffer RX,
 identifiant, exchange ni exception à conserver. Il garde uniquement des
 scalaires, sans historique cumulatif. Un en-tête produit un DEBUG une fois,
 indépendamment de sa fragmentation. Les corps 07/1B restent ignorés sans décodage.
@@ -57,7 +57,8 @@ le coordinator. Le monitor/capteur A2 conservent la catégorie B1. Ni une phase
 ni une exception injectée ne prouve la cause de la panne réelle.
 
 Les logs ne publient ni texte/chaîne/traceback d'exception, ni RX/header brut,
-ni hexadécimal, GUID, adresse, donnée domestique ou registre. Tous les champs
+ni dump hexadécimal, GUID, adresse, donnée domestique ou registre. L'exception
+B5 ci-dessous autorise uniquement un octet discriminant prouvé. Tous les champs
 sont revalidés avant émission. Un handler de log défaillant ne change pas le
 résultat du protocole. Une taille n'autorise aucun nouveau traitement/retry.
 
@@ -74,6 +75,34 @@ synthétique, confidentialité et vrais client/coordinator/entités HA. Les erre
 internes restent permanentes ; aucun faux succès/rafraîchissement A1.
 **Cause réelle non reproduite, tests réels NOT RUN.** Une correction fonctionnelle
 demande une prochaine petite tâche autorisée par MANAGER, sur preuve distincte.
+
+## B5 — unique discriminant rejeté, texte WARNING seulement
+
+[Consigne #6633812218](https://github.com/Guillaume0385/ha-hoben-community/issues/163#issuecomment-6633812218),
+base experimental `52f3a542ed2d6d30cc3ee9d04e7c3f887b2c5bec` après #177/033.
+Le framer peut transmettre **le seul entier** qu'il vient de rejeter sur le
+chemin `message_classification`, avec exactement un octet examiné. Le WARNING
+existant reçoit `message_type_byte=0xNN` (deux chiffres hexadécimaux majuscules),
+après validation du type exact int et de la plage 0–255. Un message inconnu
+complet ou sa longueur totale ne sont pas prouvés : tailles/portée/provenance
+restent `unknown`/`unproven`. La phase affichée peut rester `frame_boundary`
+dans le chemin B4 ; l'autorisation vient du rejet réel, pas de ce libellé.
+
+Le champ n'entre ni dans `FrameEvidence`, ni dans `hoben_frame`, les exceptions,
+`safe_report`, exports ou artefacts. Aucun autre octet n'est copié ou rendu ;
+les suffixes non examinés restent invisibles, y compris une queue après
+CloseClient terminal. Ping, CloseClient, marqueurs d'autorisation, MBAP invalide,
+DataUpdated, EOF partiel et erreurs locales ne produisent pas cette extension.
+Un marqueur expiré/effacé ne peut pas être réutilisé ; aucun doublon ajouté.
+
+Les tests synthétiques rouges/verts couvrent aussi les fragments et messages
+concaténés, les corps contenant de faux discriminants et les scalaires refusés.
+Le vrai parcours HA conserve les classes d'erreurs, snapshots, capteur A2 et
+reprise B4 à 60 s après cleanup attesté. Aucun parsing, codec, retry ou traitement
+#160/CloseClient modifié ; aucun DEBUG global activé. Les anciens journaux ne
+permettent pas de reconstituer rétrospectivement cet octet ni une cause serveur.
+Tests réels **NOT RUN**, C1 historique et D non réactivées ; une occurrence
+future requiert le plugin installé après revue MANAGER, sans collecte DEV.
 
 ## DEBUG HA temporaire — instruction pour le propriétaire, non exécutée
 
