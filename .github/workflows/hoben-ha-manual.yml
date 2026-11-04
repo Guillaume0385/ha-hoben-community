@@ -17,6 +17,7 @@ name: Vérification réelle Home Assistant
         - cleanup
         - availability
         - all
+        - dual-session-observation
 permissions: {}
 concurrency:
   group: hoben-read-only-observation
@@ -47,7 +48,7 @@ jobs:
         const fs = require('node:fs');
         const catalogs = {
           protocol: ['tls-only', 'session-open', 'read-v4-state', 'h1h2', 'session-300', 'session-reconnect', 'all'],
-          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all'],
+          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all', 'dual-session-observation'],
         };
         const choices = Object.hasOwn(catalogs, process.env.CAMPAIGN) ? catalogs[process.env.CAMPAIGN] : [];
         let scenario;
@@ -83,11 +84,20 @@ jobs:
     if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true' && needs.admission.outputs.collector_ready
       == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: ${{ inputs.scenario == 'dual-session-observation' && 15 || 40 }}
     permissions:
       contents: read
     environment: hoben-live
     steps:
+    - name: Armer le plafond global du scénario optionnel avant préparation
+      if: inputs.scenario == 'dual-session-observation'
+      shell: bash
+      run: |
+        python3 - <<'PYTHON'
+        import os, time
+        with open(os.environ['GITHUB_ENV'], 'a') as output:
+            output.write('HOBEN_DUAL_STARTED_NS=' + str(time.monotonic_ns()) + '\n')
+        PYTHON
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.sha }}
@@ -131,7 +141,7 @@ jobs:
         const fs = require('node:fs');
         const catalogs = {
           protocol: ['tls-only', 'session-open', 'read-v4-state', 'h1h2', 'session-300', 'session-reconnect', 'all'],
-          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all'],
+          ha: ['hoben-live', 'open-errors', 'refresh-v4', 'session-reuse', 'session-reconnect', 'cleanup', 'availability', 'all', 'dual-session-observation'],
         };
         const choices = Object.hasOwn(catalogs, process.env.CAMPAIGN) ? catalogs[process.env.CAMPAIGN] : [];
         let scenario;
@@ -144,7 +154,7 @@ jobs:
         } catch {
           // Missing/malformed event metadata never grants admission.
         }
-        const selected = scenario === 'all' ? choices.filter(x => x !== 'all') :
+        const selected = scenario === 'all' ? choices.filter(x => x !== 'all' && x !== 'dual-session-observation') :
           choices.includes(scenario) ? [scenario] : [];
         const reason = 'admission_not_verified';
         const report = {

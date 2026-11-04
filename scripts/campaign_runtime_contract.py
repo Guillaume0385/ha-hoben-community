@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 
 from scripts.ha_campaign_plan import CHOICES as HA_CHOICES
+from scripts.ha_campaign_plan import OPTIONAL_CHOICES
 from scripts.protocol_campaign_plan import CHOICES as PROTOCOL_CHOICES
 
 CHOICES = {"protocol": PROTOCOL_CHOICES, "ha": HA_CHOICES}
@@ -16,6 +17,7 @@ SECONDS = {
     "protocol": dict(zip(PROTOCOL_CHOICES, (15, 30, 45, 1800, 360, 600, 3000))),
     "ha": dict(zip(HA_CHOICES, (360, 90, 120, 180, 600, 60, 120, 1800))),
 }
+SECONDS["ha"].update({"dual-session-observation": 900})
 MAX_REPORT_BYTES = 64 * 1024
 STATUSES = {"SUCCESS", "FAILURE", "INCONCLUSIVE", "NOT RUN"}
 REASONS = {
@@ -52,8 +54,19 @@ def integer(value, low, high):
 
 def plan(campaign, selection):
     need(type(campaign) is str and campaign in CHOICES)
-    need(type(selection) is str and selection in CHOICES[campaign])
+    need(
+        type(selection) is str
+        and (
+            selection in CHOICES[campaign]
+            or campaign == "ha"
+            and selection in OPTIONAL_CHOICES
+        )
+    )
     return CHOICES[campaign][:-1] if selection == "all" else (selection,)
+
+
+def scenarios(campaign):
+    return CHOICES[campaign][:-1] + (OPTIONAL_CHOICES if campaign == "ha" else ())
 
 
 def validate_context(value):
@@ -89,7 +102,25 @@ class CampaignLimits:
         )
 
 
+@dataclass(frozen=True)
+class DualSessionLimits:
+    """Only ha_limits can select this exact optional 900 s profile."""
+
+    memory_bytes: int = 1024**3
+    pids: int = 128
+    useful_ms: None = None
+    process_ms: int = 900000
+
+    def __post_init__(self):
+        need(type(self.memory_bytes) is int and self.memory_bytes == 1024**3)
+        need(type(self.pids) is int and self.pids == 128)
+        need(self.useful_ms is None)
+        need(type(self.process_ms) is int and self.process_ms == 900000)
+
+
 def ha_limits(scenario):
+    if scenario == "dual-session-observation":
+        return DualSessionLimits()
     need(scenario in HA_CHOICES[:-1])
     return CampaignLimits(
         1024**3,
@@ -153,15 +184,19 @@ def validate_metrics(m, campaign, scenario):
         else 1
     )
     reads = (
-        6
-        if campaign == "ha" or scenario == "session-300"
-        else {
-            "tls-only": 0,
-            "session-open": 0,
-            "read-v4-state": 1,
-            "h1h2": 12,
-            "session-reconnect": 10,
-        }[scenario]
+        13
+        if scenario == "dual-session-observation"
+        else (
+            6
+            if campaign == "ha" or scenario == "session-300"
+            else {
+                "tls-only": 0,
+                "session-open": 0,
+                "read-v4-state": 1,
+                "h1h2": 12,
+                "session-reconnect": 10,
+            }[scenario]
+        )
     )
     for name, cap in {
         "opens": opens,
@@ -217,6 +252,15 @@ def observed_status(campaign, scenario, m):
     validate_metrics(m, campaign, scenario)
     if not m["cleanup"] or not m["completed"] or m["error"] != "none":
         return "FAILURE"
+    if scenario == "dual-session-observation":
+        return (
+            "SUCCESS"
+            if m["opens"] == 2
+            and m["reads"] == m["reads_ok"] == 13
+            and m["continuous"]
+            and m["available"]
+            else "FAILURE"
+        )
     if scenario == "h1h2":
         return (
             "SUCCESS"
@@ -306,7 +350,7 @@ def validate_stage(value, campaign):
         ("scenario", "started", "elapsed_ms", "reason", "status", "metrics", "detail"),
     )
     scenario = value["scenario"]
-    need(type(scenario) is str and scenario in CHOICES[campaign][:-1])
+    need(type(scenario) is str and scenario in scenarios(campaign))
     need(type(value["started"]) is bool)
     need(integer(value["elapsed_ms"], 0, SECONDS[campaign][scenario] * 1000))
     need(type(value["reason"]) is str and value["reason"] in REASONS)

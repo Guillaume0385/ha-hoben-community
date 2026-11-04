@@ -1,5 +1,20 @@
 # Changelog
 
+## En cours — #126 / 032, observation optionnelle de deux sessions
+
+- Ajouter `dual-session-observation` au seul workflow HA manuel, hors des sept
+  scénarios historiques de `all` : A lit toutes les 60 s ; B ouvre à +180 s,
+  lit une fois, reste idle avec Pong normaux puis ferme à +360 s.
+- Observer A jusqu'à +660 s au moins et 300 s après la fermeture réellement
+  terminée de B ; preuves séparées des deux ressources et refus des faux succès.
+- Profil exclusif de 900 s globales, préparation et réapage inclus, réserve de
+  teardown, limites 1 Gio / 128 PID et projection fermée Python/Node.
+- Tests synthétiques des délais, pertes, framing, refus, annulations, cleanup,
+  confinement et publication ; aucune connexion réelle ni modification du client
+  distribué, de #163, des retries, des Pong de production ou des automations.
+- [Contrat, limites et mode d'emploi manuel](docs/ha-dual-session-observation.md).
+  Validation réelle : **PENDING REAL VALIDATION**, aucun dispatch/rerun par DEV.
+
 ## En cours — #126 / 031, fermeture après reconnexion HA
 
 - Attendre le close déjà engagé par RX avant une reprise ordinaire ; une

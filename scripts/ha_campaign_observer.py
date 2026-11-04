@@ -78,6 +78,16 @@ async def take_sample(coordinator, evidence, stamp, start):
 async def observe(
     coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
 ):
+    if scenario == "dual-session-observation":
+        from scripts.ha_dual_observer import observe as dual_observe
+
+        return await dual_observe(
+            coordinator,
+            evidence=evidence,
+            clock=clock,
+            sleep=sleep,
+            absolute_end=absolute_end,
+        )
     if scenario == "hoben-live":
         from scripts.ha_session_observer import observe as baseline
 

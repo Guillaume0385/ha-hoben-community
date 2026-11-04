@@ -15,6 +15,10 @@ from scripts.ha_session_evidence import observation, outcome, progress
 
 
 def empty(scenario):
+    if scenario == "dual-session-observation":
+        from scripts.ha_dual_evidence import empty as dual_empty
+
+        return dual_empty()
     evidence = empty_evidence()
     if scenario != "hoben-live":
         evidence["terminal"] = "none"
@@ -165,6 +169,10 @@ def logical_baseline(receipt, evidence):
 
 
 def validate_detail(scenario, detail):
+    if scenario == "dual-session-observation":
+        from scripts.ha_dual_evidence import validate_detail as dual_validate
+
+        return dual_validate(detail)
     keys(detail, ("supervisor", "evidence"))
     r, e = detail["supervisor"], detail["evidence"]
     limits = ha_limits(scenario)
@@ -302,6 +310,10 @@ def validate_detail(scenario, detail):
 
 def project(scenario, detail):
     """Only fixed counters and owner-origin witnesses; no snapshots or identifiers."""
+    if scenario == "dual-session-observation":
+        from scripts.ha_dual_evidence import project as dual_project
+
+        return dual_project(detail)
     validate_detail(scenario, detail)
     r, e = detail["supervisor"], detail["evidence"]
     m = empty_metrics("ha")

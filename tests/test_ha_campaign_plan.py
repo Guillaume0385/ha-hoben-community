@@ -76,7 +76,7 @@ def test_exact_shell_choices_seven_stage_order_and_dependencies():
     )
     assert CHOICES == (*ORDER, "all")
     assert shell["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == list(
-        CHOICES
+        (*CHOICES, "dual-session-observation")
     )
     plan = build_plan("all")
     assert tuple(s.name for s in plan.stages) == ORDER
@@ -374,11 +374,14 @@ def test_no_io_imports_live_callers_or_successful_cli():
                         if isinstance(n, ast.ImportFrom)
                         and n.module == "scripts.ha_campaign_plan"
                     ]
-                    assert len(imports) == 1
+                    assert len(imports) == 2
                     assert [(a.name, a.asname) for a in imports[0].names] == [
-                        ("CHOICES", "HA_CHOICES")
+                        ("CHOICES", "HA_CHOICES"),
                     ]
-                    assert text.count("ha_campaign_plan") == 1
+                    assert [(a.name, a.asname) for a in imports[1].names] == [
+                        ("OPTIONAL_CHOICES", None)
+                    ]
+                    assert text.count("ha_campaign_plan") == 2
                 elif source == ROOT / "scripts/ha_session_supervisor.py":
                     # The private source bundle must supply that pure module to
                     # the fixed worker; only its exact filename is referenced.

@@ -13,6 +13,8 @@ CHOICES = (
     "availability",
     "all",
 )
+# Separate opt-in catalog: historical all and planning references stay intact.
+OPTIONAL_CHOICES = ("dual-session-observation",)
 STATUSES = ("SUCCESS", "FAILURE", "INCONCLUSIVE", "NOT RUN")
 LOSS_KINDS = ("none", "local_stop", "close_client", "eof", "transport_error", "unknown")
 _FIRST_LIMITS = (
