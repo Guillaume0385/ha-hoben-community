@@ -300,6 +300,9 @@ class TrackedTransport:
         r = t.e["resources"][role]
         need(r["opens"] == 0)
         r["opens"] = 1
+        # The wrapper sits before V4Session's isinstance-based transport check.
+        # Keep its fixed endpoint refusal here as well, before any TLS call.
+        need(self.transport.host == "myhoben.fr" and self.transport.port == 465)
         await self.transport.connect()
 
     async def read(self, max_bytes=4096, *, bounded=True):

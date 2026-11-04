@@ -316,3 +316,23 @@ def test_counter_overflow_keeps_budget_diagnostic_when_observer_stops():
     tracker.fail("a", "unexpected", "unknown")
     assert e["error"] == e["failure"]["category"] == "budget"
     assert validate(e)
+
+
+@pytest.mark.parametrize("host,port", [("other.invalid", 465), ("myhoben.fr", 433)])
+def test_metadata_wrapper_preserves_fixed_destination_before_any_connection(host, port):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from custom_components.hoben.transport import AsyncTlsTransport
+    from scripts.ha_dual_instrumentation import TrackedTransport, Tracker
+
+    wire = AsyncTlsTransport(host, port)
+    wire.connect = AsyncMock()
+    tracker = Tracker(empty(), lambda: 1000, 1000, 1900)
+
+    async def scenario():
+        with pytest.raises(ValueError):
+            await TrackedTransport(wire, None, tracker, "a").connect()
+
+    asyncio.run(scenario())
+    wire.connect.assert_not_awaited()
