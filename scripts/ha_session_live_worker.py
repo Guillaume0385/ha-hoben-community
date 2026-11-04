@@ -60,7 +60,7 @@ async def collect(
         client = HobenClient(
             identity["user_guid"],
             identity["device_guid"],
-            **({"max_attempts": 1} if dual_session else {}),
+            **({"max_attempts": 1, "ha_reconnect": True} if dual_session else {}),
         )
         evidence = empty_evidence()
         if dual_session:

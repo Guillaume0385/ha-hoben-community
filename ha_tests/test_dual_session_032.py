@@ -76,7 +76,9 @@ async def exercise(
 
         a.read.side_effect = read
     monkeypatch.setattr("scripts.ha_dual_observer.AsyncTlsTransport", peers.factory)
-    client = HobenClient(entry.data["user_guid"], DEVICE_GUID, max_attempts=1)
+    client = HobenClient(
+        entry.data["user_guid"], DEVICE_GUID, max_attempts=1, ha_reconnect=True
+    )
     coordinator = HobenDataUpdateCoordinator(hass, entry, client)
     clock, e, fired = Clock(), empty(), set()
     if opening_delay:

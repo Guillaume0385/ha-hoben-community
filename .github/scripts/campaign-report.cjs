@@ -20,8 +20,8 @@ const blank=(c='protocol',s=null)=>({opens:0,reads:0,reads_ok:0,pings:c==='ha'||
 
 function metrics(m,c,s) {
   object(m,Object.keys(blank()));
-  const reads=c==='ha'&&s===dual?13:c==='ha'||s==='session-300'?6:{'tls-only':0,'session-open':0,'read-v4-state':1,h1h2:12,'session-reconnect':10}[s];
-  const bounds={opens:s==='h1h2'?12:c==='ha'?2:['session-300','session-reconnect'].includes(s)?3:1,reads,
+  const reads=c==='ha'&&s===dual?15:c==='ha'||s==='session-300'?6:{'tls-only':0,'session-open':0,'read-v4-state':1,h1h2:12,'session-reconnect':10}[s];
+  const bounds={opens:s==='h1h2'?12:c==='ha'&&s===dual?3:c==='ha'?2:['session-300','session-reconnect'].includes(s)?3:1,reads,
     reads_ok:reads,pings:1048576,pongs:1048576,h1_sessions:6,h2_sessions:6,useful_ms:cap(c,s)};
   for(const [k,v] of Object.entries(bounds))check((s==='h1h2'&&['pings','pongs'].includes(k))||c==='ha'&&['pings','pongs','h1_sessions','h2_sessions'].includes(k)?m[k]===null:int(m[k],0,v));
   check(m.reads_ok<=m.reads&&(c==='ha'||s==='h1h2'||m.pongs<=m.pings));
@@ -39,7 +39,7 @@ function status(c,s,m) {
     if(s==='session-300')return m.useful_ms>=300000&&m.reads_ok>0&&m.pings===m.pongs?'SUCCESS':'FAILURE';
     return m.reads_ok===1?'SUCCESS':'FAILURE';
   }
-  if(c==='ha'&&s===dual)return m.opens===2&&m.reads===13&&m.reads_ok===13&&m.continuous&&m.available?'SUCCESS':'FAILURE';
+  if(c==='ha'&&s===dual)return m.available&&(m.opens===2&&m.reads===13&&m.reads_ok===13&&m.continuous&&!m.recovered||m.opens===3&&m.reads_ok<=m.reads&&m.reads<=15&&m.recovered&&!m.continuous)?'SUCCESS':'FAILURE';
   if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
   if(s==='session-reuse'&&!m.reused)return 'FAILURE';
   const expected={'open-errors':1,'refresh-v4':2,'session-reuse':3,cleanup:1,availability:2}[s];
@@ -241,7 +241,7 @@ function prepare(env=process.env) {
 // Presentation uses only independently validated fields and this fixed catalog.
 // The limits are design ceilings, never minimum durations or success evidence.
 function bounds(c,s) {
-  if(c==='ha'&&s===dual)return 'A : 12 lectures / 60 s ; B : une lecture, 180–360 s ; après fermeture B ≥300 s ; 2 sessions ; 900 s globales ; 1 Gio ; 128 PID';
+  if(c==='ha'&&s===dual)return 'A : cadence 60 s, continuité ou récupération prouvée ; B : une lecture, 180–360 s ; stabilité ≥300 s ; 2 connexions simultanées ; 900 s globales ; réserve 60 s ; 1 Gio ; 128 PID';
   if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':s==='session-reconnect'?'Pong de test inhibés dès 120 s ; reprise <240 s ; stabilité 120 s ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
   return {
     'tls-only':'1 TLS ; 0 lecture',
@@ -283,6 +283,14 @@ function summary(r,env) {
     if(v.scenario!==dual||!v.detail)continue;
     const e=v.detail.evidence;
     lines.push('', 'Dual : frontière OpenedClient non prouvée ; aucune causalité serveur déduite.');
+    lines.push('- Résultat fonctionnel : '+(v.metrics.continuous?'continuité':v.metrics.recovered?'récupération prouvée':'non attesté')+'.');
+    if(e.schema===2) {
+      lines.push('- A : acquisitions décodées '+e.reads.filter(s=>s.decoded).length+' ; demandes échouées '+e.reads.filter(s=>!s.decoded&&s.attempted).length+' ; polls sans émission '+e.reads.filter(s=>!s.attempted).length+'.');
+      if(e.incident)lines.push('- Premier incident : '+e.incident.role+' / génération '+e.incident.generation+' / '+e.incident.kind+' / '+e.incident.category+' / '+e.incident.phase+' à '+e.incident.at_ms+' ms ; sous-code '+e.incident.subcode+'.');
+      if(e.terminal)lines.push('- Refus terminal : '+e.terminal.role+' / '+e.terminal.category+' / '+e.terminal.phase+'.');
+      for(const f of e.cleanup_errors)lines.push('- Échec de nettoyage : '+f.role+' / génération '+f.generation+' / '+f.category+' à '+f.at_ms+' ms.');
+      for(const o of e.owners)lines.push('- Ressource '+o.role+' / génération '+o.generation+' : ouverture '+o.open_ms+' ; acceptation '+o.accepted_ms+' ; fermeture '+o.closed_ms+' ; réapage '+o.cleaned_ms+' ms ; attesté '+o.cleanup+'.');
+    }
     for(const p of e.phases)for(const role of ['a','b']) {
       const s=p[role];
       lines.push('- '+p.name+' / '+role+' : requêtes '+s.requests+' ; RX '+s.rx_bytes+' octets / '+s.rx_chunks+' livraisons ; continuations '+s.fragments+' ; Pong '+s.pongs+' ; EOF '+s.eof+' ; invalides '+s.invalid+' ; inattendus '+s.unexpected+' ; tronqués '+s.truncated+'.');

@@ -1,4 +1,4 @@
-"""Opt-in two-session observation, real shared owners, no retry/inhibition.
+"""Opt-in two-session observation with the existing HA recovery owner.
 
 The only injected interfaces in offline tests are the clock and TLS transport.
 The worker already confines the actual production transport to verified TLS.
@@ -64,12 +64,21 @@ async def observe(
     tracker = Tracker(e, stamp, start, end)
     e["clock"] = "monotonic" if native else "synthetic"
     children = []
+    resumed_at = None
 
     def healthy():
         tracker.guard("a")
         if tracker.t0 is not None:
             o = client.session_observation
-            if not o.active or o.generation != 1 or o.attempts != 1:
+            if o.cleanup_failed:
+                tracker.fail("a", "closed", "cleanup")
+                tracker.guard("a")
+            recovering = tracker.candidate() and client.ha_recovery_pending
+            if (
+                (not o.active and not recovering)
+                or o.generation not in {1, 2}
+                or (o.generation == 2 and not tracker.candidate())
+            ):
                 tracker.fail("a", "closed", "post_open", o.close_client_subcode)
                 tracker.guard("a")
         b = tracker.sessions.get("b")
@@ -88,7 +97,11 @@ async def observe(
         healthy()
 
     async def sample(ordinal):
+        nonlocal resumed_at
         previous = coordinator.data
+        previous_stamp = coordinator.last_successful_read_at
+        requests_before = len(tracker.request_times["a"])
+        tracker.ordinal = ordinal
         await coordinator.async_refresh()
         o = client.session_observation
         decoded = (
@@ -97,23 +110,43 @@ async def observe(
             and coordinator.data is not previous
         )
         attempted = tracker.request_times["a"]
-        at = attempted[-1] if len(attempted) == ordinal + 1 else tracker.at()
+        emitted = len(attempted) > requests_before
+        at = attempted[-1] if emitted else tracker.at()
+        end_ms = tracker.at()
+        if decoded:
+            tracker.last_success = end_ms
+            if o.read_generation == 2 and resumed_at is None:
+                resumed_at = end_ms
+        else:
+            need(
+                coordinator.data is previous
+                and coordinator.last_successful_read_at == previous_stamp
+            )
         if tracker.t0 is not None:
             e["reads"].append(
                 dict(
                     scheduled_ms=ordinal * 60000,
                     at_ms=at,
-                    end_ms=tracker.at(),
+                    end_ms=end_ms,
                     decoded=decoded,
-                    available=coordinator.last_update_success
-                    and coordinator.data is not None,
-                    state="connected" if o.active else "disconnected",
+                    available=coordinator.snapshot_available,
+                    state="connected"
+                    if o.active
+                    else "reconnecting"
+                    if client.ha_recovery_pending
+                    else "disconnected",
                     generation=o.read_generation,
                     sequence=o.read_sequence,
                     error="none" if decoded else category(coordinator.last_exception),
+                    attempted=emitted,
+                    held=coordinator.last_snapshot_held,
+                    last_success_ms=tracker.last_success,
+                    age_ms=None
+                    if tracker.last_success is None
+                    else end_ms - tracker.last_success,
                 )
             )
-        if not decoded or o.read_generation != 1 or o.read_sequence != ordinal + 1:
+        if not decoded and not tracker.candidate():
             tracker.fail(
                 "a",
                 category(coordinator.last_exception) if not decoded else "protocol",
@@ -130,19 +163,18 @@ async def observe(
                 await client.async_close()
             elif session is not None:
                 await session.abort()
-            r["cleanup"] = (
-                session is None
-                and r["opens"] == 0
-                or session is not None
-                and session.cleanup_succeeded
-                and r["close_completed"]
-            )
+            tracker.refresh_resources(role)
+            if session is None and r["opens"] == 0:
+                r["cleanup"] = True
             if not r["cleanup"]:
                 tracker.fail(role, "closed", "cleanup")
             elif r["accepted"]:
                 tracker.transition(role, "disconnected")
         except (Exception, asyncio.CancelledError) as error:
-            tracker.fail(role, category(error), "cleanup")
+            if session is not None:
+                tracker.cleanup_error(session, error)
+            else:
+                tracker.fail(role, category(error), "cleanup")
             raise
 
     async def session_b():
@@ -180,9 +212,15 @@ async def observe(
             raise
 
     async def schedule_a():
-        for ordinal in range(1, 12):
+        for ordinal in range(1, 14):
             await until(tracker.t0 + ordinal * 60)
             await sample(ordinal)
+            if ordinal >= 11 and (
+                e["incident"] is None
+                or resumed_at is not None
+                and tracker.at() >= resumed_at + 300000
+            ):
+                break
 
     with tracker.install(client):
         try:
@@ -201,7 +239,14 @@ async def observe(
                         )
                     )
                 need(e["b"]["closed_ms"] is not None)
-                await until(tracker.t0 + max(660, e["b"]["closed_ms"] / 1000 + 300))
+                await until(
+                    tracker.t0
+                    + max(
+                        660,
+                        e["b"]["closed_ms"] / 1000 + 300,
+                        (resumed_at or 0) / 1000 + 300,
+                    )
+                )
                 e["a_end_active"] = client.session_observation.active
         except asyncio.CancelledError:
             tracker.fail("a", "closed", "cleanup")

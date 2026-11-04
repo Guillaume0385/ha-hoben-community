@@ -11,7 +11,7 @@ from scripts.campaign_runtime_contract import (
     stage,
     validate_report,
 )
-from scripts.ha_dual_evidence import empty, phase, project
+from scripts.ha_dual_evidence import empty, owner_record, phase, project
 from scripts.run_campaign import run
 from tests.test_campaign_runtime import PROVENANCE, envelope, node_accepts
 from tests.test_ha_live_proof import receipt
@@ -77,6 +77,17 @@ def proof():
         )
         for role in ("a", "b")
     }
+    e["owners"] = [
+        {
+            **owner_record(role, 1),
+            **e["resources"][role],
+            "open_ms": None if role == "a" else 180000,
+            "accepted_ms": 0 if role == "a" else 180000,
+            "closed_ms": 660000 if role == "a" else 360000,
+            "cleaned_ms": 660000 if role == "a" else 360000,
+        }
+        for role in ("a", "b")
+    ]
     e["reads"] = [
         dict(
             scheduled_ms=n * 60000,
@@ -88,6 +99,10 @@ def proof():
             generation=1,
             sequence=n + 1,
             error="none",
+            attempted=True,
+            held=False,
+            last_success_ms=n * 60000,
+            age_ms=0,
         )
         for n in range(12)
     ]

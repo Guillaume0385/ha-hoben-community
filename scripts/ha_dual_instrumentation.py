@@ -11,6 +11,7 @@ from custom_components.hoben.error_phases import phase_of
 from custom_components.hoben.exceptions import (
     HobenAuthorizationRequiredError,
     HobenClosedError,
+    HobenInternalError,
     HobenInvalidCredentialsError,
     HobenProtocolError,
     HobenTimeoutError,
@@ -26,7 +27,13 @@ from custom_components.hoben.transport import (
 from custom_components.hoben.v4_experiment import ExperimentalCloseClientError
 from custom_components.hoben.v4_session import V4Session, V4SessionMode
 from scripts.campaign_runtime_contract import need
-from scripts.ha_dual_evidence import FRAME_KEYS, TYPES, phase, validate_frame
+from scripts.ha_dual_evidence import (
+    FRAME_KEYS,
+    TYPES,
+    owner_record,
+    phase,
+    validate_frame,
+)
 
 _ROLE = contextvars.ContextVar("hoben_dual_role", default=None)
 _installed = False
@@ -39,6 +46,28 @@ class ObservationFailed(Exception):
 
 
 def category(error):
+    # Unit-only framing tests intentionally do not install HA. The actual
+    # worker always has it; only HA's validated scalar wrapper is consulted.
+    try:
+        from custom_components.hoben.safe_reports import safe_error_report
+    except ModuleNotFoundError:
+        safe = None
+    else:
+        safe = safe_error_report(error) if isinstance(error, Exception) else None
+    mapped = {
+        "timeout": "timeout",
+        "transport_unavailable": "transport",
+        "invalid_credentials": "authentication",
+        "authorization_required": "authorization",
+        "authentication_failed": "authentication",
+        "server_closed": "closed",
+        "experimental_close_client": "closed",
+        "malformed_response": "protocol",
+        "internal_failure": "unexpected",
+        "client_closed": "closed",
+    }.get((safe or {}).get("error"))
+    if mapped is not None:
+        return mapped
     if isinstance(error, HobenInvalidCredentialsError):
         return "authentication"
     if isinstance(error, HobenAuthorizationRequiredError):
@@ -49,6 +78,8 @@ def category(error):
         return "closed"
     if isinstance(error, (TransportError, HobenTransportError)):
         return "transport"
+    if isinstance(error, HobenInternalError):
+        return "unexpected"
     if isinstance(error, HobenProtocolError):
         return "protocol"
     if isinstance(error, asyncio.CancelledError):
@@ -67,24 +98,143 @@ class Tracker(logging.Handler):
         self.sessions = {}
         self.closing = set()
         self.request_times = {"a": [], "b": []}
+        self.owners = []
+        self.ordinal = None
+        self.last_success = None
+
+    def candidate(self):
+        f = self.e["incident"]
+        if not f or f["at_ms"] is None:
+            return False
+        pending = f["read_ms"] is not None and 360000 <= f["read_ms"] <= 365000
+        idle = (
+            f["kind"] in {"eof", "close_client"}
+            and f["read_ms"] is None
+            and 355000 <= f["at_ms"] <= 365000
+        )
+        return bool(
+            f
+            and f["role"] == "a"
+            and f["generation"] == 1
+            and f["kind"] in {"timeout", "eof", "close_client"}
+            and f["subcode"] not in {2, 4, 5}
+            and (pending or idle)
+            and len(self.e["reads"]) >= 6
+            and all(s["decoded"] for s in self.e["reads"][:6])
+            and f["at_ms"] is not None
+            and (f["kind"] != "timeout" or f["at_ms"] >= f["deadline_ms"])
+        )
+
+    def record(
+        self,
+        role,
+        error,
+        phase_name,
+        *,
+        kind=None,
+        subcode=None,
+        session=None,
+        frame=None,
+    ):
+        """Record before close; only real EOF/full CloseClient have those kinds."""
+        if role in self.closing or self.e["failure"] is not None:
+            return
+        previous = self.e["incident"]
+        current = session or self.sessions.get(role)
+        if previous is not None and (
+            role != previous["role"]
+            or current is not None
+            and current.owner["generation"] != previous["generation"]
+            or error != previous["category"]
+        ):
+            self.fail(role, error, phase_name, subcode)
+            return
+        if self.e["incident"] is None:
+            session = session or self.sessions.get(role)
+            at = self.at()
+            read_ms = getattr(session, "read_ms", None)
+            self.e["incident"] = dict(
+                role=role,
+                at_ms=at,
+                category=error,
+                phase=phase_name,
+                subcode=subcode,
+                kind=kind or error,
+                frame=frame,
+                late_frame=None,
+                generation=session.owner["generation"] if session else 1,
+                read_ms=read_ms,
+                deadline_ms=read_ms + 30000
+                if error == "timeout" and read_ms is not None
+                else None,
+            )
+            if self.candidate():
+                self.transition(role, "reconnecting")
+        if not self.candidate():
+            self.fail(role, error, phase_name, subcode)
+
+    def refresh_resources(self, role):
+        rows = [s.owner for s in self.owners if s.role == role]
+        r = self.e["resources"][role]
+        for key in ("opens", "close_calls"):
+            r[key] = sum(o[key] for o in rows)
+        r["accepted"] = any(o["accepted"] for o in rows)
+        r["close_completed"] = bool(rows) and all(o["close_completed"] for o in rows)
+        r["cleanup"] = bool(rows) and all(o["cleanup"] for o in rows)
+
+    def cleanup_error(self, session, error):
+        rows = self.e["cleanup_errors"]
+        item = dict(
+            role=session.role,
+            generation=session.owner["generation"],
+            at_ms=self.at(),
+            category=category(error),
+        )
+        if not any(
+            r["role"] == item["role"] and r["generation"] == item["generation"]
+            for r in rows
+        ):
+            if len(rows) >= 3:
+                self.e["overflow"] = True
+            else:
+                rows.append(item)
+        self.fail(session.role, item["category"], "cleanup")
 
     def at(self):
-        return None if self.t0 is None else max(0, int((self.stamp() - self.t0) * 1000))
+        # Invalid observation time stops collection through guard(), but cannot
+        # interrupt the real owner's close/reaping callbacks.
+        try:
+            return (
+                None
+                if self.t0 is None
+                else max(0, int((self.stamp() - self.t0) * 1000))
+            )
+        except Exception:
+            return None
 
     def stats(self, role):
         return self.e["phases"][phase(self.at() or 0)][role]
 
     def fail(self, role, error="unexpected", phase_name="unknown", subcode=None):
+        if self.e["overflow"]:
+            self.e["error"] = "budget"
         if self.e["failure"] is None:
             if self.e["overflow"]:
                 error, subcode = "budget", None
-            self.e["error"] = error
             try:
                 at = self.at()
             except Exception:
                 at = None
-            self.e["failure"] = dict(
+            terminal = dict(
                 role=role, at_ms=at, category=error, phase=phase_name, subcode=subcode
+            )
+            self.e["terminal"] = terminal
+            incident = self.e["incident"]
+            self.e["failure"] = (
+                {k: incident[k] for k in terminal} if incident else terminal
+            )
+            self.e["error"] = (
+                "budget" if self.e["overflow"] else self.e["failure"]["category"]
             )
             _LOGGER.warning(
                 "HA dual test failure role=%s category=%s phase=%s subcode=%s",
@@ -121,13 +271,14 @@ class Tracker(logging.Handler):
 
     def accepted(self, role):
         at = self.stamp()
-        self.e["resources"][role]["accepted"] = True
-        if role == "a":
-            need(self.t0 is None)
+        session = self.sessions[role]
+        if role == "a" and self.t0 is None:
             self.t0 = at
             self.e["t0_ms"] = max(0, int((at - self.start) * 1000))
-        else:
+        elif role == "b":
             self.e["b"]["accepted_ms"] = self.at()
+        session.owner.update(accepted=True, accepted_ms=self.at())
+        self.refresh_resources(role)
         self.transition(role, "connected")
 
     def emit(self, record):
@@ -142,6 +293,37 @@ class Tracker(logging.Handler):
             s = self.stats(role)
             s["last_frame"] = frame
             if frame["event"] == "header":
+                session = self.sessions[role]
+                timer = session._read_timeout
+                expired = type(timer) is asyncio.Timeout and timer.expired()
+                if (
+                    role == "a"
+                    and frame["message_type"] == "data_response_client"
+                    and expired
+                ):
+                    # Observe the real owner's already-expired deadline. The
+                    # timeout callback may precede its waiter's exception turn.
+                    self.record(
+                        role,
+                        "timeout",
+                        "request_correlation",
+                        kind="timeout",
+                        session=session,
+                    )
+                incident = self.e["incident"]
+                if (
+                    incident
+                    and incident["kind"] == "timeout"
+                    and role == "a"
+                    and frame["generation"] == 1
+                    and frame["message_type"] == "data_response_client"
+                    and (session._rx_error is not None or expired)
+                ):
+                    if incident["late_frame"] is not None:
+                        self.e["overflow"] = True
+                        self.fail(role, "budget", "request_correlation")
+                    else:
+                        incident["late_frame"] = frame
                 i = (
                     TYPES.index(frame["message_type"])
                     if frame["message_type"] in TYPES
@@ -184,11 +366,17 @@ class Tracker(logging.Handler):
                     # A prefix/header alone cannot attest a CloseClient subcode.
                     subcode = self.sessions[role].snapshot.close_client_subcode
                     need(type(subcode) is int and 0 <= subcode <= 255)
-                self.fail(
+                self.record(
                     role,
                     "protocol" if error == "none" else error,
                     frame["phase"],
-                    subcode,
+                    subcode=subcode,
+                    kind="close_client"
+                    if subcode is not None
+                    else "protocol"
+                    if error == "none"
+                    else error,
+                    frame=frame,
                 )
         except Exception:
             self.fail(role, "unexpected", "unknown")
@@ -200,7 +388,8 @@ class Tracker(logging.Handler):
             not _installed
             and client._lifecycle is None
             and client._max_attempts == 1
-            and not client.ha_reconnect_enabled
+            and client.ha_reconnect_enabled
+            and client._read_timeout == 30
         )
         original = v4_lifecycle.V4Lifecycle
         logger = logging.getLogger("custom_components.hoben.frame_diagnostic")
@@ -217,7 +406,7 @@ class Tracker(logging.Handler):
                 and supplied.func is V4Session
                 and not supplied.args
                 and set(supplied.keywords) == {"transport_factory"}
-                and options.get("ha_reconnect") is False
+                and options.get("ha_reconnect") is True
             )
             options["session_factory"] = partial(
                 TrackedSession, tracker=self, role="a", **supplied.keywords
@@ -242,10 +431,25 @@ class TrackedSession(V4Session):
 
     def __init__(self, *, tracker, role, transport_factory, **options):
         need(
-            role not in tracker.sessions
+            role not in tracker.closing
             and options.get("mode") is V4SessionMode.PERSISTENT
         )
+        previous = tracker.sessions.get(role)
+        generation = 1 if previous is None else previous.owner["generation"] + 1
+        if previous is not None:
+            need(
+                role == "a"
+                and generation == 2
+                and tracker.candidate()
+                and previous.cleanup_succeeded
+                and previous.owner["cleanup"]
+                and tracker.at() >= previous.owner["cleaned_ms"] + 60000
+            )
         self.tracker, self.role = tracker, role
+        self.owner = owner_record(role, generation)
+        self.read_ms = None
+        tracker.e["owners"].append(self.owner)
+        tracker.owners.append(self)
         tracker.sessions[role] = self
         super().__init__(
             transport_factory=lambda: TrackedTransport(
@@ -260,23 +464,67 @@ class TrackedSession(V4Session):
             await super().connect()
             self.tracker.accepted(self.role)
         except (Exception, asyncio.CancelledError) as error:
+            self.tracker.record(
+                self.role, category(error), phase_of(error) or "opening", session=self
+            )
             self.tracker.fail(self.role, category(error), phase_of(error) or "opening")
             raise
         finally:
             _ROLE.reset(token)
+
+    async def request_v4_data(self, *, timeout=30):
+        self.read_ms = self.tracker.at()
+        try:
+            return await super().request_v4_data(timeout=timeout)
+        finally:
+            self.read_ms = None
+
+    def _signal_loss(self):
+        error = self._rx_error
+        if error is not None and self.role not in self.tracker.closing:
+            kind = "timeout" if type(error) is HobenTimeoutError else None
+            if type(error) is ExperimentalCloseClientError:
+                kind = "close_client"
+            try:
+                self.tracker.record(
+                    self.role,
+                    category(error),
+                    phase_of(error) or "request_correlation",
+                    kind=kind,
+                    session=self,
+                    subcode=error.subcode
+                    if type(error) is ExperimentalCloseClientError
+                    else None,
+                )
+            except Exception:
+                # The metadata tap cannot prevent the actual loss/close owner.
+                self.tracker.fail(self.role, "unexpected", "unknown")
+        super()._signal_loss()
+
+    async def abort(self):
+        try:
+            await super().abort()
+        finally:
+            self.owner["cleanup"] = (
+                self.cleanup_succeeded and self.owner["close_completed"]
+            )
+            if self.owner["cleanup"]:
+                self.owner["cleaned_ms"] = self.tracker.at()
+            self.tracker.refresh_resources(self.role)
 
     async def _receive_unproven_handoff(self, transport):
         token = _ROLE.set(self.role)
         try:
             error = await super()._receive_unproven_handoff(transport)
             if error is not None and self.role not in self.tracker.closing:
-                self.tracker.fail(
+                self.tracker.record(
                     self.role,
                     category(error),
                     phase_of(error) or "unknown",
-                    self.snapshot.close_client_subcode
+                    subcode=self.snapshot.close_client_subcode
                     if isinstance(error, ExperimentalCloseClientError)
                     else None,
+                    session=self,
                 )
             return error
         finally:
@@ -297,12 +545,14 @@ class TrackedTransport:
     async def connect(self):
         t, role = self.tracker, self.role
         t.guard(role)
-        r = t.e["resources"][role]
-        need(r["opens"] == 0)
-        r["opens"] = 1
-        # The wrapper sits before V4Session's isinstance-based transport check.
-        # Keep its fixed endpoint refusal here as well, before any TLS call.
         need(self.transport.host == "myhoben.fr" and self.transport.port == 465)
+        r = self.session.owner
+        need(r["opens"] == 0)
+        need(sum(s.owner["opens"] - s.owner["close_completed"] for s in t.owners) < 2)
+        r["opens"] = 1
+        r["open_ms"] = t.at()
+        t.refresh_resources(role)
+        # The wrapper preserves the same endpoint refusal before every TLS call.
         await self.transport.connect()
 
     async def read(self, max_bytes=4096, *, bounded=True):
@@ -311,7 +561,7 @@ class TrackedTransport:
         framer = self.session._framer
         partial = framer is not None and framer.partial
         buffered = len(framer._buffer) if framer is not None else 0
-        if not t.e["resources"][role]["accepted"]:
+        if not self.session.owner["accepted"]:
             buffered = max(buffered, len(self.session._opening_buffer))
         if buffered > 4096:
             t.e["overflow"], t.e["error"] = True, "budget"
@@ -327,30 +577,44 @@ class TrackedTransport:
                     t.increment(role, "fragments")
                 if not data:
                     t.increment(role, "eof")
-                    t.fail(role, "transport", "tls_read")
+                    t.record(
+                        role,
+                        "transport",
+                        "tls_read",
+                        kind="protocol" if partial else "eof",
+                        session=self.session,
+                    )
             else:
-                t.fail(role, "unexpected", "tls_read")
+                t.record(role, "unexpected", "tls_read", session=self.session)
             return data
         except Exception as error:
             if isinstance(error, TransportEOF):
                 t.increment(role, "eof")
-            t.fail(role, category(error), "tls_read")
+            t.record(
+                role,
+                category(error),
+                "tls_read",
+                kind="eof"
+                if isinstance(error, TransportEOF) and not partial
+                else "unexpected",
+                session=self.session,
+            )
             raise
 
     async def write(self, data):
         t, role = self.tracker, self.role
         t.guard(role)
-        need(not t.e["resources"][role]["close_completed"])
+        need(not self.session.owner["close_completed"])
         if data == b"\x0b":
             await self.transport.write(data)  # Never suppress a Pong.
             t.increment(role, "pongs")
-            if not t.e["resources"][role]["accepted"]:
+            if not self.session.owner["accepted"]:
                 t.increment(role, "opening_pongs")
         elif data == encode_data_request_client(
             build_read_input_registers(0xFFFF, 1024, 20)
         ):
             count = sum(p[role]["requests"] for p in t.e["phases"])
-            need(count < (12 if role == "a" else 1))
+            need(count < (14 if role == "a" else 1))
             t.increment(role, "requests")
             t.request_times[role].append(t.at())
             await self.transport.write(data)
@@ -359,18 +623,21 @@ class TrackedTransport:
             need(
                 type(data) is bytes
                 and data[:1] == b"\x03"
-                and not t.e["resources"][role]["accepted"]
+                and not self.session.owner["accepted"]
             )
             await self.transport.write(data)
 
     async def close(self):
         t, role = self.tracker, self.role
-        r = t.e["resources"][role]
+        r = self.session.owner
         need(r["close_calls"] == 0)
         r["close_calls"] = 1
+        t.refresh_resources(role)
         try:
             await self.transport.close()
             r["close_completed"] = True
+            r["closed_ms"] = t.at()
+            t.refresh_resources(role)
         except (Exception, asyncio.CancelledError) as error:
-            t.fail(role, category(error), "cleanup")
+            t.cleanup_error(self.session, error)
             raise

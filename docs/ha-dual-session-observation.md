@@ -1,9 +1,15 @@
-# Observation manuelle de deux sessions — #126/032
+# Observation manuelle de deux sessions — #126/032 et #033
+
+**Contrat courant :** [extension #033, timeout et preuve de récupération](ha-dual-timeout-recovery.md).
+Elle ajoute une voie de récupération distincte de la continuité décrite ci-dessous,
+sans changer les sept scénarios de all ni le budget global.
 
 [Consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6560615058).
 Base : `b5f0857f1c3e1f604fd5bc4c3f366ea26dcd3cca`, après #171/031.
-Ce scénario est développé et testé **hors ligne**. État réel : **PENDING REAL
-VALIDATION**. Aucun run antérieur ne valide cette observation.
+Le [run #41843581769](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/41843581769)
+de #032 est FAILURE ; aucun CloseClient A ni exclusivité serveur n'y est prouvé.
+Les corrections #033 sont développées/testées **hors ligne**, tests réels #033
+**NOT RUN**. Ce résultat antérieur ne valide pas la nouvelle livraison.
 
 ## Sélection et autorisation
 
@@ -19,13 +25,15 @@ Cette livraison ne crée ni ne reprogramme d'automatisation.
 La sélection optionnelle n'est ajoutée ni au workflow protocole original ni
 à une exécution automatique. Seul le secret existant `HOBEN_USER_GUID` est lu,
 dans l'étape protégée. Aucun nouveau secret DeviceGuid ou pairing.
-Les deux ouvertures utilisent le contrat normal initial ; un refus de B échoue
+Les ouvertures initiales A/B utilisent le contrat normal initial ; un refus de B échoue
 fermé et ne conduit pas à demander d'autre identité.
 
 ## Chronologie et preuve
 
 T0 est le retour réussi de l'ouverture partagée réelle de A. Le temps de
 préparation ou d'attente TLS n'est pas crédité à la fenêtre d'observation.
+La table décrit la voie continue ; les critères supplémentaires de récupération
+sont explicités dans le contrat #033 lié ci-dessus.
 A utilise le vrai `HobenClient` et `HobenDataUpdateCoordinator`, sans listener
 d'entité ni installation résidentielle ; B utilise `V4Session` persistante et
 le codec de lecture V4 partagé, dans le même worker isolé. L'adaptateur ne
@@ -47,9 +55,10 @@ de 10 s. Ce sont des limites de conception locales, pas des faits serveur.
 Le temps de nettoyage final de A ne complète jamais la fenêtre utile. Une
 fermeture B retardée prolonge seulement l'observation passive de A après sa
 lecture à 660 s, dans le budget initial, sans lecture hors cadence.
-Une ouverture A supplémentaire est refusée (`max_attempts=1` dans ce seul
-banc), sans changement de la politique du client distribué. B n'a aucun retry.
-Une panne/indisponibilité/framing invalide interrompt la collecte, conserve
+L'extension #033 admet une nouvelle génération A après incident admissible,
+cleanup attesté et 60 s, avec lecture corrélée puis 300 s stables ; aucune
+autre tentative A n'est créditée par ce banc. B n'a aucun retry.
+Hors de cette reprise prouvée, une panne/indisponibilité/framing invalide interrompt la collecte, conserve
 le premier diagnostic catégoriel et nettoie les deux ressources. Elle ne
 crédite jamais un succès. Le mutex exclut les autres campagnes GitHub ; il ne
 prouve pas l'absence d'application ou d'autre appareil extérieur.
@@ -71,12 +80,16 @@ borné par le parent. Les fermetures individuelles ont un plafond de 10 s ;
 annulation, arrêt dur, PID namespace et réapage restent dans l'échéance initiale.
 Confinement existant : 1 Gio / 128 PID, système de fichiers en lecture seule,
 worker non privilégié, Docker logs désactivés, identité sur pipe privé,
-aucun fallback hôte. Deux transports au plus, aucune ouverture après fermeture B.
+aucun fallback hôte. Deux transports simultanés au plus, deux générations A
+au maximum et une B, sans chevauchement des générations A.
 TLS reste vérifié certificat et hostname sur `myhoben.fr:465`, lecture V4 seule.
 
 ## Rapport expurgé
 
 Python et Node valident indépendamment les mêmes clés, enums, bornes et preuves.
+Le schéma 2 sépare incident initial, refus terminal, échecs de nettoyage et
+ressources par génération. Le schéma 1 historique reste lisible sans lui
+inventer de récupération. Voir les [critères #033](ha-dual-timeout-recovery.md).
 Le détail privé projetable reste plafonné à 8192 octets, l'étape à 16384 et le
 rapport à 64 Kio. Le job de résultat sans secret revalide avant publication ;
 un collect échoué/annulé ne peut rendre Actions SUCCESS malgré une étape verte.
@@ -102,8 +115,8 @@ bruts, GUID, valeurs de registres/capteurs et données domestiques sont exclus.
 
 SUCCESS exige toutes les preuves, horloge native monotone, échéance respectée
 et cleanup/réapage. Une horloge injectée reste `synthetic` et ne produit jamais
-de succès live. Refus avant démarrage = NOT RUN ; preuve incomplète, timeout,
-annulation, perte A/B, nettoyage non prouvé ou sortie excessive = FAILURE.
+de succès live. Refus avant démarrage = NOT RUN ; preuve incomplète, timeout non récupéré,
+annulation, perte B ou A non reprise, nettoyage non prouvé ou sortie excessive = FAILURE.
 
 ## Validation hors ligne
 
