@@ -1,5 +1,20 @@
 # Changelog
 
+## En cours — #126 / HA-F1, premier incident et preuve de cleanup
+
+- Ajouter un diagnostic HA allowlisté et versionné aux observations solo et
+  dual de la campagne existante : premier incident immuable, terminal et
+  cleanup secondaire distincts, rôle/propriétaire local, phases et chronologie.
+- Distinguer demande de fermeture, appel/retour du close transport et véritable
+  attestation après libération RX/TX/waiters/opérations ; dernière lecture
+  validée et âge sans faux rafraîchissement ni réécriture par un poll ultérieur.
+- Validation indépendante Python/Node, refus des omissions/tampering, étapes
+  incomplètes et preuves contradictoires ; résumé public catégoriel et borné.
+  [Contrat et limites HA-F1](docs/ha-first-incident-cleanup.md).
+- Aucun changement de plugin distribué, protocole, retry, scénario, all,
+  workflow, gate, budget ou automatisation. Tests exclusivement hors ligne ;
+  aucun test réel, dispatch/rerun, secret, commande ni écriture poêle.
+
 ## En cours — #163 / B6, nettoyage HA après timeout
 
 - Reproduire hors ligne une course locale : une sonde en échec attend déjà le

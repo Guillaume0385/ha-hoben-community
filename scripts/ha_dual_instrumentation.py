@@ -34,6 +34,7 @@ from scripts.ha_dual_evidence import (
     phase,
     validate_frame,
 )
+from scripts.ha_incident_observer import Recorder, SessionMetadata
 
 _ROLE = contextvars.ContextVar("hoben_dual_role", default=None)
 _installed = False
@@ -101,6 +102,7 @@ class Tracker(logging.Handler):
         self.owners = []
         self.ordinal = None
         self.last_success = None
+        self.diagnostic = Recorder(stamp, start=start)
 
     def candidate(self):
         f = self.e["incident"]
@@ -183,6 +185,9 @@ class Tracker(logging.Handler):
         r["cleanup"] = bool(rows) and all(o["cleanup"] for o in rows)
 
     def cleanup_error(self, session, error):
+        self.diagnostic.error(
+            session, error, "cleanup", "transport_close", cleanup=True
+        )
         rows = self.e["cleanup_errors"]
         item = dict(
             role=session.role,
@@ -229,6 +234,14 @@ class Tracker(logging.Handler):
                 role=role, at_ms=at, category=error, phase=phase_name, subcode=subcode
             )
             self.e["terminal"] = terminal
+            session = self.sessions.get(role)
+            self.diagnostic.event(
+                session,
+                {"unexpected": "internal", "budget": "internal"}.get(error, error),
+                phase_name,
+                "observer",
+                terminal=True,
+            )
             incident = self.e["incident"]
             self.e["failure"] = (
                 {k: incident[k] for k in terminal} if incident else terminal
@@ -426,7 +439,7 @@ class Tracker(logging.Handler):
             _installed = False
 
 
-class TrackedSession(V4Session):
+class TrackedSession(SessionMetadata, V4Session):
     """Shared session implementation; add metadata without changing routing."""
 
     def __init__(self, *, tracker, role, transport_factory, **options):
@@ -452,6 +465,8 @@ class TrackedSession(V4Session):
         tracker.owners.append(self)
         tracker.sessions[role] = self
         super().__init__(
+            diagnostics=tracker.diagnostic,
+            diagnostic_role=role,
             transport_factory=lambda: TrackedTransport(
                 transport_factory(), self, tracker, role
             ),

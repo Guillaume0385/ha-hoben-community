@@ -106,7 +106,7 @@ function recoveryEvidence(e) {
 }
 function evidence(e) {
   const modern=e.schema===2;
-  object(e,['schema','boundary_proven','clock','completed','error','t0_ms','end_ms','a_end_active','reads','b','b_read_sequence','b_active_at_close','resources','phases','transitions','failure','overflow',...(modern?['owners','incident','terminal','cleanup_errors']:[])]);
+  object(e,['schema','boundary_proven','clock','completed','error','t0_ms','end_ms','a_end_active','reads','b','b_read_sequence','b_active_at_close','resources','phases','transitions','failure','overflow',...require('./ha-incident-evidence.cjs').extra(e),...(modern?['owners','incident','terminal','cleanup_errors']:[])]);
   check([1,2].includes(e.schema)&&e.boundary_proven===false&&['unattested','synthetic','monotonic'].includes(e.clock));
   for(const k of ['completed','a_end_active','b_active_at_close','overflow'])check(typeof e[k]==='boolean');
   check(errors.includes(e.error)&&time(e.t0_ms)&&int(e.end_ms,0,900000));
@@ -165,7 +165,7 @@ function project(d,blank) {
   check(['completed','unavailable','cancelled','timeout','memory','processes','worker_failure'].includes(r.reason));
   if(r.reason==='completed')check(r.started&&r.reaped&&!r.oom_killed&&!r.pids_limited);
   check(!r.oom_killed||r.reason==='memory');check(!r.pids_limited||r.oom_killed||r.reason==='processes');
-  evidence(e);check(r.started||e.reads.length===0&&Object.values(e.resources).every(x=>x.opens===0));
+  evidence(e);require('./ha-incident-evidence.cjs').validate(e,r,true);check(r.started||e.reads.length===0&&Object.values(e.resources).every(x=>x.opens===0));
   if(e.clock==='monotonic'&&e.t0_ms!==null){check(e.t0_ms+e.end_ms<=r.elapsed_ms);for(const o of e.owners||[])for(const k of ['open_ms','accepted_ms','closed_ms','cleaned_ms'])check(o[k]===null||e.t0_ms+o[k]<=r.elapsed_ms);}
   check(Buffer.byteLength(JSON.stringify(d))<=8192);
   const m=blank('ha');

@@ -10,6 +10,8 @@ from scripts.campaign_runtime_contract import (
     keys,
     need,
 )
+from scripts.ha_incident_evidence import extra_keys
+from scripts.ha_incident_evidence import validate as validate_diagnostic
 from scripts.ha_live_proof import empty_evidence, results, validate_observation
 from scripts.ha_session_evidence import observation, outcome, progress
 
@@ -228,12 +230,13 @@ def validate_detail(scenario, detail):
     if r["pids_limited"] and not r["oom_killed"]:
         need(r["reason"] == "processes")
     if scenario == "hoben-live":
-        keys(e, ("completed", "samples", "window", "cleanup"))
+        keys(e, {"completed", "samples", "window", "cleanup"} | extra_keys(e))
         logical_baseline(r, e)
     else:
         keys(
             e,
             {"completed", "samples", "window", "cleanup", "terminal"}
+            | extra_keys(e)
             | (
                 {"recovery"}
                 if scenario == "session-reconnect" and "recovery" in e
@@ -302,6 +305,7 @@ def validate_detail(scenario, detail):
             progress(previous, e["cleanup"]["observation"])
         if scenario == "session-reconnect":
             controlled_recovery(e)
+    validate_diagnostic(e, r)
     need(
         len(json.dumps(detail, separators=(",", ":"), allow_nan=False).encode()) <= 8192
     )
