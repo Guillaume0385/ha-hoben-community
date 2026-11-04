@@ -557,6 +557,7 @@ class V4Session:
                 recovery.result.set_result(result)
         finally:
             recovery.task = None
+            recovery.closing = False
             recovery.probing = False
             timer = recovery.read_deadline
             if timer is not None and not timer.expired():
@@ -1793,11 +1794,18 @@ class V4Session:
         if self.state is not SessionState.CLOSED:
             self._transition(SessionState.CLOSED)
         recovery = self._data_updated
+        if recovery.task is asyncio.current_task():
+            recovery.closing = True
         recovery.active = False
         if recovery.result is not None and not recovery.result.done():
             recovery.result.set_result(HobenClientClosedError())
         if recovery.task is not None and recovery.task is not asyncio.current_task():
-            recovery.task.cancel()
+            # A failed probe may itself be awaiting RX's bounded TLS close.
+            # Ordinary lifecycle cleanup joins that teardown; cancelling it
+            # would forward cancellation into an unfinished wait_closed.
+            # Explicit caller cancellation still interrupts and fails closed.
+            if not recovery.closing or asyncio.current_task().cancelling():
+                recovery.task.cancel()
             await asyncio.gather(recovery.task, return_exceptions=True)
         task = self._opening_task
         if task is not None and task is not asyncio.current_task():

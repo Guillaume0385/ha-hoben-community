@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #163 / B6, nettoyage HA après timeout
+
+- Reproduire hors ligne une course locale : une sonde en échec attend déjà le
+  close RX, puis le lifecycle annule cette sonde et interrompt le shutdown TLS.
+- Joindre cette fermeture déjà engagée lors du nettoyage ordinaire ; conserver
+  l'échec des vrais close annulés, expirés ou refusés et la preuve complète avant
+  réouverture. Aucun close de remplacement ni assouplissement de retry/délai.
+- Tests rouges/verts du vrai client HA et AsyncTlsTransport sur streams simulés,
+  trois pertes successives, concurrence RX/TX, doubles fermetures, refus et unload.
+  [Cause locale et limites d'attribution](docs/ha-cleanup-recovery.md).
+- Aucun test réel, changement de protocole/DataUpdated, campagne #126, commande
+  poêle, main, dispatch/rerun ou automatisation.
+
 ## En cours — #163 / B5, discriminant V4 rejeté
 
 - Ajouter au seul texte WARNING `message_type_byte=0xNN` lorsque le vrai framer

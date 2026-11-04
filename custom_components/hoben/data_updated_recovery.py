@@ -18,6 +18,7 @@ class DataUpdatedRecovery:
     probe_started: float = 0.0
     read_deadline: asyncio.Timeout | None = None
     task: asyncio.Task | None = None
+    closing: bool = False  # The probe already owns teardown, not another read.
     result: asyncio.Future | None = None
     observer: bool = False
     consumed: bool = True
