@@ -32,6 +32,7 @@ from .exceptions import (
     HobenClosedError,
     HobenDataUpdatedRecoveryError,
     HobenError,
+    HobenFrameBoundaryError,
     HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
@@ -395,6 +396,7 @@ class V4Session:
         no_pong_after_120: NoPongAfter120 | None = None,
         _quarantine: _QuarantineCapability | None = None,
         recover_data_updated: bool = False,
+        classify_frame_boundary: bool = False,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
@@ -411,6 +413,10 @@ class V4Session:
         self._mode = mode
         if type(recover_data_updated) is not bool or (
             recover_data_updated and mode is not V4SessionMode.PERSISTENT
+        ):
+            raise HobenInvalidInputError()
+        if type(classify_frame_boundary) is not bool or (
+            classify_frame_boundary and mode is not V4SessionMode.PERSISTENT
         ):
             raise HobenInvalidInputError()
         self._opening_options = opening_options or V4OpeningOptions()
@@ -457,6 +463,7 @@ class V4Session:
                 diagnostic=session_300,
                 _reject_close_client=_quarantine is not None,
                 recover_data_updated=recover_data_updated,
+                classify_frame_boundary=classify_frame_boundary,
             )
             if session_300 is not None or mode is V4SessionMode.PERSISTENT
             else None
@@ -685,6 +692,16 @@ class V4Session:
             and self._opening_task is None
             and (self._rx_task is None or self._rx_task.done())
             and not self._operations
+        )
+
+    @property
+    def has_classified_frame_boundary_failure(self) -> bool:
+        """Current RX failure came from this framer, not a phase annotation."""
+        return (
+            self._mode is V4SessionMode.PERSISTENT
+            and self._framer is not None
+            and type(self._rx_error) is HobenFrameBoundaryError
+            and self._framer.boundary_failure is self._rx_error
         )
 
     @property
@@ -1148,6 +1165,16 @@ class V4Session:
             finally:
                 self._opening_task = None
 
+    def _record_transport_loss(self):
+        """Called only after transport failure/EOF, never a local frame rejection."""
+        self._retryable_loss = True
+        try:
+            instant = self._loss_clock()
+            if math.isfinite(instant) and instant >= 0:
+                self._loss_monotonic_ms = int(instant * 1000)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
     async def _receive_unproven_handoff(
         self, transport: SessionTransport
     ) -> HobenError | None:
@@ -1188,12 +1215,7 @@ class V4Session:
         except TransportError as failure:
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             if self._retryable_loss:
-                try:
-                    instant = self._loss_clock()
-                    if math.isfinite(instant) and instant >= 0:
-                        self._loss_monotonic_ms = int(instant * 1000)
-                except (TypeError, ValueError, OverflowError):
-                    pass
+                self._record_transport_loss()
             self._rx_error = with_phase(
                 HobenTransportError(), phase_of(failure) or "unknown"
             )
@@ -1343,7 +1365,10 @@ class V4Session:
                 if self._no_pong is not None:
                     self._no_pong.peer_closed(self._experiment_generation)
                 if self._framer.partial:
-                    raise self._framer.incomplete_error() from None
+                    error = self._framer.incomplete_error()
+                    if type(error) is HobenFrameBoundaryError:
+                        self._record_transport_loss()
+                    raise error from None
                 self._framer.frame_log.failure(failure, phase="tls_read")
                 raise
             except Exception as failure:
@@ -1361,7 +1386,10 @@ class V4Session:
                         self._experiment.note_failure(
                             "frame_boundary", "protocol", "ambiguous"
                         )
-                    raise self._framer.incomplete_error()
+                    error = self._framer.incomplete_error()
+                    if type(error) is HobenFrameBoundaryError:
+                        self._record_transport_loss()
+                    raise error
                 if self._experiment is not None:
                     self._experiment.note_failure("tls_read", "transport")
                 failure = with_phase(TransportEOF("eof"), "tls_read")

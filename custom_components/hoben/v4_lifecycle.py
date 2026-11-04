@@ -5,7 +5,9 @@ post-open CloseClient can consume one retry under the same finite budget.
 By default protocol/identity failures and application deadlines stop. The HA
 adapter can opt in to recovering exact acquisition/timeout failures after full
 cleanup. A separate explicit HA policy waits 60 seconds after confirmed cleanup
-and permits unlimited attempts; campaign/quarantine budgets remain finite.
+and permits unlimited attempts, including framer-owned classified boundary
+rejections; generic internal exceptions remain permanent. Campaign/quarantine
+budgets remain finite.
 These are local availability policies, not server-behavior claims.
 A quiet RX owner has no application inactivity timer.
 """
@@ -25,6 +27,7 @@ from .exceptions import (
     HobenClientClosedError,
     HobenClosedError,
     HobenError,
+    HobenFrameBoundaryError,
     HobenInternalError,
     HobenInvalidInputError,
     HobenProtocolError,
@@ -265,6 +268,7 @@ class V4Lifecycle:
             HobenTransportError: "transport_unavailable",
             HobenTimeoutError: "timeout",
             HobenProtocolError: "malformed_response",
+            HobenFrameBoundaryError: "malformed_response",
             HobenClosedError: "server_closed",
             ExperimentalCloseClientError: "server_closed",
         }
@@ -348,7 +352,12 @@ class V4Lifecycle:
             or self._quarantine is not None
             or session is not self._session
             or self._witness.established_generation is None
-            or type(error) is not HobenTransportError
+            or not (
+                type(error) is HobenTransportError
+                or type(error) is HobenFrameBoundaryError
+                and error.provenance == "partial_eof"
+                and session.has_classified_frame_boundary_failure
+            )
             or not session.loss_is_retryable
         ):
             return
@@ -525,6 +534,7 @@ class V4Lifecycle:
             kwargs["mode"] = self._mode
         if self._ha_reconnect:
             kwargs["recover_data_updated"] = True
+            kwargs["classify_frame_boundary"] = True
         if self._opening_options is not None:
             kwargs["opening_options"] = self._opening_options
         if cap is not None:
@@ -766,6 +776,12 @@ class V4Lifecycle:
                     and opened
                     and session.close_client_received
                 )
+                retryable = retryable or (
+                    self._ha_reconnect
+                    and opened
+                    and type(error) is HobenFrameBoundaryError
+                    and session.has_classified_frame_boundary_failure
+                )
                 if self._recover_acquisition and opened:
                     # HA opts in to discarding the entire rejected session,
                     # not its unknown bytes. No read is replayed. The same
@@ -839,7 +855,11 @@ class V4Lifecycle:
                 if not self._ha_reconnect and attempt == self.snapshot.max_attempts:
                     error = LifecycleExhaustedError(error)
                     break
-                if opened and type(error) in (HobenProtocolError, HobenTimeoutError):
+                if opened and (
+                    type(error) in (HobenProtocolError, HobenTimeoutError)
+                    or type(error) is HobenFrameBoundaryError
+                    and error.provenance != "partial_eof"
+                ):
                     observed = error_event(error)
                     notify_status(
                         self._status_callback,

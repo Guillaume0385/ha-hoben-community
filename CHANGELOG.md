@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #163 / B4, reprise des frontières V4 classifiées
+
+- Classer les rejets structurels du framer HA avec une provenance fermée et
+  vérifiée par identité du propriétaire ; une simple phase `frame_boundary`
+  ou une exception Python générique ne permet pas de reconnexion.
+- Réutiliser le superviseur HA unique : cleanup attesté, nouvelle TLS/V4,
+  attente 60 s, répétition sans plafond artificiel ; auth, stop et cleanup
+  non confirmé restent terminaux. Campagnes bornées inchangées.
+- Préserver A1/A2/B1/B3, le silence glissant DataUpdated de 30 s et le close
+  #171 ; un EOF partiel réellement observé met fin au maintien du cache A1.
+- Tests rouges/verts, trois générations successives, refus sûrs et
+  [contrat de classification](docs/frame-boundary-reconnect.md).
+  Aucun test réel, commande poêle, dispatch/rerun ou changement d'automatisation.
+
 ## En cours — #126 / 032, observation optionnelle de deux sessions
 
 - Ajouter `dual-session-observation` au seul workflow HA manuel, hors des sept

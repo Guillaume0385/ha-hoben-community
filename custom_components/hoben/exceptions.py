@@ -114,6 +114,43 @@ class HobenInternalError(HobenProtocolError):
     code = "internal_failure"
 
 
+FRAME_BOUNDARY_PROVENANCE = frozenset(
+    {"unknown_type", "unsupported_type", "invalid_mbap", "partial_eof"}
+)
+
+
+class HobenFrameBoundaryError(HobenProtocolError):
+    """A framer-classified wire rejection, never a generic Python exception.
+
+    The lifecycle also requires identity with the current framer's failure.
+    This classification proves a local rejection, not a complete message or
+    universal boundary. No received bytes or source exception are retained.
+    """
+
+    # Preserve A1's established malformed-acquisition category. The exact type,
+    # closed provenance and origin identity carry the narrower retry decision.
+    code = "malformed_response"
+
+    def __init__(self, diagnostic: MalformedDiagnostic, provenance: str) -> None:
+        if type(diagnostic) is not MalformedDiagnostic or (
+            type(provenance) is not str or provenance not in FRAME_BOUNDARY_PROVENANCE
+        ):
+            raise ValueError("invalid_frame_boundary_incident")
+        self.provenance = provenance
+        super().__init__(diagnostic)
+        self._hoben_error_phase = "frame_boundary"
+
+    def safe_report(self) -> dict[str, int | str]:
+        return (
+            HobenError.safe_report(self)
+            | self.diagnostic.safe_report()
+            | {
+                "phase": "frame_boundary",
+                "frame_boundary_provenance": self.provenance,
+            }
+        )
+
+
 class HobenTlsVerificationError(HobenError):
     """Certificate/hostname rejection; no reconnect or unverified fallback."""
 

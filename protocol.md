@@ -37,6 +37,15 @@ L'application contient également une API HTTP(S) distincte sur le port `5177` (
 
 ## 2. Empilement des protocoles
 
+**Politique locale #163/B4 (04/11/2026) :** le chemin HA peut reconnecter après
+un rejet structurel explicitement produit par son framer (type inconnu/non
+pris en charge, MBAP invalide, EOF partiel). La phase `frame_boundary` seule
+ne suffit jamais ; les exceptions internes génériques restent permanentes.
+Cleanup attesté, superviseur unique et délai de 60 s précèdent la nouvelle TLS.
+Ce choix de disponibilité ne prouve ni frontière universelle OpenedClient,
+ni message inconnu complet, ni cause serveur ; DataUpdated invalide seul garde
+le contrat #160. Voir [classification et limites](docs/frame-boundary-reconnect.md).
+
 **Instrumentation locale #152 :** les rejets `malformed_response` portent des
 catégories structurées de phase/type prouvé, tailles observées/attendues lorsque
 leur contrat est établi et éléments structurels manquants. Les faits non prouvés
