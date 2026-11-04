@@ -18,7 +18,17 @@ def test_owner_decided_protocol_ceilings_preserve_ha_and_h1h2():
     assert sum(v for k, v in SECONDS["protocol"].items() if k != "all") == 2850
     assert SECONDS["protocol"]["h1h2"] == 1800
     assert SECONDS["protocol"]["session-300"] == 360
-    assert list(SECONDS["ha"].values()) == [360, 90, 120, 180, 600, 60, 120, 1800]
+    assert [v for k, v in SECONDS["ha"].items() if k != "dual-session-observation"] == [
+        360,
+        90,
+        120,
+        180,
+        600,
+        60,
+        120,
+        1800,
+    ]
+    assert SECONDS["ha"]["dual-session-observation"] == 900
 
 
 def test_reconnect_uses_existing_pong_policy_and_collector_with_real_sessions():

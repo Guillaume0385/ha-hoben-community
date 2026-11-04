@@ -5,6 +5,7 @@ offline tests exercise the same orchestration with synthetic worker receipts.
 """
 
 import json
+import math
 import os
 import re
 import selectors
@@ -245,10 +246,17 @@ def run(
     executor=execute,
     clock=time.monotonic,
     cancelled=lambda: False,
+    absolute_start=None,
 ):
     names = plan(campaign, selection)
     validate_context(provenance)
-    start = clock()
+    now = clock()
+    start = now
+    if absolute_start is not None:
+        need(campaign == "ha" and selection == "dual-session-observation")
+        need(type(absolute_start) in (int, float) and math.isfinite(absolute_start))
+        need(0 <= absolute_start <= now)
+        start = absolute_start
     deadline = start + SECONDS[campaign][selection]
     stages, stopped = [], None
     for name in names:
@@ -351,6 +359,12 @@ def main():
             image = file.read_text().strip()
             need(re.fullmatch("sha256:[a-f0-9]{64}", image))
         reason = "identity_refused"
+        absolute_start = None
+        if campaign == "ha" and selection == "dual-session-observation":
+            raw_start = os.environ.get("HOBEN_DUAL_STARTED_NS", "")
+            need(re.fullmatch("[0-9]{1,20}", raw_start) is not None)
+            absolute_start = int(raw_start) / 1e9
+            need(0 <= absolute_start <= time.monotonic() < absolute_start + 900)
         private = identity(
             os.environ, tls_only=campaign == "protocol" and selection == "tls-only"
         )
@@ -372,6 +386,7 @@ def main():
             payload,
             image=image,
             cancelled=lambda: stopped,
+            absolute_start=absolute_start,
         )
         reason = "report_refused"
         write_report(storage, report)

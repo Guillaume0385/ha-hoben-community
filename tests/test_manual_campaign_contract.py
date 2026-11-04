@@ -170,6 +170,12 @@ def test_coherent_synthetic_snapshots_never_authorize_execution(campaign, requir
         before = snapshot(campaign, required)
         before["dispatch"]["scenario"] = scenario
         model = assess_admission(bind(before))
+        if scenario == "dual-session-observation":
+            # The archived consistency model is not the native live gate. New
+            # opt-in execution is tested through the actual controller instead.
+            assert not model.consistent and model.category == "context"
+            no_permit(model)
+            continue
         assert model.consistent and model.category == "coherent_offline"
         after = copy.deepcopy(before)
         after["observed_ms"] += 1

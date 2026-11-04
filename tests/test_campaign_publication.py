@@ -143,7 +143,10 @@ def test_workflow_wiring_preserves_native_environments_mutex_and_no_live_ci(camp
     w = yaml.safe_load(path.read_text())
     assert set(w["on"]) == {"workflow_dispatch"}
     assert w["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == list(
-        CHOICES[campaign]
+        (
+            *CHOICES[campaign],
+            *(("dual-session-observation",) if campaign == "ha" else ()),
+        )
     )
     assert w["permissions"] == {} and w["concurrency"] == {
         "group": "hoben-read-only-observation",

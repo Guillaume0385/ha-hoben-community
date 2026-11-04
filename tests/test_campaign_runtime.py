@@ -250,7 +250,16 @@ def test_design_budgets_are_exact_and_legacy_ha_limit_is_not_extended():
     from scripts.ha_session_supervisor import Limits
 
     assert list(SECONDS["protocol"].values()) == [15, 30, 45, 1800, 360, 600, 3000]
-    assert list(SECONDS["ha"].values()) == [360, 90, 120, 180, 600, 60, 120, 1800]
+    assert [SECONDS["ha"][s] for s in CHOICES["ha"]] == [
+        360,
+        90,
+        120,
+        180,
+        600,
+        60,
+        120,
+        1800,
+    ]
     assert sum(SECONDS["protocol"][s] for s in CHOICES["protocol"][:-1]) == 2850
     assert sum(SECONDS["ha"][s] for s in CHOICES["ha"][:-1]) == 1530
     assert ha_limits("session-reconnect").process_ms == 600000

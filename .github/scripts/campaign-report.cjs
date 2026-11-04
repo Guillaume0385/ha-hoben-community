@@ -11,15 +11,16 @@ const errors=['none','authentication','authorization','transport','protocol','ti
 const reasons=['observed','not_observed','not_started','context_refused','identity_refused','worker_failure','timeout',
   'cancelled','cleanup_failed','report_refused','supervisor_refused','memory','processes','previous_failure','budget'];
 const maxBytes=64*1024;
-const cap=(c,s)=>seconds[c][choices[c].indexOf(s)]*1000;
-const names=(c,s)=>{check(Object.hasOwn(choices,c)&&choices[c].includes(s));return s==='all'?choices[c].slice(0,-1):[s];};
+const dual='dual-session-observation';
+const cap=(c,s)=>c==='ha'&&s===dual?900000:seconds[c][choices[c].indexOf(s)]*1000;
+const names=(c,s)=>{check(Object.hasOwn(choices,c)&&(choices[c].includes(s)||c==='ha'&&s===dual));return s==='all'?choices[c].slice(0,-1):[s];};
 const blank=(c='protocol',s=null)=>({opens:0,reads:0,reads_ok:0,pings:c==='ha'||s==='h1h2'?null:0,pongs:c==='ha'||s==='h1h2'?null:0,h1_sessions:c==='ha'?null:0,h2_sessions:c==='ha'?null:0,useful_ms:0,
   completed:false,cleanup:false,reused:false,recovered:false,available:false,continuous:false,
   loss_kind:'none',close_client_subcode:null,error:'none'});
 
 function metrics(m,c,s) {
   object(m,Object.keys(blank()));
-  const reads=c==='ha'||s==='session-300'?6:{'tls-only':0,'session-open':0,'read-v4-state':1,h1h2:12,'session-reconnect':10}[s];
+  const reads=c==='ha'&&s===dual?13:c==='ha'||s==='session-300'?6:{'tls-only':0,'session-open':0,'read-v4-state':1,h1h2:12,'session-reconnect':10}[s];
   const bounds={opens:s==='h1h2'?12:c==='ha'?2:['session-300','session-reconnect'].includes(s)?3:1,reads,
     reads_ok:reads,pings:1048576,pongs:1048576,h1_sessions:6,h2_sessions:6,useful_ms:cap(c,s)};
   for(const [k,v] of Object.entries(bounds))check((s==='h1h2'&&['pings','pongs'].includes(k))||c==='ha'&&['pings','pongs','h1_sessions','h2_sessions'].includes(k)?m[k]===null:int(m[k],0,v));
@@ -38,6 +39,7 @@ function status(c,s,m) {
     if(s==='session-300')return m.useful_ms>=300000&&m.reads_ok>0&&m.pings===m.pongs?'SUCCESS':'FAILURE';
     return m.reads_ok===1?'SUCCESS':'FAILURE';
   }
+  if(c==='ha'&&s===dual)return m.opens===2&&m.reads===13&&m.reads_ok===13&&m.continuous&&m.available?'SUCCESS':'FAILURE';
   if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
   if(s==='session-reuse'&&!m.reused)return 'FAILURE';
   const expected={'open-errors':1,'refresh-v4':2,'session-reuse':3,cleanup:1,availability:2}[s];
@@ -80,6 +82,7 @@ function haControlled(e) {
   return r.outcome==='verified'&&proven;
 }
 function haDetail(s,d) {
+  if(s===dual)return require('./ha-dual-evidence.cjs').project(d,blank);
   object(d,['supervisor','evidence']);
   const r=d.supervisor,e=d.evidence;
   object(r,['started','reason','memory_bytes','pids','useful_ms','process_ms','elapsed_ms','oom_killed','pids_limited','reaped','network']);
@@ -168,7 +171,7 @@ function recoveryWitness(w,m) {
 function validateStage(v,c) {
   object(v,['scenario','started','elapsed_ms','reason','status','metrics','detail']);
   const s=v.scenario;
-  check(choices[c].slice(0,-1).includes(s)&&typeof v.started==='boolean'&&int(v.elapsed_ms,0,cap(c,s))&&reasons.includes(v.reason));
+  check((choices[c].slice(0,-1).includes(s)||c==='ha'&&s===dual)&&typeof v.started==='boolean'&&int(v.elapsed_ms,0,cap(c,s))&&reasons.includes(v.reason));
   metrics(v.metrics,c,s);
   const expected=!v.started?'NOT RUN':!['observed','not_observed'].includes(v.reason)?'FAILURE':status(c,s,v.metrics);
   check(v.status===expected);
@@ -238,6 +241,7 @@ function prepare(env=process.env) {
 // Presentation uses only independently validated fields and this fixed catalog.
 // The limits are design ceilings, never minimum durations or success evidence.
 function bounds(c,s) {
+  if(c==='ha'&&s===dual)return 'A : 12 lectures / 60 s ; B : une lecture, 180–360 s ; après fermeture B ≥300 s ; 2 sessions ; 900 s globales ; 1 Gio ; 128 PID';
   if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':s==='session-reconnect'?'Pong de test inhibés dès 120 s ; reprise <240 s ; stabilité 120 s ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
   return {
     'tls-only':'1 TLS ; 0 lecture',
@@ -274,6 +278,17 @@ function summary(r,env) {
     lines.push('| '+[s,v?.status||'NOT RUN',v?diagnostic(v):'report_not_attested',v?duration(v.elapsed_ms):'non attestée',
       duration(cap(c,s)),v?.started?v.metrics.reads_ok+' / '+v.metrics.reads:'non attestées',
       v?.started?(v.metrics.cleanup?'attesté':'non attesté'):'non attesté'].join(' | ')+' |');
+  }
+  for(const v of r?.stages||[]) {
+    if(v.scenario!==dual||!v.detail)continue;
+    const e=v.detail.evidence;
+    lines.push('', 'Dual : frontière OpenedClient non prouvée ; aucune causalité serveur déduite.');
+    for(const p of e.phases)for(const role of ['a','b']) {
+      const s=p[role];
+      lines.push('- '+p.name+' / '+role+' : requêtes '+s.requests+' ; RX '+s.rx_bytes+' octets / '+s.rx_chunks+' livraisons ; continuations '+s.fragments+' ; Pong '+s.pongs+' ; EOF '+s.eof+' ; invalides '+s.invalid+' ; inattendus '+s.unexpected+' ; tronqués '+s.truncated+'.');
+    }
+    for(const role of ['a','b']) {const x=e.resources[role];lines.push('- '+role+' : ouvertures '+x.opens+' ; fermetures '+x.close_calls+' ; nettoyage '+x.cleanup+'.');}
+    if(e.failure)lines.push('- Échec : '+e.failure.role+' / '+e.failure.category+' / '+e.failure.phase+' / sous-code '+e.failure.subcode+'.');
   }
   if(!selectedNames.length)lines.push('', 'Sélection non attestée : NOT RUN.');
   lines.push('', 'Bornes de conception (maxima, aucune preuve de succès) :','');

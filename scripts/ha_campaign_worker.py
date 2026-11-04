@@ -12,11 +12,11 @@ sys.path.insert(0, str(ROOT))
 
 
 def main():
-    from scripts.campaign_runtime_contract import HA_CHOICES, need
+    from scripts.campaign_runtime_contract import need, scenarios
     from scripts.ha_campaign_observer import observe
     from scripts.ha_session_live_worker import collect
 
-    need(len(sys.argv) == 2 and sys.argv[1] in HA_CHOICES[:-1])
+    need(len(sys.argv) == 2 and sys.argv[1] in scenarios("ha"))
     need(os.getuid() == 65534 and os.getgid() == 65534)
     status = dict(
         line.split(":", 1)
@@ -34,6 +34,7 @@ def main():
         collect(
             identity,
             allow_initial_identity=True,
+            dual_session=sys.argv[1] == "dual-session-observation",
             observer=partial(
                 observe,
                 scenario=sys.argv[1],

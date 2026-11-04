@@ -114,6 +114,9 @@ class SourceBundle:
                         "ha_campaign_evidence.py",
                         "ha_pong_injection.py",
                         "ha_reconnect_observer.py",
+                        "ha_dual_evidence.py",
+                        "ha_dual_observer.py",
+                        "ha_dual_instrumentation.py",
                         "campaign_runtime_contract.py",
                         "ha_campaign_plan.py",
                         "protocol_campaign_plan.py",
@@ -340,7 +343,7 @@ def supervise(
     No environment is inherited by the worker. A missing engine, image, cgroup
     metric or configuration proof refuses before the HA worker starts.
     """
-    from scripts.campaign_runtime_contract import CampaignLimits, ha_limits
+    from scripts.campaign_runtime_contract import ha_limits
 
     if (
         type(case) is not OfflineCase
@@ -348,7 +351,7 @@ def supervise(
             type(limits) is Limits
             and _campaign is None
             or type(_campaign) is _CampaignRun
-            and type(limits) is CampaignLimits
+            and type(limits) is type(ha_limits(_campaign.scenario))
             and limits == ha_limits(_campaign.scenario)
         )
         or type(image_id) is not str

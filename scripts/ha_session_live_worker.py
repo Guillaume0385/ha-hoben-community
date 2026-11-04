@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-async def collect(identity, *, observer=None, allow_initial_identity=False):
+async def collect(
+    identity, *, observer=None, allow_initial_identity=False, dual_session=False
+):
     """Reuse the real HA path; only #126 opts into the documented initial GUID.
 
     The historical #112 entry keeps its persisted-identity requirement. Neither
@@ -53,8 +55,18 @@ async def collect(identity, *, observer=None, allow_initial_identity=False):
         # This private HA API is pinned and tested; no mock or replacement of
         # the client/coordinator/persistence path occurs in the live worker.
         hass.config_entries._entries[entry.entry_id] = entry
-        client = HobenClient(identity["user_guid"], identity["device_guid"])
+        if type(dual_session) is not bool:
+            raise ValueError("invalid campaign mode")
+        client = HobenClient(
+            identity["user_guid"],
+            identity["device_guid"],
+            **({"max_attempts": 1} if dual_session else {}),
+        )
         evidence = empty_evidence()
+        if dual_session:
+            from scripts.ha_dual_evidence import empty
+
+            evidence = empty()
         try:
             coordinator = HobenDataUpdateCoordinator(hass, entry, client)
             try:
