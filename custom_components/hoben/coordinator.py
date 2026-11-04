@@ -20,6 +20,7 @@ from .exceptions import (
     HobenClosedError,
     HobenDataUpdatedRecoveryError,
     HobenError,
+    HobenFrameBoundaryError,
     HobenInvalidCredentialsError,
     HobenProtocolError,
     HobenTransportError,
@@ -158,12 +159,17 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             ) from None
         except Exception as error:
             self.data_updated_deferred = self.data_updated_hold = False
-            category = (safe_error_report(error) or {}).get("error")
-            self._snapshot_hold = category in {
-                "malformed_response",
-                "timeout",
-                "invalid_v4_snapshot",
-            }
+            report = safe_error_report(error) or {}
+            category = report.get("error")
+            self._snapshot_hold = (
+                category
+                in {
+                    "malformed_response",
+                    "timeout",
+                    "invalid_v4_snapshot",
+                }
+                and report.get("frame_boundary_provenance") != "partial_eof"
+            )
             self._hold_loss_generation = self.client.session_observation.loss_generation
             self._snapshot_hold = self.last_snapshot_held
             self._notify_held_failure = was_holding and not self._snapshot_hold
@@ -271,10 +277,17 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             ) from None
         except HobenProtocolError as error:
             # Recovery rejects/closes the old stream; it never validates an
-            # ambiguous frame. Subclasses (internal, unsupported, ambiguous
-            # opening or decoding failures) retain permanent error semantics.
+            # ambiguous frame. Only the live HA owner can recover its classified
+            # boundary subtype; internal/ambiguous-opening/decoding failures
+            # retain permanent error semantics.
             raise wrap_error(
-                UpdateFailed if type(error) is HobenProtocolError else ConfigEntryError,
+                UpdateFailed
+                if type(error) is HobenProtocolError
+                or (
+                    type(error) is HobenFrameBoundaryError
+                    and self.client.ha_recovery_pending
+                )
+                else ConfigEntryError,
                 "Hoben protocol response could not be accepted",
                 error,
             ) from None

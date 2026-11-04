@@ -147,7 +147,7 @@ async def test_unproven_client_failure_stays_unknown_without_guessing_a_phase(
             False,
             None,
         ),
-        (b"\xff", "malformed_response", "message_classification", True, None),
+        (b"\xff", "malformed_response", "frame_boundary", True, None),
         (
             bytes.fromhex("0effff0001002b"),
             "malformed_response",

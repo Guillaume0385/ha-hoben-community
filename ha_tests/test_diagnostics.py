@@ -685,7 +685,8 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
             "ambiguous",
             {
                 "error": "malformed_response",
-                "phase": "message_classification",
+                "phase": "frame_boundary",
+                "frame_boundary_provenance": "unknown_type",
                 "message_type": "unknown",
                 "received_length": 1,
                 "expected_length": "not_proven",

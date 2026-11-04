@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from .client import HobenClient, RawStoveSnapshot
 from .error_phases import PHASES, phase_of
 from .exceptions import (
+    FRAME_BOUNDARY_PROVENANCE,
     HobenAmbiguousSessionError,
     HobenAuthorizationCodeError,
     HobenAuthorizationRequiredError,
@@ -21,6 +22,7 @@ from .exceptions import (
     HobenClosedError,
     HobenDataUpdatedRecoveryError,
     HobenError,
+    HobenFrameBoundaryError,
     HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
@@ -43,6 +45,7 @@ _ERROR_CODES = frozenset(
     error_type.code
     for error_type in (
         HobenError,
+        HobenFrameBoundaryError,
         HobenCleanupError,
         HobenDataUpdatedRecoveryError,
         HobenInvalidInputError,
@@ -74,6 +77,7 @@ _ERROR_TEXT_FIELDS = {
     "profile": PROFILES,
     "failure": _ERROR_CODES,
     "phase": PHASES,
+    "frame_boundary_provenance": FRAME_BOUNDARY_PROVENANCE,
 }
 _ERROR_NUMBER_FIELDS = {
     "exception_code": 255,

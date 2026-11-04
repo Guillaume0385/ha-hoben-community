@@ -8,8 +8,14 @@ No register interpretation, Home Assistant or research capture lives here.
 import time
 from dataclasses import dataclass, field
 
-from .error_phases import error_boundary
-from .exceptions import HobenClosedError, HobenProtocolError
+from .error_phases import error_boundary, with_phase
+from .exceptions import (
+    HobenAuthorizationRequiredError,
+    HobenClosedError,
+    HobenFrameBoundaryError,
+    HobenInternalError,
+    HobenProtocolError,
+)
 from .frame_diagnostic import FrameDiagnostic, FrameEvidence
 from .malformed import MalformedDiagnostic, message_name
 from .modbus import modbus_tcp_frame_size
@@ -271,8 +277,15 @@ class ExperimentalV4Framer:
     """
 
     def __init__(
-        self, *, diagnostic=None, _reject_close_client=False, recover_data_updated=False
+        self,
+        *,
+        diagnostic=None,
+        _reject_close_client=False,
+        recover_data_updated=False,
+        classify_frame_boundary=False,
     ):
+        if type(classify_frame_boundary) is not bool:
+            raise ValueError("invalid_frame_boundary_policy")
         self._buffer = bytearray()
         self._exchange = None
         self._diagnostic = diagnostic
@@ -282,6 +295,8 @@ class ExperimentalV4Framer:
         # Preserve the separate, dormant private EOF-quarantine contract.
         self._reject_close_client = _reject_close_client
         self._recover_data_updated = recover_data_updated
+        self._classify_frame_boundary = classify_frame_boundary
+        self.boundary_failure = None
         self.invalid_data_updated = None
         self.frame_log = FrameDiagnostic()
 
@@ -296,27 +311,50 @@ class ExperimentalV4Framer:
             and message == "close_client"
         ):
             raise _RejectedCloseClient()
-        if (
+        if self._classify_frame_boundary and self._buffer:
+            if self._buffer[0] == 47:
+                # Established one-byte authorization marker, never a retry or
+                # an automatic association/code submission after opening.
+                raise with_phase(HobenAuthorizationRequiredError(), "post_open")
+            if self._buffer[0] == 48:
+                # No post-open framing/authorization contract for this marker.
+                raise UnsupportedMessageTypeError(48)
+        unsupported = (
             phase == "message_classification"
             and self._buffer[0] in UNSUPPORTED_MESSAGE_TYPES
-        ):
-            raise UnsupportedMessageTypeError(self._buffer[0])
-        raise HobenProtocolError(
-            MalformedDiagnostic(
-                phase=phase,
-                message_type=message_name(self._buffer[0] if self._buffer else None),
-                received_length=len(self._buffer),
-                length_scope="mbap_header"
-                if phase == "frame_boundary"
-                else "not_proven",
-                missing_fields="none"
-                if phase == "frame_boundary" and self._buffer
-                else "unknown",
-                rejection="unknown_type"
-                if phase == "message_classification"
-                else "invalid_mbap",
-            )
         )
+        diagnostic = MalformedDiagnostic(
+            phase=phase,
+            message_type=message_name(self._buffer[0] if self._buffer else None),
+            received_length=len(self._buffer),
+            length_scope="mbap_header" if phase == "frame_boundary" else "not_proven",
+            missing_fields="none"
+            if phase == "frame_boundary" and self._buffer
+            else "unknown",
+            rejection="unknown_type"
+            if phase == "message_classification"
+            else "invalid_mbap",
+        )
+        if self._classify_frame_boundary:
+            provenance = (
+                "unsupported_type"
+                if unsupported
+                else (
+                    "unknown_type"
+                    if phase == "message_classification"
+                    else "invalid_mbap"
+                )
+            )
+            raise self._boundary_error(diagnostic, provenance)
+        if unsupported:
+            raise UnsupportedMessageTypeError(self._buffer[0])
+        raise HobenProtocolError(diagnostic)
+
+    def _boundary_error(self, diagnostic, provenance):
+        """Bind only an explicit structural rejection to this exact RX framer."""
+        error = HobenFrameBoundaryError(diagnostic, provenance)
+        self.boundary_failure = error
+        return error
 
     def incomplete_error(self):
         """Describe an EOF in a partial frame without publishing any buffered byte."""
@@ -340,16 +378,19 @@ class ExperimentalV4Framer:
                 missing, scope = "message_body", "frame"
         else:
             missing, scope = "unknown", "not_proven"
-        error = HobenProtocolError(
-            MalformedDiagnostic(
-                phase="frame_boundary",
-                message_type=message_name(head),
-                received_length=received,
-                expected_length=expected,
-                length_scope=scope,
-                missing_fields=missing,
-                rejection="incomplete_frame",
-            )
+        diagnostic = MalformedDiagnostic(
+            phase="frame_boundary",
+            message_type=message_name(head),
+            received_length=received,
+            expected_length=expected,
+            length_scope=scope,
+            missing_fields=missing,
+            rejection="incomplete_frame",
+        )
+        error = (
+            self._boundary_error(diagnostic, "partial_eof")
+            if self._classify_frame_boundary
+            else HobenProtocolError(diagnostic)
         )
         self.frame_log.failure(error, status="partial")
         return error
@@ -361,6 +402,7 @@ class ExperimentalV4Framer:
         self._ignored_type = self._ignored_size = None
         self._tail = None
         self.invalid_data_updated = None
+        self.boundary_failure = None
         self.frame_log.clear()
 
     @property
@@ -379,11 +421,16 @@ class ExperimentalV4Framer:
 
     def _feed(self, data: bytes, exchange: object):
         if not isinstance(data, bytes) or len(data) > 4096:
+            if self._classify_frame_boundary:
+                raise HobenInternalError()  # Local delivery contract, not wire framing.
             self._fail("frame_boundary", "unclassified")
         if self._tail is not None:
             # Drain retained coalesced bytes before accepting another chunk.
             # This bounds retention to one original <=4096-byte delivery.
             if data:
+                if self._classify_frame_boundary:
+                    # A retained-tail ownership violation is a local contract.
+                    raise HobenInternalError()
                 self._fail("frame_boundary", "ambiguous")
             data, exchange = self._tail
             self._tail = None
@@ -442,7 +489,11 @@ class ExperimentalV4Framer:
                         size = prefix + modbus_tcp_frame_size(
                             bytes(self._buffer[prefix : prefix + 6])
                         )
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as failure:
+                    if self._classify_frame_boundary and isinstance(failure, TypeError):
+                        # Correctly typed fixed-size input cannot trigger this
+                        # validator contract failure. Do not blame wire bytes.
+                        raise with_phase(HobenInternalError(), "mbap_header") from None
                     self.frame_log.header()
                     self.frame_log.failure(
                         HobenProtocolError(), phase="mbap_header", status="invalid"
@@ -460,6 +511,10 @@ class ExperimentalV4Framer:
                         )
                         return []
                     self._fail("frame_boundary", "ambiguous")
+                if self._classify_frame_boundary and (
+                    type(size) is not int or not prefix + 8 <= size <= prefix + 260
+                ):
+                    raise with_phase(HobenInternalError(), "mbap_header")
                 self.frame_log.header(
                     size, provenance="validated_header", scope="frame"
                 )
