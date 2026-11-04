@@ -1,5 +1,21 @@
 # Changelog
 
+## En cours — #126 / 033, timeout et reprise du banc dual-session
+
+- Distinguer le premier incident A (CloseClient complet, EOF ou véritable
+  expiration de lecture), le refus terminal et le cleanup ; conserver les
+  catégories HA structurées au lieu de classer leur wrapper comme unexpected.
+- Activer dans ce seul banc la politique HA existante : ancienne génération
+  entièrement réapée, backoff 60 s, nouvelle TLS/V4 et lecture corrélée, puis
+  300 s stables. Aucun changement du client/coordinator distribué.
+- Preuve dual schema 2 Python/Node : continuité ou récupération distinctes,
+  demandes échouées/polls sans émission visibles, ressources par génération,
+  cache/âge sans fausse fraîcheur, en-tête tardif non crédité comme acquisition.
+- Tests synthétiques rouge/vert close B / refresh A, délais, fragmentation,
+  refus auth/interne, annulation/nettoyage, confidentialité et faux succès.
+  Budget 900 s/réserve 60 s, deux connexions simultanées, gates et all conservés.
+  Aucun test réel, dispatch/rerun, commande poêle ou changement d'automatisation.
+
 ## En cours — #163 / B4, reprise des frontières V4 classifiées
 
 - Classer les rejets structurels du framer HA avec une provenance fermée et

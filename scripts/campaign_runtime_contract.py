@@ -177,6 +177,8 @@ def validate_metrics(m, campaign, scenario):
     opens = (
         12
         if scenario == "h1h2"
+        else 3
+        if campaign == "ha" and scenario == "dual-session-observation"
         else 2
         if campaign == "ha"
         else 3
@@ -184,7 +186,7 @@ def validate_metrics(m, campaign, scenario):
         else 1
     )
     reads = (
-        13
+        15
         if scenario == "dual-session-observation"
         else (
             6
@@ -255,10 +257,17 @@ def observed_status(campaign, scenario, m):
     if scenario == "dual-session-observation":
         return (
             "SUCCESS"
-            if m["opens"] == 2
-            and m["reads"] == m["reads_ok"] == 13
-            and m["continuous"]
-            and m["available"]
+            if m["available"]
+            and (
+                m["opens"] == 2
+                and m["reads"] == m["reads_ok"] == 13
+                and m["continuous"]
+                and not m["recovered"]
+                or m["opens"] == 3
+                and m["reads_ok"] <= m["reads"] <= 15
+                and m["recovered"]
+                and not m["continuous"]
+            )
             else "FAILURE"
         )
     if scenario == "h1h2":
