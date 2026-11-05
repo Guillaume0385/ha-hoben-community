@@ -52,6 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
             user_guid=entry.data[CONF_USER_GUID],
             device_guid=entry.data[CONF_DEVICE_GUID],
             ha_reconnect=True,
+            ha_fast_reconnect=True,
         )
     except (KeyError, HobenInvalidInputError):
         raise ConfigEntryError("Stored Hoben connection data is invalid") from None
@@ -68,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
                 break
             except ConfigEntryNotReady:
                 # Keep one entry-owned lifecycle during setup. The next fresh
-                # acquisition waits for its >=60 s recovery, rather than HA's
+                # acquisition waits for its proven recovery gate, rather than HA's
                 # shorter native retry creating another client/transport.
                 if (
                     client.ha_recovery_pending is not True

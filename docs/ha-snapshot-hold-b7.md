@@ -2,7 +2,8 @@
 
 Tâche exclusive [HOBEN-163-B7-HOLD-300S-012](https://github.com/Guillaume0385/ha-hoben-community/issues/163#issuecomment-6643704581),
 base `experimental` `96e6e10917ea11c3c7ce1906f1de4d896f486d8a`.
-La tâche B8 reste séparée et non active ; #126 reste suspendue.
+B7 a été fusionnée par PR #181. B8 reste une tâche séparée, désormais décrite
+dans [son contrat](ha-reconnect-timing-b8.md) ; #126 reste suspendue.
 
 ## Comportement
 
@@ -90,4 +91,4 @@ Les résultats hors ligne ne valident pas une installation réelle. Le timer est
 notifié au premier passage de la boucle HA après échéance ; `available` refuse
 dès le seuil monotone, sans garantie d'ordonnancement temps réel sous blocage
 de la boucle. Résultats des suites et quatre CI à consigner au HEAD exact de la
-PR. Revue/fusion MANAGER uniquement, puis préparation distincte de B8.
+PR. Revue/fusion MANAGER uniquement ; les délais B8 sont documentés séparément.

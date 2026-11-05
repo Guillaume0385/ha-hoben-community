@@ -60,6 +60,9 @@ def peers(monkeypatch):
 
     def make_lifecycle(**kwargs):
         kwargs["sleep"] = backoff
+        # These historical regressions retain the explicit 60 s compatibility
+        # policy. B8's production entry timing has its own controlled timeline.
+        kwargs["ha_fast_reconnect"] = False
         lifecycle = real_lifecycle(**kwargs)
         lifecycles.append(lifecycle)
         return lifecycle

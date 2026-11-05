@@ -153,9 +153,10 @@ class HobenClient:
     recovery; failed reads return to their caller without replay. Later refreshes
     can use a recovered generation only after a new correlated response. Terminal
     failure requires an explicit new client/config-entry reload.
-    Entry setup explicitly enables ha_reconnect: recoverable failures then use
-    a separate unlimited 60-second policy. Campaign/config-flow callers keep
-    the finite default; neither policy replays a failed acquisition.
+    Entry setup explicitly enables ha_reconnect and ha_fast_reconnect: a single
+    supervisor applies B8's proven 10/10/30 timings, otherwise 60 seconds.
+    Other callers keep their existing finite or explicit HA-60 policy;
+    no policy replays a failed acquisition.
     Explicit association uses the same lock and handshake, with one attempt and
     no Modbus read. No control or client-owned polling task.
     """
@@ -172,6 +173,7 @@ class HobenClient:
         build: int = DEFAULT_BUILD,
         device_info: str = DEFAULT_DEVICE_INFO,
         ha_reconnect: bool = False,
+        ha_fast_reconnect: bool = False,
     ) -> None:
         # Validate every field before constructing a transport. Codec validation
         # remains shared with the legacy helpers; its temporary packet is unused.
@@ -196,7 +198,12 @@ class HobenClient:
         _validate_delay(read_timeout)
         if type(ha_reconnect) is not bool:
             raise HobenInvalidInputError()
+        if type(ha_fast_reconnect) is not bool or (
+            ha_fast_reconnect and not ha_reconnect
+        ):
+            raise HobenInvalidInputError()
         self._ha_reconnect = ha_reconnect
+        self._ha_fast_reconnect = ha_fast_reconnect
         self._max_attempts = max_attempts
         self._retry_delay = retry_delay
         self._handshake_timeout = handshake_timeout
@@ -228,6 +235,13 @@ class HobenClient:
             and self._lifecycle is not None
             and self._lifecycle.ha_recovery_pending
         )
+
+    @property
+    def ha_acquisition_generation(self) -> int | None:
+        """Generation eligible for one fresh coordinator read after recovery."""
+        if not self._closed and self._ha_reconnect and self._lifecycle is not None:
+            return self._lifecycle.ha_acquisition_generation
+        return None
 
     @property
     def data_updated_transport_alive(self) -> bool:
@@ -451,6 +465,7 @@ class HobenClient:
                     sleep=asyncio.sleep,
                     recover_acquisition=True,
                     ha_reconnect=self._ha_reconnect,
+                    **({"ha_fast_reconnect": True} if self._ha_fast_reconnect else {}),
                     _status_callback=(
                         self.session_monitor.emit if self._ha_reconnect else None
                     ),
