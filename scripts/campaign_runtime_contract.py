@@ -309,10 +309,8 @@ def observed_status(campaign, scenario, m):
         )
     if scenario in {"session-reuse", "availability"}:
         expected = 3 if scenario == "session-reuse" else 2
-        nominal = (
-            m["opens"] == 1
-            and m["reads"] == m["reads_ok"] == expected
-            and (scenario != "session-reuse" or m["reused"])
+        nominal = m["reads"] == m["reads_ok"] == expected and (
+            scenario != "session-reuse" or m["reused"]
         )
         recovered = (
             m["recovered"]

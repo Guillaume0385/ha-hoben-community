@@ -43,7 +43,7 @@ function status(c,s,m) {
   if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
   if(['session-reuse','availability'].includes(s)) {
     const expected=s==='session-reuse'?3:2;
-    const nominal=m.opens===1&&m.reads===expected&&m.reads_ok===expected&&(s!=='session-reuse'||m.reused);
+    const nominal=m.reads===expected&&m.reads_ok===expected&&(s!=='session-reuse'||m.reused);
     const recovered=m.recovered&&m.opens===2&&m.reads===expected&&m.reads_ok>=1&&m.reads_ok<=expected;
     return m.available&&(nominal||recovered)?'SUCCESS':'FAILURE';
   }

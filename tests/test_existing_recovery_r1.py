@@ -406,3 +406,88 @@ require('./.github/scripts/campaign-report.cjs').publish();
         published["stages"][0]["metrics"]["reads_ok"]
         == published["stages"][0]["metrics"]["reads"] - 1
     )
+
+
+def nominal_two_opens_detail(scenario):
+    """Historical nominal report, with fresh reads but no F1 recovery claim."""
+    d = ha_detail(scenario)
+    e = d["evidence"]
+    for index, sample in enumerate(e["samples"]):
+        if index:
+            sample["observation"].update(
+                attempts=2,
+                generation=2,
+                read_generation=2,
+                read_sequence=index,
+                cleaned_generation=1,
+            )
+    e["window"]["observation"] = copy.deepcopy(e["samples"][-1]["observation"])
+    e["cleanup"]["observation"] = {
+        **e["window"]["observation"],
+        "stopped": True,
+        "cleaned_generation": 2,
+    }
+    return d
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("engine", ["python", "node"])
+def test_historical_nominal_predicate_allows_two_opens_without_f1_claim(
+    scenario, engine
+):
+    r = report(scenario, nominal_two_opens_detail(scenario))
+    value = r["stages"][0]
+    m = value["metrics"]
+    assert m["opens"] == 2 and m["available"] and m["cleanup"]
+    assert m["reads"] == m["reads_ok"] == (3 if scenario == "session-reuse" else 2)
+    assert not m["recovered"] and "diagnostic_schema" not in value["detail"]["evidence"]
+    assert m["reused"] is (scenario == "session-reuse")
+    # Exact base predicate: every planned read succeeds and is available;
+    # session-reuse additionally needs reused. No opens==1 clause existed.
+    value["status"] = r["actions_result"] = "SUCCESS"
+    if engine == "python":
+        assert validate_report(r) == r
+    else:
+        assert node_accepts(r)
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_nominal_success_without_f1_cannot_be_relabelled_as_recovered(scenario):
+    r = report(scenario, nominal_two_opens_detail(scenario))
+    assert r["actions_result"] == "SUCCESS"
+    forged = copy.deepcopy(r)
+    forged["stages"][0]["metrics"]["recovered"] = True
+    with pytest.raises(ValueError):
+        validate_report(forged)
+    assert not node_accepts(forged)
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_failed_read_with_two_opens_still_needs_strict_f1_recovery(scenario):
+    d = nominal_two_opens_detail(scenario)
+    d["evidence"]["samples"][0].update(
+        decoded=False, available=False, error="transport"
+    )
+    r = report(scenario, d)
+    assert not r["stages"][0]["metrics"]["recovered"]
+    assert r["actions_result"] == "FAILURE"
+    assert validate_report(r) and node_accepts(r)
+    forged = copy.deepcopy(r)
+    forged["stages"][0]["status"] = forged["actions_result"] = "SUCCESS"
+    with pytest.raises(ValueError):
+        validate_report(forged)
+    assert not node_accepts(forged)
+
+
+def test_two_opens_do_not_replace_session_reuse_evidence():
+    d = nominal_two_opens_detail("session-reuse")
+    for o in (
+        d["evidence"]["samples"][-1]["observation"],
+        d["evidence"]["window"]["observation"],
+        d["evidence"]["cleanup"]["observation"],
+    ):
+        o["read_sequence"] = 3  # No two adjacent reads prove contiguous reuse.
+    r = report("session-reuse", d)
+    assert not r["stages"][0]["metrics"]["reused"]
+    assert r["actions_result"] == "FAILURE"
+    assert validate_report(r) and node_accepts(r)

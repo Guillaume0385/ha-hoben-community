@@ -7,9 +7,12 @@ HA-F2 est annulée ; aucun scénario de 15 minutes. R2–R5 restent du backlog.
 ## Résultat et preuves
 
 Seuls `session-reuse` et `availability` changent de critère fonctionnel.
-Le chemin nominal conserve ses compteurs et SUCCESS : une ouverture et les
-3/2 acquisitions prévues, toutes valides ; `session-reuse` prouve réellement
-la réutilisation. Une erreur intermédiaire peut désormais être couverte par
+Le chemin nominal conserve son prédicat historique et ses compteurs : disponible
+avec les 3/2 acquisitions prévues toutes valides ; `session-reuse` exige en plus
+`reused=true`. Il n'imposait pas `opens==1` : deux ouvertures restent admissibles
+dans les bornes existantes, même sans preuve de récupération F1. Ce SUCCESS
+nominal n'ajoute aucune attestation de récupération : `recovered` reste false
+sans preuve F1 stricte. Une erreur intermédiaire peut désormais être couverte par
 une récupération **attestée**, sans effacer l'échantillon échoué.
 
 Les champs existants de HA-F1 et des observations suffisent ; aucun nouveau
@@ -61,6 +64,32 @@ cleanup non confirmé ou plafond atteint : FAILURE ou refus de preuve,
 jamais un SUCCESS fabriqué. NOT RUN garde
 son sens de collecte non commencée. Les autres scénarios conservent leurs
 critères et statuts ; aucune nouvelle règle INCONCLUSIVE n'est introduite.
+
+## Correction de revue : contrat nominal et preuve de récupération
+
+La [demande MANAGER](https://github.com/Guillaume0385/ha-hoben-community/pull/183#issuecomment-6655156501)
+signale une restriction `opens==1` ajoutée à tort au nominal dans le premier
+HEAD R1. Le [contrat de base](https://github.com/Guillaume0385/ha-hoben-community/blob/c9ad5f980e8deb02ad0640b593a6a1f6c30daba8/scripts/campaign_runtime_contract.py#L310)
+et son [équivalent Node](https://github.com/Guillaume0385/ha-hoben-community/blob/c9ad5f980e8deb02ad0640b593a6a1f6c30daba8/.github/scripts/campaign-report.cjs#L44)
+ne contiennent pas cette restriction, pour aucun des deux scénarios.
+Après les prérequis communs completed/cleanup/error, le prédicat historique est :
+
+- availability : disponible et 2/2 lectures décodées ;
+- session-reuse : disponible et 3/3 lectures décodées, avec `reused=true`.
+
+Ces prédicats sont restaurés dans les deux validateurs. La borne structurelle de
+deux ouvertures reste inchangée. Un rapport nominal à deux ouvertures sans F1
+est donc SUCCESS pour ces lectures disponibles ; `recovered=false` indique
+qu'aucune récupération F1 stricte n'est attestée. Ce succès nominal ne prétend
+pas démontrer une continuité TLS ni une récupération. Le premier HEAD R1
+refusait à tort ces rapports ; quatre tests Python/Node sont RED avant la
+correction, puis GREEN.
+
+Les autres régressions vérifient qu'un rapport avec lecture échouée et sans F1
+reste FAILURE, que `session-reuse` conserve son exigence `reused` et qu'un
+champ `recovered=true` ajouté arbitrairement est refusé même sur un SUCCESS
+nominal. Le chemin alternatif récupéré et toute sa validation F1 restent
+inchangés par cette correction.
 
 ## Bornes inchangées
 
