@@ -54,9 +54,11 @@ session ; le chemin alternatif peut donc réussir avec `reused=false` et
 `recovered=true`. Le résumé affiche les deux preuves séparément et conserve le
 premier incident, l'erreur terminale et le cleanup F1.
 
-Sans preuve F1 complète, avec cache ancien/B7, ouverture sans lecture, cardinalité
-incomplète, auth/erreur terminale, annulation, cleanup non confirmé ou plafond
-atteint : FAILURE ou refus de preuve, jamais un SUCCESS fabriqué. NOT RUN garde
+Le chemin récupéré est refusé sans preuve F1 complète ; les rapports nominaux
+historiques restent lisibles selon leur contrat existant. Cache ancien/B7,
+ouverture sans lecture, cardinalité incomplète, auth/erreur terminale, annulation,
+cleanup non confirmé ou plafond atteint : FAILURE ou refus de preuve,
+jamais un SUCCESS fabriqué. NOT RUN garde
 son sens de collecte non commencée. Les autres scénarios conservent leurs
 critères et statuts ; aucune nouvelle règle INCONCLUSIVE n'est introduite.
 
