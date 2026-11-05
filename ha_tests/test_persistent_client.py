@@ -130,19 +130,21 @@ async def test_actual_client_reuses_tls_and_session_across_ha_refreshes(
         [TransportTlsError("synthetic-private")],
     ],
 )
-async def test_unavailable_until_new_generation_and_valid_read(
+async def test_b7_retains_values_while_new_generation_still_requires_valid_read(
     hass, entry, peers, loss, caplog
 ):
     first = peers.wire(DEVICE_GUID, [[RESPONSE], loss])
     second = peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
     coordinator = await load(hass, entry)
     previous = coordinator.data
+    previous_sensor = sensor(hass, entry)
     lifecycle = peers.lifecycles[0]
     await coordinator.async_refresh()
     await peers.backoff.entered.get()
     assert not coordinator.last_update_success and coordinator.data is previous
     assert isinstance(coordinator.last_exception, UpdateFailed)
-    assert sensor(hass, entry).state == "unavailable"
+    assert sensor(hass, entry) is previous_sensor  # B7 hold, no false acquisition.
+    assert coordinator.snapshot_available and coordinator.last_snapshot_held
     report = await async_get_config_entry_diagnostics(hass, entry)
     if loss[0] == b"\x05" or loss[0] == b"\x05\x03\xff":
         assert report["coordinator"]["last_error"]["subcode"] == 3

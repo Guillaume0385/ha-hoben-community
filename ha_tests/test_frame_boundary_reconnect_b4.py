@@ -81,9 +81,10 @@ async def test_three_classified_boundaries_reconnect_after_cleanup_and_60_second
             coordinator._async_unsub_refresh()
             assert coordinator.data is previous and not coordinator.last_update_success
             assert coordinator.last_successful_read_at == stamp
-            # An idle loss followed by a pending-owner poll is not an A1 hold
-            # already established by a failed acquisition. Keep that distinction.
-            assert sensor(hass, entry).state == "unavailable"
+            # B7 retains the validated value within 300 s of the real loss;
+            # opening/retry still proves neither acquisition nor freshness.
+            assert sensor(hass, entry).state != "unavailable"
+            assert coordinator.last_snapshot_held
             assert sum(w.write.await_count for w in wires) == before_writes
             freezer.tick(timedelta(seconds=59))
             await pump()

@@ -143,6 +143,7 @@ async def test_simulated_concurrent_app_close_during_pending_ha_refresh(
     second = peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE[:9], RESPONSE[9:] + b"\x0a"]])
     coordinator = await load(hass, entry)
     previous = coordinator.data
+    previous_sensor = sensor(hass, entry)
     app_connected = asyncio.Event()
 
     async def phone_peer():
@@ -162,7 +163,8 @@ async def test_simulated_concurrent_app_close_during_pending_ha_refresh(
     assert await peers.backoff.entered.get() == 60.0
     assert not coordinator.last_update_success and coordinator.data is previous
     assert isinstance(coordinator.last_exception, UpdateFailed)
-    assert sensor(hass, entry).state == "unavailable"
+    assert sensor(hass, entry) is previous_sensor  # B7 retains, never refreshes.
+    assert coordinator.last_snapshot_held
     assert peers.factory.call_count == 1
     first.close.assert_awaited_once_with()
     peers.backoff.release.put_nowait(None)
