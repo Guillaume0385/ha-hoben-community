@@ -46,9 +46,10 @@ ERROR_CATEGORIES = {
 }
 
 
-async def take_sample(coordinator, evidence, stamp, start):
+async def take_sample(coordinator, evidence, stamp, start, *, require_fresh=False):
     """Project one real refresh; never publish its data or arbitrary exception."""
     previous = coordinator.data
+    before = coordinator.client.session_observation
     try:
         await coordinator.async_refresh()
     finally:
@@ -57,14 +58,29 @@ async def take_sample(coordinator, evidence, stamp, start):
             and type(coordinator.data) is HobenCoordinatorData
             and coordinator.data is not previous
         )
+        if require_fresh:
+            after = coordinator.client.session_observation
+            decoded = bool(
+                decoded
+                and after.read_generation is not None
+                and after.read_generation == after.generation
+                and not after.stopped
+                and not after.cleanup_failed
+                and (
+                    after.read_generation != before.read_generation
+                    or (after.read_sequence or 0) > (before.read_sequence or 0)
+                )
+                and coordinator.last_successful_read_at is not None
+            )
         safe = safe_error_report(coordinator.last_exception)
         evidence["samples"].append(
             {
                 "ordinal": len(evidence["samples"]) + 1,
                 "at_ms": max(0, int((stamp() - start) * 1000)),
                 "decoded": decoded,
-                "available": coordinator.last_update_success
-                and coordinator.data is not None,
+                "available": coordinator.snapshot_available
+                if require_fresh
+                else coordinator.last_update_success and coordinator.data is not None,
                 "error": "none"
                 if decoded
                 else ERROR_CATEGORIES.get((safe or {}).get("error"), "unexpected"),
@@ -197,7 +213,13 @@ async def _observe(
             for offset in SCHEDULES[scenario]:
                 await until(start + offset)
                 need(stamp() < collection_end)
-                await take_sample(coordinator, evidence, stamp, start)
+                await take_sample(
+                    coordinator,
+                    evidence,
+                    stamp,
+                    start,
+                    require_fresh=scenario in {"session-reuse", "availability"},
+                )
             evidence["completed"] = True
     except asyncio.CancelledError:
         evidence["terminal"] = "closed"

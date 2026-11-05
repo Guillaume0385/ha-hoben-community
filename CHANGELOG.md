@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #126 / R1, récupération prouvée des scénarios HA existants
+
+- Autoriser `session-reuse` et `availability` à réussir après un incident
+  récupéré uniquement avec preuve F1 des deux générations, lecture V4 neuve
+  corrélée/décodée et nettoyage intégral. Préserver les lectures tentées/réussies
+  et le sens de `reused` ; publier séparément la récupération.
+- Refuser une valeur B7 conservée, un simple drapeau de succès, une ouverture
+  sans lecture, une erreur terminale ou un cleanup manquant/annulé/échoué.
+  Contrats Python/Node indépendants et tests RED/GREEN synthétiques.
+- Aucun nouveau scénario, appel supplémentaire, changement du plugin, des
+  délais B8, budgets, gates, workflows, H1/H2, dual ou `session-reconnect`.
+  Aucun test réel ni fusion DEV. [Contrat et analyse historique R1](docs/ha-existing-recovery-r1.md).
+
 ## En cours — #163 / B8, délais de reprise HA prouvés
 
 - Après CloseClient complet reconnu non auth ou EOF prouvé : nettoyage attesté,

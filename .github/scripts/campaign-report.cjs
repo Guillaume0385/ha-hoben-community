@@ -41,7 +41,12 @@ function status(c,s,m) {
   }
   if(c==='ha'&&s===dual)return m.available&&(m.opens===2&&m.reads===13&&m.reads_ok===13&&m.continuous&&!m.recovered||m.opens===3&&m.reads_ok<=m.reads&&m.reads<=15&&m.recovered&&!m.continuous)?'SUCCESS':'FAILURE';
   if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
-  if(s==='session-reuse'&&!m.reused)return 'FAILURE';
+  if(['session-reuse','availability'].includes(s)) {
+    const expected=s==='session-reuse'?3:2;
+    const nominal=m.opens===1&&m.reads===expected&&m.reads_ok===expected&&(s!=='session-reuse'||m.reused);
+    const recovered=m.recovered&&m.opens===2&&m.reads===expected&&m.reads_ok>=1&&m.reads_ok<=expected;
+    return m.available&&(nominal||recovered)?'SUCCESS':'FAILURE';
+  }
   const expected={'open-errors':1,'refresh-v4':2,'session-reuse':3,cleanup:1,availability:2}[s];
   return m.available&&m.reads===expected&&m.reads_ok===expected?'SUCCESS':'FAILURE';
 }
@@ -80,6 +85,27 @@ function haControlled(e) {
       s.observation.read_generation===2&&s.observation.read_sequence===r.read_sequence&&s.observation.loss_generation===1&&s.observation.cleaned_generation===1);
   check(r.outcome!=='verified'||proven);
   return r.outcome==='verified'&&proven;
+}
+function existingRecovery(e) {
+  // R1: called only after independent shape, chronology and HA-F1 validation.
+  if(e.diagnostic_schema!==1||!e.samples.length)return false;
+  const d=e.diagnostic,f=d.first;
+  if(f===null||f[0]!=='a'||f[1]!==1||!['eof','transport','tls','timeout','close_client','protocol'].includes(f[3])||
+    f[3]==='close_client'&&[2,4,5].includes(f[6])||d.terminal!==null||d.cleanup!==null||d.owners.length!==2||
+    !e.completed||e.terminal!=='none'||!e.window.active)return false;
+  const [old,next]=d.owners;
+  if(![[old,1],[next,2]].every(([o,g])=>o.accepted&&o.accepted_generation===g&&o.stage==='reaped'&&o.pending===0&&o.close[3]!==null))return false;
+  const last=e.samples.at(-1),w=e.window.observation,final=e.cleanup.observation;
+  if(!last.decoded||!last.available||last.error!=='none'||w===null||!e.cleanup.completed||!final.stopped||final.cleanup_failed||
+    final.cleaned_generation!==2||final.loss_generation!==w.loss_generation||next.last_read===null||
+    f[2]>old.close[0]||old.close[3]>next.last_read[1])return false;
+  const o=last.observation;
+  if(!(o.generation===2&&o.read_generation===2&&o.cleaned_generation===1&&!o.stopped&&!o.cleanup_failed&&
+    next.last_read[0]===o.read_sequence&&w.generation===2&&w.read_generation===2&&final.generation===2&&
+    w.read_sequence===o.read_sequence&&final.read_sequence===o.read_sequence&&!w.stopped&&!w.cleanup_failed))return false;
+  return e.samples.every(s=>s.decoded||['transport','timeout','closed','protocol'].includes(s.error)&&s.observation.generation===1&&
+    !s.observation.stopped&&!s.observation.cleanup_failed&&e.samples.some(t=>t.decoded&&t.observation.read_generation===2&&
+      t.observation.cleaned_generation===1&&t.ordinal>s.ordinal));
 }
 function haDetail(s,d) {
   if(s===dual)return require('./ha-dual-evidence.cjs').project(d,blank);
@@ -139,11 +165,16 @@ function haDetail(s,d) {
   m.reused=e.samples.some((b,i)=>i>0&&e.samples[i-1].decoded&&b.decoded&&e.samples[i-1].observation.read_generation===b.observation.read_generation&&b.observation.read_sequence===e.samples[i-1].observation.read_sequence+1);
   m.recovered=e.samples.some(v=>v.decoded&&v.observation.loss_generation!==null&&v.observation.read_generation>v.observation.loss_generation&&v.observation.cleaned_generation!==null&&v.observation.cleaned_generation>=v.observation.loss_generation&&!v.observation.cleanup_failed);
   if(s==='session-reconnect')m.recovered=haControlled(e);
+  if(['session-reuse','availability'].includes(s))m.recovered=existingRecovery(e);
   if(w){m.loss_kind=w.loss_kind||'none';m.close_client_subcode=w.close_client_subcode;}
   m.available=e.window.active&&e.samples.length>0&&(s==='hoben-live'?e.samples.at(-1).decoded:e.samples.at(-1).available);
   if(s==='hoben-live')m.continuous=logical.criteria.continuous_300s==='SUCCESS';
   else if(e.terminal!=='none')m.error=e.terminal;
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;
+  if(['session-reuse','availability'].includes(s)&&!m.recovered&&e.diagnostic?.first&&m.error==='none') {
+    const category=e.diagnostic.first[3];
+    m.error=({eof:'transport',tls:'transport',close_client:'closed'})[category]||(errors.includes(category)?category:'unexpected');
+  }
   return m;
 }
 function recoveryWitness(w,m) {
@@ -280,6 +311,12 @@ function summary(r,env) {
     lines.push('| '+[s,v?.status||'NOT RUN',v?diagnostic(v):'report_not_attested',v?duration(v.elapsed_ms):'non attestée',
       duration(cap(c,s)),v?.started?v.metrics.reads_ok+' / '+v.metrics.reads:'non attestées',
       v?.started?(v.metrics.cleanup?'attesté':'non attesté'):'non attesté'].join(' | ')+' |');
+  }
+  for(const v of r?.stages||[]) {
+    if(!['session-reuse','availability'].includes(v.scenario)||!v.started)continue;
+    lines.push('', 'R1 — '+v.scenario+' : réutilisation réellement attestée '+v.metrics.reused+
+      ' ; récupération prouvée '+v.metrics.recovered+' ; lectures fraîches '+v.metrics.reads_ok+' / tentées '+v.metrics.reads+
+      '. Une valeur conservée B7 ne compte pas comme acquisition.');
   }
   for(const v of r?.stages||[]) {
     const e=v.detail?.evidence;
