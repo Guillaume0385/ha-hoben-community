@@ -493,3 +493,31 @@ async def test_fast_entry_preserves_dataupdated_sliding_silence_and_one_probe(
     assert_private_values_absent(caplog.text + repr(coordinator.client.safe_report()))
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
+
+
+@pytest.mark.parametrize("pending_read", [False, True])
+async def test_pong_timeout_is_not_proof_of_an_expired_acquisition_deadline(
+    hass, entry, tls_peers, tls_timeline, pending_read
+):
+    first = tls_peers.wire([[RESPONSE], []])
+    coordinator = await load(hass, entry)
+    coordinator._async_unsub_refresh()
+    stamp = coordinator.last_successful_read_at
+
+    async def drain():
+        if first.writer.write.call_args.args[0][0] == 11:
+            await asyncio.Future()
+
+    first.writer.drain.side_effect = drain
+    refresh = asyncio.create_task(coordinator.async_refresh()) if pending_read else None
+    await pump()
+    first.queue.put_nowait(b"\x0a")
+    await pump()
+    await tls_timeline.advance(10)
+    if refresh is not None:
+        await refresh
+    assert await tls_timeline.waiting.get() == 60
+    assert coordinator.last_successful_read_at == stamp
+    assert len(tls_peers.transports) == 1
+    assert coordinator.client.session_observation.cleaned_generation == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)

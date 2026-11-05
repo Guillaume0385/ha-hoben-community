@@ -82,6 +82,10 @@ les cas non attestés. Les régressions historiques B6/B7 conservent expliciteme
 leur politique HA-60 pour isoler leurs contrats ; B8 exerce la politique réelle
 de l’entrée avec son propre temps contrôlé.
 
+Deux régressions supplémentaires confirment que le timeout réel de TX Pong
+conserve 60 s, avec ou sans lecture en attente. Elles passent sans correctif
+supplémentaire : ce cas n’atteste pas un timeout de l’acquisition en cours.
+
 DataUpdated invalide seul reste sur la même session : silence glissant 30 s,
 sonde unique, aucun délai de reconnexion B8 induit par ce seul message. Les tests
 existants #160, frame_boundary B4, diagnostic B3/B5, annulation, H1/H2 et campagnes
