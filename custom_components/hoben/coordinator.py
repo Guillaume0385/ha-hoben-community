@@ -4,11 +4,13 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -38,6 +40,18 @@ if TYPE_CHECKING:
     from . import HobenConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+_CONNECTION_HOLD_SECONDS = 300
+_HOLD_CATEGORIES = frozenset(
+    {
+        "timeout",
+        "transport_unavailable",
+        "experimental_close_client",
+        "server_closed",
+        "malformed_response",
+        "data_updated_recovery",
+        "invalid_v4_snapshot",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +84,19 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         self._snapshot_hold = False
         self._hold_loss_generation = None
         self._notify_held_failure = False
+        self._updating = False
+        # A UI deadline only: neither a read nor permission to reopen transport.
+        # It survives accepted openings and failed polls until a decoded read.
+        self._connection_hold_until: float | None = None
+        self._connection_loss_generation: int | None = None
+        self._connection_hold_revoked = False
+        self._unsub_hold_expiry = None
+        self._hold_timer_token = None
+        self._unsub_session_hold = (
+            client.session_monitor.subscribe(self._session_changed)
+            if type(client) is HobenClient and client.ha_reconnect_enabled
+            else None
+        )
 
         async def stop_client(_event) -> None:
             # The one-shot bus listener is already removed before invocation.
@@ -86,6 +113,10 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def async_shutdown(self) -> None:
         """Cancel scheduling and the entry's shutdown hook; unload closes the client."""
         await super().async_shutdown()
+        self._cancel_hold_expiry()
+        if self._unsub_session_hold is not None:
+            self._unsub_session_hold()
+            self._unsub_session_hold = None
         self._snapshot_hold = self.data_updated_hold = False
         self.async_update_listeners()
         self._session_event()
@@ -98,10 +129,123 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         if type(self.client) is HobenClient:
             self.client.session_monitor.emit(event)
 
+    def _cancel_hold_expiry(self) -> None:
+        self._hold_timer_token = None
+        if self._unsub_hold_expiry is not None:
+            self._unsub_hold_expiry()
+            self._unsub_hold_expiry = None
+
+    def _schedule_hold_expiry(self, seconds: float) -> None:
+        token = self._hold_timer_token = object()
+
+        @callback
+        def expire(now) -> None:
+            # An already queued callback from an old sample/unload cannot
+            # expire or duplicate the timer belonging to a later acquisition.
+            if self._hold_timer_token is token:
+                self._expire_connection_hold(now)
+
+        self._unsub_hold_expiry = async_call_later(self.hass, seconds, expire)
+
+    @property
+    def _connection_owner_active(self) -> bool:
+        """A task finishing a permanent refusal is not a recovery supervisor."""
+        life = self.client._lifecycle
+        return (
+            self.client.ha_recovery_pending is True
+            and life is not None
+            and life.state in ("connected", "reconnecting")
+        )
+
+    @property
+    def _connection_hold_safe(self) -> bool:
+        """Observe the existing owner; a UI cache cannot override its refusal."""
+        observation = self.client.session_observation
+        category = self.client.session_monitor.last_error_category
+        return (
+            not self._shutdown_requested
+            and observation.stopped is not True
+            and observation.cleanup_failed is False
+            and self._connection_owner_active
+            and category in _HOLD_CATEGORIES
+            and not (
+                category == "experimental_close_client"
+                and observation.close_client_subcode in (None, 2, 4, 5)
+            )
+        )
+
+    @callback
+    def _session_changed(self) -> None:
+        """Latch the first actual loss, including idle loss between HA polls."""
+        if (
+            self._shutdown_requested
+            or self.data is None
+            or self.last_successful_read_at is None
+        ):
+            return
+        if self.client.data_updated_transport_alive is not True:
+            if self._connection_hold_until is None:
+                # Loss is degradation, never a successful HA update. Retained
+                # values use their separate availability rule; this also lets
+                # HA publish an identical *new* decoded read after expiration.
+                if not self._updating:
+                    # During a refresh HA records/logs its real exception.
+                    # An idle loss must also degrade without inventing a poll.
+                    self.last_update_success = False
+                self._connection_loss_generation = (
+                    self.client.session_observation.generation
+                )
+                self._connection_hold_until = monotonic() + _CONNECTION_HOLD_SECONDS
+                self._schedule_hold_expiry(_CONNECTION_HOLD_SECONDS)
+            # During normal cleanup the final proof can still be pending. Do
+            # not publish old data again; terminal/failed cleanup revokes now.
+            observation = self.client.session_observation
+            category = self.client.session_monitor.last_error_category
+            if (
+                observation.stopped is True
+                or observation.cleanup_failed is True
+                or not self._connection_owner_active
+                or category is not None
+                and category not in _HOLD_CATEGORIES
+                or category == "experimental_close_client"
+                and observation.close_client_subcode in (2, 4, 5)
+            ):
+                self._connection_hold_revoked = True
+                self._cancel_hold_expiry()
+                self.async_update_listeners()
+
+    @callback
+    def _expire_connection_hold(self, _now) -> None:
+        """Notify HA at the monotone deadline even if no refresh completes."""
+        self._unsub_hold_expiry = None
+        if self._shutdown_requested or self._connection_hold_until is None:
+            return
+        remaining = self._connection_hold_until - monotonic()
+        if remaining > 0:
+            self._schedule_hold_expiry(remaining)
+            return
+        self.async_update_listeners()
+
     @property
     def last_snapshot_held(self) -> bool:
         """Availability of old validated values is never connection/freshness."""
         observation = self.client.session_observation
+        if self._connection_hold_until is not None:
+            # Cleanup must be attested for the disconnected accepted owner.
+            # A new opening without a decoded sample never renews the window.
+            cleanup_generation = (
+                observation.generation
+                if not observation.active
+                else self._connection_loss_generation
+            )
+            return (
+                self.data is not None
+                and self.last_successful_read_at is not None
+                and not self._connection_hold_revoked
+                and monotonic() < self._connection_hold_until
+                and self._connection_hold_safe
+                and self._cleanup_proven(cleanup_generation)
+            )
         return (
             self._snapshot_hold
             and not self._shutdown_requested
@@ -115,6 +259,28 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             )
         )
 
+    def _cleanup_proven(self, generation: int | None) -> bool:
+        """Read the original proof; never close, await or substitute an owner.
+
+        A failed refresh can return after the real session has finished closing
+        but just before the lifecycle copies that proof into cleaned_generation.
+        Bridge only this publication race for the exact accepted owner. No
+        detached transport, missing session or pending close attests cleanup.
+        """
+        if type(generation) is not int:
+            return False
+        cleaned = self.client.session_observation.cleaned_generation
+        if type(cleaned) is int and cleaned >= generation:
+            return True
+        life = self.client._lifecycle
+        return (
+            life is not None
+            and type(life._active_generation) is int
+            and life._active_generation == generation
+            and life._session is not None
+            and life._session.cleanup_succeeded is True
+        )
+
     @property
     def snapshot_available(self) -> bool:
         """A shutdown or terminal failure cannot be covered by retained data."""
@@ -122,7 +288,11 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             not self._shutdown_requested
             and self.client.session_observation.stopped is not True
             and self.data is not None
-            and (self.last_update_success or self.last_snapshot_held)
+            and (
+                self.last_snapshot_held
+                if self._connection_hold_until is not None
+                else self.last_update_success or self.last_snapshot_held
+            )
         )
 
     async def _async_update_data(self) -> HobenCoordinatorData:
@@ -149,7 +319,11 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 )
                 pending_owner = True
                 raise wrap_error(UpdateFailed, "Hoben session recovery pending", source)
-            data = await self._async_update_once()
+            self._updating = True
+            try:
+                data = await self._async_update_once()
+            finally:
+                self._updating = False
         except HobenDataUpdatedRecoveryError as error:
             self.data_updated_deferred = True
             self._snapshot_hold = self.data_updated_hold = self.data is not None
@@ -201,6 +375,8 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     def async_update_listeners(self) -> None:
         """Do not report old sensor values as freshly acquired during a hold."""
         if not self.last_snapshot_held:
+            if self._connection_hold_until is not None:
+                self._connection_hold_revoked = True
             super().async_update_listeners()
 
     def _async_refresh_finished(self) -> None:
@@ -234,6 +410,10 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             with error_boundary("identity_storage"):
                 self._persist_identity()
             self.last_successful_read_at = dt_util.utcnow()
+            self._connection_hold_until = None
+            self._connection_loss_generation = None
+            self._connection_hold_revoked = False
+            self._cancel_hold_expiry()
             self._session_event(SessionEvent("read_succeeded"))
             return HobenCoordinatorData(raw=snapshot, state=state)
         except HobenDataUpdatedRecoveryError:

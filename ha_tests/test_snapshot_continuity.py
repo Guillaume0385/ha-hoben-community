@@ -107,7 +107,7 @@ async def start_protocol_hold(hass, entry, peers):
 
 
 @pytest.mark.parametrize("failure", ["transport", "certificate", "authentication"])
-async def test_later_open_failure_cannot_hide_behind_previous_acquisition_hold(
+async def test_b7_transient_open_failure_holds_but_permanent_failure_revokes(
     hass, entry, peers, failure, caplog
 ):
     coordinator = await start_protocol_hold(hass, entry, peers)
@@ -128,14 +128,19 @@ async def test_later_open_failure_cannot_hide_behind_previous_acquisition_hold(
         assert await peers.backoff.entered.get() == 60
     else:
         await pump()
-    assert not coordinator.last_snapshot_held
+    assert coordinator.last_snapshot_held is (failure == "transport")
     refresh = asyncio.create_task(coordinator.async_refresh())
     await pump()
     assert refresh.done()  # The coordinator never waits forever through an outage.
     await refresh
     assert coordinator.data is previous and not coordinator.last_update_success
     assert coordinator.last_successful_read_at == stamp
-    assert all(s.state == "unavailable" for s in states(hass, entry).values())
+    assert all(
+        (s.state != "unavailable")
+        if failure == "transport"
+        else (s.state == "unavailable")
+        for s in states(hass, entry).values()
+    )
     assert peers.factory.call_count == 2
     assert peers.backoff.delays == ([60, 60] if failure == "transport" else [60])
     assert_private_values_absent(caplog.text)
@@ -196,7 +201,7 @@ async def test_initial_failure_cannot_create_a_snapshot_or_an_available_entity(
         assert_stopped(peers)
 
 
-async def test_real_idle_eof_during_hold_marks_entities_unavailable_at_next_poll(
+async def test_b7_idle_eof_during_hold_retains_values_with_original_read_timestamp(
     hass, entry, peers
 ):
     coordinator = await start_protocol_hold(hass, entry, peers)
@@ -207,9 +212,9 @@ async def test_real_idle_eof_during_hold_marks_entities_unavailable_at_next_poll
     wire.queue.put_nowait(TransportEOF("PRIVATE_PAYLOAD"))
     assert await peers.backoff.entered.get() == 60
     await coordinator.async_refresh()
-    assert not coordinator.last_snapshot_held and not coordinator.last_update_success
+    assert coordinator.last_snapshot_held and not coordinator.last_update_success
     assert coordinator.data is previous and coordinator.last_successful_read_at == stamp
-    assert all(s.state == "unavailable" for s in states(hass, entry).values())
+    assert all(s.state != "unavailable" for s in states(hass, entry).values())
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
 

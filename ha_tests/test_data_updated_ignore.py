@@ -120,17 +120,19 @@ async def test_recovery_holds_values_without_fake_updates_then_uses_one_probe(
         assert_stopped(peers)
 
 
-async def test_genuine_transport_loss_ends_value_hold_and_preserves_normal_retry(
+async def test_b7_genuine_loss_starts_bounded_hold_and_preserves_normal_retry(
     hass, entry, peers, monkeypatch
 ):
     wire, coordinator, _, _ = await enter_hold(hass, entry, peers, monkeypatch)
+    previous = sensor(hass, entry)
     peers.wire(DEVICE_GUID, [[RESPONSE]])
     try:
         wire.queue.put_nowait(TransportEOF("synthetic loss"))
         await peers.backoff.entered.get()
         refresh = asyncio.create_task(coordinator.async_refresh())
         await pump()
-        assert sensor(hass, entry).state == "unavailable"
+        assert sensor(hass, entry) is previous
+        assert coordinator.last_snapshot_held  # B7 loss hold, not DataUpdated success.
         await refresh
         assert not coordinator.last_update_success
         peers.backoff.release.put_nowait(None)

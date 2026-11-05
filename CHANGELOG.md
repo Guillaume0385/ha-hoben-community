@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #163 / B7, conservation des valeurs après perte de session
+
+- Conserver les dernières valeurs HA décodées pendant moins de 300 secondes
+  depuis la première perte effective, avec expiration locale sans poll.
+- Préserver horodatage, âge, unknown/None et états de session ; aucune réussite
+  ni fraîcheur fictive, aucun reset par ouverture ou tentative de reconnexion.
+- Refuser la conservation sur arrêt, auth, erreur permanente ou nettoyage non
+  attesté ; tests synthétiques des seuils, revalidation et régressions B6.
+  [Contrat et limites B7](docs/ha-snapshot-hold-b7.md).
+- Aucun changement de protocole, transport, retry, campagne ou workflow ;
+  aucun test réel, automatisation, commande ou écriture poêle. B8 reste séparée.
+
 ## En cours — #126 / HA-F1, premier incident et preuve de cleanup
 
 - Ajouter un diagnostic HA allowlisté et versionné aux observations solo et

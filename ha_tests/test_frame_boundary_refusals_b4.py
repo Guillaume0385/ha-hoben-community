@@ -222,7 +222,7 @@ async def test_open_failures_keep_one_supervisor_and_60s_wait_without_attempt_ca
         assert_stopped(peers)
 
 
-async def test_partial_eof_after_a1_hold_cannot_hide_real_transport_loss(
+async def test_b7_partial_eof_keeps_owner_loss_visible_while_retaining_old_values(
     hass, entry, peers
 ):
     peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x04"]])
@@ -239,11 +239,12 @@ async def test_partial_eof_after_a1_hold_cannot_hide_real_transport_loss(
         second.queue.put_nowait(TransportEOF(PRIVATE_TEXT))
         assert await peers.backoff.entered.get() == 60
         await pump()
-        assert not coordinator.last_snapshot_held
+        assert coordinator.last_snapshot_held
         assert coordinator.client.session_observation.loss_generation == 2
         await coordinator.async_refresh()
-        assert not coordinator.snapshot_available
-        assert sensor(hass, entry).state == "unavailable"
+        assert coordinator.snapshot_available and not coordinator.last_update_success
+        assert sensor(hass, entry).state != "unavailable"
+        assert session_state(hass, entry).state == "reconnecting"
         assert (
             coordinator.data is previous
             and coordinator.last_successful_read_at == stamp
