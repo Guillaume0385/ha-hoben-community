@@ -296,6 +296,51 @@ propriété nouvelle du serveur et n'autorisent aucune campagne réelle.
 
 ## Validation et limites de livraison
 
+### R4 — preuves de sûreté entre les sept scénarios HA
+
+[Consigne HOBEN-126-HA-R4-ALL-INDEPENDENT-015](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6664174856),
+base `experimental` `276549b0c4dd8e6fb8924c72bc3750287d1220db` après #185.
+La poursuite après un KO fonctionnel sûr existait déjà dans #126/030 ; R4
+préserve ce mécanisme et renforce ses preuves, uniquement pour `ha/all`.
+
+L'ordre reste hoben-live, open-errors, refresh-v4, session-reuse,
+session-reconnect, cleanup, availability. Les sept scénarios gardent leurs
+critères propres. R3 dual-session-observation est annulée et hors de cette
+liste ; son historique optionnel ne bloque pas all. R5 ne commence pas ici.
+
+Après les contrôles existants de worker/superviseur/cleanup/budget, le parent
+et le validateur Node inspectent indépendamment les faits F1 présents :
+
+- Erreur de cleanup, premier/terminal cleanup_failed, propriétaire sans étape
+  reaped, pending non nul ou attestation finale de nettoyage absente : arrêt
+  cleanup_failed. Cela inclut une tentative d'ouverture non acceptée :
+  génération acceptée absente ne signifie pas transport/libération prouvés.
+- Annulation F1 : arrêt cancelled. Authentification/autorisation refusée :
+  identity_refused. Erreur interne F1 : worker_failure. Un résumé cleanup=true
+  ne blanchit aucun de ces faits ; les événements restent dans le rapport.
+- Sans F1, le contrat historique validé propriétaire/superviseur reste requis.
+  Aucun champ ni schéma n'est ajouté ; la validation structurelle ne certifie
+  pas la provenance d'un rapport arbitraire.
+
+Après un préfixe sûr, NOT RUN exige une cause de refus du nouveau worker ou un
+arrêt global explicite : previous_failure, not_started, observed ou not_observed
+ne justifient pas de sauter les scénarios encore exécutables. Les refus avant
+collecte, la deadline et l'annulation conservent leurs contrats. Après un arrêt
+de sûreté, le parent n'invoque plus aucun worker et conserve les raisons fermées.
+
+Les résultats FAILURE/INCONCLUSIVE restent visibles même si les scénarios
+suivants réussissent ; le global reste FAILURE. Aucun compteur, lecture,
+cleanup ou disponibilité n'est réparé pour obtenir SUCCESS. Les scénarios
+individuels et protocol/all restent inchangés ; admission, mutex/environnement,
+plafonds par étape, 1800 s globales, réserve de deux secondes et quotas gardent
+leurs valeurs. Une limite ou annulation interdit toujours un nouveau départ.
+
+RED sur base intacte : neuf poursuites dangereuses du vrai parent, dix-huit
+enchaînements falsifiés Python/Node et huit sauts NOT RUN non justifiés ; GREEN
+après correction. Les tests couvrent aussi la poursuite avec F1 propre après
+chacun des sept KO, les résultats/publications et les arrêts historiques. Ce
+sont des fixtures et horloges injectées, pas une nouvelle validation réelle.
+
 Tests déterministes des contrôleurs réellement embarqués, refus/reruns,
 scénarios individuels/all, fragmentation/coalescence/Ping/CloseClient, absence
 de perte, récupération, perte tardive, annulation, limites, processus résistant,

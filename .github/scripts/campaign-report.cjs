@@ -278,7 +278,7 @@ function validateStage(v,c) {
   if(['SUCCESS','INCONCLUSIVE'].includes(v.status))check(v.metrics.useful_ms<=v.elapsed_ms&&(c!=='ha'||v.detail!==null));
   return v;
 }
-function continuationStopReason(v,c) {
+function continuationStopReason(v,c,selection) {
   // Independent of the Python gate: a functional KO does not prove isolation.
   if(c!=='ha')return ['FAILURE','NOT RUN'].includes(v.status)||!v.metrics.cleanup?'previous_failure':null;
   if(!v.started||v.reason!=='observed')return ['observed','not_observed','not_started'].includes(v.reason)?'supervisor_refused':v.reason;
@@ -286,7 +286,20 @@ function continuationStopReason(v,c) {
   const r=v.detail.supervisor;
   if(!r.reaped||!v.metrics.cleanup)return 'cleanup_failed';
   if(r.reason!=='completed')return r.reason==='unavailable'?'supervisor_refused':r.reason;
-  return v.metrics.error==='budget'?'budget':null;
+  if(v.metrics.error==='budget')return 'budget';
+  if(selection==='all') {
+    const d=v.detail.evidence.diagnostic;
+    if(d) {
+      const categories=[d.first,d.terminal].filter(e=>e!==null).map(e=>e[3]);
+      if(d.cleanup!==null||categories.includes('cleanup_failed')||
+        d.owners.some(o=>o.stage!=='reaped'||o.pending!==0||o.close[3]===null))return 'cleanup_failed';
+      if(categories.includes('cancelled'))return 'cancelled';
+      if(categories.some(c=>['authentication','authorization'].includes(c)))return 'identity_refused';
+      if(categories.includes('internal'))return 'worker_failure';
+    }
+    if(['authentication','authorization'].includes(v.metrics.error))return 'identity_refused';
+  }
+  return null;
 }
 function validate(r) {
   object(r,['schema','campaign','selection','provenance','elapsed_ms','stages','collection_result','actions_result']);
@@ -298,7 +311,9 @@ function validate(r) {
   let stopped=false;
   r.stages.forEach((v,i)=>{check(v.scenario===selected[i]);validateStage(v,r.campaign);
     if(stopped)check(!v.started&&v.status==='NOT RUN');
-    stopped=stopped||continuationStopReason(v,r.campaign)!==null;});
+    if(r.campaign==='ha'&&r.selection==='all'&&i>0&&!stopped&&!v.started)
+      check(!['previous_failure','not_started','not_observed','observed'].includes(v.reason));
+    stopped=stopped||continuationStopReason(v,r.campaign,r.selection)!==null;});
   check(r.stages.reduce((n,v)=>n+v.elapsed_ms,0)<=r.elapsed_ms);
   if(r.campaign==='ha')check(r.stages.reduce((n,v)=>n+v.metrics.opens,0)<=15&&r.stages.reduce((n,v)=>n+v.metrics.reads,0)<=42);
   check(['pending','success','failure','cancelled','skipped','unattested'].includes(r.collection_result));
