@@ -170,6 +170,93 @@ def logical_baseline(receipt, evidence):
     return validate_observation(logical)
 
 
+def existing_recovery(e):
+    """R1: positive owner/F1 proof, never a last-success or generation guess.
+
+    Called after shape/chronology validation. The failed attempts remain in the
+    report; only a fresh decoded read of the cleaned replacement may recover
+    them. The existing two-opening budget is unchanged.
+    """
+    if e.get("diagnostic_schema") != 1 or not e["samples"]:
+        return False
+    d = e["diagnostic"]
+    first = d["first"]
+    if (
+        first is None
+        or first[0:2] != ["a", 1]
+        or first[3]
+        not in {"eof", "transport", "tls", "timeout", "close_client", "protocol"}
+        or first[3] == "close_client"
+        and first[6] in {2, 4, 5}
+        or d["terminal"] is not None
+        or d["cleanup"] is not None
+        or len(d["owners"]) != 2
+        or not e["completed"]
+        or e["terminal"] != "none"
+        or not e["window"]["active"]
+    ):
+        return False
+    old, new = d["owners"]
+    if not all(
+        row["accepted"]
+        and row["accepted_generation"] == generation
+        and row["stage"] == "reaped"
+        and row["pending"] == 0
+        and row["close"][3] is not None
+        for row, generation in ((old, 1), (new, 2))
+    ):
+        return False
+    last = e["samples"][-1]
+    w, final = e["window"]["observation"], e["cleanup"]["observation"]
+    if (
+        not last["decoded"]
+        or not last["available"]
+        or last["error"] != "none"
+        or w is None
+        or not e["cleanup"]["completed"]
+        or not final["stopped"]
+        or final["cleanup_failed"]
+        or final["cleaned_generation"] != 2
+        or final["loss_generation"] != w["loss_generation"]
+        or new["last_read"] is None
+        or first[2] > old["close"][0]
+        or old["close"][3] > new["last_read"][1]
+    ):
+        return False
+    o = last["observation"]
+    if not (
+        o["generation"] == o["read_generation"] == 2
+        and o["cleaned_generation"] == 1
+        and not o["stopped"]
+        and not o["cleanup_failed"]
+        and new["last_read"][0] == o["read_sequence"]
+        and w["generation"] == w["read_generation"] == final["generation"] == 2
+        and w["read_sequence"] == final["read_sequence"] == o["read_sequence"]
+        and not w["stopped"]
+        and not w["cleanup_failed"]
+    ):
+        return False
+    # Each failed poll needs a later new-generation acquisition. A retained B7
+    # snapshot or a same-generation read cannot stand in for this transition.
+    return all(
+        s["decoded"]
+        or (
+            s["error"] in {"transport", "timeout", "closed", "protocol"}
+            and s["observation"]["generation"] == 1
+            and not s["observation"]["stopped"]
+            and not s["observation"]["cleanup_failed"]
+            and any(
+                later["decoded"]
+                and later["observation"]["read_generation"] == 2
+                and later["observation"]["cleaned_generation"] == 1
+                and later["ordinal"] > s["ordinal"]
+                for later in e["samples"]
+            )
+        )
+        for s in e["samples"]
+    )
+
+
 def validate_detail(scenario, detail):
     if scenario == "dual-session-observation":
         from scripts.ha_dual_evidence import validate_detail as dual_validate
@@ -359,6 +446,8 @@ def project(scenario, detail):
     )
     if scenario == "session-reconnect":
         m["recovered"] = controlled_recovery(e)
+    if scenario in {"session-reuse", "availability"}:
+        m["recovered"] = existing_recovery(e)
     w = e["window"]["observation"]
     if w is not None:
         m["loss_kind"] = w["loss_kind"] or "none"
@@ -380,4 +469,38 @@ def project(scenario, detail):
         m["error"] = e["terminal"]
     elif e["samples"] and not e["samples"][-1]["decoded"]:
         m["error"] = e["samples"][-1]["error"]
+    if (
+        scenario in {"session-reuse", "availability"}
+        and not m["recovered"]
+        and e.get("diagnostic", {}).get("first") is not None
+        and m["error"] == "none"
+    ):
+        d = e["diagnostic"]
+        first = d["first"]
+        category = first[3]
+        unsafe = (
+            d["terminal"] is not None
+            or d["cleanup"] is not None
+            or category
+            in {
+                "authentication",
+                "authorization",
+                "internal",
+                "cancelled",
+                "cleanup_failed",
+                "exhausted",
+                "closed",
+            }
+            or category == "close_client"
+            and first[6] in {2, 4, 5}
+        )
+        # All planned reads can succeed after a transient opening retry. Keep
+        # that historical nominal result, without claiming F1 recovery. Failed
+        # polls, terminal/safety errors and cleanup errors still fail closed.
+        if unsafe or any(not s["decoded"] for s in e["samples"]):
+            m["error"] = {
+                "eof": "transport",
+                "tls": "transport",
+                "close_client": "closed",
+            }.get(category, category if category in ERRORS else "unexpected")
     return m

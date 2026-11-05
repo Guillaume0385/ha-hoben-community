@@ -180,10 +180,12 @@ async def test_earlier_real_read_error_is_not_erased_by_later_coordinator_succes
     d = detail(scenario, e, int(now[0] * 1000))
     m = project(scenario, d)
     assert m["error"] == "none" and m["available"] and m["cleanup"]
-    # Even with completion separately attested, these samples cannot validate
-    # an ordinary two-refresh scenario. Synthetic timing itself stays non-live.
+    # R1 permits the proven recovery for availability only. The unrelated
+    # refresh-v4 scenario retains its strict two-successful-read contract.
     assert not m["completed"]
-    assert observed_status("ha", scenario, {**m, "completed": True}) == "FAILURE"
+    assert observed_status("ha", scenario, {**m, "completed": True}) == (
+        "SUCCESS" if scenario == "availability" else "FAILURE"
+    )
     assert_private_values_absent(str(d) + caplog.text)
     assert_stopped(peers)
 
