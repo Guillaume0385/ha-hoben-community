@@ -23,6 +23,7 @@ from custom_components.hoben.exceptions import (
 from custom_components.hoben.transport import (
     TransportEOF,
     TransportError,
+    TransportTimeout,
     TransportTlsError,
 )
 from custom_components.hoben.v4_experiment import ExperimentalCloseClientError
@@ -38,7 +39,7 @@ def category(error):
     """Types only: never consult exception text, payloads or chains."""
     for kinds, name in (
         ((TransportEOF,), "eof"),
-        ((TimeoutError, HobenTimeoutError), "timeout"),
+        ((TimeoutError, TransportTimeout, HobenTimeoutError), "timeout"),
         ((TransportTlsError, HobenTlsVerificationError), "tls"),
         ((TransportError, HobenTransportError), "transport"),
         ((ExperimentalCloseClientError,), "close_client"),
@@ -55,14 +56,34 @@ def category(error):
 class PongInjection:
     """Constant-space counters; the supplied clock enforces the original bound."""
 
-    def __init__(self, clock, deadline):
+    def __init__(self, clock, deadline, *, multi=False, start=None):
         self.clock, self.deadline = clock, deadline
+        self.multi, self.start = multi, clock() if start is None else start
+        self.generations, self.sessions = [], []
         self.policy = NoPongAfter120(clock=clock)
         self.attempts = self.recovery_pongs = 0
         self.reopened_at = None
         self.enabled = False
         self.tearing_down = False
         self.diagnostic = dict(interruption=None, cleanup=None)
+
+    def at(self):
+        return max(0, int((self.clock() - self.start) * 1000))
+
+    def cleaned(self, session):
+        if (
+            session.cleanup_succeeded
+            and not session._tx_operations
+            and session._pending_read is None
+            and (
+                session._data_updated.task is None or session._data_updated.task.done()
+            )
+        ):
+            row = self.generations[session.test_generation - 1]
+            if row["cleanup_ms"] is None:
+                row["cleanup_ms"] = self.at()
+            return True
+        return False
 
     def note(self, slot, error, owner, generation, subcode=None):
         if self.diagnostic[slot] is not None:
@@ -82,11 +103,37 @@ class PongInjection:
         )
 
     def interrupted(self, error, owner, generation, subcode=None):
+        if self.multi and self.enabled and not self.tearing_down:
+            row = self.generations[generation - 1]
+            kind = category(error)
+            recoverable = (
+                owner != "opening"
+                and row["opened_ms"] is not None
+                and self.policy.first_loss_after_suppression_at is not None
+                and (
+                    kind in {"eof", "timeout", "transport", "tls"}
+                    or kind == "close_client"
+                    and subcode in {3, 6}
+                )
+            )
+            if recoverable:
+                if row["loss_ms"] is None:
+                    at = (
+                        int(
+                            (self.policy.first_loss_after_suppression_at - self.start)
+                            * 1000
+                        )
+                        if generation == self.policy.first_generation
+                        else self.at()
+                    )
+                    row.update(loss_ms=at, category=kind, subcode=subcode)
+                return
         if (
             self.enabled
             and not self.tearing_down
             and (
-                generation != self.policy.first_generation
+                self.multi
+                or generation != self.policy.first_generation
                 or self.policy.first_loss_after_suppression_at is None
             )
         ):
@@ -102,7 +149,8 @@ class PongInjection:
         HobenClient has no session-injection API. Its constructor is unchanged;
         the isolated worker temporarily binds its lazy lifecycle factory. The
         binding rejects any second/different client and any production HA retry
-        policy. The real lifecycle still enforces its two-opening lifetime cap.
+        policy. R5 alone uses three finite openings; the real lifecycle owns
+        every retry and cleanup, with no change to the distributed HA client.
         """
         global _installed
         need(
@@ -120,6 +168,14 @@ class PongInjection:
 
             async def connect(self):
                 need(probe.enabled and probe.clock() < probe.deadline)
+                if probe.multi:
+                    need(
+                        all(
+                            probe.cleaned(s)
+                            for s in probe.sessions[: self.generation - 1]
+                        )
+                    )
+                    probe.generations[self.generation - 1]["connect_ms"] = probe.at()
                 # A raced retry cannot silently replace an unexercised first
                 # generation while the observer is awaiting a true refresh.
                 if probe.diagnostic["interruption"] is not None:
@@ -156,6 +212,14 @@ class PongInjection:
                     ):
                         probe.recovery_pongs += 1
                         need(probe.recovery_pongs <= 1048576)
+                    if (
+                        probe.multi
+                        and probe.generations[self.generation - 1]["opened_ms"]
+                        is not None
+                    ):
+                        row = probe.generations[self.generation - 1]
+                        row["pongs"] += 1
+                        need(row["pongs"] <= 1048576)
                 else:
                     await self.send(data)
 
@@ -176,18 +240,34 @@ class PongInjection:
 
         class Session(V4Session):
             def __init__(self, *, transport_factory, **options):
-                need(probe.enabled and probe.clock() < probe.deadline)
+                need(probe.enabled)
+                probe.attempts += 1
+                need(probe.attempts <= (3 if probe.multi else 2))
+                self.test_generation = probe.attempts
+                if probe.multi:
+                    probe.generations.append(
+                        dict(
+                            generation=self.test_generation,
+                            connect_ms=None,
+                            opened_ms=None,
+                            loss_ms=None,
+                            category=None,
+                            subcode=None,
+                            cleanup_ms=None,
+                            pongs=0,
+                        )
+                    )
+                need(probe.clock() < probe.deadline)
                 if probe.diagnostic["interruption"] is not None:
                     raise HobenClientClosedError()
-                probe.attempts += 1
-                need(probe.attempts <= 2)
-                self.test_generation = probe.attempts
                 super().__init__(
                     transport_factory=lambda: Transport(
                         transport_factory(), self.test_generation
                     ),
                     **options,
                 )
+                if probe.multi:
+                    probe.sessions.append(self)
 
             async def connect(self):
                 try:
@@ -197,8 +277,25 @@ class PongInjection:
                     raise
                 # Strict acceptance, no await before stamp.
                 probe.policy.accepted(self.test_generation)
-                if self.test_generation != probe.policy.first_generation:
-                    probe.reopened_at = probe.clock()
+                accepted = (
+                    probe.policy.first_opened_at
+                    if self.test_generation == probe.policy.first_generation
+                    else probe.clock()
+                )
+                if probe.multi:
+                    probe.generations[self.test_generation - 1]["opened_ms"] = int(
+                        (accepted - probe.start) * 1000
+                    )
+                    probe.recovery_pongs = 0
+                if self.test_generation > 1:
+                    probe.reopened_at = accepted
+
+            async def close(self):
+                try:
+                    await super().close()
+                finally:
+                    if probe.multi:
+                        probe.cleaned(self)
 
             async def wait_lost(self):
                 try:
@@ -233,6 +330,9 @@ class PongInjection:
                 and set(supplied.keywords) == {"transport_factory"}
             )
             options["session_factory"] = partial(Session, **supplied.keywords)
+            if probe.multi:
+                need(len(options["retry_delays"]) == 1)
+                options["retry_delays"] *= 2
             return original(**options)
 
         self.enabled = _installed = True

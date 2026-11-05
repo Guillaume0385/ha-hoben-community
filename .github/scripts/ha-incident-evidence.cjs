@@ -14,22 +14,22 @@ function extra(e) {
   }
   return [];
 }
-function validate(e,r,dual=false) {
+function validate(e,r,dual=false,maxAttempts=2) {
   if(!extra(e).length)return; // Historical evidence has no F1 attestation.
   const d=e.diagnostic;
   object(d,['end_ms','first','terminal','cleanup','owners','invalid']);
   check(d.invalid===false&&int(d.end_ms,0,r.process_ms));
   if((dual?e.clock:e.window.clock)==='monotonic')check(d.end_ms<=r.elapsed_ms);
-  check(Array.isArray(d.owners)&&d.owners.length<=(dual?3:2));
+  check(Array.isArray(d.owners)&&d.owners.length<=(dual?3:maxAttempts));
   const identifiers=[],acceptedCounts={a:0,b:0};
   for(const o of d.owners) {
     object(o,['role','generation','accepted','accepted_generation','close_client_subcode','close','stage','pending','last_read']);
-    check((dual?['a','b']:['a']).includes(o.role)&&int(o.generation,1,o.role==='b'?1:2));
+    check((dual?['a','b']:['a']).includes(o.role)&&int(o.generation,1,o.role==='b'?1:maxAttempts));
     check(o.generation===1+identifiers.filter(([role])=>role===o.role).length);
     check(!identifiers.some(([role,g])=>role===o.role&&g===o.generation));
     identifiers.push([o.role,o.generation]);
     check(typeof o.accepted==='boolean'&&stages.includes(o.stage));
-    if(o.accepted){acceptedCounts[o.role]++;check(int(o.accepted_generation,1,2)&&o.accepted_generation===acceptedCounts[o.role]);}else check(o.accepted_generation===null);
+    if(o.accepted){acceptedCounts[o.role]++;check(int(o.accepted_generation,1,maxAttempts)&&o.accepted_generation===acceptedCounts[o.role]);}else check(o.accepted_generation===null);
     check(o.close_client_subcode===null||int(o.close_client_subcode,0,255));
     if(o.stage==='construction_failed'){check(!o.accepted&&JSON.stringify(o.close)==='[null,null,null,null]'&&o.pending===null&&o.last_read===null&&o.close_client_subcode===null);continue;}
     check(Array.isArray(o.close)&&o.close.length===4);
@@ -47,7 +47,7 @@ function validate(e,r,dual=false) {
     const v=d[name];if(v===null)continue;
     check(Array.isArray(v)&&v.length===7);
     const [role,g,at,category,phase,source,subcode]=v;
-    check(typeof role==='string'&&(g===null||int(g,1,2)));
+    check(typeof role==='string'&&(g===null||int(g,1,maxAttempts)));
     check(identifiers.some(([rr,gg])=>rr===role&&gg===g)||role==='a'&&g===null&&d.owners.length===0);
     check(int(at,0,d.end_ms)&&categories.includes(category)&&phases.includes(phase)&&sources.includes(source));
     check(category==='close_client'?int(subcode,0,255):subcode===null);

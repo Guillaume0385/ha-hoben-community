@@ -8,11 +8,11 @@ const object = (v, names) => check(v !== null && typeof v === 'object' && !Array
   Object.keys(v).length === names.length && names.every(k => Object.hasOwn(v, k)));
 const int = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
 
-function inspect(o) {
+function inspect(o,maxAttempts=2) {
   object(o, FIELDS);
-  check(int(o.attempts, 0, 2));
+  check(int(o.attempts, 0, maxAttempts));
   for (const k of ['generation', 'read_generation', 'loss_generation', 'cleaned_generation'])
-    check(o[k] === null || int(o[k], 1, 2));
+    check(o[k] === null || int(o[k], 1, maxAttempts));
   check(o.generation === null || o.generation <= o.attempts);
   for (const k of ['read_generation', 'loss_generation', 'cleaned_generation'])
     check(o[k] === null || (o.generation !== null && o[k] <= o.generation));

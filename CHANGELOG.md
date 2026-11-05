@@ -1,5 +1,20 @@
 # Changelog
 
+## En cours — #126 / R5, reprises HA session-reconnect attestées
+
+- Accepter jusqu'à deux reprises du scénario existant, chacune liée au cleanup
+  complet précédent, à une nouvelle ouverture TLS/V4 et à une acquisition V4
+  neuve corrélée. Une génération intermédiaire sans lecture ne suffit pas.
+- Garder l'inhibition des seuls Pong sur la première génération après 120 s,
+  la première reprise avant 240 s, puis exiger 120 s stables après la dernière
+  ouverture, avec Pong restaurés. Preuve v2 bornée par génération, contrôlée
+  indépendamment en Python/Node ; aucun EOF ni cause serveur inventés.
+- Utiliser les trois ouvertures déjà arbitrées pour ce seul banc isolé,
+  six refreshs et 600 s cleanup compris ; réserves de teardown et quotas all
+  conservés. Une reprise observée ne masque jamais un cleanup final échoué.
+  Tests RED/GREEN synthétiques ; plugin distribué, autres scénarios, workflows,
+  gates, protocole et automations inchangés. Aucun test réel exécuté.
+
 ## En cours — #126 / R4, indépendance sûre des sept scénarios HA/all
 
 - Conserver la poursuite après KO fonctionnel isolé et nettoyé, sans modifier

@@ -46,7 +46,9 @@ ERROR_CATEGORIES = {
 }
 
 
-async def take_sample(coordinator, evidence, stamp, start, *, require_fresh=False):
+async def take_sample(
+    coordinator, evidence, stamp, start, *, require_fresh=False, max_attempts=2
+):
     """Project one real refresh; never publish its data or arbitrary exception."""
     previous = coordinator.data
     before = coordinator.client.session_observation
@@ -85,7 +87,7 @@ async def take_sample(coordinator, evidence, stamp, start, *, require_fresh=Fals
                 if decoded
                 else ERROR_CATEGORIES.get((safe or {}).get("error"), "unexpected"),
                 "observation": project_observation(
-                    coordinator.client.session_observation
+                    coordinator.client.session_observation, max_attempts=max_attempts
                 ),
             }
         )
@@ -116,6 +118,7 @@ async def observe(
                 clock=clock,
                 sleep=sleep,
                 absolute_end=absolute_end,
+                reconnect_start=diagnostic.start,
             )
     except (Exception, asyncio.CancelledError) as error:
         session = diagnostic.sessions[-1] if diagnostic.sessions else None
@@ -136,7 +139,14 @@ async def observe(
 
 
 async def _observe(
-    coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
+    coordinator,
+    scenario,
+    *,
+    evidence=None,
+    clock=None,
+    sleep=None,
+    absolute_end=None,
+    reconnect_start=None,
 ):
     if scenario == "dual-session-observation":
         from scripts.ha_dual_observer import observe as dual_observe
@@ -163,6 +173,7 @@ async def _observe(
             clock=clock,
             sleep=sleep,
             absolute_end=absolute_end,
+            start=reconnect_start,
         )
     need(scenario in SCHEDULES)
     need(

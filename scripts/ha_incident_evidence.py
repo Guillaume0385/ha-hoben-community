@@ -49,7 +49,7 @@ def extra_keys(e):
     return set()
 
 
-def validate(e, receipt, *, dual=False):
+def validate(e, receipt, *, dual=False, max_attempts=2):
     if not extra_keys(e):
         return  # Historical reports cannot attest a HA-F1 diagnostic.
     d = e["diagnostic"]
@@ -59,7 +59,7 @@ def validate(e, receipt, *, dual=False):
     if clock == "monotonic":
         need(d["end_ms"] <= receipt["elapsed_ms"])
     rows = d["owners"]
-    need(type(rows) is list and len(rows) <= (3 if dual else 2))
+    need(type(rows) is list and len(rows) <= (3 if dual else max_attempts))
     identifiers, accepted_counts = [], {"a": 0, "b": 0}
     for row in rows:
         keys(
@@ -78,7 +78,7 @@ def validate(e, receipt, *, dual=False):
         )
         role, generation = row["role"], row["generation"]
         need(type(role) is str and role in ({"a", "b"} if dual else {"a"}))
-        need(integer(generation, 1, 1 if role == "b" else 2))
+        need(integer(generation, 1, 1 if role == "b" else max_attempts))
         need(generation == 1 + sum(r == role for r, _ in identifiers))
         need((role, generation) not in identifiers)
         identifiers.append((role, generation))
@@ -136,7 +136,10 @@ def validate(e, receipt, *, dual=False):
             continue
         need(type(event) is list and len(event) == 7)
         role, generation, at, category, phase, source, subcode = event
-        need(type(role) is str and (generation is None or integer(generation, 1, 2)))
+        need(
+            type(role) is str
+            and (generation is None or integer(generation, 1, max_attempts))
+        )
         need(
             (role, generation) in identifiers
             or role == "a"

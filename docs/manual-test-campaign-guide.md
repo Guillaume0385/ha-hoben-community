@@ -63,15 +63,15 @@ universelle. La campagne protocole ne valide pas l’intégration HA.
 | `open-errors` | Un refresh d’ouverture/lecture réussi, ou son erreur catégorielle. Ne provoque aucune erreur d’identifiants. | 90 s |
 | `refresh-v4` | Deux refreshs décodés successifs, tous deux réussis. | 120 s |
 | `session-reuse` | Trois refreshs réussis, réutilisation de génération et nouvelles séquences corrélées. | 180 s |
-| `session-reconnect` | Test HA isolé : inhibition des seuls Pong après 120 s, perte effective, réouverture avant 240 s, lecture corrélée puis 120 s stables avec Pong rétablis ; sinon INCONCLUSIVE. Aucun changement aux Pong du client HA installé. | 600 s ; 2 ouvertures, 6 refreshs maximum |
+| `session-reconnect` | Test HA isolé : inhibition des seuls Pong après 120 s sur la première génération, perte effective et première reprise avant 240 s. Chaque reprise exige cleanup et lecture fraîche corrélée ; 120 s stables après la dernière ouverture avec Pong rétablis. Aucun changement aux Pong du client HA installé. | 600 s ; 3 ouvertures, 6 refreshs maximum |
 | `cleanup` | Un refresh puis fermeture effectivement attestée. | 60 s |
 | `availability` | Deux refreshs réussis et disponibilité constatée du coordinator à la fin de l’observation. | 120 s |
 | `all` | Les sept étapes ci-dessus, indépendantes et séquentielles. | 1800 s ; somme des maxima individuels 1530 s |
 
 Chaque exécution HA garde **1 Gio de mémoire agrégée**, **128 PID/threads**,
-six refreshs maximum et la limite actuelle du vrai client de deux ouvertures.
-L’arbitrage permet trois ouvertures de reconnexion HA ; cette implémentation
-reste plus restrictive avec deux. Le plafond global `all` est de quinze
+six refreshs maximum et deux ouvertures, sauf `session-reconnect` dont le banc
+R5 utilise les trois ouvertures déjà arbitrées. Le client distribué garde son
+API et sa politique propres. Le plafond global `all` est de quinze
 ouvertures et quarante-deux refreshs. **Aucun quota, compteur ou proxy RX HA.**
 Ces maxima ne sont pas des durées minimales ni des preuves de réussite.
 

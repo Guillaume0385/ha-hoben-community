@@ -246,6 +246,7 @@ async def test_cleanup_error_is_not_erased_by_idempotent_worker_close(
         "session-reconnect", detail("session-reconnect", e, int(elapsed * 1000))
     )
     assert m["recovered"] and not m["cleanup"]
+    assert e["recovery"]["read_generation"] == 2
     assert e["cleanup"]["observation"]["cleanup_failed"]
     assert e["recovery"]["diagnostic"]["cleanup"] == {
         "category": "transport",
