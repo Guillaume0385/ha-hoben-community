@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #126 / R2-C, refus du nominal contradictoire F1
+
+- Refuser SUCCESS pour hoben-live quand le premier incident F1 est permanent,
+  même avec 6/6 lectures déclarées et terminal/cleanup nuls. Garder le premier
+  incident et les compteurs ; aucune récupération ni nouvelle fraîcheur inventée.
+- Garder le nominal sain, les tentatives d'ouverture transitoires admissibles
+  et la récupération R2 prouvée ; correctif limité aux projecteurs Python/Node,
+  régressions RED/GREEN et [contrat R2](docs/ha-live-recovery-r2.md).
+  Aucun plugin, protocole, autre scénario, budget, workflow ou test réel modifié.
+
 ## En cours — #126 / R2, récupération prouvée de hoben-live 300 s
 
 - Conserver le SUCCESS nominal et autoriser une récupération distincte seulement
