@@ -299,12 +299,17 @@ def observed_status(campaign, scenario, m):
             )
         return "SUCCESS" if m["reads_ok"] == 1 else "FAILURE"
     if scenario == "hoben-live":
+        nominal = m["continuous"] and m["reads_ok"] == 6 and m["reused"]
+        recovered = (
+            m["recovered"]
+            and m["opens"] == 2
+            and m["reads"] == 6
+            and 1 <= m["reads_ok"] <= 6
+            and m["available"]
+        )
         return (
             "SUCCESS"
-            if m["continuous"]
-            and m["useful_ms"] >= 300000
-            and m["reads_ok"] == 6
-            and m["reused"]
+            if m["useful_ms"] >= 300000 and (nominal or recovered)
             else "FAILURE"
         )
     if scenario in {"session-reuse", "availability"}:

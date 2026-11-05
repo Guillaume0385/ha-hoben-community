@@ -40,7 +40,11 @@ function status(c,s,m) {
     return m.reads_ok===1?'SUCCESS':'FAILURE';
   }
   if(c==='ha'&&s===dual)return m.available&&(m.opens===2&&m.reads===13&&m.reads_ok===13&&m.continuous&&!m.recovered||m.opens===3&&m.reads_ok<=m.reads&&m.reads<=15&&m.recovered&&!m.continuous)?'SUCCESS':'FAILURE';
-  if(s==='hoben-live')return m.continuous&&m.useful_ms>=300000&&m.reads_ok===6&&m.reused?'SUCCESS':'FAILURE';
+  if(s==='hoben-live') {
+    const nominal=m.continuous&&m.reads_ok===6&&m.reused;
+    const recovered=m.recovered&&m.opens===2&&m.reads===6&&m.reads_ok>=1&&m.reads_ok<=6&&m.available;
+    return m.useful_ms>=300000&&(nominal||recovered)?'SUCCESS':'FAILURE';
+  }
   if(['session-reuse','availability'].includes(s)) {
     const expected=s==='session-reuse'?3:2;
     const nominal=m.reads===expected&&m.reads_ok===expected&&(s!=='session-reuse'||m.reused);
@@ -107,6 +111,36 @@ function existingRecovery(e) {
     !s.observation.stopped&&!s.observation.cleanup_failed&&e.samples.some(t=>t.decoded&&t.observation.read_generation===2&&
       t.observation.cleaned_generation===1&&t.ordinal>s.ordinal));
 }
+function liveRecovery(e) {
+  // R2 only; the #112 continuous_300s result and other scenarios are unchanged.
+  if(e.diagnostic_schema!==1||e.samples.length!==6)return false;
+  const d=e.diagnostic,w=e.window,final=e.cleanup.observation,f=d.first;
+  if(!e.completed||!w.active||w.observation===null||w.elapsed_ms<300000||w.elapsed_ms>=330000||
+    !e.cleanup.completed||!final.stopped||final.cleanup_failed||final.cleaned_generation!==2||
+    final.loss_generation!==w.observation.loss_generation||f===null||f[0]!=='a'||f[1]!==1||
+    !['eof','transport','tls','timeout','close_client'].includes(f[3])||
+    !['tls_read','request_correlation','post_open'].includes(f[4])||
+    !['transport_read','transport_write','session','observer'].includes(f[5])||
+    f[3]==='close_client'&&![3,6].includes(f[6])||d.terminal!==null||d.cleanup!==null||
+    d.owners.length!==2||!e.samples[0].decoded||!e.samples.at(-1).decoded)return false;
+  const [old,next]=d.owners;
+  for(const [row,g] of [[old,1],[next,2]]) {
+    const good=e.samples.filter(s=>s.decoded&&s.observation.generation===g);
+    if(!row.accepted||row.accepted_generation!==g||row.stage!=='reaped'||row.pending!==0||
+      row.close[3]===null||!good.length||row.last_read===null||row.last_read[0]!==good.length||
+      good.some((s,i)=>s.observation.read_generation!==g||s.observation.read_sequence!==i+1||
+        g===2&&s.observation.cleaned_generation!==1||s.observation.stopped||s.observation.cleanup_failed))return false;
+  }
+  const last=e.samples.at(-1).observation;
+  if(f[2]<old.last_read[1]||f[2]>old.close[0]||old.close[3]>next.last_read[1]||
+    last.generation!==2||last.cleaned_generation!==1||w.observation.generation!==2||
+    w.observation.read_generation!==2||final.generation!==2||
+    w.observation.read_sequence!==last.read_sequence||final.read_sequence!==last.read_sequence||
+    w.observation.stopped||w.observation.cleanup_failed)return false;
+  return e.samples.every(s=>s.decoded||s.observation.generation===1&&!s.observation.stopped&&
+    !s.observation.cleanup_failed&&e.samples.some(t=>t.decoded&&t.observation.generation===2&&
+      t.observation.cleaned_generation===1&&t.ordinal>s.ordinal));
+}
 function haDetail(s,d) {
   if(s===dual)return require('./ha-dual-evidence.cjs').project(d,blank);
   object(d,['supervisor','evidence']);
@@ -166,9 +200,14 @@ function haDetail(s,d) {
   m.recovered=e.samples.some(v=>v.decoded&&v.observation.loss_generation!==null&&v.observation.read_generation>v.observation.loss_generation&&v.observation.cleaned_generation!==null&&v.observation.cleaned_generation>=v.observation.loss_generation&&!v.observation.cleanup_failed);
   if(s==='session-reconnect')m.recovered=haControlled(e);
   if(['session-reuse','availability'].includes(s))m.recovered=existingRecovery(e);
+  if(s==='hoben-live')m.recovered=liveRecovery(e);
   if(w){m.loss_kind=w.loss_kind||'none';m.close_client_subcode=w.close_client_subcode;}
   m.available=e.window.active&&e.samples.length>0&&(s==='hoben-live'?e.samples.at(-1).decoded:e.samples.at(-1).available);
-  if(s==='hoben-live')m.continuous=logical.criteria.continuous_300s==='SUCCESS';
+  if(s==='hoben-live') {
+    m.continuous=logical.criteria.continuous_300s==='SUCCESS';
+    const d=e.diagnostic;
+    if(d&&(d.terminal!==null||d.cleanup!==null))m.error='unexpected';
+  }
   else if(e.terminal!=='none')m.error=e.terminal;
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;
   if(['session-reuse','availability'].includes(s)&&!m.recovered&&e.diagnostic?.first&&m.error==='none') {
@@ -317,6 +356,10 @@ function summary(r,env) {
       v?.started?(v.metrics.cleanup?'attesté':'non attesté'):'non attesté'].join(' | ')+' |');
   }
   for(const v of r?.stages||[]) {
+    if(v.scenario==='hoben-live'&&v.started)lines.push('',
+      'R2 — hoben-live : continuité '+v.metrics.continuous+' ; récupération prouvée '+v.metrics.recovered+
+      ' ; observation utile '+duration(v.metrics.useful_ms)+' ; lectures fraîches '+v.metrics.reads_ok+' / tentées '+v.metrics.reads+
+      '. Le premier incident et les lectures échouées restent visibles ; aucune valeur B7 créditée.');
     if(!['session-reuse','availability'].includes(v.scenario)||!v.started)continue;
     lines.push('', 'R1 — '+v.scenario+' : réutilisation réellement attestée '+v.metrics.reused+
       ' ; récupération prouvée '+v.metrics.recovered+' ; lectures fraîches '+v.metrics.reads_ok+' / tentées '+v.metrics.reads+

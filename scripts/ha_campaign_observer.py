@@ -151,7 +151,9 @@ async def _observe(
     if scenario == "hoben-live":
         from scripts.ha_session_observer import observe as baseline
 
-        return await baseline(coordinator, evidence=evidence, clock=clock, sleep=sleep)
+        return await baseline(
+            coordinator, evidence=evidence, clock=clock, sleep=sleep, require_fresh=True
+        )
     if scenario == "session-reconnect":
         from scripts.ha_reconnect_observer import observe as reconnect
 
