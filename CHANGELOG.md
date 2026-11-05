@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #126 / R2, récupération prouvée de hoben-live 300 s
+
+- Conserver le SUCCESS nominal et autoriser une récupération distincte seulement
+  avec preuve F1 des deux propriétaires acceptés/nettoyés, nouvelle lecture V4
+  corrélée/décodée et fin active/nettoyée ; jamais de continuité fictive.
+- Maintenir six appels à 0/50/100/150/200/250 s et observation jusqu'à 300 s,
+  sans replay, nouvelle lecture, extension de budget ou crédit du cache B7.
+  Préserver le premier incident et les compteurs réels, refuser auth, framing
+  non prouvé, erreurs terminales/cleanup, omissions et preuves falsifiées.
+- Tests RED/GREEN Python/Node et vrai parcours HA en transport synthétique.
+  Aucun changement de plugin, protocole/B8, autres scénarios, workflows ou gates.
+  [Contrat et limites R2](docs/ha-live-recovery-r2.md) ; aucun test réel DEV.
+
 ## En cours — #126 / R1, récupération prouvée des scénarios HA existants
 
 - Autoriser `session-reuse` et `availability` à réussir après un incident

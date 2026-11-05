@@ -19,7 +19,9 @@ from scripts.ha_live_proof import (
 from scripts.ha_session_evidence import project_observation
 
 
-async def observe(coordinator, *, clock=None, sleep=None, evidence=None):
+async def observe(
+    coordinator, *, clock=None, sleep=None, evidence=None, require_fresh=False
+):
     """Six bounded refreshes over the real HA path; cleanup owns cancellation."""
     if (
         type(coordinator) is not HobenDataUpdateCoordinator
@@ -70,6 +72,7 @@ async def observe(coordinator, *, clock=None, sleep=None, evidence=None):
                     if stamp() - anchor >= USEFUL_MS * 1_000_000:
                         raise TimeoutError
                 previous = coordinator.data
+                before = coordinator.client.session_observation
                 try:
                     await coordinator.async_refresh()
                 finally:
@@ -79,16 +82,34 @@ async def observe(coordinator, *, clock=None, sleep=None, evidence=None):
                     elapsed_ms = (current - anchor) // 1_000_000
                     if elapsed_ms >= USEFUL_MS:
                         raise TimeoutError
+                    after = coordinator.client.session_observation
+                    decoded = (
+                        coordinator.last_update_success
+                        and type(coordinator.data) is HobenCoordinatorData
+                        and coordinator.data is not previous
+                    )
+                    if require_fresh:
+                        # R2 manual campaign only: a copied B7 snapshot or HA
+                        # success flag cannot manufacture a correlated read.
+                        decoded = bool(
+                            decoded
+                            and after.read_generation == after.generation
+                            and after.read_generation is not None
+                            and not after.stopped
+                            and not after.cleanup_failed
+                            and (
+                                after.read_generation != before.read_generation
+                                or (after.read_sequence or 0)
+                                > (before.read_sequence or 0)
+                            )
+                            and coordinator.last_successful_read_at is not None
+                        )
                     evidence["samples"].append(
                         {
                             "ordinal": ordinal,
                             "at_ms": elapsed_ms,
-                            "decoded": coordinator.last_update_success
-                            and type(coordinator.data) is HobenCoordinatorData
-                            and coordinator.data is not previous,
-                            "observation": project_observation(
-                                coordinator.client.session_observation
-                            ),
+                            "decoded": decoded,
+                            "observation": project_observation(after),
                         }
                     )
             # Keep the actual persistent reader/lifecycle alive for the whole

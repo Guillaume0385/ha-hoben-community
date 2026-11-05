@@ -257,6 +257,104 @@ def existing_recovery(e):
     )
 
 
+def live_recovery(e):
+    """R2: six calls over the original 300s, with one fully attested transition.
+
+    This does not change the historical #112 continuity proof. F1 timestamps
+    share their own origin; counters link them to campaign sample witnesses.
+    A discriminator/framing rejection is deliberately outside this alternative.
+    """
+    if e.get("diagnostic_schema") != 1 or len(e["samples"]) != 6:
+        return False
+    d, w, final = e["diagnostic"], e["window"], e["cleanup"]["observation"]
+    f = d["first"]
+    if (
+        not e["completed"]
+        or not w["active"]
+        or w["observation"] is None
+        or not 300000 <= w["elapsed_ms"] < 330000
+        or not e["cleanup"]["completed"]
+        or not final["stopped"]
+        or final["cleanup_failed"]
+        or final["cleaned_generation"] != 2
+        or final["loss_generation"] != w["observation"]["loss_generation"]
+        or f is None
+        or f[:2] != ["a", 1]
+        or f[3] not in {"eof", "transport", "tls", "timeout", "close_client"}
+        or f[4] not in {"tls_read", "request_correlation", "post_open"}
+        or f[5] not in {"transport_read", "transport_write", "session", "observer"}
+        or f[3] == "close_client"
+        and f[6] not in {3, 6}
+        or d["terminal"] is not None
+        or d["cleanup"] is not None
+        or len(d["owners"]) != 2
+        or not e["samples"][0]["decoded"]
+        or not e["samples"][-1]["decoded"]
+    ):
+        return False
+    old, new = d["owners"]
+    for row, generation in ((old, 1), (new, 2)):
+        good = [
+            s
+            for s in e["samples"]
+            if s["decoded"] and s["observation"]["generation"] == generation
+        ]
+        if (
+            not row["accepted"]
+            or row["accepted_generation"] != generation
+            or row["stage"] != "reaped"
+            or row["pending"] != 0
+            or row["close"][3] is None
+            or not good
+            or row["last_read"] is None
+            or row["last_read"][0] != len(good)
+            or any(
+                s["observation"]["read_generation"] != generation
+                or s["observation"]["read_sequence"] != index
+                or generation == 2
+                and s["observation"]["cleaned_generation"] != 1
+                or s["observation"]["stopped"]
+                or s["observation"]["cleanup_failed"]
+                for index, s in enumerate(good, 1)
+            )
+        ):
+            return False
+    last = e["samples"][-1]["observation"]
+    if (
+        f[2] < old["last_read"][1]
+        or f[2] > old["close"][0]
+        or old["close"][3] > new["last_read"][1]
+        or last["generation"] != 2
+        or last["cleaned_generation"] != 1
+        or w["observation"]["generation"] != 2
+        or w["observation"]["read_generation"] != 2
+        or final["generation"] != 2
+        or w["observation"]["read_sequence"] != last["read_sequence"]
+        or final["read_sequence"] != last["read_sequence"]
+        or w["observation"]["stopped"]
+        or w["observation"]["cleanup_failed"]
+    ):
+        return False
+    # Every failed poll remains visible and must be followed by a decoded read
+    # on the cleaned replacement, never by a held value or an extra replay.
+    return all(
+        s["decoded"]
+        or (
+            s["observation"]["generation"] == 1
+            and not s["observation"]["stopped"]
+            and not s["observation"]["cleanup_failed"]
+            and any(
+                t["decoded"]
+                and t["observation"]["generation"] == 2
+                and t["observation"]["cleaned_generation"] == 1
+                and t["ordinal"] > s["ordinal"]
+                for t in e["samples"]
+            )
+        )
+        for s in e["samples"]
+    )
+
+
 def validate_detail(scenario, detail):
     if scenario == "dual-session-observation":
         from scripts.ha_dual_evidence import validate_detail as dual_validate
@@ -448,6 +546,8 @@ def project(scenario, detail):
         m["recovered"] = controlled_recovery(e)
     if scenario in {"session-reuse", "availability"}:
         m["recovered"] = existing_recovery(e)
+    if scenario == "hoben-live":
+        m["recovered"] = live_recovery(e)
     w = e["window"]["observation"]
     if w is not None:
         m["loss_kind"] = w["loss_kind"] or "none"
@@ -465,6 +565,9 @@ def project(scenario, detail):
         m["continuous"] = (
             logical_baseline(r, e)["criteria"]["continuous_300s"] == "SUCCESS"
         )
+        d = e.get("diagnostic")
+        if d is not None and (d["terminal"] is not None or d["cleanup"] is not None):
+            m["error"] = "unexpected"
     elif e["terminal"] != "none":
         m["error"] = e["terminal"]
     elif e["samples"] and not e["samples"][-1]["decoded"]:
