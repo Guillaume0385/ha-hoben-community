@@ -475,12 +475,32 @@ def project(scenario, detail):
         and e.get("diagnostic", {}).get("first") is not None
         and m["error"] == "none"
     ):
-        # Preserve the incident if its recovery is unproven, even if a later
-        # refresh or retained value otherwise looks available.
-        category = e["diagnostic"]["first"][3]
-        m["error"] = {
-            "eof": "transport",
-            "tls": "transport",
-            "close_client": "closed",
-        }.get(category, category if category in ERRORS else "unexpected")
+        d = e["diagnostic"]
+        first = d["first"]
+        category = first[3]
+        unsafe = (
+            d["terminal"] is not None
+            or d["cleanup"] is not None
+            or category
+            in {
+                "authentication",
+                "authorization",
+                "internal",
+                "cancelled",
+                "cleanup_failed",
+                "exhausted",
+                "closed",
+            }
+            or category == "close_client"
+            and first[6] in {2, 4, 5}
+        )
+        # All planned reads can succeed after a transient opening retry. Keep
+        # that historical nominal result, without claiming F1 recovery. Failed
+        # polls, terminal/safety errors and cleanup errors still fail closed.
+        if unsafe or any(not s["decoded"] for s in e["samples"]):
+            m["error"] = {
+                "eof": "transport",
+                "tls": "transport",
+                "close_client": "closed",
+            }.get(category, category if category in ERRORS else "unexpected")
     return m

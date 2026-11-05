@@ -491,3 +491,104 @@ def test_two_opens_do_not_replace_session_reuse_evidence():
     assert not r["stages"][0]["metrics"]["reused"]
     assert r["actions_result"] == "FAILURE"
     assert validate_report(r) and node_accepts(r)
+
+
+def nominal_initial_retry_detail(scenario):
+    """Two attempts, only one accepted session; all scheduled reads succeed."""
+    d = ha_detail(scenario)
+    e = d["evidence"]
+    for s in e["samples"]:
+        s["observation"]["attempts"] = 2
+    last = e["samples"][-1]
+    e["window"]["observation"] = copy.deepcopy(last["observation"])
+    e["cleanup"]["observation"] = {
+        **last["observation"],
+        "stopped": True,
+        "cleaned_generation": 1,
+    }
+    end = e["window"]["elapsed_ms"] + 1
+    e.update(
+        diagnostic_schema=1,
+        diagnostic=dict(
+            end_ms=end,
+            first=["a", 1, 0, "tls", "opening", "transport_connect", None],
+            terminal=None,
+            cleanup=None,
+            invalid=False,
+            owners=[
+                dict(
+                    role="a",
+                    generation=1,
+                    accepted=False,
+                    accepted_generation=None,
+                    close_client_subcode=None,
+                    close=[0, 0, 0, 0],
+                    stage="reaped",
+                    pending=0,
+                    last_read=None,
+                ),
+                dict(
+                    role="a",
+                    generation=2,
+                    accepted=True,
+                    accepted_generation=1,
+                    close_client_subcode=None,
+                    close=[end - 1, end - 1, end, end],
+                    stage="reaped",
+                    pending=0,
+                    last_read=[len(e["samples"]), last["at_ms"], end - last["at_ms"]],
+                ),
+            ],
+        ),
+    )
+    return d
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("engine", ["python", "node"])
+def test_nominal_f1_transient_opening_failure_is_not_an_unproved_recovery(
+    scenario, engine
+):
+    r = report(scenario, nominal_initial_retry_detail(scenario))
+    r["stages"][0]["status"] = r["actions_result"] = "SUCCESS"
+    r["stages"][0]["metrics"]["error"] = "none"  # Historical nominal projection.
+    assert not r["stages"][0]["metrics"]["recovered"]
+    if engine == "python":
+        assert validate_report(r) == r
+    else:
+        assert node_accepts(r)
+    forged = copy.deepcopy(r)
+    forged["stages"][0]["metrics"]["recovered"] = True
+    with pytest.raises(ValueError):
+        validate_report(forged)
+    assert not node_accepts(forged)
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "terminal",
+        "cleanup",
+        "authentication",
+        "authorization",
+        "internal",
+        "cancelled",
+        "exhausted",
+        "closed",
+    ],
+)
+def test_terminal_or_unsafe_f1_events_still_refuse_nominal_success(scenario, unsafe):
+    d = nominal_initial_retry_detail(scenario)
+    f = d["evidence"]["diagnostic"]
+    if unsafe == "terminal":
+        f["terminal"] = ["a", 2, 1000, "internal", "unknown", "session", None]
+    elif unsafe == "cleanup":
+        f["cleanup"] = ["a", 2, 1000, "cleanup_failed", "cleanup", "session", None]
+    else:
+        f["first"][3] = unsafe
+    r = report(scenario, d)
+    assert (
+        r["actions_result"] == "FAILURE" and not r["stages"][0]["metrics"]["recovered"]
+    )
+    assert validate_report(r) and node_accepts(r)

@@ -172,8 +172,12 @@ function haDetail(s,d) {
   else if(e.terminal!=='none')m.error=e.terminal;
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;
   if(['session-reuse','availability'].includes(s)&&!m.recovered&&e.diagnostic?.first&&m.error==='none') {
-    const category=e.diagnostic.first[3];
-    m.error=({eof:'transport',tls:'transport',close_client:'closed'})[category]||(errors.includes(category)?category:'unexpected');
+    const d=e.diagnostic,f=d.first,category=f[3];
+    const unsafe=d.terminal!==null||d.cleanup!==null||
+      ['authentication','authorization','internal','cancelled','cleanup_failed','exhausted','closed'].includes(category)||
+      category==='close_client'&&[2,4,5].includes(f[6]);
+    if(unsafe||e.samples.some(v=>!v.decoded))
+      m.error=({eof:'transport',tls:'transport',close_client:'closed'})[category]||(errors.includes(category)?category:'unexpected');
   }
   return m;
 }

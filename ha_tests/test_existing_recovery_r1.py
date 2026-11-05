@@ -350,3 +350,47 @@ async def test_unsupported_protocol_opening_is_permanent_not_a_recovery(
     await coordinator.async_shutdown()
     await client.async_close()
     assert_stopped(peers)
+
+
+@pytest.mark.parametrize("scenario,count", [("session-reuse", 3), ("availability", 2)])
+async def test_real_initial_tls_retry_preserves_all_successful_nominal_reads(
+    hass, entry, peers, scenario, count, freezer
+):
+    from custom_components.hoben.transport import TransportTlsError
+
+    first = peers.wire(DEVICE_GUID, [])
+    first.connect.side_effect = TransportTlsError("PRIVATE_PAYLOAD")
+    fresh = peers.wire(DEVICE_GUID, [[RESPONSE]] * count)
+    client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
+    coordinator = HobenDataUpdateCoordinator(hass, entry, client)
+    now = [0.0]
+
+    async def sleep(seconds):
+        now[0] += seconds
+        freezer.tick(seconds)
+        await pump()
+
+    task = asyncio.create_task(
+        observe(coordinator, scenario, clock=lambda: now[0], sleep=sleep)
+    )
+    try:
+        delay = await peers.backoff.entered.get()
+        now[0] += delay
+        freezer.tick(delay)
+        peers.backoff.release.put_nowait(None)
+        e = await task
+        m = project(scenario, detail(scenario, e, int(now[0] * 1000) + 1))
+        assert all(s["decoded"] for s in e["samples"])
+        assert m["reads"] == m["reads_ok"] == count and m["opens"] == 2
+        assert not m["recovered"] and m["error"] == "none"
+        assert observed_status("ha", scenario, {**m, "completed": True}) == "SUCCESS"
+        assert e["diagnostic"]["first"] is not None
+        assert [o["accepted"] for o in e["diagnostic"]["owners"]] == [False, True]
+        assert first.write.await_count == 0 and fresh.write.await_count == count + 1
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await coordinator.async_shutdown()
+        await client.async_close()
+    assert_stopped(peers)

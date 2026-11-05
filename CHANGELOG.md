@@ -11,6 +11,9 @@
   Contrats Python/Node indépendants et tests RED/GREEN synthétiques.
 - Revue : conserver le prédicat nominal historique sans restriction nouvelle
   `opens==1` ; un succès nominal sans F1 ne prétend pas prouver une récupération.
+  Une tentative d'ouverture transitoire échouée reste visible dans F1 sans
+  invalider toutes les lectures ensuite réussies ; `recovered=false` et refus
+  des erreurs terminales, de sécurité et de cleanup inchangés.
 - Aucun nouveau scénario, appel supplémentaire, changement du plugin, des
   délais B8, budgets, gates, workflows, H1/H2, dual ou `session-reconnect`.
   Aucun test réel ni fusion DEV. [Contrat et analyse historique R1](docs/ha-existing-recovery-r1.md).

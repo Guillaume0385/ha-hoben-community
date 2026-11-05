@@ -91,6 +91,19 @@ champ `recovered=true` ajouté arbitrairement est refusé même sur un SUCCESS
 nominal. Le chemin alternatif récupéré et toute sa validation F1 restent
 inchangés par cette correction.
 
+La même régression est couverte avec le vrai collecteur F1 : une première
+tentative TLS non acceptée échoue, puis la seconde ouvre la génération acceptée
+1 et toutes les acquisitions prévues sont décodées. Le premier incident reste
+visible dans F1 ; il n'est pas transformé mécaniquement en erreur globale si
+aucun poll n'a échoué et qu'aucune erreur terminale, de cleanup ou de sécurité
+n'est présente. Ce résultat nominal garde `recovered=false` : il ne prétend pas
+attester la récupération d'une génération précédemment acceptée. Deux tests HA
+sont RED avant cette correction puis GREEN ; les fixtures Python/Node vérifient
+la même distinction. Auth, erreur interne, annulation, état fermé/épuisé,
+incident terminal ou cleanup défaillant restent FAILURE. Dès qu'un poll échoue,
+le chemin nominal est insuffisant et seule la preuve F1 stricte peut attester
+une récupération.
+
 ## Bornes inchangées
 
 | Scénario | Échéances des appels | Plafond processus | Collecte avant réserve |
