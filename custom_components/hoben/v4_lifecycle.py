@@ -361,6 +361,10 @@ class V4Lifecycle:
             )
             if lost in done:
                 await lost
+                # wait_lost normally raises its typed terminal error. A broken
+                # observer returning normally must also abort immediately;
+                # neither the remaining delay nor a read is then authorized.
+                raise HobenInternalError()
             await sleeper
             if self._clock() < deadline:
                 # A broken clock/sleep cannot authorize early TX.

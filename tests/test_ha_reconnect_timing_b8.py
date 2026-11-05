@@ -4,7 +4,12 @@ import asyncio
 
 import pytest
 
-from custom_components.hoben.exceptions import HobenClosedError, HobenTimeoutError
+from custom_components.hoben.exceptions import (
+    HobenClosedError,
+    HobenError,
+    HobenInternalError,
+    HobenTimeoutError,
+)
 from custom_components.hoben.transport import (
     TransportEOF,
     TransportError,
@@ -12,7 +17,7 @@ from custom_components.hoben.transport import (
     TransportTlsError,
 )
 from custom_components.hoben.v4_lifecycle import V4Lifecycle
-from custom_components.hoben.v4_session import V4SessionMode
+from custom_components.hoben.v4_session import V4Session, V4SessionMode
 from tests.test_ha_reconnect_policy import Clock
 from tests.test_v4_lifecycle import Factory, assert_clean
 
@@ -345,6 +350,54 @@ def test_failed_new_openings_revert_to_60_without_replenishing_owner():
             assert len(factory.sessions) == 4 and life.snapshot.attempts == 4
             assert life.ha_acquisition_generation is None
             assert all(len(w.writes) <= 1 for w in factory.transports)
+        finally:
+            await life.close()
+            assert_clean(factory)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("elapsed", [3, 9.999])
+def test_returning_loss_observer_aborts_gate_without_waiting_or_acquisition(
+    monkeypatch, elapsed
+):
+    """A violated wait_lost contract must fail closed, not wait out the gate."""
+
+    async def scenario():
+        clock, factory = Clock(), Factory()
+        real_wait_lost = V4Session.wait_lost
+
+        async def contradictory_observer(session):
+            try:
+                await real_wait_lost(session)
+            except HobenError:
+                if len(factory.sessions) > 1 and session is factory.sessions[1]:
+                    return  # Synthetic contract violation: loss without its error.
+                raise
+
+        monkeypatch.setattr(V4Session, "wait_lost", contradictory_observer)
+        life = owner(factory, clock)
+        try:
+            await life.connect()
+            first = factory.transports[0]
+            await first.rx_started.wait()
+            first.rx.set_exception(TransportEOF())
+            assert await clock.waiting.get() == 10
+            await clock.advance(10)
+            assert await clock.waiting.get() == 10
+            post_open_timer = clock.timer[1]
+            await clock.advance(elapsed)
+            factory.transports[1].rx.set_exception(TransportEOF())
+            for _ in range(40):
+                await asyncio.sleep(0)
+            assert life._task.done(), "loss completion must not await the sleeper"
+            assert post_open_timer.cancelled()
+            with pytest.raises(HobenInternalError):
+                await life.wait_stopped()
+            assert life.session_observation.cleaned_generation == 2
+            assert life.ha_acquisition_generation is None
+            assert len(factory.sessions) == 2 and clock.waiting.empty()
+            assert all(len(w.writes) == 1 for w in factory.transports)
         finally:
             await life.close()
             assert_clean(factory)

@@ -521,3 +521,63 @@ async def test_pong_timeout_is_not_proof_of_an_expired_acquisition_deadline(
     assert len(tls_peers.transports) == 1
     assert coordinator.client.session_observation.cleaned_generation == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    ("fault", "delay"),
+    [
+        (TransportEOF(), 10),
+        (b"\x05\x06", 10),
+        (TransportError(), 60),
+        (b"\x05\x05", None),
+    ],
+)
+async def test_actual_loss_at_three_seconds_interrupts_post_open_gate_immediately(
+    hass, entry, peers, timeline, fault, delay
+):
+    first = peers.wire(DEVICE_GUID, [[RESPONSE]])
+    rejected = peers.wire(DEVICE_GUID, [])
+    fresh = peers.wire(DEVICE_GUID, [[RESPONSE]])
+    coordinator = await load(hass, entry)
+    coordinator._async_unsub_refresh()
+    stamp = coordinator.last_successful_read_at
+    life = peers.lifecycles[0]
+    first.queue.put_nowait(TransportEOF())
+    assert await timeline.waiting.get() == 10
+    await timeline.advance(10)
+    assert await timeline.waiting.get() == 10
+    post_open_timer = timeline.timer[1]
+    await timeline.advance(3)
+    rejected.queue.put_nowait(fault)
+    await pump()
+    # The real wait_lost raises its typed error; no remaining seven-second wait.
+    assert post_open_timer.cancelled()
+    assert coordinator.client.session_observation.cleaned_generation == 2
+    assert life.ha_acquisition_generation is None
+    assert coordinator.client.session_observation.read_generation is None
+    assert coordinator.last_successful_read_at == stamp
+    assert not coordinator.last_update_success
+    assert [c.args[0][0] for c in rejected.write.await_args_list] == [3]
+    assert peers.factory.call_count == 2
+    if delay is None:
+        assert life._task.done() and timeline.waiting.empty()
+        assert not coordinator.snapshot_available
+        await timeline.advance(100)
+        assert peers.factory.call_count == 2
+    else:
+        assert await timeline.waiting.get() == delay
+        assert timeline.timer[0] == 13 + delay
+        await timeline.advance(delay - 0.001)
+        assert peers.factory.call_count == 2
+        await timeline.advance(0.0011)
+        if delay == 10:
+            assert await timeline.waiting.get() == 10
+            assert fresh.write.await_count == 1
+            await timeline.advance(10)
+            assert fresh.write.await_count == 2 and coordinator.last_update_success
+        else:
+            assert fresh.write.await_count == 1
+            assert not coordinator.last_update_success
+        assert peers.factory.call_count == 3 and len(peers.lifecycles) == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert_stopped(peers)

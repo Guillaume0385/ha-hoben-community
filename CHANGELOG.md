@@ -8,6 +8,9 @@
   le timeout, nettoyage compris ; ambigu/générique conserve 60 s.
 - Une acquisition événementielle via le coordinator existant, sans boucle de polling ajoutée,
   replay ni second superviseur ; conservation B7 limitée à la première perte.
+- Revue MANAGER : rendre terminale la branche perte de la gate post-open,
+  y compris si son observateur viole son contrat en retournant normalement ;
+  annuler/réaper l'attente immédiatement, sans acquisition ni retry interne.
 - Refus auth/cleanup/arrêt, annulations et pertes successives testés sur vrais
   propriétaires et adaptateur TLS avec flux/horloges synthétiques.
   [Contrat, preuves et limites B8](docs/ha-reconnect-timing-b8.md).
