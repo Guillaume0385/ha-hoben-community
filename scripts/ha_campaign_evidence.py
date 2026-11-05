@@ -566,7 +566,23 @@ def project(scenario, detail):
             logical_baseline(r, e)["criteria"]["continuous_300s"] == "SUCCESS"
         )
         d = e.get("diagnostic")
-        if d is not None and (d["terminal"] is not None or d["cleanup"] is not None):
+        # A permanent first incident contradicts nominal success even when no
+        # separate terminal/cleanup event was recorded. Preserve the F1 event.
+        if d is not None and (
+            d["terminal"] is not None
+            or d["cleanup"] is not None
+            or d["first"] is not None
+            and d["first"][3]
+            in {
+                "authentication",
+                "authorization",
+                "internal",
+                "cancelled",
+                "cleanup_failed",
+                "closed",
+                "exhausted",
+            }
+        ):
             m["error"] = "unexpected"
     elif e["terminal"] != "none":
         m["error"] = e["terminal"]

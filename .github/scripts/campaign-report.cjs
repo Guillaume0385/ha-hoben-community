@@ -206,7 +206,9 @@ function haDetail(s,d) {
   if(s==='hoben-live') {
     m.continuous=logical.criteria.continuous_300s==='SUCCESS';
     const d=e.diagnostic;
-    if(d&&(d.terminal!==null||d.cleanup!==null))m.error='unexpected';
+    // Permanent first F1 evidence cannot be erased by nominal read flags.
+    if(d&&(d.terminal!==null||d.cleanup!==null||d.first!==null&&
+      ['authentication','authorization','internal','cancelled','cleanup_failed','closed','exhausted'].includes(d.first[3])))m.error='unexpected';
   }
   else if(e.terminal!=='none')m.error=e.terminal;
   else if(e.samples.length&&!e.samples.at(-1).decoded)m.error=e.samples.at(-1).error;

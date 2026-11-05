@@ -61,6 +61,34 @@ n'est inventé. Les anciens seuls compteurs de génération ne suffisent plus à
 attester `recovered` pour cette campagne ; sans F1 complet, l'alternative est
 fausse. Le chemin nominal historique reste lisible sans F1.
 
+### Correction R2-C — premier incident permanent dans le nominal
+
+La [consigne corrective HOBEN-126-HA-R2C-FIRST-PERMANENT-F1-014](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6663323850)
+part du SHA `c53a8be97a7e8281391209cf672649158e8047b7` après #184.
+Les sept fixtures signalées dans le [bilan post-fusion](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6658950993)
+étaient locales, non publiées ; elles sont reconstruites dans les tests R2-C.
+
+Un `diagnostic.first` de catégorie `authentication`, `authorization`, `internal`,
+`cancelled`, `cleanup_failed`, `closed` ou `exhausted` interdit SUCCESS même si
+les six lectures sont déclarées valides, `continuous=true` et les événements
+`terminal`/`cleanup` sont nuls. Les projecteurs indépendants Python/Node donnent
+alors `error=unexpected` pour cette contradiction ; le premier incident F1 et
+ses champs restent intacts, les compteurs ne changent pas et `recovered=false`.
+Les quatorze cas (sept catégories, deux validateurs) sont RED avant le correctif
+puis GREEN ; un SUCCESS falsifié ou un effacement du seul champ error est refusé.
+
+La présence d'un premier incident n'est pas à elle seule un échec permanent :
+une tentative TLS/transport/timeout d'ouverture non acceptée, nettoyée puis
+suivie des six acquisitions valides conserve le nominal historique sans
+prétendre à une récupération de génération acceptée. `first=null` reste nominal
+sain. La récupération R2 entièrement prouvée et ses refus ne changent pas.
+Les omissions partielles de F1, types/champs non autorisés, événement tronqué,
+tap invalide et pending contradictoire sont rejetés par les contrats existants.
+Aucun schéma ou champ nouveau ; les rapports historiques sans F1 gardent leur
+contrat, et la provenance des données ne peut pas être fabriquée par validation
+structurelle. Aucun code d'observateur, plugin, scénario voisin, budget, gate,
+workflow ou politique de reconnexion ne change dans R2-C.
+
 ## Observation et bornes conservées
 
 L'adaptateur de campagne active une vérification de fraîcheur dans l'observateur
