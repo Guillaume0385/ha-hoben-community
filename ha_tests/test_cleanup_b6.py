@@ -65,6 +65,9 @@ def tls_peers(monkeypatch):
         await asyncio.sleep(seconds)
 
     def lifecycle(**options):
+        # B6 isolates teardown under the original HA timing policy. B8 also
+        # exercises the real TLS teardown under the accelerated entry policy.
+        options["ha_fast_reconnect"] = False
         result = V4Lifecycle(**(options | {"sleep": backoff}))
         owners.append(result)
         return result

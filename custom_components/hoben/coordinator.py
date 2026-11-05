@@ -85,6 +85,8 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         self._hold_loss_generation = None
         self._notify_held_failure = False
         self._updating = False
+        self._recovery_read_handle = self._recovery_read_task = None
+        self._recovery_read_generation = None
         # A UI deadline only: neither a read nor permission to reopen transport.
         # It survives accepted openings and failed polls until a decoded read.
         self._connection_hold_until: float | None = None
@@ -113,6 +115,13 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def async_shutdown(self) -> None:
         """Cancel scheduling and the entry's shutdown hook; unload closes the client."""
         await super().async_shutdown()
+        if self._recovery_read_handle is not None:
+            self._recovery_read_handle.cancel()
+            self._recovery_read_handle = None
+        if self._recovery_read_task is not None:
+            self._recovery_read_task.cancel()
+            await asyncio.gather(self._recovery_read_task, return_exceptions=True)
+            self._recovery_read_task = None
         self._cancel_hold_expiry()
         if self._unsub_session_hold is not None:
             self._unsub_session_hold()
@@ -177,6 +186,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     @callback
     def _session_changed(self) -> None:
         """Latch the first actual loss, including idle loss between HA polls."""
+        self._schedule_recovery_read()
         if (
             self._shutdown_requested
             or self.data is None
@@ -213,6 +223,37 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 self._connection_hold_revoked = True
                 self._cancel_hold_expiry()
                 self.async_update_listeners()
+
+    @callback
+    def _schedule_recovery_read(self) -> None:
+        """One event-driven acquisition, coalesced with a poll already in flight."""
+        generation = self.client.ha_acquisition_generation
+        if self._shutdown_requested or generation is None:
+            if self._recovery_read_handle is not None:
+                self._recovery_read_handle.cancel()
+                self._recovery_read_handle = None
+            return
+        if generation == self._recovery_read_generation:
+            return
+        self._recovery_read_generation = generation
+
+        async def refresh():
+            if (
+                not self._shutdown_requested
+                and not self._updating
+                and self.client.ha_acquisition_generation == generation
+            ):
+                await self.async_request_refresh()
+
+        @callback
+        def begin():
+            self._recovery_read_handle = None
+            if not self._shutdown_requested:
+                self._recovery_read_task = self.hass.async_create_background_task(
+                    refresh(), "hoben-recovery-acquisition"
+                )
+
+        self._recovery_read_handle = self.hass.loop.call_soon(begin)
 
     @callback
     def _expire_connection_hold(self, _now) -> None:

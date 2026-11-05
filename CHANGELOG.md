@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #163 / B8, délais de reprise HA prouvés
+
+- Après CloseClient complet reconnu non auth ou EOF prouvé : nettoyage attesté,
+  10 s avant TLS neuve, puis 10 s après ouverture acceptée avant acquisition.
+- Après timeout de lecture/acquisition prouvé : échéance monotone de 30 s depuis
+  le timeout, nettoyage compris ; ambigu/générique conserve 60 s.
+- Une acquisition événementielle via le coordinator existant, sans boucle de polling ajoutée,
+  replay ni second superviseur ; conservation B7 limitée à la première perte.
+- Refus auth/cleanup/arrêt, annulations et pertes successives testés sur vrais
+  propriétaires et adaptateur TLS avec flux/horloges synthétiques.
+  [Contrat, preuves et limites B8](docs/ha-reconnect-timing-b8.md).
+- Aucun changement de codec/framing, transport, campagne #126, workflow live
+  ou automatisation ; aucun test réel, commande ni écriture poêle.
+
 ## En cours — #163 / B7, conservation des valeurs après perte de session
 
 - Conserver les dernières valeurs HA décodées pendant moins de 300 secondes

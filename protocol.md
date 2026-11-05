@@ -37,6 +37,13 @@ L'application contient également une API HTTP(S) distincte sur le port `5177` (
 
 ## 2. Empilement des protocoles
 
+**Politique locale #163/B8 (05/11/2026) :** le plugin HA distribué distingue
+CloseClient complet reconnu non auth/EOF prouvé (10 s après nettoyage puis
+10 s après ouverture acceptée) et timeout d’acquisition prouvé (30 s depuis
+le timeout, nettoyage compris). Les erreurs ambiguës restent à 60 s.
+Ces délais sont une politique locale, sans déduction sur le serveur ; aucune
+frontière inconnue n’est réutilisée. [Contrat B8](docs/ha-reconnect-timing-b8.md).
+
 **Politique locale #163/B4 (04/11/2026) :** le chemin HA peut reconnecter après
 un rejet structurel explicitement produit par son framer (type inconnu/non
 pris en charge, MBAP invalide, EOF partiel). La phase `frame_boundary` seule

@@ -616,6 +616,13 @@ DEV et CI ordinaires restent hors ligne ; aucun live ni promotion main implicite
 
 ## Étape 8, tranche B — véritable client Home Assistant
 
+**Évolution #163/B8 :** l’entrée distribuée active en plus `ha_fast_reconnect` :
+10 s après nettoyage puis 10 s après ouverture pour une perte franche prouvée,
+30 s depuis un timeout d’acquisition prouvé, sinon 60 s. Le coordinator reçoit
+un événement pour une lecture neuve ; la cadence périodique reste 60 s.
+Les clients de campagne gardent leur politique explicite antérieure.
+Voir [contrat B8](docs/ha-reconnect-timing-b8.md) et conservation B7 à 300 s.
+
 **Évolution #152 — MALFORMED-DIAGNOSTIC-004 :** l'entrée HA active désormais une
 politique distincte `ha_reconnect=True` sur le gestionnaire partagé : tentatives
 sans plafond cumulatif, attente de 60 s après échec récupérable et nettoyage

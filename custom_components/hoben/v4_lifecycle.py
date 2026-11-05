@@ -4,10 +4,11 @@ Local recovery policy only: a sanitized transport loss or complete experimental
 post-open CloseClient can consume one retry under the same finite budget.
 By default protocol/identity failures and application deadlines stop. The HA
 adapter can opt in to recovering exact acquisition/timeout failures after full
-cleanup. A separate explicit HA policy waits 60 seconds after confirmed cleanup
-and permits unlimited attempts, including framer-owned classified boundary
+cleanup. An explicit HA policy permits unlimited attempts with a conservative
+60-second delay, including framer-owned classified boundary
 rejections; generic internal exceptions remain permanent. Campaign/quarantine
-budgets remain finite.
+budgets remain unchanged. The distributed entry additionally enables B8 timing
+for proven EOF/recognized non-auth CloseClient and acquisition timeout only.
 These are local availability policies, not server-behavior claims.
 A quiet RX owner has no application inactivity timer.
 """
@@ -52,6 +53,13 @@ from .v4_session import (
 
 _LOGGER = logging.getLogger(__name__)
 HA_RECONNECT_SECONDS = 60.0
+HA_PROVEN_LOSS_SECONDS = 10.0
+HA_ACQUISITION_RECONNECT_SECONDS = 30.0
+
+
+def _monotonic():
+    """Resolve the process monotone clock at use, including deterministic tests."""
+    return time.monotonic()
 
 
 class LifecycleStoppedError(HobenClientClosedError):
@@ -126,8 +134,9 @@ class V4Lifecycle:
     The default factory retains V4Session's verified, fixed TLS destination.
     recover_acquisition is an explicit persistent-adapter policy. It never
     changes the default campaign/quarantine policy, framing or attempt budget.
-    ha_reconnect additionally selects unlimited attempts with a fixed >=60 s
-    delay, including recoverable opening failures. It requires persistent mode
+    ha_reconnect selects unlimited attempts with a conservative 60 s delay;
+    ha_fast_reconnect additionally enables proven B8 timing for the HA entry.
+    This requires persistent mode
     and recovery opt-in; it cannot be combined with experimental capabilities.
     """
 
@@ -157,6 +166,8 @@ class V4Lifecycle:
         "_recover_acquisition",
         "_ha_reconnect",
         "_status_callback",
+        "_ha_acquisition_generation",
+        "_ha_fast_reconnect",
     )
 
     def __init__(
@@ -169,9 +180,10 @@ class V4Lifecycle:
         retry_delays: tuple[float, ...] = (1.0, 2.0, 4.0),
         session_factory: Callable[..., V4Session] = V4Session,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = _monotonic,
         recover_acquisition: bool = False,
         ha_reconnect: bool = False,
+        ha_fast_reconnect: bool = False,
         _status_callback=None,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
@@ -191,6 +203,10 @@ class V4Lifecycle:
             if type(ha_reconnect) is not bool or (
                 ha_reconnect
                 and (mode is not V4SessionMode.PERSISTENT or not recover_acquisition)
+            ):
+                raise HobenInvalidInputError()
+            if type(ha_fast_reconnect) is not bool or (
+                ha_fast_reconnect and not ha_reconnect
             ):
                 raise HobenInvalidInputError()
             if _status_callback is not None and not callable(_status_callback):
@@ -222,7 +238,9 @@ class V4Lifecycle:
         self._mode, self._opening_options = mode, opening_options
         self._recover_acquisition = recover_acquisition
         self._ha_reconnect = ha_reconnect
+        self._ha_fast_reconnect = ha_fast_reconnect
         self._status_callback = _status_callback
+        self._ha_acquisition_generation = None
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -314,6 +332,78 @@ class V4Lifecycle:
             if self._quarantine
             else self._snapshot
         )
+
+    @property
+    def ha_acquisition_generation(self) -> int | None:
+        """One event-driven fresh HA read after a qualified, fully ready recovery."""
+        generation = self._ha_acquisition_generation
+        return (
+            generation
+            if (
+                self._ha_reconnect
+                and self.ha_recovery_pending
+                and self.state is SessionState.CONNECTED
+                and self._failure is None
+                and self.data_updated_transport_alive
+                and self._witness.verified_read_generation != generation
+            )
+            else None
+        )
+
+    async def _ha_post_open_wait(self, session, seconds):
+        """The same supervisor owns this wait and interrupts it on real loss."""
+        deadline = self._clock() + seconds
+        sleeper = asyncio.create_task(self._sleep(seconds))
+        lost = asyncio.create_task(session.wait_lost())
+        try:
+            done, _ = await asyncio.wait(
+                {sleeper, lost}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if lost in done:
+                await lost
+            await sleeper
+            if self._clock() < deadline:
+                # A broken clock/sleep cannot authorize early TX.
+                raise HobenInternalError()
+            if self._stopping or session is not self._session:
+                raise LifecycleStoppedError()
+            if session.state is not SessionState.CONNECTED:
+                await session.wait_lost()
+        finally:
+            for task in (sleeper, lost):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(sleeper, lost, return_exceptions=True)
+
+    def _ha_timing(self, session, error, opened):
+        """Proven classes only; this never expands the retryable error set."""
+        if (
+            opened
+            and type(error) is ExperimentalCloseClientError
+            and error.reason
+            in (
+                CloseClientReason.STOVE_CONNECTION_REQUIRED,
+                CloseClientReason.SERVER_MAINTENANCE,
+            )
+            and session.close_client_received
+        ):
+            return "proven_loss", None
+        if (
+            opened
+            and type(error) is HobenTransportError
+            and session.transport_eof_received
+        ):
+            return "proven_loss", None
+        if (
+            opened
+            and type(error) is HobenTimeoutError
+            and session.acquisition_timeout_at is not None
+        ):
+            return (
+                "timeout",
+                session.acquisition_timeout_at + HA_ACQUISITION_RECONNECT_SECONDS,
+            )
+        return "conservative", None
 
     @property
     def witness(self) -> LifecycleWitness:
@@ -479,7 +569,11 @@ class V4Lifecycle:
         if self._stopping:
             raise LifecycleStoppedError()
         session = self._session
-        if self.state is not SessionState.CONNECTED or session is None:
+        if (
+            self.state is not SessionState.CONNECTED
+            or session is None
+            or (self._ha_reconnect and not self._connected.is_set())
+        ):
             raise self._failure or SessionStateError()
         response = await session.request_v4_data(timeout=timeout)
         # The checked owner and immutable generation must still match. A later
@@ -658,6 +752,7 @@ class V4Lifecycle:
 
     async def _run(self) -> HobenError:
         error: HobenError = LifecycleStoppedError()
+        ha_timing, timeout_deadline = "conservative", None
         try:
             attempts = (
                 count(1)
@@ -732,9 +827,18 @@ class V4Lifecycle:
                         SessionEvent("accepted", generation=self._generation),
                     )
                     self._log_attempt(attempt, "connected")
+                    if self._ha_fast_reconnect and ha_timing == "proven_loss":
+                        await self._ha_post_open_wait(session, HA_PROVEN_LOSS_SECONDS)
                     self._connected.set()
                     if not self._ready.done():
                         self._ready.set_result(None)
+                    if (
+                        self._ha_fast_reconnect
+                        and attempt > 1
+                        and ha_timing != "conservative"
+                    ):
+                        self._ha_acquisition_generation = self._generation
+                        notify_status(self._status_callback)
                     if self._quarantine is None:
                         await session.wait_lost()
                     else:
@@ -746,6 +850,7 @@ class V4Lifecycle:
                         HobenInternalError(), phase_of(failure) or "unknown"
                     )
                 self._failure = error
+                self._ha_acquisition_generation = None
                 notify_status(self._status_callback, error_event(error))
                 self._log_attempt(attempt, "failed", error)
                 self._connected.clear()
@@ -852,6 +957,10 @@ class V4Lifecycle:
                         error = with_phase(HobenCleanupError(), "cleanup")
                 if not retryable:
                     break
+                if self._ha_fast_reconnect:
+                    ha_timing, timeout_deadline = self._ha_timing(
+                        session, error, opened
+                    )
                 if not self._ha_reconnect and attempt == self.snapshot.max_attempts:
                     error = LifecycleExhaustedError(error)
                     break
@@ -873,11 +982,15 @@ class V4Lifecycle:
                     async with asyncio.timeout(self._check_private_recovery()):
                         await self._sleep(self._delays[attempt - 1])
                 else:
-                    await self._sleep(
-                        HA_RECONNECT_SECONDS
-                        if self._ha_reconnect
-                        else self._delays[attempt - 1]
-                    )
+                    if not self._ha_reconnect:
+                        delay = self._delays[attempt - 1]
+                    elif ha_timing == "proven_loss":
+                        delay = HA_PROVEN_LOSS_SECONDS
+                    elif ha_timing == "timeout":
+                        delay = max(0.0, timeout_deadline - self._clock())
+                    else:
+                        delay = HA_RECONNECT_SECONDS
+                    await self._sleep(delay)
                 if self._quarantine is not None:
                     self._check_private_recovery()
         except asyncio.CancelledError:
@@ -885,6 +998,7 @@ class V4Lifecycle:
         except Exception as failure:
             error = with_phase(HobenInternalError(), phase_of(failure) or "unknown")
         finally:
+            self._ha_acquisition_generation = None
             if self._quarantine is not None and self._quarantine._origin is not None:
                 self._quarantine._origin._quarantine_stop(Event.CANCEL)
             try:

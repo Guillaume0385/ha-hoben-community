@@ -377,6 +377,8 @@ class V4Session:
         "_verified_read_sequence",
         "_loss_clock",
         "_loss_monotonic_ms",
+        "_transport_eof",
+        "_acquisition_timeout_at",
         "_mode",
         "_opening_options",
         "_cleanup_failed",
@@ -486,6 +488,8 @@ class V4Session:
         self._retryable_loss = False
         self._verified_read_sequence = 0
         self._loss_clock = time.monotonic
+        self._transport_eof = False
+        self._acquisition_timeout_at = None
         self._loss_monotonic_ms: int | None = None
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
@@ -669,6 +673,16 @@ class V4Session:
     def loss_is_retryable(self) -> bool:
         """True only for an observed transport loss, never caller cancellation."""
         return self._retryable_loss
+
+    @property
+    def transport_eof_received(self) -> bool:
+        """Exact TLS read EOF, never generic I/O, local close or partial framing."""
+        return self._transport_eof and type(self._rx_error) is HobenTransportError
+
+    @property
+    def acquisition_timeout_at(self) -> float | None:
+        """Monotone time of an actual abandoned acquisition, not a phase guess."""
+        return self._acquisition_timeout_at
 
     @property
     def close_client_received(self) -> bool:
@@ -1206,6 +1220,8 @@ class V4Session:
             if self.state is not SessionState.CLOSED:
                 self._rx_error = HobenTransportError()
         except TransportTimeout as failure:
+            if self._pending_read is not None and self._read_sent:
+                self._acquisition_timeout_at = self._loss_clock()
             self._rx_error = with_phase(
                 HobenTimeoutError(), phase_of(failure) or "unknown"
             )
@@ -1214,6 +1230,7 @@ class V4Session:
                 HobenTlsVerificationError(), phase_of(failure) or "unknown"
             )
         except TransportError as failure:
+            self._transport_eof = type(failure) is TransportEOF
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             if self._retryable_loss:
                 self._record_transport_loss()
@@ -1737,10 +1754,15 @@ class V4Session:
             self._quarantine_stop(Event.CANCEL)
             cancelled = True
             error = HobenTransportError()
-        except (TransportTimeout, TimeoutError):
+        except (TransportTimeout, TimeoutError) as failure:
             if self.data_updated_recovering and tx_completed:
                 raise HobenDataUpdatedRecoveryError() from None
             self._quarantine_stop(Event.LOCAL_CLOSE)
+            if self._acquisition_timeout_at is None and type(failure) in (
+                TransportTimeout,
+                TimeoutError,
+            ):
+                self._acquisition_timeout_at = self._loss_clock()
             error = HobenTimeoutError()
         except TransportCertificateError:
             error = HobenTlsVerificationError()
