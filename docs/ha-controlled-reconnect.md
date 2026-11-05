@@ -1,4 +1,73 @@
-# Reconnexion HA avec inhibition Pong de test — #126 / 028–031
+# Reconnexion HA avec inhibition Pong de test — #126 / R5
+
+## Contrat courant R5 — plusieurs reprises prouvées
+
+[Consigne MANAGER #6665052749](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6665052749),
+base `b17437f9e78d8c9ae7953471f4048096d5da5d29` après R4/#187. Ce contrat remplace
+les limites à deux générations et à une seule perte des sections historiques
+ci-dessous, pour le seul scénario HA `session-reconnect` existant.
+
+Le banc décore la factory d'un client frais dans son worker isolé : son vrai
+lifecycle reçoit deux délais finis identiques au délai de campagne existant,
+donc **trois ouvertures maximum**, sans modifier l'API HobenClient ni activer
+la politique HA distribuée. C'est la limite déjà arbitrée pour ce scénario,
+anciennement restreinte à deux par son adaptateur. Une troisième reprise est
+refusée ; aucun reset de compteur, client de remplacement ou session parallèle.
+
+L'inhibition reste exclusivement celle des Pong de la **première génération**
+après 120 s depuis son acceptation stricte. Une perte avant inhibition ne
+valide pas le scénario et interdit sa poursuite. La perte contrôlée exige un
+EOF réellement reçu ou un CloseClient complet reconnu ; première reprise avant
+240 s. Aucun autre octet n'est filtré, réinterprété ou enregistré. Les générations
+suivantes rétablissent les Pong, même après plus de 120 s.
+
+Chaque génération possède des métadonnées fermées : connexion demandée,
+acceptation, premier incident typé/sous-code prouvé, nettoyage complet et Pong
+transmis après acceptation. Avant chaque nouvelle connexion, le banc vérifie le
+cleanup réel du propriétaire précédent : TLS détaché sans échec, RX et opérations
+terminés, TX et waiter absents, sonde DataUpdated réapée. Le lifecycle réel reste
+seul propriétaire des retries et fermetures. Les témoins HA-F1 indépendants
+doivent aussi attester l'ancien propriétaire réapé et aucune ressource pending.
+
+Le rapport `recovery.schema=2` exige une lecture V4 fraîche corrélée pour
+**chaque génération acceptée**, y compris l'intermédiaire : génération/séquence
+réelles, nouvel objet décodé du coordinator et ancien cleanup attesté. Un poll
+échoué reste échoué, sans replay ; le snapshot disponible B7 n'est pas une
+nouvelle lecture. Un timeout typé n'est pas renommé EOF : les champs publics
+de perte naturelle restent ceux du lifecycle. Une erreur interne, auth, arrêt,
+framing non admissible, ouverture refusée ou cleanup non prouvé reste en échec.
+
+La stabilité de 120 s repart de la **dernière ouverture acceptée**, avec lecture
+neuve, génération active inchangée et Pong réellement transmis après acceptation.
+Une nouvelle perte efface cette stabilité, jamais les preuves antérieures.
+L'observation est bornée à 570 s et à la deadline parent moins 40 s ; close final
+borné à 10 s, réserve restante pour arrêt HA/réapage, plafond absolu 600 s.
+Six refreshs maximum, au moins 60 s après la fin du précédent ; plus assez de
+temps ou de lectures implique échec, sans prolongation. HA/all conserve 1800 s,
+15 ouvertures et 42 refreshs ; les autres scénarios gardent deux ouvertures.
+
+`recovered` décrit la reprise observée avant teardown. Une erreur de fermeture
+finale reste séparément visible, invalide `completed`/`cleanup`, impose FAILURE
+et arrête HA/all ; aucun close idempotent ultérieur ne peut l'effacer. Les anciens
+rapports sans v2 gardent leur validation historique à deux générations. Les
+preuves synthétiques ne deviennent jamais une complétion live. Sortie allowlistée
+≤8192 octets, `boundary_proven=false`, aucun total OpenedClient inventé.
+
+Le run historique **41927475489**, SHA
+`96e6e10917ea11c3c7ce1906f1de4d896f486d8a`, montre deux ouvertures, cinq lectures
+décodées, une reprise et 120 s stables, puis timeout de fermeture TLS génération 2
+et cleanup non attesté : FAILURE correct. Ce SHA contient déjà #171/#179 et
+précède B7/B8. Ce constat ne prouve aucune cause serveur ni un nouveau défaut de
+fermeture du HEAD actuel ; aucune correction production spéculative dans R5.
+
+Tests : vrai client/coordinator/session sur transports et horloge synthétiques,
+zéro/une/deux reprises, troisième refusée, pertes avant/après inhibition, EOF et
+CloseClient distincts, timeout, lecture intermédiaire absente, reprise trop
+tardive, auth/interne/protocole, ouverture refusée, cleanup des trois générations,
+annulation/timeout de close via les régressions #171, altérations Python/Node.
+Aucun test réel, dispatch/rerun ou changement d'automatisation par DEV.
+
+## Historique 028–031
 
 Décision propriétaire du 30/10/2026, [consigne MANAGER active](https://github.com/Guillaume0385/ha-hoben-community/issues/126#issuecomment-6435985641).
 Première livraison ciblée : **session-reconnect** de la campagne HA uniquement.

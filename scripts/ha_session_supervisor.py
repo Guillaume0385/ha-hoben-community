@@ -116,6 +116,7 @@ class SourceBundle:
                         "ha_incident_observer.py",
                         "ha_pong_injection.py",
                         "ha_reconnect_observer.py",
+                        "ha_reconnect_proof.py",
                         "ha_dual_evidence.py",
                         "ha_dual_observer.py",
                         "ha_dual_instrumentation.py",

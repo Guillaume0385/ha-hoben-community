@@ -121,14 +121,15 @@ NOT RUN.** La livraison n'autorise aucun dispatch ou rerun réel.
 | open-errors | 90 s | Premier refresh du vrai coordinator et catégorie de son éventuelle erreur ; aucun credential volontairement invalide. |
 | refresh-v4 | 120 s | Deux refreshs et nouveaux objets HobenCoordinatorData issus du décodage V4. |
 | session-reuse | 180 s | Trois refreshs, même génération et séquences corrélées successives. |
-| session-reconnect | 600 s | Banc HA isolé : Pong de la première génération inhibés après 120 s, perte effective puis réouverture avant 240 s, lecture corrélée, Pong rétablis et stabilité 120 s. Deux ouvertures, six refreshs maximum ; aucune panne par fermeture locale. Sans preuve complète : INCONCLUSIVE. |
+| session-reconnect | 600 s | Banc HA isolé R5 : Pong de la première génération inhibés après 120 s, perte effective puis première reprise avant 240 s. Cleanup et lecture fraîche corrélée par reprise, Pong rétablis et stabilité 120 s après la dernière ouverture. Trois ouvertures, six refreshs maximum ; aucune panne par fermeture locale. Sans preuve complète, aucun SUCCESS. |
 | cleanup | 60 s | Ouverture/lecture puis fermeture effective, état arrêté et génération nettoyée. |
 | availability | 120 s | Deux refreshs, état last_update_success/data du vrai coordinator et catégories d’erreur ; aucune disponibilité fictive. |
 | all | 1800 s | Sept exécutions indépendantes, cleanup entre elles ; maxima individuels 1530 s, marge 270 s. |
 
-Les compléments ont six refreshs et deux ouvertures maximum. L’arbitrage permet
-jusqu’à trois ouvertures pour la reconnexion HA ; le vrai HobenClient conserve
-sa limite actuelle plus restrictive de **deux**, sans modifier son API. All
+Les compléments ont six refreshs et deux ouvertures maximum, sauf R5 qui utilise
+les **trois** ouvertures déjà arbitrées pour le seul banc `session-reconnect`.
+La factory isolée conserve les vrais propriétaires, sans modifier l'API du
+client distribué. All
 vérifie aussi les plafonds globaux de 15 ouvertures et 42 refreshs.
 
 Le worker réutilise collect() de #112 : véritables HomeAssistant/ConfigEntry,

@@ -46,7 +46,9 @@ ERROR_CATEGORIES = {
 }
 
 
-async def take_sample(coordinator, evidence, stamp, start, *, require_fresh=False):
+async def take_sample(
+    coordinator, evidence, stamp, start, *, require_fresh=False, max_attempts=2
+):
     """Project one real refresh; never publish its data or arbitrary exception."""
     previous = coordinator.data
     before = coordinator.client.session_observation
@@ -85,7 +87,7 @@ async def take_sample(coordinator, evidence, stamp, start, *, require_fresh=Fals
                 if decoded
                 else ERROR_CATEGORIES.get((safe or {}).get("error"), "unexpected"),
                 "observation": project_observation(
-                    coordinator.client.session_observation
+                    coordinator.client.session_observation, max_attempts=max_attempts
                 ),
             }
         )

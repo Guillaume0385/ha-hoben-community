@@ -107,7 +107,11 @@ def test_isolated_campaign_source_has_injector_but_original_baseline_does_not():
     for campaign in (True, False):
         bundle = SourceBundle(live=True, campaign=campaign)
         try:
-            for name in ("ha_pong_injection.py", "ha_reconnect_observer.py"):
+            for name in (
+                "ha_pong_injection.py",
+                "ha_reconnect_observer.py",
+                "ha_reconnect_proof.py",
+            ):
                 path = bundle.folder / "scripts" / name
                 assert path.exists() is campaign
                 if campaign:

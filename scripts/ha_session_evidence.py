@@ -42,7 +42,7 @@ def keys(value, expected):
     require(type(value) is dict and value.keys() == expected)
 
 
-def project_observation(value: SessionObservation) -> dict:
+def project_observation(value: SessionObservation, *, max_attempts=2) -> dict:
     """Explicit projection; no generic dataclass, client or snapshot export."""
     from custom_components.hoben.session_observation import (
         SessionLossKind,
@@ -63,20 +63,20 @@ def project_observation(value: SessionObservation) -> dict:
         "cleanup_failed": value.cleanup_failed,
         "stopped": value.stopped,
     }
-    observation(projected)
+    observation(projected, max_attempts=max_attempts)
     return projected
 
 
-def observation(value):
+def observation(value, *, max_attempts=2):
     keys(value, OBS_KEYS)
-    require(integer(value["attempts"], 0, 2))
+    require(integer(value["attempts"], 0, max_attempts))
     for name in (
         "generation",
         "read_generation",
         "loss_generation",
         "cleaned_generation",
     ):
-        require(value[name] is None or integer(value[name], 1, 2))
+        require(value[name] is None or integer(value[name], 1, max_attempts))
     generation = value["generation"]
     require(generation is None or generation <= value["attempts"])
     for name in ("read_generation", "loss_generation", "cleaned_generation"):

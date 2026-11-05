@@ -13,6 +13,8 @@ from scripts.campaign_runtime_contract import (
 from scripts.ha_incident_evidence import extra_keys
 from scripts.ha_incident_evidence import validate as validate_diagnostic
 from scripts.ha_live_proof import empty_evidence, results, validate_observation
+from scripts.ha_reconnect_proof import is_multi
+from scripts.ha_reconnect_proof import validate as validate_multi
 from scripts.ha_session_evidence import observation, outcome, progress
 
 
@@ -55,6 +57,8 @@ def controlled_recovery(e):
     if "recovery" not in e:
         return False
     r = e["recovery"]
+    if is_multi(e):
+        return validate_multi(e)
     keys(r, set(empty_recovery()) | ({"diagnostic"} if "diagnostic" in r else set()))
     if "diagnostic" in r:
         diagnostic = r["diagnostic"]
@@ -432,6 +436,7 @@ def validate_detail(scenario, detail):
         need(type(e["completed"]) is bool)
         need(type(e["samples"]) is list and len(e["samples"]) <= 6)
         need(r["started"] or not e["samples"])
+        max_attempts = 3 if scenario == "session-reconnect" and is_multi(e) else 2
         previous, at_ms = None, -1
         for ordinal, s in enumerate(e["samples"], 1):
             keys(
@@ -442,7 +447,7 @@ def validate_detail(scenario, detail):
             need(type(s["decoded"]) is bool and type(s["available"]) is bool)
             need(type(s["error"]) is str and s["error"] in ERRORS)
             o = s["observation"]
-            observation(o)
+            observation(o, max_attempts=max_attempts)
             if previous is not None:
                 progress(previous, o)
             if s["decoded"]:
@@ -465,7 +470,7 @@ def validate_detail(scenario, detail):
         need(w["clock"] in {"unattested", "monotonic", "synthetic"})
         need(integer(w["elapsed_ms"], 0, limits.process_ms))
         if w["observation"] is not None:
-            observation(w["observation"])
+            observation(w["observation"], max_attempts=max_attempts)
             need(r["started"] and w["clock"] != "unattested")
             if previous is not None:
                 progress(previous, w["observation"])
@@ -485,12 +490,14 @@ def validate_detail(scenario, detail):
         )
         keys(e["cleanup"], ("completed", "observation"))
         need(type(e["cleanup"]["completed"]) is bool)
-        observation(e["cleanup"]["observation"])
+        observation(e["cleanup"]["observation"], max_attempts=max_attempts)
         if previous is not None:
             progress(previous, e["cleanup"]["observation"])
-        if scenario == "session-reconnect":
-            controlled_recovery(e)
-    validate_diagnostic(e, r)
+    validate_diagnostic(
+        e, r, max_attempts=3 if scenario == "session-reconnect" and is_multi(e) else 2
+    )
+    if scenario == "session-reconnect":
+        controlled_recovery(e)
     need(
         len(json.dumps(detail, separators=(",", ":"), allow_nan=False).encode()) <= 8192
     )

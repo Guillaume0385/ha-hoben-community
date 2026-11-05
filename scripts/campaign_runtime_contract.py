@@ -178,7 +178,8 @@ def validate_metrics(m, campaign, scenario):
         12
         if scenario == "h1h2"
         else 3
-        if campaign == "ha" and scenario == "dual-session-observation"
+        if campaign == "ha"
+        and scenario in {"dual-session-observation", "session-reconnect"}
         else 2
         if campaign == "ha"
         else 3

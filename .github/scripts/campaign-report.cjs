@@ -3,6 +3,7 @@
 const fs=require('node:fs'),path=require('node:path');
 const {object,check,int,inspect,progress}=require('../../scripts/ha-session-evidence.cjs');
 const baseline=require('../../scripts/ha-live-proof.cjs');
+const multi=require('./ha-reconnect-proof.cjs');
 const files=require('./experimental-report-file.cjs');
 const choices={protocol:['tls-only','session-open','read-v4-state','h1h2','session-300','session-reconnect','all'],
   ha:['hoben-live','open-errors','refresh-v4','session-reuse','session-reconnect','cleanup','availability','all']};
@@ -21,7 +22,7 @@ const blank=(c='protocol',s=null)=>({opens:0,reads:0,reads_ok:0,pings:c==='ha'||
 function metrics(m,c,s) {
   object(m,Object.keys(blank()));
   const reads=c==='ha'&&s===dual?15:c==='ha'||s==='session-300'?6:{'tls-only':0,'session-open':0,'read-v4-state':1,h1h2:12,'session-reconnect':10}[s];
-  const bounds={opens:s==='h1h2'?12:c==='ha'&&s===dual?3:c==='ha'?2:['session-300','session-reconnect'].includes(s)?3:1,reads,
+  const bounds={opens:s==='h1h2'?12:c==='ha'&&[dual,'session-reconnect'].includes(s)?3:c==='ha'?2:['session-300','session-reconnect'].includes(s)?3:1,reads,
     reads_ok:reads,pings:1048576,pongs:1048576,h1_sessions:6,h2_sessions:6,useful_ms:cap(c,s)};
   for(const [k,v] of Object.entries(bounds))check((s==='h1h2'&&['pings','pongs'].includes(k))||c==='ha'&&['pings','pongs','h1_sessions','h2_sessions'].includes(k)?m[k]===null:int(m[k],0,v));
   check(m.reads_ok<=m.reads&&(c==='ha'||s==='h1h2'||m.pongs<=m.pings));
@@ -56,6 +57,7 @@ function status(c,s,m) {
 }
 function haControlled(e) {
   if(!Object.hasOwn(e,'recovery'))return false;
+  if(multi.isMulti(e))return multi.validate(e);
   const r=e.recovery,w=e.window,o=w.observation;
   object(r,['mode','boundary_proven','outcome','accepted_at_ms','suppressed_pongs',
     'loss_generation','loss_after_ms','reopened_after_ms','read_generation','read_sequence','recovery_pongs','stable_ms',
@@ -145,6 +147,7 @@ function haDetail(s,d) {
   if(s===dual)return require('./ha-dual-evidence.cjs').project(d,blank);
   object(d,['supervisor','evidence']);
   const r=d.supervisor,e=d.evidence;
+  const maxAttempts=s==='session-reconnect'&&multi.isMulti(e)?3:2;
   const incident=require('./ha-incident-evidence.cjs');
   object(r,['started','reason','memory_bytes','pids','useful_ms','process_ms','elapsed_ms','oom_killed','pids_limited','reaped','network']);
   for(const k of ['started','oom_killed','pids_limited','reaped'])check(typeof r[k]==='boolean');
@@ -167,7 +170,7 @@ function haDetail(s,d) {
       object(v,['ordinal','at_ms','decoded','available','error','observation']);
       check(v.ordinal===i+1&&int(v.at_ms,0,r.process_ms-1)&&v.at_ms>=at);
       check(typeof v.decoded==='boolean'&&typeof v.available==='boolean'&&errors.includes(v.error));
-      inspect(v.observation);
+      inspect(v.observation,maxAttempts);
       if(previous)progress(previous,v.observation);
       if(v.decoded) {
         check(v.available&&v.error==='none'&&v.observation.read_generation!==null&&!v.observation.stopped&&!v.observation.cleanup_failed);
@@ -179,7 +182,7 @@ function haDetail(s,d) {
     object(w,['clock','elapsed_ms','observation','active']);
     check(typeof w.active==='boolean'&&['unattested','monotonic','synthetic'].includes(w.clock)&&int(w.elapsed_ms,0,r.process_ms));
     if(w.observation!==null) {
-      inspect(w.observation);check(r.started&&w.clock!=='unattested');
+      inspect(w.observation,maxAttempts);check(r.started&&w.clock!=='unattested');
       if(previous){progress(previous,w.observation);check(w.elapsed_ms>=at);}
       previous=w.observation;
     } else check(!w.active&&e.samples.length===0);
@@ -187,10 +190,10 @@ function haDetail(s,d) {
     if(w.clock==='unattested')check(e.samples.length===0&&w.elapsed_ms===0);
     check(!e.completed||e.samples.length>0&&e.terminal==='none'&&w.observation!==null);
     object(e.cleanup,['completed','observation']);check(typeof e.cleanup.completed==='boolean');
-    inspect(e.cleanup.observation);if(previous)progress(previous,e.cleanup.observation);
-    if(s==='session-reconnect')haControlled(e);
+    inspect(e.cleanup.observation,maxAttempts);if(previous)progress(previous,e.cleanup.observation);
   }
-  incident.validate(e,r);
+  incident.validate(e,r,false,maxAttempts);
+  if(s==='session-reconnect')haControlled(e);
   check(Buffer.byteLength(JSON.stringify(d))<=8192);
   const m=blank('ha'),o=e.cleanup.observation,w=e.window.observation;
   Object.assign(m,{opens:o.attempts,reads:e.samples.length,reads_ok:e.samples.filter(v=>v.decoded).length,useful_ms:e.window.elapsed_ms,
@@ -335,7 +338,7 @@ function prepare(env=process.env) {
 // The limits are design ceilings, never minimum durations or success evidence.
 function bounds(c,s) {
   if(c==='ha'&&s===dual)return 'A : cadence 60 s, continuité ou récupération prouvée ; B : une lecture, 180–360 s ; stabilité ≥300 s ; 2 connexions simultanées ; 900 s globales ; réserve 60 s ; 1 Gio ; 128 PID';
-  if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':s==='session-reconnect'?'Pong de test inhibés dès 120 s ; reprise <240 s ; stabilité 120 s ; ':'')+'2 ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
+  if(c==='ha')return (s==='hoben-live'?'300 s utiles ; ':s==='session-reconnect'?'Pong de test inhibés dès 120 s ; première reprise <240 s ; stabilité 120 s après dernière ouverture ; ':'')+(s==='session-reconnect'?'3':'2')+' ouvertures ; 6 refreshs ; 1 Gio ; 128 PID';
   return {
     'tls-only':'1 TLS ; 0 lecture',
     'session-open':'1 ouverture ; 0 lecture',
@@ -386,6 +389,10 @@ function summary(r,env) {
     const e=v.detail?.evidence;
     if(e?.diagnostic_schema!==1)continue;
     const d=e.diagnostic;
+    if(v.scenario==='session-reconnect'&&multi.isMulti(e)) {
+      lines.push('', 'R5 — reprises prouvées '+v.metrics.recovered+' ; cleanup final '+v.metrics.cleanup+' ; stabilité finale '+e.recovery.stable_ms+' ms ; frontière OpenedClient non prouvée.');
+      for(const g of e.recovery.generations)lines.push('- Génération '+g.generation+' : connexion '+g.connect_ms+' ; acceptation '+g.opened_ms+' ; incident '+g.category+' à '+g.loss_ms+' ; sous-code '+g.subcode+' ; cleanup attesté '+g.cleanup_ms+' ms ; Pong transmis après acceptation '+g.pongs+'.');
+    }
     lines.push('', 'Diagnostic HA-F1 — '+v.scenario+' (temps relatifs au début de collecte) :');
     for(const [key,label] of [['first','Premier incident'],['terminal','Erreur terminale'],['cleanup','Erreur de nettoyage']]) {
       const x=d[key];
