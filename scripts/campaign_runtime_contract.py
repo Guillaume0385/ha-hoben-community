@@ -514,7 +514,7 @@ def validate_recovery_witness(w, metrics):
         need(w["reopened_after_ms"] + w["stable_ms"] <= metrics["useful_ms"])
 
 
-def continuation_stop_reason(value, campaign):
+def continuation_stop_reason(value, campaign, *, selection=None):
     """For an already validated stage, return a closed stop reason or None.
 
     HA functional failure is independent of the next observer only after the
@@ -544,6 +544,33 @@ def continuation_stop_reason(value, campaign):
         return "supervisor_refused" if r["reason"] == "unavailable" else r["reason"]
     if value["metrics"]["error"] == "budget":
         return "budget"
+    if selection == "all":
+        # A clean summary cannot override contrary owner/stop evidence. This
+        # boundary policy applies only to HA/all, never individual verdicts.
+        d = value["detail"]["evidence"].get("diagnostic")
+        if d is not None:
+            categories = {
+                event[3] for event in (d["first"], d["terminal"]) if event is not None
+            }
+            if (
+                d["cleanup"] is not None
+                or "cleanup_failed" in categories
+                or any(
+                    row["stage"] != "reaped"
+                    or row["pending"] != 0
+                    or row["close"][3] is None
+                    for row in d["owners"]
+                )
+            ):
+                return "cleanup_failed"
+            if "cancelled" in categories:
+                return "cancelled"
+            if categories & {"authentication", "authorization"}:
+                return "identity_refused"
+            if "internal" in categories:
+                return "worker_failure"
+        if value["metrics"]["error"] in {"authentication", "authorization"}:
+            return "identity_refused"
     return None
 
 
@@ -568,12 +595,27 @@ def validate_report(report):
     need(integer(report["elapsed_ms"], 0, SECONDS[campaign][selection] * 1000))
     need(type(report["stages"]) is list and len(report["stages"]) == len(names))
     stopped = False
-    for name, value in zip(names, report["stages"]):
+    for index, (name, value) in enumerate(zip(names, report["stages"])):
         need(value["scenario"] == name)
         validate_stage(value, campaign)
         if stopped:
             need(not value["started"] and value["status"] == "NOT RUN")
-        stopped |= continuation_stop_reason(value, campaign) is not None
+        if (
+            campaign == "ha"
+            and selection == "all"
+            and index
+            and not stopped
+            and not value["started"]
+        ):
+            # Previous functional failure did not stop this campaign. A new
+            # refusal needs a real worker/global cause, not a fabricated skip.
+            need(
+                value["reason"]
+                not in {"previous_failure", "not_started", "not_observed", "observed"}
+            )
+        stopped |= (
+            continuation_stop_reason(value, campaign, selection=selection) is not None
+        )
     need(sum(s["elapsed_ms"] for s in report["stages"]) <= report["elapsed_ms"])
     if campaign == "ha":
         need(sum(s["metrics"]["opens"] for s in report["stages"]) <= 15)

@@ -97,11 +97,14 @@ la durée, le plafond, les lectures réussies/tentées et le nettoyage attesté.
 | INCONCLUSIVE | Observation bornée effectuée, mais hypothèse/récupération non démontrée. Ce n’est pas une validation. |
 | NOT RUN | Étape non commencée ou preuve absente/refusée. Ne démontre pas à lui seul qu’aucune connexion n’a pu avoir lieu. |
 
-`all` continue après une étape INCONCLUSIVE entièrement collectée/nettoyée ;
-FAILURE ou NOT RUN arrête la suite et laisse les étapes restantes NOT RUN.
+`protocol/all` conserve son arrêt après FAILURE ou NOT RUN et peut poursuivre
+après INCONCLUSIVE entièrement collecté/nettoyé. `ha/all` tente les sept étapes
+malgré un KO fonctionnel uniquement après preuves de cleanup/isolation/sûreté ;
+une annulation, une erreur de nettoyage ou une preuve insuffisante laisse les
+étapes suivantes NOT RUN. Voir les [conditions R4](manual-test-campaign-runtime.md#r4--preuves-de-sûreté-entre-les-sept-scénarios-ha).
 Le verdict global est SUCCESS seulement si toutes les étapes sont SUCCESS
-**et** le job `collect` a réussi. H1/H2 étant INCONCLUSIVE, `all` protocole
-reste donc globalement FAILURE. Un `collect` annulé/échoué garde un verdict
+**et** le job `collect` a réussi ; INCONCLUSIVE ne valide pas la campagne.
+Un `collect` annulé/échoué garde un verdict
 global FAILURE même si une étape précédente est localement attestée SUCCESS.
 
 Les diagnostics sont fermés : `observed`, `not_observed`, catégories d’erreur

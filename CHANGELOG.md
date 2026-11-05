@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #126 / R4, indépendance sûre des sept scénarios HA/all
+
+- Conserver la poursuite après KO fonctionnel isolé et nettoyé, sans modifier
+  les verdicts individuels ni masquer FAILURE/INCONCLUSIVE dans l'agrégat.
+- Arrêter HA/all sur F1 contredisant le cleanup, propriétaire non réapé/pending,
+  annulation, refus d'identité ou erreur interne ; rejeter une poursuite forgée
+  et les NOT RUN sans cause après un préfixe sûr. Contrats Python/Node cohérents.
+- Tests RED/GREEN hors ligne du vrai parent ; budgets, gates, scénarios
+  individuels, protocole/all et plugin inchangés. R3 dual annulée, hors all ;
+  R5 reste distincte. Aucun test réel ni workflow live modifié.
+
 ## En cours — #126 / R2-C, refus du nominal contradictoire F1
 
 - Refuser SUCCESS pour hoben-live quand le premier incident F1 est permanent,

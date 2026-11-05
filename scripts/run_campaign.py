@@ -279,7 +279,7 @@ def run(
             )
             validate_stage(value, campaign)
             need(value["scenario"] == name)
-            stopped = continuation_stop_reason(value, campaign)
+            stopped = continuation_stop_reason(value, campaign, selection=selection)
         stages.append(value)
     elapsed = max(0, int((clock() - start) * 1000))
     if elapsed > SECONDS[campaign][selection] * 1000:
