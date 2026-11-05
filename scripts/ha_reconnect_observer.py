@@ -14,7 +14,7 @@ from scripts.ha_session_evidence import project_observation
 
 
 async def observe(
-    coordinator, *, evidence=None, clock=None, sleep=None, absolute_end=None
+    coordinator, *, evidence=None, clock=None, sleep=None, absolute_end=None, start=None
 ):
     from scripts.ha_campaign_observer import take_sample
 
@@ -45,12 +45,15 @@ async def observe(
         last = now
         return now
 
-    start = stamp()
+    now = stamp()
+    if start is None:
+        start = now
+    need(type(start) in (int, float) and math.isfinite(start) and start <= now)
     end = start + 570  # original 600 s process cap, 30 s teardown reserve
     if absolute_end is not None:
         need(type(absolute_end) in (int, float) and math.isfinite(absolute_end))
         end = min(end, absolute_end - 40)
-    need(end > start)
+    need(end > now)
     evidence["window"]["clock"] = "monotonic" if native else "synthetic"
     probe = PongInjection(stamp, end, multi=True, start=start)
     witness = evidence["recovery"]
@@ -62,7 +65,7 @@ async def observe(
 
     with probe.install(coordinator.client):
         try:
-            async with asyncio.timeout(end - start):
+            async with asyncio.timeout(end - stamp()):
                 while True:
                     now = stamp()
                     if now >= end:

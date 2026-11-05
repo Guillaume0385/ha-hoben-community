@@ -36,7 +36,7 @@ function validate(e) {
     if(row.opened_ms!==null)check(row.connect_ms!==null&&row.connect_ms<=row.opened_ms&&row.opened_ms<=w.elapsed_ms);
     if(row.loss_ms!==null)check(row.opened_ms!==null&&row.opened_ms<=row.loss_ms&&row.loss_ms<=w.elapsed_ms);
     if(row.cleanup_ms!==null)check((row.connect_ms===null||row.cleanup_ms>=row.connect_ms)&&(row.loss_ms===null||row.cleanup_ms>=row.loss_ms));
-    if(i>0&&row.connect_ms!==null){const old=rows[i-1];check(old.loss_ms!==null&&old.cleanup_ms!==null&&old.cleanup_ms<=row.connect_ms);}
+    if(i>0&&row.connect_ms!==null){const old=rows[i-1];check(old.loss_ms!==null&&old.cleanup_ms!==null&&old.cleanup_ms<=row.connect_ms);if(e.diagnostic_schema===1){const owner=e.diagnostic.owners[i-1];check(owner.close[3]!==null&&owner.close[3]<=row.connect_ms);}}
   });
   if(r.outcome!=='verified')return false;
   check(e.diagnostic_schema===1);

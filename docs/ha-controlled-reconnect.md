@@ -28,6 +28,8 @@ cleanup réel du propriétaire précédent : TLS détaché sans échec, RX et op
 terminés, TX et waiter absents, sonde DataUpdated réapée. Le lifecycle réel reste
 seul propriétaire des retries et fermetures. Les témoins HA-F1 indépendants
 doivent aussi attester l'ancien propriétaire réapé et aucune ressource pending.
+Les temps R5 et HA-F1 partagent la même origine monotone ; un cleanup F1
+postérieur à la connexion suivante invalide le rapport.
 
 Le rapport `recovery.schema=2` exige une lecture V4 fraîche corrélée pour
 **chaque génération acceptée**, y compris l'intermédiaire : génération/séquence

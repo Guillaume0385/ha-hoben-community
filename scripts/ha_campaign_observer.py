@@ -118,6 +118,7 @@ async def observe(
                 clock=clock,
                 sleep=sleep,
                 absolute_end=absolute_end,
+                reconnect_start=diagnostic.start,
             )
     except (Exception, asyncio.CancelledError) as error:
         session = diagnostic.sessions[-1] if diagnostic.sessions else None
@@ -138,7 +139,14 @@ async def observe(
 
 
 async def _observe(
-    coordinator, scenario, *, evidence=None, clock=None, sleep=None, absolute_end=None
+    coordinator,
+    scenario,
+    *,
+    evidence=None,
+    clock=None,
+    sleep=None,
+    absolute_end=None,
+    reconnect_start=None,
 ):
     if scenario == "dual-session-observation":
         from scripts.ha_dual_observer import observe as dual_observe
@@ -165,6 +173,7 @@ async def _observe(
             clock=clock,
             sleep=sleep,
             absolute_end=absolute_end,
+            start=reconnect_start,
         )
     need(scenario in SCHEDULES)
     need(

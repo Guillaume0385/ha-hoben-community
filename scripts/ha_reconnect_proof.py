@@ -125,6 +125,12 @@ def validate(e):
                 and old["cleanup_ms"] is not None
                 and old["cleanup_ms"] <= row["connect_ms"]
             )
+            if e.get("diagnostic_schema") == 1:
+                old_owner = e["diagnostic"]["owners"][index - 2]
+                need(
+                    old_owner["close"][3] is not None
+                    and old_owner["close"][3] <= row["connect_ms"]
+                )
     if r["outcome"] != "verified":
         return False
     # A SUCCESS needs both the scoped observer and independently tapped F1

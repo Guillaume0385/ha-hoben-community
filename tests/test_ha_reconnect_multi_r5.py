@@ -159,6 +159,7 @@ def test_each_transition_is_required_and_closed(field, value):
         "replay",
         "late_read",
         "early_inhibition",
+        "f1_cleanup_after_next_connect",
     ],
 )
 def test_missing_or_falsified_evidence_never_succeeds(case):
@@ -202,6 +203,8 @@ def test_missing_or_falsified_evidence_never_succeeds(case):
         e["samples"][3]["at_ms"] = 221000
     elif case == "early_inhibition":
         e["recovery"]["loss_after_ms"] = 119999
+    elif case == "f1_cleanup_after_next_connect":
+        f["owners"][0]["close"] = [150000] * 4
     with pytest.raises(ValueError):
         validate_report(r)
     assert not node_accepts(r)
