@@ -154,26 +154,57 @@ class AsyncTlsTransport:
         return data
 
     async def close(self) -> None:
-        """Close once and await shutdown; abort if shutdown fails or is cancelled.
+        """Close once, proving shutdown even when graceful TLS close stalls.
 
         State is detached first, so repeated close calls are harmless even after
-        a failed shutdown. Errors are sanitized just like read/write failures.
+        a failed shutdown. Reserve the last fifth (at most one second) of the
+        existing deadline for abort and its connection_lost acknowledgement.
+        An abort request alone never proves closure. Errors remain sanitized.
         """
         writer, self._writer = self._writer, None
         self._reader = None
         if writer is None:
             return
+        waiter = None
+        aborted = False
+
+        def abort() -> bool:
+            nonlocal aborted
+            if not aborted:
+                aborted = True
+                try:
+                    writer.transport.abort()
+                except Exception:
+                    return False
+            return True
+
         try:
             writer.close()
-            if (wait_closed := getattr(writer, "wait_closed", None)) is not None:
-                async with asyncio.timeout(self.close_timeout):
-                    await wait_closed()
+            async with asyncio.timeout(self.close_timeout):
+                # Cancelling StreamWriter.wait_closed cancels its shared close
+                # future. Own one waiter and leave it intact at the graceful
+                # deadline, so a subsequent abort can still prove completion.
+                waiter = asyncio.create_task(
+                    writer.wait_closed(), name="hoben-tls-close"
+                )
+                reserve = min(1.0, self.close_timeout / 5)
+                done, _ = await asyncio.wait(
+                    {waiter}, timeout=self.close_timeout - reserve
+                )
+                if not done and not abort():
+                    raise TransportError("TLS close failed")
+                await asyncio.shield(waiter)
         except TimeoutError:
-            writer.transport.abort()
+            abort()
             raise TransportTimeout("close") from None
-        except OSError:
-            writer.transport.abort()
+        except Exception:
+            abort()
             raise TransportError("TLS close failed") from None
         except asyncio.CancelledError:
-            writer.transport.abort()
+            abort()
             raise
+        finally:
+            if waiter is not None:
+                if not waiter.done():
+                    waiter.cancel()
+                await asyncio.gather(waiter, return_exceptions=True)

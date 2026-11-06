@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #163 / B9, fermeture TLS et réapage attestés
+
+- Garder intact le témoin `StreamWriter.wait_closed()` quand la fermeture
+  gracieuse tarde ; dans le plafond total existant de 5 s, réserver 1 s pour
+  demander un abort et attendre sa confirmation réelle. Un abort seul, une
+  erreur, une annulation ou une confirmation absente restent des échecs fermés.
+- Réaper l'unique tâche de fermeture avant de rendre la main. Reprise B8 après
+  cleanup confirmé uniquement ; aucun changement des délais de reconnexion,
+  du framer, de DataUpdated ou du snapshot B7. Trois cycles HA synthétiques,
+  courses RX/TX/sonde et refus de faux succès vérifiés hors ligne.
+- [Diagnostic B9](docs/ha-cleanup-reap-b9.md) : défaut local reproduit avec
+  le vrai témoin asyncio, sans attribution de cause à l'incident résidentiel.
+  Validation réelle NOT RUN ; campagnes et workflows inchangés.
+
 ## En cours — #126 / R5, reprises HA session-reconnect attestées
 
 - Accepter jusqu'à deux reprises du scénario existant, chacune liée au cleanup
