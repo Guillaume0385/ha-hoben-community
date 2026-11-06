@@ -4,6 +4,8 @@ import asyncio
 import math
 import ssl
 
+from .close_diagnostic import CloseTrace
+
 DEFAULT_HOST = "myhoben.fr"
 DEFAULT_PORT = 465
 
@@ -165,6 +167,7 @@ class AsyncTlsTransport:
         self._reader = None
         if writer is None:
             return
+        trace = CloseTrace(writer, self.close_timeout)
         waiter = None
         aborted = False
 
@@ -173,20 +176,24 @@ class AsyncTlsTransport:
             if not aborted:
                 aborted = True
                 try:
-                    writer.transport.abort()
+                    with trace.operation("abort"):
+                        writer.transport.abort()
                 except Exception:
                     return False
             return True
 
         try:
-            writer.close()
+            with trace.operation("writer_close"):
+                writer.close()
             async with asyncio.timeout(self.close_timeout):
                 # Cancelling StreamWriter.wait_closed cancels its shared close
                 # future. Own one waiter and leave it intact at the graceful
                 # deadline, so a subsequent abort can still prove completion.
-                waiter = asyncio.create_task(
-                    writer.wait_closed(), name="hoben-tls-close"
-                )
+                async def wait_closed():
+                    with trace.operation("wait_closed"):
+                        await writer.wait_closed()
+
+                waiter = asyncio.create_task(wait_closed(), name="hoben-tls-close")
                 reserve = min(1.0, self.close_timeout / 5)
                 done, _ = await asyncio.wait(
                     {waiter}, timeout=self.close_timeout - reserve
@@ -194,17 +201,24 @@ class AsyncTlsTransport:
                 if not done and not abort():
                     raise TransportError("TLS close failed")
                 await asyncio.shield(waiter)
-        except TimeoutError:
+        except TimeoutError as error:
+            trace.owner_failure(error)
             abort()
             raise TransportTimeout("close") from None
-        except Exception:
+        except Exception as error:
+            trace.owner_failure(error)
             abort()
             raise TransportError("TLS close failed") from None
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
+            trace.owner_failure(error)
             abort()
             raise
         finally:
-            if waiter is not None:
-                if not waiter.done():
-                    waiter.cancel()
-                await asyncio.gather(waiter, return_exceptions=True)
+            try:
+                if waiter is not None:
+                    with trace.operation("reap"):
+                        if not waiter.done():
+                            waiter.cancel()
+                        await asyncio.gather(waiter, return_exceptions=True)
+            finally:
+                trace.finish()
