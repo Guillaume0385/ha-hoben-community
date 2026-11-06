@@ -151,7 +151,7 @@ def test_tls_rejection_has_no_fallback(streams, error_type) -> None:
 
 @pytest.mark.parametrize("wait_closed_available", [True, False])
 def test_idempotent_close(streams, wait_closed_available) -> None:
-    """Closing before connect, after close and with an older stream is safe."""
+    """A missing completion witness fails closed; later close stays idempotent."""
     if not wait_closed_available:
         del streams.writer.wait_closed
 
@@ -161,7 +161,11 @@ def test_idempotent_close(streams, wait_closed_available) -> None:
         await transport.connect()
         with pytest.raises(TransportError, match="already connected"):
             await transport.connect()
-        await transport.close()
+        if wait_closed_available:
+            await transport.close()
+        else:
+            with pytest.raises(TransportError, match="TLS close failed"):
+                await transport.close()
         await transport.close()
         with pytest.raises(TransportError, match="not connected"):
             await transport.read()
@@ -170,7 +174,10 @@ def test_idempotent_close(streams, wait_closed_available) -> None:
 
     asyncio.run(run())
     streams.writer.close.assert_called_once_with()
-    streams.writer.transport.abort.assert_not_called()
+    if wait_closed_available:
+        streams.writer.transport.abort.assert_not_called()
+    else:
+        streams.writer.transport.abort.assert_called_once_with()
     streams.connect.assert_awaited_once()
     if wait_closed_available:
         streams.writer.wait_closed.assert_awaited_once_with()
