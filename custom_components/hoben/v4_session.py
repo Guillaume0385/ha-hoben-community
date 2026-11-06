@@ -23,6 +23,7 @@ from .client import (
     _validate_delay,
     _validate_device_guid,
 )
+from .close_diagnostic import close_generation
 from .data_updated_recovery import DataUpdatedRecovery
 from .error_phases import error_boundary, phase_of, with_phase
 from .exceptions import (
@@ -924,7 +925,8 @@ class V4Session:
             transport, self._transport = self._transport, None
             if transport is not None:
                 try:
-                    await transport.close()
+                    with close_generation(self._framer):
+                        await transport.close()
                 except (Exception, asyncio.CancelledError) as failure:
                     self._cleanup_failed = True
                     if self.close_client_received:

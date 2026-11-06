@@ -5,6 +5,7 @@ not identify the real shutdown failure or establish a corrective change.
 """
 
 import asyncio
+import logging
 import ssl
 from types import SimpleNamespace
 
@@ -18,8 +19,54 @@ from custom_components.hoben.v4_lifecycle import V4Lifecycle
 from ha_tests.test_persistent_client import RESPONSE, load, opening, sensor
 from ha_tests.test_reconnect_cleanup_031 import validated
 from ha_tests.test_session_sensor import session_state
+from scripts.ha_campaign_evidence import empty
 from scripts.ha_campaign_observer import observe
 from tests.test_data_updated_silence import pump
+
+LOGGER = "custom_components.hoben.close_diagnostic"
+
+
+@pytest.fixture(autouse=True)
+def close_logging(caplog):
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+
+
+def close_records(caplog):
+    return [r.hoben_tls_close for r in caplog.records if r.name == LOGGER]
+
+
+def check_trace(trace, generation, mode):
+    assert trace["generation"] == generation
+    assert trace["connection_lost"] == (
+        "not_observed" if mode == "unconfirmed" else "observed"
+    )
+    assert trace["future"] == (
+        "completed_ok"
+        if mode == "normal"
+        else "cancelled"
+        if mode == "unconfirmed"
+        else "completed_error"
+    )
+    assert (
+        trace["first_failure"] is None
+        if mode == "normal"
+        else (
+            trace["first_failure"]["operation"] == "wait_closed"
+            and trace["first_failure"]["result"]
+            == {
+                "reset": "raised_connection",
+                "ssl_error": "raised_tls",
+                "unconfirmed": "timeout",
+            }[mode]
+        )
+    )
+    assert 0 <= trace["elapsed_ms"] <= 5000
+    assert not trace["truncated"] and not trace["invalid"]
+    events = trace["events"]
+    assert len(events) <= 12
+    assert [e["order"] for e in events] == sorted(e["order"] for e in events)
+    assert any(e["operation"] == "writer_close" for e in events)
+    assert any(e["operation"] == "reap" and e["result"] == "returned" for e in events)
 
 
 class Wire(asyncio.Transport):
@@ -38,6 +85,7 @@ class Wire(asyncio.Transport):
         self.close_count = self.abort_count = self.reads = self.pongs = 0
         self.trace = []
         self.silent = False
+        self.gate_close = False
 
     def get_extra_info(self, name, default=None):
         return default
@@ -63,7 +111,7 @@ class Wire(asyncio.Transport):
         self.close_count += 1
         self.trace.append(("close", asyncio.current_task().get_name()))
         self.tick(0.125)
-        if self.mode != "unconfirmed":
+        if self.mode != "unconfirmed" and not self.gate_close:
             asyncio.get_running_loop().call_soon(self.ack)
 
     def abort(self):
@@ -174,6 +222,9 @@ async def test_s1_rx_loss_and_real_close_callback(
             await pump()
         await refresh
         coordinator._async_unsub_refresh()
+        logs = close_records(caplog)
+        assert len(logs) == 1, "close operation discrimination is missing"
+        check_trace(logs[0], 1, mode)
         assert session._rx_error.code == (
             "malformed_response" if incident == b"\x0c" else "experimental_close_client"
         )
@@ -230,10 +281,12 @@ async def test_s1_rx_loss_and_real_close_callback(
 
 
 @pytest.mark.parametrize("mode", ["normal", "reset", "ssl_error", "unconfirmed"])
+@pytest.mark.parametrize("closing", ["ordinary", "double", "cancel"])
 async def test_s2_true_campaign_recovery_and_final_generation_close(
-    hass, entry, tls, mode, caplog
+    hass, entry, tls, mode, closing, caplog
 ):
     first, second = tls.wire(), tls.wire(mode)
+    second.gate_close = closing != "ordinary"
     client = HobenClient(entry.data["user_guid"], DEVICE_GUID)
     coordinator = HobenDataUpdateCoordinator(hass, entry, client)
     marks = set()
@@ -253,17 +306,53 @@ async def test_s2_true_campaign_recovery_and_final_generation_close(
             second.reader.feed_data(b"\x0a")
         await pump()
 
+    evidence = empty("hoben-live")
+    extras = []
     task = asyncio.create_task(
-        observe(coordinator, "session-reconnect", clock=lambda: tls.now[0], sleep=sleep)
+        observe(
+            coordinator,
+            "session-reconnect",
+            evidence=evidence,
+            clock=lambda: tls.now[0],
+            sleep=sleep,
+        )
     )
     try:
         # The observer does not advance its clock during final teardown.
         while not task.done():
             await pump()
+            if second.closing and "teardown" not in marks:
+                marks.add("teardown")
+                if closing == "double":
+                    extras.append(asyncio.create_task(client.async_close()))
+                    await pump()
+                    assert second.close_count == 1 and not extras[0].done()
+                    if mode != "unconfirmed":
+                        second.ack()
+                elif closing == "cancel":
+                    task.cancel()
+                    asyncio.get_running_loop().call_soon(task.cancel)
             if second.closing and mode == "unconfirmed":
                 tls.tick(1.001)
-        evidence = await task
-        metrics = validated(evidence, tls.now[0])
+        if closing == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            await task
+        await asyncio.gather(*extras)
+        logs = close_records(caplog)
+        assert len(logs) == 2, "per-generation close discrimination is missing"
+        check_trace(logs[0], 1, "normal")
+        if closing == "cancel":
+            assert logs[1]["generation"] == 2
+            assert logs[1]["first_failure"]["result"] == "cancelled"
+        else:
+            check_trace(logs[1], 2, mode)
+        metrics = validated(
+            evidence,
+            tls.now[0],
+            reason="cancelled" if closing == "cancel" else "completed",
+        )
         assert evidence["recovery"]["outcome"] == "verified"
         assert evidence["recovery"]["suppressed_pongs"] == 1
         assert evidence["recovery"]["stable_ms"] == 120000
@@ -272,10 +361,10 @@ async def test_s2_true_campaign_recovery_and_final_generation_close(
         assert first.close_count == second.close_count == 1
         assert first.witness.done() and not first.witness.cancelled()
         assert metrics["recovered"]
-        assert metrics["cleanup"] is (mode == "normal")
+        assert metrics["cleanup"] is (mode == "normal" and closing != "cancel")
         rows = evidence["diagnostic"]["owners"]
         assert rows[0]["stage"] == "reaped"
-        if mode == "normal":
+        if mode == "normal" and closing != "cancel":
             assert rows[1]["stage"] == "reaped"
             assert evidence["cleanup"]["completed"]
         else:
@@ -284,7 +373,11 @@ async def test_s2_true_campaign_recovery_and_final_generation_close(
             assert not evidence["cleanup"]["completed"]
             assert evidence["recovery"]["diagnostic"]["cleanup"]["generation"] == 2
             assert evidence["recovery"]["diagnostic"]["cleanup"]["category"] == (
-                "timeout" if mode == "unconfirmed" else "transport"
+                "cancelled"
+                if closing == "cancel"
+                else "timeout"
+                if mode == "unconfirmed"
+                else "transport"
             )
             assert evidence["diagnostic"]["first"][3] == "close_client"
         assert_private_values_absent(caplog.text + repr(evidence))
@@ -293,6 +386,7 @@ async def test_s2_true_campaign_recovery_and_final_generation_close(
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         await client.async_close()
+        await asyncio.gather(*extras, return_exceptions=True)
         for wire in tls.wires:
             if not wire.closed:
                 wire.mode = "normal"
@@ -302,3 +396,50 @@ async def test_s2_true_campaign_recovery_and_final_generation_close(
         for t in asyncio.all_tasks()
         if not t.done()
     )
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_s1_nested_closers_or_concurrent_cancel_keep_original_close_owner(
+    hass, entry, tls, caplog, cancel
+):
+    first = tls.wire("unconfirmed")
+    tls.wire()
+    coordinator = await load(hass, entry)
+    coordinator._async_unsub_refresh()
+    client, owner = coordinator.client, tls.owners[0]
+    session = owner._session
+    stamp = coordinator.last_successful_read_at
+    first.reader.feed_data(b"\x0c")
+    await pump()
+    assert first.closing and first.close_count == 1
+    if cancel:
+        session._rx_task.cancel()
+        session._rx_task.cancel()
+        await pump()
+        assert session._rx_task.done() and not session.cleanup_succeeded
+        assert client.session_observation.cleanup_failed and not tls.delays
+        assert close_records(caplog)[0]["first_failure"]["result"] == "cancelled"
+        tls.tick(120)
+        await pump()
+        assert len(tls.transports) == 1
+    else:
+        tasks = [
+            asyncio.create_task(session.close()),
+            asyncio.create_task(session.abort()),
+        ]
+        await pump()
+        assert not any(t.done() for t in tasks)
+        first.mode = "normal"
+        first.ack()
+        await asyncio.gather(*tasks)
+        assert session.cleanup_succeeded and tls.delays == [60]
+        assert len(close_records(caplog)) == 1
+        check_trace(close_records(caplog)[0], 1, "normal")
+    assert coordinator.last_successful_read_at == stamp
+    assert first.close_count == 1
+    assert_private_values_absent(caplog.text)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    for wire in tls.wires:
+        if not wire.closed:
+            wire.mode = "normal"
+            wire.ack()

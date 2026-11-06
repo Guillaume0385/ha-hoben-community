@@ -1,10 +1,10 @@
-# #192 — caractérisation offline S1/S2, preuve causale manquante
+# #192 — caractérisation S1/S2 et instrumentation diagnostic-only
 
 Tâche `HOBEN-192-HA-CLEANUP-OFFLINE-001`,
 [consigne #6695381974](https://github.com/Guillaume0385/ha-hoben-community/issues/192#issuecomment-6695381974),
 base `experimental` `6e37c5a04f3d90353cf9340250423aecacb60130`.
 
-**Aucun correctif de production établi.** Cette caractérisation ne solde pas
+**Aucun correctif causal de cleanup établi.** Cette caractérisation ne solde pas
 #192, ne démontre pas la cause résidentielle et ne valide pas le run réel.
 Les tests sont verts en vérifiant aussi des `cleanup_failed` attendus : ils
 ne constituent donc pas une preuve RED/GREEN d'un défaut corrigé.
@@ -83,8 +83,72 @@ changement de budget, codec/framing, retry B8, B7 300 s, DataUpdated 30 s, gate,
 workflow, main/release ou automatisation. #192 reste ouverte ; validations
 V1–V6 non soldées et dernier HA/all #42283866996 toujours FAILURE.
 
-Commandes hors ligne : pytest HA sur ce fichier et régressions B6/B8/B9/#171,
-pytest unitaire transport/B6/B9, Ruff check/format. Les résultats exacts sont
-consignés dans le commentaire canonique. Sans PR corrective ni nouveau HEAD de
-production, les quatre CI de cette investigation restent **NOT RUN** ; les
-checks verts de #191 appartiennent au code de base et ne prouvent pas #192.
+## Étape diagnostique autorisée par MANAGER après ce blocage
+
+La dernière section de la même consigne autorise une instrumentation limitée,
+**sans modification du contrat de fermeture**. Son RED/GREEN porte uniquement
+sur la perte de discrimination : les 12 cas de base n'émettent aucun témoin
+permettant de distinguer les opérations ; ils échouent avec les nouvelles
+assertions diagnostiques. Après instrumentation, ces assertions deviennent
+vertes. Cela ne corrige ni ne prouve la cause des incidents réels S1/S2.
+
+`close_diagnostic.CloseTrace` émet un seul log structuré `hoben_tls_close` par
+fermeture effective : DEBUG sans échec, WARNING sinon. Un close idempotent ne
+fabrique ni log de succès ni attestation de réapage supplémentaire. Le schéma
+reste local au journal ; rapports/gates de campagne Python/Node inchangés.
+
+- Opérations fermées : `writer_close`, `wait_closed`, `abort`, `reap`.
+- Résultats fermés : `returned`, `raised_connection`, `raised_tls`,
+  `raised_other`, `timeout`, `cancelled`, `not_confirmed` (entrée/pending).
+- État du Future partagé : `pending`, `completed_ok`, `completed_error`,
+  `cancelled`, ou `unknown` si le SDK n'est pas inspectable. L'accès ne consomme
+  pas l'exception du Future, ne l'attend pas et ne le modifie pas.
+- Callback : `observed` uniquement si le tap temporaire a reçu l'appel réel
+  `connection_lost`, puis a transmis **le même argument** au callback original.
+  `not_observed` ne prouve pas son absence : un callback déjà exécuté ou capturé
+  par la boucle avant installation peut échapper au tap. Son résultat typé est
+  séparé de celui de `wait_closed`. Le callback original est restauré avant log.
+- Génération : entier déjà attribué par le lifecycle au diagnostic B3 du
+  framer ; `unknown` si indisponible. Un contexte temporaire dans
+  `V4Session._release_transport` transmet seulement cet entier aux wrappers
+  imbriqués et au transport. Aucun compteur parallèle ni identifiant privé.
+- Maximum 12 événements, premier échec et un secondaire conservés même si la
+  liste sature ; ordre plafonné à 65535, indicateur `truncated` en cas de perte.
+  Le schéma est testé à 4096 octets JSON maximum ; tout champ hors allowlist
+  est rejeté. Un callback tardif ne modifie pas le diagnostic déjà émis.
+  Durées en millisecondes, plafonnées au close_timeout configuré, au plus 60 s
+  pour la télémétrie. Pour le réglage normal : 5000 ms ; `duration_capped`
+  signale une valeur réelle supérieure, sans augmenter le délai opérationnel.
+
+La lecture du Future utilise les détails CPython de StreamReaderProtocol
+testés en Python 3.12 et 3.14 ; ce n'est pas une nouvelle API de preuve. Une
+implémentation non inspectable reste `unknown` et ne modifie pas le close réel.
+
+Les catégories ne pilotent **aucune** décision. Callback avec erreur, abort,
+`is_closing`, Future terminé avec erreur et close idempotent ne deviennent pas
+des preuves de cleanup. Une annulation/erreur du logger n'interrompt pas la
+fermeture réelle. Aucun texte/type d'exception libre, argument, cause, traceback,
+GUID, RX ou valeur de registre n'est retenu dans le diagnostic.
+
+Les cas supplémentaires couvrent annulations concurrentes et doubles fermetures
+S1/S2, premier échec suivi d'une erreur d'abort, refus de succès sans callback,
+réapage, restauration du callback, saturation, génération inconnue et logger
+défaillant. Les suites B6/B7/B8/B9/#160/#171 et contrats Python/Node restent
+requises ; les résultats exacts et quatre CI figurent dans le bilan au HEAD PR.
+Les checks verts de #191 ne sont pas ceux de cette étape.
+
+## Instruction DEBUG Home Assistant, sans activation par CODEX DEV
+
+Après revue/déploiement autorisés seulement, MANAGER peut proposer d'ajouter
+temporairement au bloc logger existant (sans dupliquer sa clé) :
+
+```yaml
+logger:
+  logs:
+    custom_components.hoben.close_diagnostic: debug
+```
+
+Cela permet de voir aussi les fermetures sans erreur. Les échecs restent au
+niveau WARNING. Revenir ensuite au niveau antérieur ; n'activer aucun logger
+global, TLS ou RX brut, ne pas exporter les journaux HA privés. Cette instruction
+n'a pas été exécutée ; aucun accès HA résidentiel, test réel ou workflow live.
