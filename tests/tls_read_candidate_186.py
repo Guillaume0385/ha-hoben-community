@@ -17,6 +17,9 @@ RESPONSE = bytes.fromhex("0effff0000002b010428") + b"\x00\x00" * 20
 PING = b"\x0a"
 INVALID_UPDATED = b"\x1b" + b"\x00" * 4 + bytes.fromhex("ffff0000ffff")
 RE_HEAD = "e2f88b0dfcd130b9b9f9e52d69a900d8ded48b6e"
+# APK ManageOpened allocates 512 bytes (06000C21:0108–0120). A comparison
+# completion must fit both readers; HA's 4096-byte read capacity is not framing.
+MAX_COMPLETION_BYTES = 512
 
 
 class MemoryCompletions:
@@ -24,7 +27,7 @@ class MemoryCompletions:
 
     def __init__(self, deliveries):
         if len(deliveries) > 64 or any(
-            not (type(item) is bytes and len(item) <= 4096)
+            not (type(item) is bytes and len(item) <= MAX_COMPLETION_BYTES)
             and type(item) not in (TransportEOF, TransportTlsError)
             for item in deliveries
         ):
@@ -252,7 +255,7 @@ def bounded_json(report):
                 valid &= (
                     type(item) is list
                     and len(item) <= 64
-                    and all(number(n, 4096) for n in item)
+                    and all(number(n, MAX_COMPLETION_BYTES) for n in item)
                 )
             elif key == "events":
                 if type(item) is not list or len(item) > 128:
@@ -266,10 +269,14 @@ def bounded_json(report):
                     )
                     if not valid:
                         break
-                    valid &= event["event"] in event_names and all(
-                        number(v, 255 if k == "synthetic_subcode" else 4096)
-                        for k, v in event.items()
-                        if k != "event"
+                    valid &= (
+                        type(event["event"]) is str
+                        and event["event"] in event_names
+                        and all(
+                            number(v, 255 if k == "synthetic_subcode" else 4096)
+                            for k, v in event.items()
+                            if k != "event"
+                        )
                     )
             else:
                 valid &= number(item)

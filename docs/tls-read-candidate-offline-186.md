@@ -21,6 +21,8 @@ asynchrones indépendants. Une entrée désigne une **complétion de lecture de
 plaintext prescrite**, pas un paquet TCP, un enregistrement TLS ou une trame
 applicative prouvée. Les tailles `delivery_bytes` sont en octets effectivement
 retournés à chaque consommateur. HA peut cesser de lire avant le modèle APK.
+Chaque complétion est limitée à 512 octets pour respecter la capacité du buffer
+APK (`06000C21:0108–0120`), sans assimiler cette capacité à une taille de message.
 
 Le modèle APK choisit au plus une branche par complétion, sans accumulation,
 séparation ni sauvegarde du suffixe. Les décisions de Pong et de nouvelle lecture
@@ -83,7 +85,7 @@ Les 48 octets demeurent un préfixe, pas un total OpenedClient prouvé.
 
 `compare()` retourne des événements, compteurs, tailles et énumérations fermées.
 `bounded_json()` refuse les champs supplémentaires, textes libres et faux drapeau
-de preuve ; plafond **8192 octets par cas**, 64 complétions de 4096 octets au plus,
+de preuve ; plafond **8192 octets par cas**, 64 complétions de 512 octets au plus,
 128 événements par côté. Dépassement : erreur fermée, sans rapport tronqué présenté
 comme complet. Aucun RX, payload, identité, registre ou texte d'exception n'est
 sérialisé. Les journaux de framer sont également vérifiés contre des marqueurs

@@ -193,9 +193,9 @@ def test_report_has_only_closed_scalars_and_sizes_not_exception_text_or_payload(
     with pytest.raises(ValueError, match="invalid_synthetic_deliveries"):
         MemoryCompletions([b"x"] * 65)
     with pytest.raises(ValueError, match="invalid_synthetic_deliveries"):
-        MemoryCompletions([b"x" * 4097])
+        MemoryCompletions([b"x" * 513])
     with pytest.raises(ValueError, match="synthetic_event_budget"):
-        observe(PING * 4096)
+        observe(PING * 512)
 
 
 @pytest.mark.parametrize("mutation", ["extra", "text", "counter", "proof", "event"])
