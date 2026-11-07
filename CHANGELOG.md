@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #192, diagnostic borné de fermeture TLS uniquement
+
+- Distinguer les opérations writer_close, wait_closed, abort et reap, les
+  erreurs de connexion/TLS/autres, timeout et annulation, sans exception libre.
+  Conserver le premier échec et un secondaire, l'ordre et les durées bornées,
+  l'état du Future SDK et le callback effectivement observé, par génération B3.
+- Un seul diagnostic expurgé par stream fermé, 12 événements maximum ; aucun
+  nouveau champ de campagne ni changement des décisions de cleanup/retry,
+  du plafond TLS 5 s, de B7/B8 ou de DataUpdated. Tests RED/GREEN de la lacune
+  d'observabilité, avec vrais chemins HA et témoins asyncio synthétiques.
+- **Diagnostic-only : S1/S2 non résolus.** Aucun correctif causal de l'incident
+  réel ni résultat live revendiqué. [Limites et activation DEBUG sûre](docs/ha-cleanup-offline-192.md).
+
 ## En cours — #163 / B9, fermeture TLS et réapage attestés
 
 - Garder intact le témoin `StreamWriter.wait_closed()` quand la fermeture
