@@ -39,6 +39,7 @@ ERRORS = {
 EVENTS = {
     "start",
     "observation",
+    "pending",
     "tick",
     "cancel",
     "worker_failed",
@@ -86,6 +87,7 @@ class InfoSupervisor:
         self._phase = "NEW"
         self._events = []
         self._observation = None
+        self._pending = None
         self._started = False
         self._clock_valid = True
         self._first_error = self._stop_reason = "none"
@@ -148,7 +150,93 @@ class InfoSupervisor:
                 else "cleanup_timeout"
             )
 
+    def _prepare(self, report):
+        # D4 only: C has observed protocol facts, but actual teardown is pending.
+        # This FAILURE/cleanup_unproven report is NEVER a cleanup attestation.
+        try:
+            validate_observation(report)
+            need(self._pending is None and self._observation is None)
+            need(
+                self._phase == "OBSERVING"
+                or (self._phase == "CLEANING" and self._first_error != "none")
+            )
+            need(report["started"] and not report["cleanup_attested"])
+            need(report["cleanup_ms"] == 0)
+            need(report["elapsed_ms"] <= self._elapsed)
+            if self._elapsed > LIMITS["observation_ms"]:
+                # A real request's own error cleanup may finish inside the
+                # reserved teardown window. Keep that failure, never a late
+                # successful acquisition, and never move the fixed boundary.
+                need(report["first_error"] != "none")
+                self._cleanup("window_elapsed", at=LIMITS["observation_ms"])
+                need(self._elapsed < self._cleanup_deadline)
+            if self._first_error == "none" and report["first_error"] == "none":
+                need(
+                    self._elapsed < LIMITS["observation_ms"]
+                    if report["info_discarded"]
+                    else self._elapsed == LIMITS["observation_ms"]
+                )
+            self._pending = copy.deepcopy(report)
+        except Exception:
+            self._latch("invalid_evidence")
+            self._cleanup("invalid_evidence")
+            return
+        if report["first_error"] != "none":
+            self._latch("observation_failed")
+        self._cleanup(
+            "window_elapsed"
+            if not report["info_discarded"]
+            and self._elapsed == LIMITS["observation_ms"]
+            else "observed"
+        )
+
+    def _finalize(self, report):
+        try:
+            validate_observation(report)
+            need(self._observation is None and self._phase == "CLEANING")
+            # Only teardown/time fields may change. No new read, different
+            # session, erased incident or replaced protocol evidence is allowed.
+            changed = {
+                "rx_reaped",
+                "cleanup_attested",
+                "first_error",
+                "elapsed_ms",
+                "cleanup_ms",
+                "result",
+                "reason",
+            }
+            need(
+                all(
+                    report[k] == v for k, v in self._pending.items() if k not in changed
+                )
+            )
+            need(
+                self._pending["first_error"] == "none"
+                or report["first_error"] == self._pending["first_error"]
+            )
+            need(self._pending["elapsed_ms"] <= report["elapsed_ms"] <= self._elapsed)
+            pending_at = next(
+                e["at_ms"] for e in self._events if e["event"] == "pending"
+            )
+            # C's seconds-to-ms projection can truncate by one millisecond;
+            # never permit an unrelated/rewound teardown duration.
+            need(
+                abs(
+                    (report["elapsed_ms"] - self._pending["elapsed_ms"])
+                    - (self._elapsed - pending_at)
+                )
+                <= 1
+            )
+            self._observation = copy.deepcopy(report)
+            if report["result"] not in {"SUCCESS", "INCONCLUSIVE"}:
+                self._latch("observation_failed")
+        except Exception:
+            self._latch("invalid_evidence")
+
     def _accept(self, report):
+        if self._pending is not None:
+            self._finalize(report)
+            return
         if self._phase != "OBSERVING":
             self._latch("late_evidence")
             return
@@ -206,6 +294,12 @@ class InfoSupervisor:
             self._latch("clock")
             self._abort_requested = True
             self._cleanup("clock")
+        if kind == "pending" and self._clock_valid:
+            # Exactly 3540 s is the boundary for a No-Info provisional report.
+            # Process it BEFORE advancing; never latch missing evidence first.
+            self._prepare(report)
+            self._advance()
+            return
         if self._clock_valid:
             self._advance()
         if self._phase == "STOPPED":
@@ -248,6 +342,10 @@ class InfoSupervisor:
 
     def observe(self, report):
         self._step("observation", report)
+
+    def prepare_observation(self, report):
+        """D4 schema 2: freeze protocol facts before actual, bounded cleanup."""
+        self._step("pending", report)
 
     def tick(self):
         self._step("tick")
@@ -304,6 +402,8 @@ class InfoSupervisor:
             "result": result,
             "reason": reason,
         }
+        if any(e["event"] == "pending" for e in self._events):
+            output.update(schema=2, pending_observation=self._pending)
         need(
             len(json.dumps(output, separators=(",", ":")).encode())
             <= LIMITS["max_report_bytes"]
@@ -315,9 +415,14 @@ def validate_supervision_report(report):
     """Closed schema plus deterministic replay; never authenticates the events."""
     try:
         empty = InfoSupervisor(clock_ms=lambda: 0).finish()
-        need(type(report) is dict and report.keys() == empty.keys())
+        need(type(report) is dict and type(report.get("schema")) is int)
+        version2 = report["schema"] == 2
+        if version2:
+            empty.update(schema=2, pending_observation=None)
+        need(report.keys() == empty.keys())
         for key, value in CONSTANTS.items():
-            need(type(report[key]) is type(value) and report[key] == value)
+            expected = 2 if key == "schema" and version2 else value
+            need(type(report[key]) is type(expected) and report[key] == expected)
         need(type(report["limits"]) is dict and report["limits"] == LIMITS)
         need(all(type(value) is int for value in report["limits"].values()))
         for key in (
@@ -350,7 +455,10 @@ def validate_supervision_report(report):
             kind, now[0] = entry["event"], entry["at_ms"]
             need(type(kind) is str and kind in EVENTS)
             need(now[0] is None or time_value(now[0]))
-            if kind == "observation":
+            if kind == "pending":
+                need(version2)
+                replay.prepare_observation(report["pending_observation"])
+            elif kind == "observation":
                 replay.observe(report["observation"])
             elif kind == "event_budget":
                 need(len(replay._events) == LIMITS["max_events"] - 1)
