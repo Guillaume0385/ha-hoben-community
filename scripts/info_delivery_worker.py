@@ -14,6 +14,7 @@ from scripts.info_delivery_supervisor import (
     InfoSupervisor,
     validate_supervision_report,
 )
+from scripts.info_delivery_tls_adapter import MemoryInfoPorts
 
 
 async def _wait_progress(wire, clock, deadline, rx):
@@ -42,14 +43,19 @@ def _check_ports(session, clock):
     return wire
 
 
-async def run_offline_worker(*, session, clock):
+async def run_offline_worker(*, session, clock, _tls_ports=None):
     """Drive/reap one async memory worker; never attests a real process/TLS close.
 
     Cancel before start: no connection. Cancel in flight: signal the owned task
     once, shield its bounded cleanup against repeat cancellation, reap, FAILURE.
     The synchronous return is a validated synthetic report, never live evidence.
     """
+    if _tls_ports is not None:
+        require(type(_tls_ports) is MemoryInfoPorts)
+        _tls_ports.bind(session, clock)
     wire = _check_ports(session, clock)
+    if _tls_ports is not None:
+        wire._delivery_port = _tls_ports
     policy = InfoSupervisor(clock_ms=lambda: clock.now_ms)
     origin = clock.now_ms
     deadline = origin + LIMITS["observation_ms"]
@@ -69,6 +75,9 @@ async def run_offline_worker(*, session, clock):
                         raise session._rx_error
                     first = "closed"
                     break
+                if _tls_ports is not None and _tls_ports.failed:
+                    first = "evidence_gap"
+                    break
                 child = wire.scenario
                 if child is not None:
                     # C's short proof window starts at candidate delivery, not
@@ -81,11 +90,16 @@ async def run_offline_worker(*, session, clock):
                         first = "timeout"
                         break
                     if child.drops and child.steps["pong"] is not None:
+                        if _tls_ports is not None and not _tls_ports.allow_v4_read():
+                            first = "evidence_gap"
+                            break
                         remaining = min(
                             5, (min(deadline, local_end) - clock.now_ms) / 1000
                         )
                         await session.request_v4_data(timeout=remaining)
                         wire.sample()
+                        if _tls_ports is not None and _tls_ports.failed:
+                            first = "evidence_gap"
                         break
                 else:
                     local_end = deadline
