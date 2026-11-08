@@ -128,6 +128,16 @@ Cette règle est une **hypothèse autorisée, pas une preuve de frontière ou de
 fraîcheur serveur**. Les contrats expérimentaux restent inchangés et aucun
 résultat réel nouveau n'est établi.
 
+### Prototype privé Info — hypothèse #186-B, désactivée par défaut
+
+Le [prototype offline #186-B](docs/info-delivery-drop-experiment-186.md) peut
+abandonner une livraison plaintext entière commençant par Info, seulement avec
+une capacité privée de fixture, framer vide et provenance de lecture attestée.
+Ce choix local borné ne délimite pas Info et peut perdre un Ping/0E concaténé.
+Longueur Info INCONCLUSIVE, `boundary_proven=false` ; aucun sous-code interprété,
+scan ou saut de deux octets. Aucun fournisseur HA/live et aucun changement des
+comportements par défaut, du silence DataUpdated, des délais B7/B8 ou du cleanup.
+
 ---
 
 ## 3. Types de messages MyHOBEN
