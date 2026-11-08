@@ -80,6 +80,8 @@ function validateOffline(report) {
     need(report.reads_after_drop <= report.requests_after_drop);
     need(report.reconnections === Math.max(0, report.openings - 1));
     need(report.started === (report.openings > 0));
+    if (!report.started)
+      need(report.info_discarded === 0 && !report.rx_reaped && !report.cleanup_attested);
     need(!report.opened_validated || report.started);
     need(!report.same_session || report.opened_validated);
     need(report.elapsed_ms === report.collection_ms + report.cleanup_ms);

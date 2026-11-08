@@ -34,6 +34,9 @@ si les autres garanties tiennent ; un incident ou cleanup non prouvé reste
 distincte de l'échec final de cleanup. Une chronologie insuffisante peut décrire
 un échec fidèle ; elle ne peut pas être requalifiée en succès. Les budgets de
 fixture C (30 s collecte + 5 s cleanup, 16 drops, 128 événements) sont inchangés.
+Le lecteur Node refuse aussi toute revendication de drop, RX réapé ou cleanup
+sans démarrage : un NOT RUN contradictoire n'est pas une preuve admissible.
+Ce durcissement de lecture ne modifie pas le producteur Python C.
 
 **Authentification/provenance/supervision live : NON PROUVÉES.** Un schéma
 cohérent n'authentifie pas son émetteur ; un rapport entièrement fabriqué peut
@@ -43,7 +46,8 @@ un SUCCESS offline valide est refusé par l'API de publication live. Changer
 `mode`, ajouter une attestation, ou remplacer les budgets par une heure ne
 constitue jamais une voie d'admission. Aucun export/publish live n'existe ici.
 
-Validation : 168 tests Node adversariaux, exécution de cette suite par pytest
+Validation : 171 tests Node adversariaux, dont trois RED/GREEN sur NOT RUN,
+exécution de cette suite par pytest
 dans la CI existante, comparaison Python/Node de 20 rapports issus du vrai
 V4Session sur transport mémoire et de rapports altérés ; régressions #186-A/B/C,
 #192 et B4/B7/B8/DataUpdated. Les tests VM exécutent le module avec I/O et accès

@@ -151,6 +151,15 @@ test('absence cannot carry post-drop evidence or manufactured SUCCESS', () => {
   refused(() => api.validateOffline({...absent(), requests_after_drop: 1, reads_after_drop: 1}));
 });
 
+for (const kind of ['drop', 'reaped', 'cleanup']) test('NOT RUN cannot claim activity: ' + kind, () => {
+  const r = notRun();
+  if (kind === 'drop') {
+    r.info_discarded = 1; r.info_delivery_bytes = [1]; r.steps.drop = 1;
+  } else if (kind === 'reaped') r.rx_reaped = true;
+  else {r.rx_reaped = true; r.cleanup_attested = true;}
+  refused(() => api.validateOffline(r));
+});
+
 test('transport encoding refuses size excess, duplicates, aliases and malformed UTF-8', () => {
   const text = JSON.stringify(success());
   for (const input of [null, {}, true, Buffer.alloc(8193), ' '.repeat(8193),
