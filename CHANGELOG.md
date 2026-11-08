@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #186-D3, refus de l'ancienne admission HA manuelle
+
+- Réserver la sélection existante `hoben-live` à la future observation Info
+  sous la politique technique `hoben-experimental`. Rejeter l'ancien
+  environnement HA et refuser cette sélection avant tout claim/READY, au
+  préflight comme au recheck, tant que le workflow route encore vers collect-ha.
+- Préserver les autres choix, `all`, leurs approbations/rechecks et anti-rejeu.
+  Tests adversariaux hors ligne, y compris le vrai script de préflight ;
+  aucun workflow, launcher, runtime ou plugin modifié. Aucun test réel ni
+  nouveau dispatch ; framing Info INCONCLUSIVE et cleanup #192 non résolu.
+
 ## En cours — #186-B, prototype privé d'abandon de livraison Info
 
 - Ajouter un opt-in de test privé, désactivé par défaut, au vrai RX V4 :

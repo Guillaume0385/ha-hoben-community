@@ -2,7 +2,6 @@
 // Owner dispatch replaces the old PR comment. Every technical proof is reread.
 const crypto=require('node:crypto');
 const technical=require('./experimental-lab-gate.cjs');
-const live=require('./experimental-live-gate.cjs');
 const API={owner:'Guillaume0385',repo:'ha-hoben-community'};
 const REPO=API.owner+'/'+API.repo, REPO_ID=1401398724, OWNER_ID=18246624;
 const FILE='.github/workflows/hoben-manual.yml';
@@ -71,8 +70,10 @@ async function verify(options) {
   const {github,context,recheck=false}=options;
   const proof=await provenance(options);
   const reviewed=await reviewedCommit(github,context,proof);
-  const environmentAPI=proof.selection==='hoben-live'?live:technical;
-  const environment=await environmentAPI.environmentPolicy(github,context);
+  // #186 reassigns the existing literal hoben-live choice to Info research.
+  // Its future route must satisfy the hoben-experimental technical policy;
+  // the former HA environment/approval cannot authorize this selection.
+  const environment=await technical.environmentPolicy(github,context);
   await technical.noOtherObservation(github,context);
   // Also reject runs created from the retired experimental entry points.
   for(const status of ['requested','queued','pending','waiting','in_progress']) {
@@ -82,6 +83,11 @@ async function verify(options) {
        ['hoben-experimental.yml','hoben-live-experimental.yml','hoben-session-300.yml']
          .includes(r.path.split('@')[0].split('/').pop()))));
   }
+  // The frozen workflow still sends every approved hoben-live selection to
+  // collect-ha/environment hoben-live. Never emit READY or create/read a claim
+  // for Info until a separately reviewed workflow/worker route replaces it.
+  // This denial also applies to recheck and previously approved HA claims.
+  if(proof.selection==='hoben-live')throw Error('manual_info_route_not_connected');
   const name='hoben-manual-'+context.runId+'-attempt1';
   const claim={schema:1,selection:proof.selection,sha:context.sha,run_id:context.runId,
     run_attempt:1,...reviewed,environment_digest:environment.digest};
@@ -93,7 +99,7 @@ async function verify(options) {
     const {data:tag}=await github.rest.git.getTag({...API,tag_sha:ref.object.sha});
     need(tag.tag===name&&tag.object?.type==='commit'&&tag.object.sha===context.sha&&
       digest(JSON.parse(tag.message))===digest(claim));
-    if(environment.approvalRequired) await environmentAPI.actualApproval(github,context,environment,
+    if(environment.approvalRequired) await technical.actualApproval(github,context,environment,
       {number:1,beganAt:proof.beganAt},true);
   } else {
     const {data:tag}=await github.rest.git.createTag({...API,tag:name,message:JSON.stringify(claim),

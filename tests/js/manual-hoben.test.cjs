@@ -1,5 +1,6 @@
 "use strict";
 const test=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs');
 const gate=require('../../.github/scripts/manual-hoben-gate.cjs');
 const api=require('../../.github/scripts/manual-hoben-report.cjs');
 const repo='Guillaume0385/ha-hoben-community',file='.github/workflows/hoben-manual.yml';
@@ -7,7 +8,7 @@ const sha='a'.repeat(40),candidate='b'.repeat(40),tree='c'.repeat(40);
 const user={login:'Guillaume0385',id:18246624,type:'User'};
 const repository={full_name:repo,id:1401398724};
 function setup(selection='all') {
-  const s={writes:0,history:[],reviews:[],threads:[],jobs:['tests','ha-tests','hacs','hassfest'].map(name=>
+  const s={writes:0,claimReads:0,environmentReads:[],reads:new Set(),history:[],reviews:[],threads:[],jobs:['tests','ha-tests','hacs','hassfest'].map(name=>
     ({name,head_sha:candidate,status:'completed',conclusion:'success'}))};
   s.context={eventName:'workflow_dispatch',actor:user.login,ref:'refs/heads/experimental',sha,runId:123,
     repo:{owner:user.login,repo:'ha-hoben-community'},
@@ -28,30 +29,30 @@ function setup(selection='all') {
     custom_branch_policies:true},protection_rules:[{type:'branch_policy',id:2}]};
   s.policies=[{id:2,node_id:'branch',name:'experimental',type:'branch'}];
   s.tree=tree;s.active=[];
-  const actions={getWorkflowRun:async q=>({data:q.run_id===9?s.ci:s.run}),
-    listWorkflowRunsForRepo:q=>q.head_sha?[s.ci]:s.active,listJobsForWorkflowRun:()=>s.jobs};
-  const git={getCommit:async q=>({data:{sha:q.commit_sha,tree:{sha:q.commit_sha===sha?s.tree:tree}}}),
+  const actions={getWorkflowRun:async q=>{s.reads.add(q.run_id===9?'ci':'run');return {data:q.run_id===9?s.ci:s.run};},
+    listWorkflowRunsForRepo:q=>q.head_sha?[s.ci]:s.active,
+    listJobsForWorkflowRun:()=>{s.reads.add('jobs');return s.jobs;}};
+  const git={getCommit:async q=>{s.reads.add('tree');return {data:{sha:q.commit_sha,tree:{sha:q.commit_sha===sha?s.tree:tree}}};},
     createTag:async q=>{s.writes++;s.tag={tag:q.tag,object:{type:'commit',sha:q.object},message:q.message};
       return {data:{sha:'d'.repeat(40)}};},
     createRef:async q=>{if(s.ref)throw Error('collision');s.ref={ref:q.ref,object:{type:'tag',sha:q.sha}};},
-    getRef:async()=>({data:s.ref}),getTag:async()=>({data:s.tag})};
-  s.github={rest:{repos:{getBranch:async()=>({data:s.branch}),
-      listPullRequestsAssociatedWithCommit:()=>[s.pr],getEnvironment:async()=>{
+    getRef:async()=>{s.claimReads++;return {data:s.ref};},getTag:async()=>({data:s.tag})};
+  s.github={rest:{repos:{getBranch:async()=>{s.reads.add('branch');return {data:s.branch};},
+      listPullRequestsAssociatedWithCommit:()=>{s.reads.add('pr');return [s.pr];},getEnvironment:async q=>{
+        s.environmentReads.push(q.environment_name);
         if(s.apiDenied)throw Error('PRIVATE_API');return {data:s.environment};},
       listDeploymentBranchPolicies:()=>s.policies},
-    pulls:{get:async()=>({data:s.pr}),listReviews:()=>s.reviews},actions,git},
+    pulls:{get:async()=>({data:s.pr}),listReviews:()=>{s.reads.add('review');return s.reviews;}},actions,git},
     paginate:async(fn,args)=>fn(args),
     graphql:async()=>({repository:{pullRequest:{reviewThreads:{nodes:s.threads,pageInfo:{hasNextPage:false}}}}}),
     request:async()=>({data:s.history})};
-  if(selection==='hoben-live') {
-    s.branch.name='experimental';
-    s.environment.name='hoben-live';s.environment.can_admins_bypass=true;
-    s.environment.deployment_branch_policy={protected_branches:true,custom_branch_policies:false};
-  }
   s.options=()=>({github:s.github,context:s.context,env:s.env});
   return s;
 }
-for(const choice of gate.CHOICES)test('manual reserve/recheck '+choice,async()=>{
+// #186-D3 supersedes the former HA acceptance of this one literal selection.
+// Other scenarios retain their exact reservation/approval/recheck behavior.
+const runnable=['h1h2','session-300','session-reconnect','all'];
+for(const choice of runnable)test('manual reserve/recheck '+choice,async()=>{
   const s=setup(choice);
   const decision=await gate.verify(s.options());
   assert.equal(decision.selection,choice);assert.equal(decision.pr,121);
@@ -73,8 +74,8 @@ const mutations={main:s=>{s.context.ref=s.env.GITHUB_REF='refs/heads/main';},
 for(const [name,mutate] of Object.entries(mutations))test('refusal before claim '+name,async()=>{
   const s=setup();mutate(s);await assert.rejects(()=>gate.verify(s.options()));assert.equal(s.writes,0);
 });
-test('fresh independent environment approval is mandatory when configured',async()=>{
-  const s=setup();s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
+for(const choice of runnable)test('fresh independent environment approval is mandatory: '+choice,async()=>{
+  const s=setup(choice);s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
     reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
   assert.equal((await gate.verify(s.options())).status,'PENDING APPROVAL');
   await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
@@ -108,37 +109,84 @@ test('publication refuses oversized or incomplete environment parts before files
   }
 });
 
-test('live protected environment without reviewers is accepted, never inferred from absence',async()=>{
-  const s=setup('hoben-live');
-  const d=await gate.verify(s.options());
-  assert.equal(d.environment_id,1);assert.match(d.environment_digest,/^[a-f0-9]{64}$/);
-  assert.equal(d.claim_sha,'d'.repeat(40));
-  await gate.verify({...s.options(),recheck:true});
-  s.environment.deployment_branch_policy={protected_branches:false,custom_branch_policies:false};
-  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
+const routeBlocked='manual_info_route_not_connected';
+function legacy(s) {
+  s.branch.name='experimental';
+  s.environment.name='hoben-live';s.environment.can_admins_bypass=true;
+  s.environment.deployment_branch_policy={protected_branches:true,custom_branch_policies:false};
+  return s;
+}
+test('the dispatch choices are unchanged and all does not select hoben-live',()=>{
+  assert.deepEqual(gate.CHOICES,[...runnable,'hoben-live']);
+  assert.deepEqual(runnable,['h1h2','session-300','session-reconnect','all']);
 });
-for(const [name,mutate] of Object.entries(mutations))test('live refuses before claim '+name,async()=>{
+for(const recheck of [false,true])test('Info route stays blocked after all technical checks, recheck='+recheck,async()=>{
   const s=setup('hoben-live');
-  if(name==='environment')s.environment.deployment_branch_policy={protected_branches:false,custom_branch_policies:false};
-  else mutate(s);
-  await assert.rejects(()=>gate.verify(s.options()));assert.equal(s.writes,0);
+  await assert.rejects(()=>gate.verify({...s.options(),recheck}),{message:routeBlocked});
+  assert.deepEqual(s.environmentReads,['hoben-experimental']);
+  for(const read of ['branch','run','pr','tree','review','ci','jobs'])assert.ok(s.reads.has(read),read);
+  assert.equal(s.writes,0);assert.equal(s.claimReads,0);assert.equal(s.ref,undefined);
 });
-test('live approval is fresh, independent and bound to hoben-live',async()=>{
+for(const recheck of [false,true])test('old HA environment cannot admit Info, recheck='+recheck,async()=>{
+  const s=legacy(setup('hoben-live'));
+  await assert.rejects(()=>gate.verify({...s.options(),recheck}),{message:'environment_branch_invalid'});
+  assert.deepEqual(s.environmentReads,['hoben-experimental']);assert.equal(s.writes,0);
+});
+const infoMutations={...mutations,
+  sender:s=>{s.context.payload.sender={...user,id:99};},
+  repository:s=>{s.context.payload.repository={...repository,id:99};},
+  runHead:s=>{s.run.head_sha=candidate;},
+  prDraft:s=>{s.pr.draft=true;},prMerge:s=>{s.pr.merged=false;},
+  prOwner:s=>{s.pr.merged_by={...user,id:99};},
+  ciHead:s=>{s.ci.head_sha=sha;},ciAttempt:s=>{s.ci.run_attempt=2;},
+  ciJobHead:s=>{s.jobs[0].head_sha=sha;},ciMissing:s=>{s.jobs.pop();},
+  wrongEnvironment:s=>{s.environment.name='hoben-live';},
+  unknownRule:s=>{s.environment.protection_rules.push({id:3,type:'custom_protection'});}};
+for(const [name,mutate] of Object.entries(infoMutations))test('Info technical refusal is not masked by route block: '+name,async()=>{
+  const s=setup('hoben-live');mutate(s);
+  await assert.rejects(()=>gate.verify(s.options()),error=>error.message!==routeBlocked);
+  assert.equal(s.writes,0);
+});
+test('legacy claimed/approved HA evidence and caller flags cannot resurrect the route',async()=>{
+  for(const environment of ['hoben-live','hoben-experimental']) {
+    const s=setup('hoben-live');
+    if(environment==='hoben-live')legacy(s);
+    s.ref={ref:'refs/tags/hoben-manual-123-attempt1',object:{type:'tag',sha:'d'.repeat(40)}};
+    s.tag={tag:'hoben-manual-123-attempt1',object:{type:'commit',sha},message:JSON.stringify({schema:1,selection:'hoben-live'})};
+    s.history=[{state:'approved',created_at:'2026-10-24T12:11:00Z',environments:[{id:1,name:environment}],
+      user:{type:'User',id:2,login:'reviewer'}}];
+    await assert.rejects(()=>gate.verify({...s.options(),recheck:true,infoRouteConnected:true,allowLive:true}));
+    assert.equal(s.writes,0);assert.equal(s.claimReads,0);
+  }
+});
+test('configured technical approval cannot authorize the unconnected Info route',async()=>{
   const s=setup('hoben-live');
   s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
     reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
-  assert.equal((await gate.verify(s.options())).status,'PENDING APPROVAL');
-  const approval={state:'approved',created_at:'2026-10-24T12:09:00Z',environments:[{id:1,name:'hoben-live'}],
-    user:{type:'User',id:2,login:'reviewer'}};
-  for(const history of [[],[approval]]){s.history=history;await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));}
-  approval.created_at='2026-10-24T12:11:00Z';s.history=[approval];
-  await gate.verify({...s.options(),recheck:true});
-  approval.environments[0].name='hoben-experimental';
-  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
+  for(const history of [[],[{state:'approved',created_at:'2026-10-24T12:11:00Z',environments:[{id:1,name:'hoben-experimental'}],
+    user:{type:'User',id:2,login:'reviewer'}}]]) {
+    s.history=history;
+    await assert.rejects(()=>gate.verify({...s.options(),recheck:true}),{message:routeBlocked});
+    assert.equal(s.claimReads,0);assert.equal(s.writes,0);
+  }
 });
-
-test('accepted admin-bypass setting cannot silently change after reservation',async()=>{
-  const s=setup('hoben-live');await gate.verify(s.options());
-  s.environment.can_admins_bypass=false;
-  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}));
+test('actual preflight action never emits approved for the old collect-ha branch',async()=>{
+  const workflow=fs.readFileSync('.github/workflows/hoben-manual.yml','utf8');
+  const block=workflow.split('    - id: gate\n')[1]?.split('\n    outputs:')[0];
+  assert.ok(block);
+  const lines=block.split('        script: |\n')[1]?.trimEnd().split('\n');
+  assert.ok(lines&&lines.length>0&&lines.every(line=>line.startsWith('          ')));
+  const script=lines.map(line=>line.slice(10)).join('\n');
+  const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+  const action=new AsyncFunction('require','github','context','core',script);
+  for(const setupEnvironment of [s=>s,legacy]) {
+    const s=setupEnvironment(setup('hoben-live')),outputs={},failures=[];
+    let summaries=0;
+    const core={setOutput:(key,value)=>{outputs[key]=value;},setFailed:value=>failures.push(value),
+      summary:{addRaw(){summaries++;return this;},async write(){}}};
+    await action(name=>{assert.equal(name,'./.github/scripts/manual-hoben-gate.cjs');
+      return {verify:options=>gate.verify({...options,env:s.env})};},s.github,s.context,core);
+    assert.equal(outputs.approved,undefined);assert.deepEqual(outputs,{});
+    assert.equal(failures.length,1);assert.equal(summaries,0);assert.equal(s.writes,0);
+  }
 });
