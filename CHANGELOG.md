@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #186-B, prototype privé d'abandon de livraison Info
+
+- Ajouter un opt-in de test privé, désactivé par défaut, au vrai RX V4 :
+  abandonner une livraison réelle commençant par Info seulement avec framer
+  vide, propriétaire attesté et hors suffixe d'ouverture/récupération DataUpdated.
+  Aucun sous-code ou suffixe analysé ; borne totale et logs scalaires limités,
+  échéance/corrélation inchangées, cleanup existant au refus/timeout/arrêt.
+- Aucun fournisseur HA/config/lifecycle/campagne/live. Info reste INCONCLUSIVE,
+  frontière non prouvée ; perte de Ping/0E concaténé explicitement testée.
+  [Contrat et limites](docs/info-delivery-drop-experiment-186.md), tests RED/GREEN
+  synthétiques, aucune validation réelle ni modification des politiques B7/B8.
+
 ## En cours — #192, diagnostic borné de fermeture TLS uniquement
 
 - Distinguer les opérations writer_close, wait_closed, abort et reap, les

@@ -306,6 +306,25 @@ class _QuarantineCapability:
         return "_QuarantineCapability()"
 
 
+class _InfoDeliveryDropExperiment:
+    """One-session offline opt-in; never supplied by HA or campaign factories.
+
+    A read completion is NOT an Info frame. Cap total drops/logs at 16 per
+    object, without resetting on a good read. Exhaustion must stop safely.
+    The fixture may choose a smaller cap; no environment/user option exists.
+    """
+
+    __slots__ = ("_limit", "_count", "_claimed")
+
+    def __init__(self, *, limit):
+        if type(limit) is not int or not 1 <= limit <= 16:
+            raise HobenInvalidInputError()
+        self._limit, self._count, self._claimed = limit, 0, False
+
+    def __repr__(self):
+        return "_InfoDeliveryDropExperiment()"
+
+
 _TRANSITIONS = {
     SessionState.DISCONNECTED: frozenset(
         {SessionState.CONNECTING, SessionState.CLOSED}
@@ -385,6 +404,7 @@ class V4Session:
         "_cleanup_failed",
         "_data_updated",
         "_read_idle",
+        "_info_delivery_drop",
     )
 
     def __init__(
@@ -400,6 +420,7 @@ class V4Session:
         _quarantine: _QuarantineCapability | None = None,
         recover_data_updated: bool = False,
         classify_frame_boundary: bool = False,
+        _info_delivery_drop: _InfoDeliveryDropExperiment | None = None,
     ) -> None:
         if not callable(transport_factory):
             raise TypeError("transport_factory_must_be_callable")
@@ -422,6 +443,15 @@ class V4Session:
             classify_frame_boundary and mode is not V4SessionMode.PERSISTENT
         ):
             raise HobenInvalidInputError()
+        if _info_delivery_drop is not None:
+            if (
+                type(_info_delivery_drop) is not _InfoDeliveryDropExperiment
+                or mode is not V4SessionMode.PERSISTENT
+                or _info_delivery_drop._claimed
+            ):
+                raise HobenInvalidInputError()
+            _info_delivery_drop._claimed = True
+        self._info_delivery_drop = _info_delivery_drop
         self._opening_options = opening_options or V4OpeningOptions()
         self._cleanup_failed = False
         if session_300 is not None and type(session_300) not in (
@@ -582,7 +612,13 @@ class V4Session:
         while True:
             if not recovery.active:
                 with error_boundary("tls_read"):
-                    return await transport.read(4096, bounded=False)
+                    data = await transport.read(4096, bounded=False)
+                if self._info_delivery_drop is not None and self._discard_info_delivery(
+                    data, transport
+                ):
+                    data = b""  # Release the entire delivery before the next await.
+                    continue
+                return data
             remaining = (
                 max(
                     0,
@@ -626,6 +662,42 @@ class V4Session:
                 data = b""
                 continue  # Drop immediately, never accumulate opaque RX.
             return data
+
+    def _discard_info_delivery(self, data, transport):
+        """Private #186 hypothesis at a genuine read completion, never a suffix.
+
+        No subcode, scan, buffer reset, acquisition success or timeout rearm.
+        Partial frames/tails and the DataUpdated probe retain their contracts.
+        Even a coalesced Ping/response is deliberately lost with this delivery.
+        """
+        if (
+            type(data) is not bytes
+            or not 1 <= len(data) <= 4096
+            or data[0] != 12
+            or asyncio.current_task() is not self._rx_task
+            or transport is not self._transport
+            or self.state is not SessionState.CONNECTED
+            or self._cleanup_failed
+            or self._rx_error is not None
+            or self._data_updated.active
+            or type(self._framer) is not ExperimentalV4Framer
+            or self._framer.partial
+            or self._framer._tail is not None
+        ):
+            return False
+        experiment = self._info_delivery_drop
+        if experiment._count >= experiment._limit:
+            # Local experiment exhausted, NOT a proven wire/frame incident.
+            raise HobenProtocolError()
+        experiment._count += 1
+        _LOGGER.debug(
+            "Hoben experimental RX event=info_delivery_discarded delivery_bytes=%d "
+            "discarded_deliveries=%d "
+            "experimental_hypothesis=true boundary_proven=false",
+            len(data),
+            experiment._count,
+        )
+        return True
 
     async def _await_data_updated_recovery(self, timeout):
         recovery = self._data_updated

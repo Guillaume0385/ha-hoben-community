@@ -15,6 +15,7 @@ async def test_real_ha_decodes_fragmented_response_and_retains_original_freshnes
 ):
     wire = peers.wire(DEVICE_GUID, [[PING + RESPONSE[:split], RESPONSE[split:] + PING]])
     coordinator = await load(hass, entry)
+    assert peers.lifecycles[0]._session._info_delivery_drop is None
     coordinator._async_unsub_refresh()
     observation = coordinator.client.session_observation
     assert coordinator.last_update_success and observation.read_sequence == 1
@@ -33,6 +34,7 @@ async def test_info_candidate_cannot_refresh_ha_or_credit_concatenated_response(
 ):
     wire = peers.wire(DEVICE_GUID, [[RESPONSE], [bytes((12, code)) + PING + RESPONSE]])
     coordinator = await load(hass, entry)
+    assert peers.lifecycles[0]._session._info_delivery_drop is None
     coordinator._async_unsub_refresh()
     previous, stamp = coordinator.data, coordinator.last_successful_read_at
     previous_state = sensor(hass, entry)
