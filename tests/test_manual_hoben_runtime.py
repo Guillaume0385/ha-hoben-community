@@ -37,13 +37,43 @@ def check_cleanup_in_running_loop(monkeypatch, harness):
 
 
 def test_manual_gate_with_offline_github_api():
+    # Standalone node:test executes all registered assertions in this suite.
     result = subprocess.run(
-        ["node", "--test", "tests/js/manual-hoben.test.cjs"],
+        ["node", "tests/js/manual-hoben.test.cjs"],
         text=True,
         capture_output=True,
         timeout=15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_info_denial_blocks_the_frozen_ha_route_without_changing_dispatch():
+    """D3 cannot authorize the old collect-ha while its workflow is frozen."""
+    config = yaml.load(
+        (ROOT / ".github/workflows/hoben-manual.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    jobs = config["jobs"]
+    assert config["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == [
+        "h1h2",
+        "session-300",
+        "session-reconnect",
+        "all",
+        "hoben-live",
+    ]
+    assert "hoben-live" not in PLANS["all"]
+    assert jobs["collect-ha"]["needs"] == "preflight"
+    assert jobs["collect-ha"]["environment"] == "hoben-live"
+    assert "needs.preflight.outputs.approved == 'true'" in jobs["collect-ha"]["if"]
+    assert (
+        "needs.preflight.outputs.selection == 'hoben-live'" in jobs["collect-ha"]["if"]
+    )
+    assert "needs.preflight.outputs.selection != 'hoben-live'" in jobs["collect"]["if"]
+    recheck = next(s for s in jobs["collect-ha"]["steps"] if s.get("id") == "recheck")
+    assert "manual-hoben-gate.cjs" in recheck["with"]["script"]
+    assert "verify({github,context,recheck:true})" in recheck["with"]["script"]
+    capture = next(s for s in jobs["collect-ha"]["steps"] if s.get("id") == "capture")
+    assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
 
 
 def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
