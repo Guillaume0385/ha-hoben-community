@@ -108,3 +108,13 @@ Test réel NOT RUN ; lancement manuel pas encore prêt. Le collect à 50 min,
 gates/anti-rejeu/mutex/approbations et raccordement restent à la suite autorisée
 par MANAGER. Aucun workflow, launcher, HA, TLS ou ancien budget modifié. #192
 cleanup S1/S2 et V1–V6 demeure non résolu. CODEX ne prépare ni ne s'attribue D3.
+
+## Extension offline D4
+
+Le [worker mémoire D4](info-delivery-worker-offline-186.md) ajoute un chemin
+**schema 2** `prepare_observation` : faits C figés avant teardown, puis rapport C
+final après fermeture effective du transport mémoire. Le replay lie ces deux
+projections sans effacer une première erreur ni réarmer les délais. Le rapport
+provisoire demeure FAILURE/cleanup_unproven ; seule la preuve finale peut attester
+le cleanup. Le chemin historique schema 1 et ses contrats restent inchangés.
+Ni cette extension ni la tâche asyncio mémoire n'authentifient un worker live.
