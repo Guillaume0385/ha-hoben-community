@@ -69,6 +69,8 @@ class MemoryTransport:
         self.connect_count = self.openings = self.close_count = 0
         self.deliveries = self.transmissions = self.requests = self.pongs = 0
         self.closed = False
+        self.plaintext_deliveries = self.plaintext_bytes = 0
+        self._ports_claim = self._delivery_port = None
         self.session = self.clock = self.scenario = None
         self.ledger = OfflineTransportLedger(self)
         self.frozen = False
@@ -117,6 +119,10 @@ class MemoryTransport:
                 require(self.deliveries <= 256)
                 if isinstance(data, Exception):
                     raise data
+                self.plaintext_deliveries += 1
+                self.plaintext_bytes += len(data)
+                if self._delivery_port is not None:
+                    self._delivery_port.delivered(data)
                 if data[:1] == b"\x0c":
                     self._begin_evidence()
                 if self.scenario is not None and not self.frozen:

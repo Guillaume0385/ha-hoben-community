@@ -28,6 +28,12 @@ async def run_worker_case(
     close_ack=True,
     cancel_at=None,
     repeat_cancel=False,
+    adapter=False,
+    delivery_layout="unknown",
+    delivery_generation=1,
+    delivery_layouts=None,
+    delivery_generations=None,
+    finalize_adapter=True,
 ):
     loop = asyncio.get_running_loop()
     clock = OfflineClock(origin=0)
@@ -56,15 +62,30 @@ async def run_worker_case(
         classify_frame_boundary=True,
         **options,
     )
-    task = asyncio.create_task(run_offline_worker(session=session, clock=clock))
+    ports = None
+    if adapter:
+        from scripts.info_delivery_tls_adapter import MemoryInfoPorts
+
+        ports = MemoryInfoPorts(session=session, clock=clock)
+    task = asyncio.create_task(
+        run_offline_worker(session=session, clock=clock, _tls_ports=ports)
+    )
     pending = list(plan)
     cancelled = False
+    delivery_index = 0
     try:
         for _ in range(1024):
             await pump()
             if task.done():
+                report = task.result()
                 return SimpleNamespace(
-                    report=task.result(),
+                    report=report,
+                    ports=ports,
+                    adapter_report=(
+                        ports.finish(report)
+                        if ports is not None and finalize_adapter
+                        else None
+                    ),
                     session=session,
                     wire=wire,
                     clock=clock,
@@ -88,7 +109,21 @@ async def run_worker_case(
             clock.advance_to(at)
             while pending and pending[0][0] <= at:
                 _, data = pending.pop(0)
-                wire.feed(data)
+                if ports is not None and type(data) is bytes:
+                    layout = (
+                        delivery_layouts[delivery_index]
+                        if delivery_layouts is not None
+                        else delivery_layout
+                    )
+                    generation = (
+                        delivery_generations[delivery_index]
+                        if delivery_generations is not None
+                        else delivery_generation
+                    )
+                    ports.feed_memory(data, layout=layout, generation=generation)
+                    delivery_index += 1
+                else:
+                    wire.feed(data)
             if cancel_at is not None and at >= cancel_at and not cancelled:
                 task.cancel()
                 cancelled = True
