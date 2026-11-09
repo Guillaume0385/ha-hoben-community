@@ -210,3 +210,64 @@ test('Info requires configured approval even though source route remains blocked
 });
 
 module.exports={setup};
+
+/* #186: every fail-closed admission phase has a fixed, non-sensitive public reason. */
+const diagnosticMutations={
+  provenance:s=>{s.env.GITHUB_ACTOR='other';},
+  merged_pr:s=>{s.pr.merged=false;},
+  ci:s=>{s.jobs[0].conclusion='failure';},
+  review:s=>{s.reviews=[{state:'CHANGES_REQUESTED',user:{id:2}}];},
+  environment_policy:s=>{s.policies[0].name='main';},
+  environment_api:s=>{s.apiDenied=true;},
+  environment_approval:s=>{s.environment.protection_rules=
+    s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');},
+  concurrent_run:s=>{s.active=[{id:99,path:'.github/workflows/hoben-session-300.yml'}];},
+  route_contract:s=>unconnected(s),
+  claim:s=>{s.ref={ref:'refs/tags/hoben-manual-123-attempt1',
+    object:{type:'tag',sha:'d'.repeat(40)}};},
+};
+test('Info diagnostic categories have only the allowed public vocabulary',()=>{
+  assert.deepEqual(gate.PUBLIC_PHASES,['provenance','merged_pr','ci','review',
+    'environment_policy','environment_api','environment_approval','concurrent_run','claim',
+    'route_contract']);
+  assert.equal(gate.publicFailureCategory(new Error('TOKEN-DO-NOT-LOG')),'unknown');
+  assert.equal(gate.publicFailureCategory({manualCategory:'ci'}),'unknown');
+  assert.equal(gate.publicFailureCategory(null),'unknown');
+  const workflow=fs.readFileSync('.github/workflows/hoben-manual.yml','utf8');
+  assert.ok(workflow.includes("publicFailureCategory(error)"));
+  assert.ok(workflow.includes("'NOT RUN: manual admission refused; phase='+category+'.'"));
+  assert.ok(!workflow.includes('core.setFailed(error.message)'));
+});
+for(const [category,change] of Object.entries(diagnosticMutations)) {
+  test('Info preflight fail closed and reports public phase '+category,async()=>{
+    const s=setup('hoben-live');change(s);
+    await assert.rejects(()=>gate.verify(s.options()),error=>{
+      assert.equal(gate.publicFailureCategory(error),category);
+      return true;
+    });
+    assert.equal(s.ref?.object?.sha==='d'.repeat(40) && category==='claim',category==='claim');
+    if(category!=='claim')assert.equal(s.writes,0);
+  });
+}
+test('Info approval remains a fresh independent review at recheck',async()=>{
+  const s=setup('hoben-live');
+  const decision=await gate.verify(s.options());
+  assert.equal(decision.status,'PENDING APPROVAL');
+  assert.equal(decision.selection,'hoben-live');
+  await assert.rejects(()=>gate.verify({...s.options(),recheck:true}),
+    e=>gate.publicFailureCategory(e)==='environment_approval');
+  s.history=[{state:'approved',created_at:'2026-10-24T12:11:00Z',
+    environments:[{id:1,name:'hoben-experimental'}],
+    user:{type:'User',id:2,login:'reviewer'}}];
+  const accepted=await gate.verify({...s.options(),recheck:true});
+  assert.equal(accepted.claim_sha,decision.claim_sha);
+  await assert.rejects(()=>gate.verify(s.options()),
+    e=>gate.publicFailureCategory(e)==='claim');
+});
+test('Info rerun never reuses the original reservation',async()=>{
+  const s=setup('hoben-live');
+  await gate.verify(s.options());
+  s.env.GITHUB_RUN_ATTEMPT='2';
+  await assert.rejects(()=>gate.verify(s.options()),
+    e=>gate.publicFailureCategory(e)==='provenance');
+});
