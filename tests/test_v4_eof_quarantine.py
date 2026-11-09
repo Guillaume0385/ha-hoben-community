@@ -627,6 +627,12 @@ def test_foundation_is_pure_and_only_session_can_reference_its_policy():
             }:
                 continue
             source = file.read_text()
+            if file == root / ".github/scripts/info-manual-route.cjs":
+                # A fixed manifest path is data to hash, never a policy import.
+                literal = "'custom_components/hoben/v4_eof_quarantine.py'"
+                assert source.count(literal) == 1
+                source = source.replace(literal, "''", 1)
+                # All other policy references remain forbidden below.
             if file == root / "custom_components/hoben/v4_lifecycle.py":
                 imports = [
                     n

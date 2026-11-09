@@ -492,6 +492,31 @@ def test_optin_has_no_ha_lifecycle_campaign_or_environment_supplier():
             if path.as_posix() == "custom_components/hoben/v4_session.py":
                 continue
             source = path.read_text()
+            if path.as_posix() == "scripts/info_manual_worker.py":
+                # D7 explicitly authorizes this dedicated private supplier only.
+                # No environment/HA switch; exactly one bounded capability.
+                tree = ast.parse(source)
+                factories = [
+                    n
+                    for n in ast.walk(tree)
+                    if isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Name)
+                    and n.func.id == "_InfoDeliveryDropExperiment"
+                ]
+                assert len(factories) == 1
+                assert not factories[0].args
+                assert [
+                    (k.arg, ast.literal_eval(k.value)) for k in factories[0].keywords
+                ] == [("limit", 1)]
+                consumers = [
+                    n
+                    for n in ast.walk(tree)
+                    if isinstance(n, ast.keyword) and n.arg == "_info_delivery_drop"
+                ]
+                assert len(consumers) == 1 and consumers[0].value is factories[0]
+                assert "os.environ" not in source and "getenv" not in source
+                assert "type(port) is PassiveTlsPort" in source
+                continue
             assert "_InfoDeliveryDropExperiment" not in source
             tree = ast.parse(source)
             assert not any(
