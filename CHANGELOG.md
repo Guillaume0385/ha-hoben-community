@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #186, diagnostic du lancement manuel Info 0x0C
+
+- Le préflight affiche une catégorie publique fixe et non sensible pour chaque
+  refus (provenance, PR, CI, revue, environnement, approbation, concurrence,
+  réservation ou contrat de route), sans divulguer l'exception ni la réponse API.
+  Aucun verdict historique n'est reconstruit depuis un ancien refus générique.
+- La règle de reviewer indépendant sur `hoben-experimental` demeure obligatoire
+  pour `hoben-live` Info ; son absence et les permissions GitHub insuffisantes
+  provoquent toujours NOT RUN. Aucun dispatch, secret, test réel, changement
+  protocolaire, plugin HA ou assouplissement de l'anti-rejeu.
+
+
 ## En cours — #186-D7, observation passive Info manuelle
 
 - Réaffecter le choix existant hoben-live de Tests Hoben manuels à une session
