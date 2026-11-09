@@ -1,5 +1,20 @@
 # Changelog
 
+## En cours — #186-D7, observation passive Info manuelle
+
+- Réaffecter le choix existant hoben-live de Tests Hoben manuels à une session
+  TLS/V4 dédiée en lecture seule sous hoben-experimental. Aucun ajout à all,
+  aucun changement du workflow HA dédié ou de l'intégration distribuée.
+- Observer un candidat opaque 0x0C sans longueur supposée, arrêter les lectures
+  sans forcer de continuation et rendre INCONCLUSIVE après cleanup attesté.
+  Sans candidat : fenêtre complète 3540 s ; cleanup réservé 60 s, total 3600 s.
+- Ajouter supervision OS indépendante, réapage et contrat public fermé, permission
+  de lancement à usage unique, recheck avant secrets et reçus authentifiés.
+  Aucun SUCCESS offline converti en live, refus D1 préservé, tests adversariaux
+  hors ligne. Publication bloquée séparément sur l'assertion historique refusée :
+  aucun faux READY ni essai réel. Info framing INCONCLUSIVE ; #192 non résolu.
+  [Architecture, limites et blocage](docs/info-manual-end-to-end-186.md).
+
 ## En cours — #186-D3, refus de l'ancienne admission HA manuelle
 
 - Réserver la sélection existante `hoben-live` à la future observation Info

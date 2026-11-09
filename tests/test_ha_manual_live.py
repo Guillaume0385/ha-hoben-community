@@ -205,16 +205,66 @@ def test_live_workflow_has_separate_environment_publication_and_no_all_expansion
         Loader=yaml.BaseLoader,
     )
     jobs = w["jobs"]
-    assert jobs["collect-ha"]["environment"] == "hoben-live"
+    # D7 reuses this choice for Info; HA keeps its own separate workflow.
+    assert set(w["on"]) == {"workflow_dispatch"}
+    assert w["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"] == [
+        "h1h2",
+        "session-300",
+        "session-reconnect",
+        "all",
+        "hoben-live",
+    ]
+    assert not {"collect-ha", "publish-ha", "result-ha"}.intersection(jobs)
+    collect = jobs["collect-info"]
+    assert collect["environment"] == "hoben-experimental"
+    assert collect["needs"] == "preflight"
+    assert jobs["collect"]["timeout-minutes"] == "50"
     assert "selection != 'hoben-live'" in jobs["collect"]["if"]
-    assert "selection == 'hoben-live'" in jobs["collect-ha"]["if"]
-    assert "environment" not in jobs["publish-ha"]
-    assert "environment" not in jobs["result-ha"]
-    capture = next(s for s in jobs["collect-ha"]["steps"] if s.get("id") == "capture")
+    for condition in (
+        "needs.preflight.outputs.approved == 'true'",
+        "selection == 'hoben-live'",
+        "github.run_attempt == 1",
+        "github.event_name == 'workflow_dispatch'",
+        "github.ref == 'refs/heads/experimental'",
+    ):
+        assert condition in collect["if"]
+    assert w["concurrency"]["group"] == "hoben-read-only-observation"
+    assert w["concurrency"]["cancel-in-progress"] == "false"
+    context = next(s for s in jobs["preflight"]["steps"] if s.get("id") == "context")
+    for guard in (
+        "context.actor !== owner",
+        "context.payload.sender?.login !== owner",
+        "process.env.GITHUB_TRIGGERING_ACTOR !== owner",
+        "context.ref !== 'refs/heads/experimental'",
+        "process.env.GITHUB_RUN_ATTEMPT !== '1'",
+    ):
+        assert guard in context["with"]["script"]
+    steps = collect["steps"]
+    recheck = next(s for s in steps if s.get("id") == "recheck")
+    capture = next(s for s in steps if s.get("id") == "capture")
+    assert steps.index(recheck) < steps.index(capture)
+    assert "writeLaunchPermit({github,context," in recheck["with"]["script"]
     assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
-    assert capture["run"] == "python -I trusted/scripts/launch_ha_manual_live.py"
-    for name in ("publish-ha", "result-ha"):
-        assert set(jobs[name]["permissions"]) == {"contents"}
+    assert capture["run"] == "python -I trusted/scripts/launch_info_manual.py"
+    assert capture["env"]["MANUAL_HOBEN_CLAIM"] == "${{ steps.recheck.outputs.claim }}"
+    for name in ("publish-info", "result-info"):
+        assert "environment" not in jobs[name]
+        assert "secrets." not in json.dumps(jobs[name])
+        assert jobs[name]["permissions"] == {
+            "contents": "read",
+            "actions": "read",
+            "pull-requests": "read",
+        }
+        assert "collect-info" in jobs[name]["needs"]
+    ha = yaml.load(
+        (ROOT / ".github/workflows/hoben-ha-manual.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert ha["jobs"]["collect"]["environment"] == "hoben-live"
+    assert (
+        "hoben-live" in ha["on"]["workflow_dispatch"]["inputs"]["scenario"]["options"]
+    )
+    assert not {"collect-info", "publish-info", "result-info"}.intersection(ha["jobs"])
     from scripts.manual_hoben_context import PLANS
 
     assert PLANS["all"] == ("h1h2", "session-300", "session-reconnect")

@@ -47,8 +47,8 @@ def test_manual_gate_with_offline_github_api():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_info_denial_blocks_the_frozen_ha_route_without_changing_dispatch():
-    """D3 cannot authorize the old collect-ha while its workflow is frozen."""
+def test_info_route_preserves_dispatch_and_requires_fresh_admission():
+    """D7 separates protected Info collection from the historical scenarios."""
     config = yaml.load(
         (ROOT / ".github/workflows/hoben-manual.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -62,17 +62,21 @@ def test_info_denial_blocks_the_frozen_ha_route_without_changing_dispatch():
         "hoben-live",
     ]
     assert "hoben-live" not in PLANS["all"]
-    assert jobs["collect-ha"]["needs"] == "preflight"
-    assert jobs["collect-ha"]["environment"] == "hoben-live"
-    assert "needs.preflight.outputs.approved == 'true'" in jobs["collect-ha"]["if"]
+    assert jobs["collect-info"]["needs"] == "preflight"
+    assert jobs["collect-info"]["environment"] == "hoben-experimental"
+    assert "needs.preflight.outputs.approved == 'true'" in jobs["collect-info"]["if"]
     assert (
-        "needs.preflight.outputs.selection == 'hoben-live'" in jobs["collect-ha"]["if"]
+        "needs.preflight.outputs.selection == 'hoben-live'"
+        in jobs["collect-info"]["if"]
     )
     assert "needs.preflight.outputs.selection != 'hoben-live'" in jobs["collect"]["if"]
-    recheck = next(s for s in jobs["collect-ha"]["steps"] if s.get("id") == "recheck")
-    assert "manual-hoben-gate.cjs" in recheck["with"]["script"]
-    assert "verify({github,context,recheck:true})" in recheck["with"]["script"]
-    capture = next(s for s in jobs["collect-ha"]["steps"] if s.get("id") == "capture")
+    recheck = next(s for s in jobs["collect-info"]["steps"] if s.get("id") == "recheck")
+    assert "info-manual-live-report.cjs" in recheck["with"]["script"]
+    assert (
+        "writeLaunchPermit({github,context,root:process.env.RUNNER_TEMP})"
+        in recheck["with"]["script"]
+    )
+    capture = next(s for s in jobs["collect-info"]["steps"] if s.get("id") == "capture")
     assert capture["if"] == "steps.recheck.outputs.approved == 'true'"
 
 
@@ -101,7 +105,9 @@ def test_only_dispatch_is_live_and_every_secret_is_after_recheck():
         assert "env" not in job
         for step in job["steps"]:
             if "secrets." in json.dumps(step):
-                assert job_name in {"collect", "collect-ha"} and step["id"] == "capture"
+                assert (
+                    job_name in {"collect", "collect-info"} and step["id"] == "capture"
+                )
                 assert step["if"] == "steps.recheck.outputs.approved == 'true'"
             if step.get("uses", "").startswith("actions/checkout"):
                 assert step["with"]["ref"] == "${{ github.sha }}"

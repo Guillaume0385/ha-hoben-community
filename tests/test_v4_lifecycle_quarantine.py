@@ -680,6 +680,12 @@ def test_default_off_guard_allows_only_reviewed_session_lifecycle_references(
             if p in allowed or p.suffix not in {".py", ".js", ".cjs", ".yml", ".yaml"}:
                 continue
             source = p.read_text()
+            if p == root / ".github/scripts/info-manual-route.cjs":
+                # A fixed manifest path is data to hash, never a policy import.
+                literal = "'custom_components/hoben/v4_eof_quarantine.py'"
+                assert source.count(literal) == 1
+                source = source.replace(literal, "''", 1)
+                # All other policy references remain forbidden below.
             assert (
                 "_LifecycleQuarantineCapability" not in source
                 and "_quarantine" not in source

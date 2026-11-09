@@ -85,6 +85,26 @@ def need(condition):
         raise InvalidProcessGuard()
 
 
+def owns_process_group(guardian, worker):
+    """Kernel ownership witness shared by the dummy probe and D7 controller.
+
+    Scalars stay private. No signal is sent and no exception text is exported.
+    """
+    if not all(type(p) is int and p > 1 for p in (guardian, worker)):
+        return False
+    try:
+        return (
+            worker != guardian
+            and os.getsid(guardian) == os.getpgid(guardian) == guardian
+            and os.getsid(worker) == guardian
+            and os.getpgid(worker) == worker
+            and guardian != os.getsid(0)
+            and worker != os.getpgrp()
+        )
+    except OSError:
+        return False
+
+
 class ProcessBudget:
     """Pure deadline/witness reducer. Synthetic unless driven by our exact port."""
 
@@ -453,10 +473,7 @@ class _LocalDummy:
                 self.buffer = self.buffer[5:]
                 if kind == b"R":
                     pid = self.process.pid
-                    need(number > 1 and number != pid)
-                    need(os.getsid(pid) == os.getpgid(pid) == pid)
-                    need(os.getsid(number) == pid and os.getpgid(number) == number)
-                    need(pid != os.getsid(0) and number != os.getpgrp())
+                    need(owns_process_group(pid, number))
                     self.worker_group = number
                     os.write(self.command, b"A")
                     events.extend(("isolated", "ready"))

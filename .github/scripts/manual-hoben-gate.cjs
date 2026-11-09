@@ -2,6 +2,7 @@
 // Owner dispatch replaces the old PR comment. Every technical proof is reread.
 const crypto=require('node:crypto');
 const technical=require('./experimental-lab-gate.cjs');
+const infoRoute=require('./info-manual-route.cjs');
 const API={owner:'Guillaume0385',repo:'ha-hoben-community'};
 const REPO=API.owner+'/'+API.repo, REPO_ID=1401398724, OWNER_ID=18246624;
 const FILE='.github/workflows/hoben-manual.yml';
@@ -80,17 +81,23 @@ async function verify(options) {
     const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,{...API,status,per_page:100});
     need(Array.isArray(runs)&&!runs.some(r=>r.id!==context.runId&&
       (!positive(r.id)||typeof r.path!=='string'||
-       ['hoben-experimental.yml','hoben-live-experimental.yml','hoben-session-300.yml']
+       ['hoben-experimental.yml','hoben-live-experimental.yml','hoben-session-300.yml',
+         ...(proof.selection==='hoben-live'?['hoben-manual.yml','hoben-ha-manual.yml',
+           'hoben-protocol-manual.yml']:[])]
          .includes(r.path.split('@')[0].split('/').pop()))));
   }
-  // The frozen workflow still sends every approved hoben-live selection to
-  // collect-ha/environment hoben-live. Never emit READY or create/read a claim
-  // for Info until a separately reviewed workflow/worker route replaces it.
-  // This denial also applies to recheck and previously approved HA claims.
-  if(proof.selection==='hoben-live')throw Error('manual_info_route_not_connected');
+  let circuit;
+  if(proof.selection==='hoben-live') {
+    // Owner 09/11: the supported passive strategy may end INCONCLUSIVE
+    // after an opaque candidate, without claiming a frame/continuation.
+    // Only the reviewed, complete worker/guardian/receipt route can admit it.
+    if(!environment.approvalRequired)throw Error('manual_info_environment_approval_required');
+    circuit=await infoRoute.requireConnected({github,context});
+  }
   const name='hoben-manual-'+context.runId+'-attempt1';
-  const claim={schema:1,selection:proof.selection,sha:context.sha,run_id:context.runId,
-    run_attempt:1,...reviewed,environment_digest:environment.digest};
+  const claim={schema:circuit?2:1,selection:proof.selection,sha:context.sha,run_id:context.runId,
+    run_attempt:1,...reviewed,environment_digest:environment.digest,
+    ...(circuit?{contract_digest:circuit.contract_digest}:{})};
   let claimSha;
   if(recheck) {
     const {data:ref}=await github.rest.git.getRef({...API,ref:'tags/'+name});
@@ -110,7 +117,7 @@ async function verify(options) {
     need(created.ref==='refs/tags/'+name&&created.object?.type==='tag'&&created.object.sha===tag.sha);
     claimSha=tag.sha;
   }
-  return {...reviewed,selection:proof.selection,claim_sha:claimSha,
+  return {...reviewed,...(circuit?{contract_digest:circuit.contract_digest}:{}),selection:proof.selection,claim_sha:claimSha,
     environment_id:environment.id,environment_digest:environment.digest,
     status:environment.approvalRequired?'PENDING APPROVAL':'READY FOR ENVIRONMENT'};
 }

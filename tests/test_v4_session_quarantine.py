@@ -591,6 +591,12 @@ def test_only_session_lifecycle_reference_bridge_without_consumer_capability(
             } or path.suffix not in {".py", ".js", ".cjs", ".yml", ".yaml"}:
                 continue
             source = path.read_text()
+            if path == root / ".github/scripts/info-manual-route.cjs":
+                # A fixed manifest path is data to hash, never a policy import.
+                literal = "'custom_components/hoben/v4_eof_quarantine.py'"
+                assert source.count(literal) == 1
+                source = source.replace(literal, "''", 1)
+                # All other policy references remain forbidden below.
             assert (
                 "_QuarantineCapability" not in source and "_quarantine" not in source
             ), path
