@@ -255,61 +255,41 @@ def test_actual_isolated_command_reproduces_empty_input_after_real_git_checks(tm
 
 
 @pytest.mark.parametrize("state", ["missing", "early", "not_run", "success"])
-def test_real_result_script_keeps_global_failure_when_collection_failed(state):
+def test_info_result_script_never_consumes_legacy_ha_success(tmp_path, state):
     workflow = yaml.load(
         (ROOT / ".github/workflows/hoben-manual.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    job = workflow["jobs"]["collect-ha"]
-    exports = next(s for s in job["steps"] if s.get("id") == "exports")
-    assert "steps.capture.outcome == 'failure'" in exports["if"]
-    assert "steps.recheck.outputs.approved == 'true'" in exports["if"]
-    script = workflow["jobs"]["result-ha"]["steps"][-1]["with"]["script"]
-    report = not_run(PROOF) if state == "not_run" else live_report()
-    if state == "early":
-        report = build_live_report(
-            PROOF,
-            {**report["supervisor"], "network": "none", "reason": "worker_failure"},
-            empty_evidence(),
-        )
-    harness = """
-const fs=require('node:fs');
-const {script,report,missing}=JSON.parse(fs.readFileSync(0,'utf8'));
-const errors=[],summary={table:[],raw:'',addHeading(){return this},
-addTable(v){this.table=v;return this},
-addRaw(v){this.raw+=v;return this},async write(){}};
-const api=require('./.github/scripts/ha-manual-live-report.cjs');
+    script = workflow["jobs"]["result-info"]["steps"][-1]["with"]["script"]
+    harness = r"""
+const {script,state}=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+const failures=[],summary={table:[],raw:'',addHeading(){return this},
+  addTable(v){this.table=v;return this},
+  addRaw(v){this.raw+=v;return this},async write(){}};
+process.env.APPROVED=state==='early'?'false':'true';
+process.env.GITHUB_RUN_ATTEMPT='1';
+const fakeRequire=()=>({proof:()=>({}),
+  read:()=>({schema:3,mode:'live',outcome:'SUCCESS'}),
+  validateForLivePublication:async()=>{throw Error('PRIVATE_UNATTESTED_LEGACY');}});
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-new AsyncFunction('core','context','require','process',script)(
- {summary,setFailed:v=>errors.push(v)},{sha:report.proof.merge_sha,runId:20},
- ()=>({...api,read:(file,p)=>{if(missing)throw Error('absent');
-   return api.validate(report,p)}}),
- {env:{APPROVED:'true',GITHUB_RUN_ATTEMPT:'1',APPROVED_PR:'128',APPROVED_CANDIDATE:'b'.repeat(40),
- APPROVED_CI:'10',APPROVED_ENVIRONMENT:'30',APPROVED_POLICY:'c'.repeat(64),APPROVED_CLAIM:'d'.repeat(40),
- COLLECTION_RESULT:'failure',PUBLICATION_RESULT:missing?'skipped':'success'}}
-).then(()=>process.stdout.write(JSON.stringify({errors,table:summary.table,raw:summary.raw})));
+new AsyncFunction('core','require','github','context',script)(
+  {summary,setFailed:v=>failures.push(v)},fakeRequire,{},{}
+).then(()=>process.stdout.write(JSON.stringify({failures,table:summary.table,raw:summary.raw})));
 """
     result = subprocess.run(
         ["node", "-e", harness],
-        input=json.dumps(
-            {
-                "script": script,
-                "report": report,
-                "missing": state == "missing",
-            }
-        ),
+        input=json.dumps({"script": script, "state": state}),
         text=True,
         capture_output=True,
         check=True,
     )
     data = json.loads(result.stdout)
-    assert result.stderr == "" and data["errors"]
-    assert ["Collecte (job)", "failure"] in data["table"]
-    expected = {
-        "missing": "NOT RUN",
-        "early": "FAILURE",
-        "not_run": "NOT RUN",
-        "success": "SUCCESS",
-    }[state]
-    assert ["hoben-live (preuve de session)", expected] in data["table"]
-    assert "Résultat global : FAILURE" in data["raw"]
+    assert result.stderr == "" and data["failures"]
+    expected = (
+        ["NOT RUN", "not_admitted"]
+        if state == "early"
+        else ["FAILURE", "execution_or_provenance_not_attested"]
+    )
+    assert expected in data["table"]
+    assert not any(row == ["SUCCESS", "none"] for row in data["table"])
+    assert "PRIVATE" not in result.stdout

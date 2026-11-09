@@ -1,12 +1,13 @@
 # Tests Hoben manuels — #119, phase 2 experimental
 
-**Décision propriétaire #186-D3 (08/11/2026) :** la sélection littérale existante
-`hoben-live` est réservée à la future observation passive Info #186, sous la
-politique technique **hoben-experimental**. Elle est actuellement **REFUSÉE** au
-préflight et au recheck, avant tout claim/READY, même avec une ancienne preuve
-HA approuvée. Le workflow conserve encore collect-ha/environment hoben-live :
-le gate seul ne peut pas le réaffecter sûrement. Aucun workflow ni choix dispatch
-n'est changé par D3. `all` et les trois autres scénarios conservent leurs règles.
+**#186-D7 : préparation hors ligne, NOT RUN.** Le choix existant hoben-live est
+réaffecté à l'observation passive Info sous hoben-experimental ; l'ancien chemin
+HA est retiré de ce workflow. Le workflow HA dédié et les autres choix/all ne
+changent pas. Un candidat opaque peut être observé sans connaître sa longueur :
+ce worker arrête ensuite les lectures et conclut INCONCLUSIVE après nettoyage,
+sans forcer une nouvelle acquisition. Aucun essai exécuté. Revue MANAGER,
+résolution du contrôle de publication et quatre CI requis avant tout READY.
+[Architecture et limites](info-manual-end-to-end-186.md).
 [Consigne canonique #186](https://github.com/Guillaume0385/ha-hoben-community/issues/186#issuecomment-6713923452).
 
 La phase 1 a installé le bouton sur la branche par défaut `main` (PR #120,
@@ -17,14 +18,14 @@ Aucun protocole n'est promu vers main. La [tranche C2b](ha-session-live-c2b.md)
 avait ajouté le choix HA hoben-live après autorisation du 26/10 ; cette route du
 workflow manuel n'est plus admissible depuis D3. Le workflow HA dédié est inchangé.
 
-## Utilisation après fusion et revue MANAGER
+## Parcours prévu après un éventuel READY MANAGER, pas de lancement maintenant
 
 Dans **Actions → Tests Hoben manuels → Run workflow** :
 
 1. Choisir **experimental** dans le sélecteur natif **Use workflow from**.
 2. Choisir `h1h2`, `session-300`, `session-reconnect`, `all` ou `hoben-live`.
    `all` conserve les trois anciens scénarios ; hoben-live reste séparé et
-   termine actuellement NOT RUN au gate, sans collecte.
+   utilise la route Info distincte, jamais la campagne HA dédiée.
 3. Déclencher explicitement le workflow en tant que propriétaire autorisé.
 4. Attendre les approbations d'environnement effectivement requises. PENDING
    APPROVAL ne permet aucune collecte et ne doit jamais être contourné.
@@ -65,20 +66,20 @@ sa file sans annulation ; les anciens runs sont aussi recherchés avant collecte
 Ce scan API n'est pas un verrou atomique pour une ancienne voie hors mutex :
 le propriétaire doit contrôler les runs historiques avant une campagne.
 
-Pour `hoben-live`, D3 relit provenance propriétaire/experimental/HEAD courant,
-PR fusionnée et arbre candidat, revue/4 CI et politique **hoben-experimental**,
-puis les exclusions de concurrence. L'ancien environnement hoben-live est rejeté.
-Même si ces preuves techniques sont correctes, le gate lève
-`manual_info_route_not_connected` **avant création ou lecture de claim** : aucun
-READY, PENDING APPROVAL ou approved ne peut ouvrir collect-ha. Le refus vaut
-aussi au recheck et ne peut être levé par un drapeau du caller ou une ancienne
-approbation. Ce contrôle préparatoire ne constitue donc pas une admission Info.
+Pour `hoben-live`, les preuves techniques sont relues puis une règle effective
+de reviewers indépendants **doit être configurée** sur hoben-experimental.
+L'exception historique d'environnement sans reviewer ne vaut pas pour Info.
+Ensuite le manifeste fermé de sources et le câblage Info sont vérifiés au SHA
+exact ; une route incomplète garde manual_info_route_not_connected. Une route
+connectée n'est pas une preuve d'exécution. Le recheck après approbation réserve
+une permission à usage unique, relue via GitHub avant identités par le launcher.
+Un reçu public authentifié n'est produit qu'après cleanup et réapage attestés.
+Le rapport offline D1 demeure refusé pour toute publication live. Les détails,
+preuves physiques, limites de confiance et refus se trouvent dans le rapport D7.
+Les claims et rechecks des autres sélections restent intacts.
+Une approbation sur l'ancien environnement ne vaut jamais approbation sur
+hoben-experimental. Le dispatch demeure réservé au propriétaire.
 
-Les claims, approbations fraîches si configurées et rechecks des autres choix
-restent intacts. Le futur raccordement Info devra conserver ces mêmes preuves,
-anti-rejeu et approbations effectives post-attente ; D3 ne les simule ni ne les
-remplace. Une approbation sur l'ancien environnement ne vaut jamais approbation
-sur hoben-experimental. Le dispatch demeure réservé au propriétaire.
 Ce refus sur le nouveau code ne révoque pas une exécution déjà engagée depuis
 un ancien SHA ; il ne prouve aucune absence de connexion passée.
 
@@ -89,7 +90,7 @@ un ancien SHA ; il ne prouve aucune absence de connexion passée.
 | h1h2 | Même campagne H1/H2 : six sessions par hypothèse, 90 s et 1 Mio RX par session ; processus 1800 s. |
 | session-300 | Même observe(), 300 s utiles, processus 360 s, trois ouvertures, six lectures fixes et 1 Mio RX. |
 | session-reconnect | Même collecteur borné de reconnexion : processus 600 s, fonctionnel au plus 360 s, dix lectures, trois ouvertures, 1 Mio RX. |
-| hoben-live | Réservé à Info #186, actuellement REFUSÉ avant collecte. Ancien collect-ha conservé dans le YAML mais inadmissible. Future limite 3600 s cleanup compris à raccorder séparément. |
+| hoben-live | Info #186 : observation passive 3540 s et réserve cleanup 60 s, plafond worker 3600 s ; collect-info 75 min. NOT RUN avant revue/fusion/CI et dispatch propriétaire. |
 | all | H1/H2 puis suite existante session-300 → reconnexion ; plafond des deux sessions 1020 s, total processus 1800+1020=2820 s. |
 
 Le superviseur parent possède un seul groupe isolé. Chaque transition fixe doit
@@ -141,26 +142,29 @@ obligatoire ; aucun succès réel revendiqué par les tests synthétiques.
 Les sept anciennes définitions live/préflight sont déplacées hors d'Actions dans
 `tests/fixtures/retired_workflows/`. Leurs scripts et régressions restent testés
 hors ligne ; leurs commentaires/gates ne sont jamais un repli de la nouvelle voie.
-Seuls hoben-manual, Validate et publication de release restent dans Actions.
+Les cinq workflows actuels sont Tests Hoben manuels, campagnes HA et protocole
+manuelles, Validate et publication de release.
 Le retrait ne supprime ni ne relance les runs déjà créés ou leurs claims.
 Une activation future de main exige une décision propriétaire distincte après
 installation et validation de ses contrôles ; aucune PR main dans cette phase.
 
 
-## Historique HA et futur raccordement Info
+## Historique HA et observation Info
 
-L'ancienne route et les preuves HA C2b restent documentées dans
-[C2b](ha-session-live-c2b.md) comme historique, sans autoriser hoben-live dans ce
-workflow. La décision #186 réutilise **ce même choix**, sans nouvelle option,
-pour une observation passive Info. La prochaine tâche MANAGER devra remplacer
-la destination collect-ha, vérifier supervision/worker/provenance réelle et
-publication fermée avant de lever le refus. Le plafond collect actuel de 50 min
-ne permet pas 3600 s cleanup inclus ; son adaptation spécifique ne concerne
-aucun autre scénario et ne fait pas partie de D3.
+L'ancien chemin collect-ha/publish-ha/result-ha est retiré de ce workflow.
+Le workflow séparé hoben-ha-manual.yml conserve son propre hoben-live HA.
+Info dispose de collect-info/publish-info/result-info et d'un rapport public
+fermé de 8192 octets maximum, publié sept jours. Sans Info pendant la fenêtre
+complète : INCONCLUSIVE. Candidat observé mais continuation non prouvée :
+INCONCLUSIVE après cleanup attesté. Toute erreur, défaut de cleanup ou de
+provenance : FAILURE, sans prétendre qu'aucune connexion n'a eu lieu.
+Ce worker ne produit jamais SUCCESS ; framing INCONCLUSIVE,
+boundary_proven=false et cleanup réel #192 non résolu restent explicites.
+Le succès technique du job de publication ne change pas le verdict scientifique.
 
-Le refus de publication live D1 reste inconditionnel ; D2 est un modèle offline.
-Info framing INCONCLUSIVE, boundary_proven=false, cleanup #192 non résolu.
-Lancement manuel pas encore prêt, test réel NOT RUN. Aucun workflow, launcher,
-runtime, secret, environnement/protection ou automation modifié par D3 ; aucun
-dispatch/rerun ni promotion main. Le CHANGELOG consigne cette admission devenue
-restrictive ; aucun changement du plugin ou nouveau runtime livrable.
+Une reprise de parsing après Info n'est pas tentée. Fragments et coalescences
+sont testés hors ligne, sans inventer de frontière applicative. Aucun test réel
+DEV/CI, aucune approbation automatisée, aucune relance ni activation HA.
+Le [rapport D7](info-manual-end-to-end-186.md) détaille le contrôle de publication
+encore bloquant et les conditions nécessaires avant une déclaration READY par
+MANAGER. Ce document ne constitue pas une autorisation de dispatch.

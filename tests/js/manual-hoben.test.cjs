@@ -27,6 +27,8 @@ function setup(selection='all') {
     path:'.github/workflows/validate.yml',updated_at:'2026-10-24T12:00:00Z',pull_requests:[]};
   s.environment={id:1,name:'hoben-experimental',deployment_branch_policy:{protected_branches:false,
     custom_branch_policies:true},protection_rules:[{type:'branch_policy',id:2}]};
+  if(selection==='hoben-live')s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
+    reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
   s.policies=[{id:2,node_id:'branch',name:'experimental',type:'branch'}];
   s.tree=tree;s.active=[];
   const actions={getWorkflowRun:async q=>{s.reads.add(q.run_id===9?'ci':'run');return {data:q.run_id===9?s.ci:s.run};},
@@ -41,7 +43,10 @@ function setup(selection='all') {
       listPullRequestsAssociatedWithCommit:()=>{s.reads.add('pr');return [s.pr];},getEnvironment:async q=>{
         s.environmentReads.push(q.environment_name);
         if(s.apiDenied)throw Error('PRIVATE_API');return {data:s.environment};},
-      listDeploymentBranchPolicies:()=>s.policies},
+      listDeploymentBranchPolicies:()=>s.policies,
+      getContent:async q=>{assert.equal(q.ref,sha);
+        const text=fs.readFileSync(q.path,'utf8');return {data:{type:'file',path:q.path,
+          encoding:'base64',size:Buffer.byteLength(text),content:Buffer.from(text).toString('base64')}};}},
     pulls:{get:async()=>({data:s.pr}),listReviews:()=>{s.reads.add('review');return s.reviews;}},actions,git},
     paginate:async(fn,args)=>fn(args),
     graphql:async()=>({repository:{pullRequest:{reviewThreads:{nodes:s.threads,pageInfo:{hasNextPage:false}}}}}),
@@ -49,7 +54,7 @@ function setup(selection='all') {
   s.options=()=>({github:s.github,context:s.context,env:s.env});
   return s;
 }
-// #186-D3 supersedes the former HA acceptance of this one literal selection.
+// #186-D7 retains the fail-closed Info admission; D3 superseded the former HA acceptance of this one literal selection.
 // Other scenarios retain their exact reservation/approval/recheck behavior.
 const runnable=['h1h2','session-300','session-reconnect','all'];
 for(const choice of runnable)test('manual reserve/recheck '+choice,async()=>{
@@ -110,6 +115,15 @@ test('publication refuses oversized or incomplete environment parts before files
 });
 
 const routeBlocked='manual_info_route_not_connected';
+function unconnected(s) {
+  const original=s.github.rest.repos.getContent;
+  s.github.rest.repos.getContent=async q=>{
+    const r=await original(q);if(q.path==='.github/info-manual-route.json'){
+      const m=JSON.parse(Buffer.from(r.data.content,'base64'));m.schema=1;
+      const t=JSON.stringify(m);r.data.content=Buffer.from(t).toString('base64');r.data.size=Buffer.byteLength(t);
+    }return r;
+  };return s;
+}
 function legacy(s) {
   s.branch.name='experimental';
   s.environment.name='hoben-live';s.environment.can_admins_bypass=true;
@@ -120,8 +134,8 @@ test('the dispatch choices are unchanged and all does not select hoben-live',()=
   assert.deepEqual(gate.CHOICES,[...runnable,'hoben-live']);
   assert.deepEqual(runnable,['h1h2','session-300','session-reconnect','all']);
 });
-for(const recheck of [false,true])test('Info route stays blocked after all technical checks, recheck='+recheck,async()=>{
-  const s=setup('hoben-live');
+for(const recheck of [false,true])test('Unconnected Info route stays blocked after technical checks, recheck='+recheck,async()=>{
+  const s=unconnected(setup('hoben-live'));
   await assert.rejects(()=>gate.verify({...s.options(),recheck}),{message:routeBlocked});
   assert.deepEqual(s.environmentReads,['hoben-experimental']);
   for(const read of ['branch','run','pr','tree','review','ci','jobs'])assert.ok(s.reads.has(read),read);
@@ -149,7 +163,7 @@ for(const [name,mutate] of Object.entries(infoMutations))test('Info technical re
 });
 test('legacy claimed/approved HA evidence and caller flags cannot resurrect the route',async()=>{
   for(const environment of ['hoben-live','hoben-experimental']) {
-    const s=setup('hoben-live');
+    const s=unconnected(setup('hoben-live'));
     if(environment==='hoben-live')legacy(s);
     s.ref={ref:'refs/tags/hoben-manual-123-attempt1',object:{type:'tag',sha:'d'.repeat(40)}};
     s.tag={tag:'hoben-manual-123-attempt1',object:{type:'commit',sha},message:JSON.stringify({schema:1,selection:'hoben-live'})};
@@ -160,9 +174,7 @@ test('legacy claimed/approved HA evidence and caller flags cannot resurrect the 
   }
 });
 test('configured technical approval cannot authorize the unconnected Info route',async()=>{
-  const s=setup('hoben-live');
-  s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
-    reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
+  const s=unconnected(setup('hoben-live'));
   for(const history of [[],[{state:'approved',created_at:'2026-10-24T12:11:00Z',environments:[{id:1,name:'hoben-experimental'}],
     user:{type:'User',id:2,login:'reviewer'}}]]) {
     s.history=history;
@@ -170,7 +182,7 @@ test('configured technical approval cannot authorize the unconnected Info route'
     assert.equal(s.claimReads,0);assert.equal(s.writes,0);
   }
 });
-test('actual preflight action never emits approved for the old collect-ha branch',async()=>{
+test('actual preflight action never emits approved for the unproven Info route',async()=>{
   const workflow=fs.readFileSync('.github/workflows/hoben-manual.yml','utf8');
   const block=workflow.split('    - id: gate\n')[1]?.split('\n    outputs:')[0];
   assert.ok(block);
@@ -180,7 +192,7 @@ test('actual preflight action never emits approved for the old collect-ha branch
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
   const action=new AsyncFunction('require','github','context','core',script);
   for(const setupEnvironment of [s=>s,legacy]) {
-    const s=setupEnvironment(setup('hoben-live')),outputs={},failures=[];
+    const s=setupEnvironment(unconnected(setup('hoben-live'))),outputs={},failures=[];
     let summaries=0;
     const core={setOutput:(key,value)=>{outputs[key]=value;},setFailed:value=>failures.push(value),
       summary:{addRaw(){summaries++;return this;},async write(){}}};
@@ -190,3 +202,11 @@ test('actual preflight action never emits approved for the old collect-ha branch
     assert.equal(failures.length,1);assert.equal(summaries,0);assert.equal(s.writes,0);
   }
 });
+
+test('Info requires configured approval even though source route remains blocked',async()=>{
+  const s=setup('hoben-live');s.environment.protection_rules=s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');
+  await assert.rejects(()=>gate.verify(s.options()),{message:'manual_info_environment_approval_required'});
+  assert.equal(s.writes,0);assert.equal(s.claimReads,0);
+});
+
+module.exports={setup};
