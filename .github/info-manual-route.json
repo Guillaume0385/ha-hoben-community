@@ -14,9 +14,9 @@
     "boundary_proven": false
   },
   "files": {
-    ".github/workflows/hoben-manual.yml": "5b3a41e941d25326a0624510dc7307b6ced092b8e41b6f0680a1a4360aee38fd",
+    ".github/workflows/hoben-manual.yml": "9ae334ca0f79e5fdca36eb8d84002c7082a6f2885c004ff334656ff60b344eda",
     ".github/workflows/hoben-ha-manual.yml": "f1f27e60304f2f3b44c08e9b88e13064e5e0f80de40f3396d57a84c2f7b02eff",
-    ".github/scripts/manual-hoben-gate.cjs": "3c8b1dc3cf5e31dab9fe421c8269245754569e60caf895b8565c815b75b7cc9d",
+    ".github/scripts/manual-hoben-gate.cjs": "2d4ebc434b5eea145ab774c143277416c5676ba490ae087aa964d404596605fb",
     ".github/scripts/info-manual-route.cjs": "b155a096db2b1608b147be799bb8005f4df4bf01062c0bb4e7f69cde60946248",
     ".github/scripts/info-manual-report.cjs": "95c56b7313676a9fd71e39db7ba1777d33f0065540e099e48d478c37923534cb",
     ".github/scripts/info-manual-live-report.cjs": "03c25fdb12d930f6d945064fd2fa6fd0952eb720952b80c32da0d6c7e50af8ee",
