@@ -292,3 +292,46 @@ def test_real_worker_memory_tls_and_os_guardian_share_actual_cleanup(
     assert report["process"]["guardian_waited"] and report["process"]["exit_ok"]
     # This is a test fixture, not a GitHub protected-worker publication receipt.
     assert report == validate_report(report, PROOF)
+
+
+def test_controller_error_before_ack_waits_for_guardian_reap(monkeypatch):
+    original = subprocess.Popen
+    waits = []
+    processes = []
+
+    def spawn(command, **kwargs):
+        process = original(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                PROBE,
+                str(ROOT),
+                "ignore-term",
+                *command[5:],
+            ],
+            **kwargs,
+        )
+        wait = process.wait
+
+        def observed_wait(timeout=None):
+            waits.append(timeout)
+            return wait(timeout=timeout)
+
+        process.wait = observed_wait
+        processes.append(process)
+        return process
+
+    def ownership_unproven(*args):
+        raise ValueError("synthetic ownership failure")
+
+    monkeypatch.setattr(guard.subprocess, "Popen", spawn)
+    monkeypatch.setattr(guard, "owns_process_group", ownership_unproven)
+    report = guard.run_process(
+        PROOF, {"user": "offline-probe", "device": "offline-probe"}
+    )
+    assert waits and waits[0] > 3500  # Original immutable budget, not five seconds.
+    assert processes[0].returncode is not None
+    assert report["process"]["guardian_waited"]
+    assert report["result"] == "FAILURE" and not report["observation"]["started"]

@@ -28,7 +28,7 @@
     "scripts/manual_hoben_context.py": "ab2799f957eb685786966e4520a6e7e52ef93439e5168449e1ee41cf1217861c",
     "scripts/launch_info_manual.py": "f10f8bf9a14bf73ce973284d217fee0ebd01de9682c86f3cc7a2f8557712cf78",
     "scripts/info_manual_contract.py": "1f51cb11e44ad8c0572c0b6afbc00a01881c2c4df6f4be8c69016005d261afb2",
-    "scripts/info_manual_process.py": "5122b8f753d26d332b5ff194ec0e8d2b8ce5b0d1f918b4bfba85fc3ea884aedd",
+    "scripts/info_manual_process.py": "67fcaa36a725ec0fafeebc3da3b6e7df8d78d0477e2f88a5aee03da261da5365",
     "scripts/info_manual_worker.py": "be4edf4ff334a744223d82c88e6e5d6c2d188e37e33c89c27dd38e5bf73e12e3",
     "scripts/info_delivery_memory.py": "490f153e304f1b98293082cf75e3ad57741f5053cc072eed33383880b99ae5c0",
     "scripts/info_delivery_process_guard.py": "346d90891d66ded23a2513ebb1f1e653221529ddaecfbcf9c143889df1faf410",

@@ -198,6 +198,9 @@ def _guardian(control, status, identity, origin, *, worker=_worker):
                     if token == b"A" and not acknowledged:
                         acknowledged = True
                     elif token in (b"Q", b"T", b""):
+                        # Ownership was not acknowledged, but cancellation/EOF
+                        # releases the zombie pin so cleanup still must reap.
+                        acknowledged = True
                         if token == b"":
                             selector.unregister(control)
                         if term_at is None:
@@ -205,6 +208,7 @@ def _guardian(control, status, identity, origin, *, worker=_worker):
                             send(signal.SIGTERM, "term")
                             error = True
                     else:
+                        acknowledged = True  # Invalid control also requires reap.
                         error = True
                         if term_at is None:
                             term_at = now
@@ -462,7 +466,7 @@ def run_process(proof, identity, *, clock=time.monotonic, cancelled=lambda: Fals
         p["control_closed"] = True
         if process is not None and not p["guardian_waited"]:
             try:
-                process.wait(timeout=max(0, min(5, end - clock())))
+                process.wait(timeout=max(0, end - clock()))
                 p["guardian_waited"] = True
             except subprocess.TimeoutExpired:
                 pass
