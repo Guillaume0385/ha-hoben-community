@@ -13,6 +13,23 @@ const positive=v=>Number.isSafeInteger(v)&&v>0;
 const sameRepo=r=>r?.id===REPO_ID&&r.full_name===REPO;
 const owner=u=>u?.login===API.owner&&u.id===OWNER_ID&&u.type==='User';
 const digest=o=>crypto.createHash('sha256').update(JSON.stringify(o)).digest('hex');
+// Public diagnostic phases are fixed, never derived from GitHub API responses,
+// exception messages or private Hoben evidence. The run still fails closed.
+const PUBLIC_PHASES=Object.freeze(['provenance','merged_pr','ci','review','environment_policy',
+  'environment_api','environment_approval','concurrent_run','claim','route_contract']);
+const refusalPhases=new WeakMap();
+function mark(error,category) {
+  const safe=error instanceof Error?error:Error('manual_proof_unverified');
+  if(!refusalPhases.has(safe))refusalPhases.set(safe,category);
+  return safe;
+}
+async function inPhase(category,operation) {
+  try{return await operation();}catch(error){throw mark(error,category);}
+}
+function publicFailureCategory(error) {
+  const category=error instanceof Error?refusalPhases.get(error):undefined;
+  return PUBLIC_PHASES.includes(category)?category:'unknown';
+}
 
 async function provenance({github,context,env=process.env}) {
   need(context.eventName==='workflow_dispatch'&&context.ref==='refs/heads/experimental'&&
@@ -52,53 +69,70 @@ async function reviewedCommit(github,context,proof) {
     github.rest.git.getCommit({...API,commit_sha:context.sha})]);
   need(candidate.sha===pr.head.sha&&merged.sha===context.sha&&sha(candidate.tree?.sha)&&
     candidate.tree.sha===merged.tree?.sha);
-  const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
-    {...API,head_sha:pr.head.sha,event:'pull_request',per_page:100});
-  const candidates=runs.filter(r=>r.head_sha===pr.head.sha&&r.head_branch===pr.head.ref&&
-    r.event==='pull_request'&&r.run_attempt===1&&r.status==='completed'&&r.conclusion==='success'&&
-    technical.workflowPath(r.path,'.github/workflows/validate.yml',
-      ['refs/pull/'+pr.number+'/merge',pr.head.ref,'refs/heads/'+pr.head.ref])&&
-    Number.isFinite(Date.parse(r.updated_at))&&Date.parse(r.updated_at)<=proof.beganAt);
-  need(candidates.length>0);
-  candidates.sort((a,b)=>b.id-a.id);
-  // Only the existing technical review/CI checks are reused. No comment is read.
-  await technical.reviewedCI(github,pr,{ciRunId:candidates[0].id,
-    notAfter:new Date(proof.beganAt).toISOString()});
+  const candidates=await inPhase('ci',async()=>{
+    const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
+      {...API,head_sha:pr.head.sha,event:'pull_request',per_page:100});
+    const found=runs.filter(r=>r.head_sha===pr.head.sha&&r.head_branch===pr.head.ref&&
+      r.event==='pull_request'&&r.run_attempt===1&&r.status==='completed'&&r.conclusion==='success'&&
+      technical.workflowPath(r.path,'.github/workflows/validate.yml',
+        ['refs/pull/'+pr.number+'/merge',pr.head.ref,'refs/heads/'+pr.head.ref])&&
+      Number.isFinite(Date.parse(r.updated_at))&&Date.parse(r.updated_at)<=proof.beganAt);
+    need(found.length>0);
+    return found.sort((a,b)=>b.id-a.id);
+  });
+  // Review and CI are distinct public failure phases, but no raw API errors escape.
+  try {
+    await technical.reviewedCI(github,pr,{ciRunId:candidates[0].id,
+      notAfter:new Date(proof.beganAt).toISOString()});
+  } catch(error) {
+    throw mark(error,error instanceof Error&&error.message==='review_unverified'?'review':'ci');
+  }
   return {pr:pr.number,candidate_sha:pr.head.sha,ci_run_id:candidates[0].id};
 }
 
 async function verify(options) {
   const {github,context,recheck=false}=options;
-  const proof=await provenance(options);
-  const reviewed=await reviewedCommit(github,context,proof);
+  const proof=await inPhase('provenance',()=>provenance(options));
+  const reviewed=await inPhase('merged_pr',()=>reviewedCommit(github,context,proof));
   // #186 reassigns the existing literal hoben-live choice to Info research.
   // Its future route must satisfy the hoben-experimental technical policy;
   // the former HA environment/approval cannot authorize this selection.
-  const environment=await technical.environmentPolicy(github,context);
-  await technical.noOtherObservation(github,context);
-  // Also reject runs created from the retired experimental entry points.
-  for(const status of ['requested','queued','pending','waiting','in_progress']) {
-    const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,{...API,status,per_page:100});
-    need(Array.isArray(runs)&&!runs.some(r=>r.id!==context.runId&&
-      (!positive(r.id)||typeof r.path!=='string'||
-       ['hoben-experimental.yml','hoben-live-experimental.yml','hoben-session-300.yml',
-         ...(proof.selection==='hoben-live'?['hoben-manual.yml','hoben-ha-manual.yml',
-           'hoben-protocol-manual.yml']:[])]
-         .includes(r.path.split('@')[0].split('/').pop()))));
+  let environment;
+  try {
+    environment=await technical.environmentPolicy(github,context);
+  } catch(error) {
+    throw mark(error,error instanceof Error&&error.message==='environment_api_inaccessible'
+      ?'environment_api':'environment_policy');
   }
+  await inPhase('concurrent_run',async()=>{
+    await technical.noOtherObservation(github,context);
+    // Also reject runs created from the retired experimental entry points.
+    for(const status of ['requested','queued','pending','waiting','in_progress']) {
+      const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,{...API,status,per_page:100});
+      need(Array.isArray(runs)&&!runs.some(r=>r.id!==context.runId&&
+        (!positive(r.id)||typeof r.path!=='string'||
+         ['hoben-experimental.yml','hoben-live-experimental.yml','hoben-session-300.yml',
+           ...(proof.selection==='hoben-live'?['hoben-manual.yml','hoben-ha-manual.yml',
+             'hoben-protocol-manual.yml']:[])]
+           .includes(r.path.split('@')[0].split('/').pop()))));
+    }
+  });
   let circuit;
   if(proof.selection==='hoben-live') {
     // Owner 09/11: the supported passive strategy may end INCONCLUSIVE
     // after an opaque candidate, without claiming a frame/continuation.
     // Only the reviewed, complete worker/guardian/receipt route can admit it.
-    if(!environment.approvalRequired)throw Error('manual_info_environment_approval_required');
-    circuit=await infoRoute.requireConnected({github,context});
+    // GitHub may authorize an environment without required reviewers. Do not
+    // invent an extra human approval; actualApproval still applies when GitHub
+    // configures required_reviewers, including post-environment rechecks.
+    circuit=await inPhase('route_contract',()=>infoRoute.requireConnected({github,context}));
   }
   const name='hoben-manual-'+context.runId+'-attempt1';
   const claim={schema:circuit?2:1,selection:proof.selection,sha:context.sha,run_id:context.runId,
     run_attempt:1,...reviewed,environment_digest:environment.digest,
     ...(circuit?{contract_digest:circuit.contract_digest}:{})};
   let claimSha;
+  await inPhase('claim',async()=>{
   if(recheck) {
     const {data:ref}=await github.rest.git.getRef({...API,ref:'tags/'+name});
     need(ref.ref==='refs/tags/'+name&&ref.object?.type==='tag'&&sha(ref.object.sha));
@@ -106,8 +140,9 @@ async function verify(options) {
     const {data:tag}=await github.rest.git.getTag({...API,tag_sha:ref.object.sha});
     need(tag.tag===name&&tag.object?.type==='commit'&&tag.object.sha===context.sha&&
       digest(JSON.parse(tag.message))===digest(claim));
-    if(environment.approvalRequired) await technical.actualApproval(github,context,environment,
-      {number:1,beganAt:proof.beganAt},true);
+    if(environment.approvalRequired) await inPhase('environment_approval',
+      ()=>technical.actualApproval(github,context,environment,
+        {number:1,beganAt:proof.beganAt},true));
   } else {
     const {data:tag}=await github.rest.git.createTag({...API,tag:name,message:JSON.stringify(claim),
       object:context.sha,type:'commit'});
@@ -117,8 +152,9 @@ async function verify(options) {
     need(created.ref==='refs/tags/'+name&&created.object?.type==='tag'&&created.object.sha===tag.sha);
     claimSha=tag.sha;
   }
+  });
   return {...reviewed,...(circuit?{contract_digest:circuit.contract_digest}:{}),selection:proof.selection,claim_sha:claimSha,
     environment_id:environment.id,environment_digest:environment.digest,
     status:environment.approvalRequired?'PENDING APPROVAL':'READY FOR ENVIRONMENT'};
 }
-module.exports={provenance,verify,CHOICES};
+module.exports={provenance,verify,CHOICES,publicFailureCategory,PUBLIC_PHASES};

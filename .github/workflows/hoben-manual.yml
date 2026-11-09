@@ -125,7 +125,11 @@ jobs:
             core.setOutput('policy',d.environment_digest);core.setOutput('claim',d.claim_sha);
             core.setOutput('contract',d.contract_digest||'');
             await core.summary.addRaw(d.status + ': GitHub environment rules remain mandatory.').write();
-          }catch(_){core.setFailed('NOT RUN: manual provenance, review, CI, environment or claim refused.');}
+          }catch(error){
+            // Only a fixed public category, never an exception or API response.
+            const category=require('./.github/scripts/manual-hoben-gate.cjs').publicFailureCategory(error);
+            core.setFailed('NOT RUN: manual admission refused; phase='+category+'.');
+          }
     outputs:
       approved: ${{ steps.gate.outputs.approved }}
       pr: ${{ steps.gate.outputs.pr }}

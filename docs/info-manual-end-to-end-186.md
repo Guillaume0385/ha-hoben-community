@@ -61,14 +61,19 @@ hoben-experimental obligatoire, collect 75 minutes pour marge Actions.
 
 Le gate conserve propriétaire/sender/triggering_actor, ref experimental et HEAD
 protégé courant, PR fusionnée/arbre candidat/revue/four CI avant dispatch,
-absence de concurrence, tentative 1, approbation réelle indépendante fraîche,
-claim atomique anti-rejeu et mutex hoben-read-only-observation. L'environnement
+absence de concurrence, tentative 1, claim atomique anti-rejeu et mutex
+hoben-read-only-observation. Selon la décision propriétaire postérieure à D7,
+aucun approbateur indépendant additionnel n'est requis quand la configuration
+GitHub de l'environnement n'en comporte pas. Une approbation réelle indépendante
+fraîche reste obligatoire si `required_reviewers` est effectivement configuré,
+et les preuves sont recontrôlées après l'accès à l'environnement. L'environnement
 est vérifié, jamais créé, approuvé ou affaibli par ce code. La route n'est
 connectée qu'après vérification du câblage et du manifeste fermé SHA256 des
 sources au même SHA via API. Une empreinte ou valeur ready ne prouve pas une
 exécution : ces contrôles précèdent toujours les témoins physiques.
 
-Après approbation, un nouveau recheck complet réserve le tag de lancement
+Après admission effective par l'environnement (et approbation si exigée), un
+nouveau recheck complet réserve le tag de lancement
 `hoben-info-start-<run>-attempt1` et une permission locale privée à nonce aléatoire
 à usage unique. Le launcher relit HEAD, tag exact et horodatage de moins de
 120 secondes, run/étape de collecte réellement en cours, double checkout et
@@ -92,7 +97,8 @@ cleanup réel incertain donnera FAILURE et aucune seconde connexion.
 
 Une clé éphémère de scellement est créée seulement **après** réapage physique,
 fermeture des pipes et groupe vide (ou absence prouvée de lancement). Le
-collecteur vérifie HMAC, rapport fermé, gate/approbation à nouveau et étapes
+collecteur vérifie HMAC, rapport fermé, gate/politique et approbation si requise,
+ainsi que les étapes
 GitHub réellement achevées avant de réserver un reçu immuable lié au SHA256 du
 rapport. Publish et result, runners distincts sans secrets Hoben, relisent ces
 preuves via API et refusent toute substitution. La clé privée est supprimée.

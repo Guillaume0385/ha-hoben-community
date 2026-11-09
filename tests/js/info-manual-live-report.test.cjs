@@ -140,3 +140,30 @@ test('b64 bounds and offline schema never reach live publication',()=>{
   assert.throws(()=>api.decode('A'.repeat(10925),{}));
   assert.throws(()=>api.decode(Buffer.from('{"mode":"offline","result":"SUCCESS"}').toString('base64'),{}));
 });
+
+test('Info no-reviewer environment still requires full launch, cleanup and receipt proofs',async()=>{
+  const s=fixture();try{
+    s.environment.protection_rules=s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');
+    s.history=[];
+    let approvalApiCalls=0;
+    s.github.request=async()=>{approvalApiCalls++;throw Error('unexpected_approval_request');};
+    const p=await s.admit(),r=model(p);
+    assert.equal(approvalApiCalls,0);
+    assert.equal(s.refs.has('refs/tags/hoben-manual-123-attempt1'),true);
+    assert.equal(s.refs.has('refs/tags/hoben-info-start-123-attempt1'),true);
+    s.seal(r);
+    await api.prepare({github:s.github,context:s.context,core:s.core,proof:p,root:s.root});
+    assert.deepEqual(s.failures,[]);
+    s.settle();
+    await api.publish({github:s.github,context:s.context,core:s.core,proof:p,
+      text:s.outputs.report_b64,receiptSha:s.outputs.receipt_sha,root:s.root});
+    assert.equal(s.outputs.report,'true');
+    assert.equal(approvalApiCalls,0);
+    // Any later addition of required reviewers invalidates the reserved
+    // policy digest. An old claim cannot authorize the changed environment.
+    s.environment.protection_rules.push({id:3,type:'required_reviewers',prevent_self_review:true,
+      reviewers:[{type:'User',reviewer:{type:'User',id:2,login:'reviewer'}}]});
+    await assert.rejects(()=>api.validateForLivePublication({github:s.github,context:s.context,
+      report:r,proof:p,receiptSha:s.outputs.receipt_sha}));
+  }finally{s.close();}
+});

@@ -80,8 +80,25 @@ def test_historical_jobs_and_dedicated_ha_workflow_are_identical_to_d7_base():
     # Only the Info source-contract output is added to shared preflight.
     del historical["preflight"]["outputs"]["contract"]
     script = historical["preflight"]["steps"][-1]["with"]["script"]
+    # Normalize only the reviewed diagnostic delta, without weakening
+    # the historical digest of the other protected steps and jobs.
+    new_catch = (
+        "}catch(error){\n"
+        "  // Only a fixed public category, never an exception or API response.\n"
+        "  const category=require('./.github/scripts/manual-hoben-gate.cjs')"
+        ".publicFailureCategory(error);\n"
+        "  core.setFailed('NOT RUN: manual admission refused; phase='"
+        "+category+'.');\n"
+        "}"
+    )
+    old_catch = (
+        "}catch(_){core.setFailed('NOT RUN: manual provenance, review, CI, "
+        "environment or claim refused.');}"
+    )
+    assert script.count(new_catch) == 1
+    script = script.replace("  core.setOutput('contract',d.contract_digest||'');\n", "")
     historical["preflight"]["steps"][-1]["with"]["script"] = script.replace(
-        "  core.setOutput('contract',d.contract_digest||'');\n", ""
+        new_catch, old_catch
     )
     assert hashlib.sha256(
         json.dumps(historical, sort_keys=True).encode()

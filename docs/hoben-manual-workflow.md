@@ -66,9 +66,25 @@ sa file sans annulation ; les anciens runs sont aussi recherchés avant collecte
 Ce scan API n'est pas un verrou atomique pour une ancienne voie hors mutex :
 le propriétaire doit contrôler les runs historiques avant une campagne.
 
-Pour `hoben-live`, les preuves techniques sont relues puis une règle effective
-de reviewers indépendants **doit être configurée** sur hoben-experimental.
-L'exception historique d'environnement sans reviewer ne vaut pas pour Info.
+Un refus au préflight est signalé exclusivement par `phase=<categorie>`.
+Les catégories publiques fermées sont `provenance`, `merged_pr`, `ci`, `review`,
+`environment_policy`, `environment_api`, `environment_approval`,
+`concurrent_run`, `claim` et `route_contract`. Une erreur non classifiable
+devient `unknown` et reste refusée. Aucun détail d'exception, contenu de réponse
+GitHub, identité privée ou donnée Hoben ne doit être publié. Les anciens runs
+ayant seulement affiché le refus générique ne peuvent pas être recatégorisés
+rétroactivement : vérifier la politique effective avant tout nouvel essai.
+
+Pour `hoben-live`, la décision propriétaire postérieure à D7 demande un
+déclenchement manuel sans approbateur indépendant **s'il n'en existe pas dans
+la politique GitHub réelle**. Contrairement à l'exigence D7 initiale, le code
+n'impose donc plus une règle `required_reviewers` supplémentaire. Les mêmes
+preuves techniques, vérifications de la politique `hoben-experimental`, branche
+`experimental` unique, mutex, CI/revue/claim et recheck restent obligatoires.
+Si GitHub configure effectivement des approbateurs, l'approbation indépendante
+fraîche est toujours obligatoire et vérifiée après le contrôle d'environnement ;
+aucun chemin parallèle ou bypass n'est autorisé. API de politique inaccessible
+ou preuve partielle : `NOT RUN`.
 Ensuite le manifeste fermé de sources et le câblage Info sont vérifiés au SHA
 exact ; une route incomplète garde manual_info_route_not_connected. Une route
 connectée n'est pas une preuve d'exécution. Le recheck après approbation réserve
