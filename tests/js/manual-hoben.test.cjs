@@ -197,7 +197,8 @@ test('actual preflight action never emits approved for the unproven Info route',
     const core={setOutput:(key,value)=>{outputs[key]=value;},setFailed:value=>failures.push(value),
       summary:{addRaw(){summaries++;return this;},async write(){}}};
     await action(name=>{assert.equal(name,'./.github/scripts/manual-hoben-gate.cjs');
-      return {verify:options=>gate.verify({...options,env:s.env})};},s.github,s.context,core);
+      return {verify:options=>gate.verify({...options,env:s.env}),
+        publicFailureCategory:gate.publicFailureCategory};},s.github,s.context,core);
     assert.equal(outputs.approved,undefined);assert.deepEqual(outputs,{});
     assert.equal(failures.length,1);assert.equal(summaries,0);assert.equal(s.writes,0);
   }
