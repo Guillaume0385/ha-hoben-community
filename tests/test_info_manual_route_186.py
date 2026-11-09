@@ -96,9 +96,7 @@ def test_historical_jobs_and_dedicated_ha_workflow_are_identical_to_d7_base():
         "environment or claim refused.');}"
     )
     assert script.count(new_catch) == 1
-    script = script.replace(
-        "  core.setOutput('contract',d.contract_digest||'');\n", ""
-    )
+    script = script.replace("  core.setOutput('contract',d.contract_digest||'');\n", "")
     historical["preflight"]["steps"][-1]["with"]["script"] = script.replace(
         new_catch, old_catch
     )
