@@ -204,10 +204,25 @@ test('actual preflight action never emits approved for the unproven Info route',
   }
 });
 
-test('Info requires configured approval even though source route remains blocked',async()=>{
-  const s=setup('hoben-live');s.environment.protection_rules=s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');
-  await assert.rejects(()=>gate.verify(s.options()),{message:'manual_info_environment_approval_required'});
-  assert.equal(s.writes,0);assert.equal(s.claimReads,0);
+test('Info uses GitHub environment without extra reviewers and still reserves claim',async()=>{
+  const s=setup('hoben-live');
+  s.environment.protection_rules=s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');
+  const decision=await gate.verify(s.options());
+  assert.equal(decision.status,'READY FOR ENVIRONMENT');
+  assert.equal(decision.selection,'hoben-live');
+  assert.equal(s.ref.ref,'refs/tags/hoben-manual-123-attempt1');
+  assert.equal((await gate.verify({...s.options(),recheck:true})).claim_sha,decision.claim_sha);
+  assert.equal(s.writes,1);
+  await assert.rejects(()=>gate.verify(s.options()),e=>gate.publicFailureCategory(e)==='claim');
+});
+test('Info without reviewers still refuses unknown environment branch and broken route',async()=>{
+  for(const mutate of [s=>{s.policies[0].name='main';},s=>unconnected(s)]) {
+    const s=setup('hoben-live');
+    s.environment.protection_rules=s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');
+    mutate(s);
+    await assert.rejects(()=>gate.verify(s.options()));
+    assert.equal(s.writes,0);
+  }
 });
 
 module.exports={setup};
@@ -220,8 +235,6 @@ const diagnosticMutations={
   review:s=>{s.reviews=[{state:'CHANGES_REQUESTED',user:{id:2}}];},
   environment_policy:s=>{s.policies[0].name='main';},
   environment_api:s=>{s.apiDenied=true;},
-  environment_approval:s=>{s.environment.protection_rules=
-    s.environment.protection_rules.filter(r=>r.type!=='required_reviewers');},
   concurrent_run:s=>{s.active=[{id:99,path:'.github/workflows/hoben-session-300.yml'}];},
   route_contract:s=>unconnected(s),
   claim:s=>{s.ref={ref:'refs/tags/hoben-manual-123-attempt1',
