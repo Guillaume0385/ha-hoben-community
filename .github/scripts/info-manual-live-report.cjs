@@ -120,7 +120,8 @@ function privateFile(file,max) {
 async function writeLaunchPermit({github,context,root}) {
   // No caller-provided "approved" decision can mint a launch capability.
   const decision=await require('./manual-hoben-gate.cjs').verify({github,context,recheck:true});
-  need(decision.selection==='hoben-live'&&decision.status==='PENDING APPROVAL');
+  need(decision.selection==='hoben-live'&&
+    (decision.status==='PENDING APPROVAL'||decision.status==='READY FOR ENVIRONMENT'));
   const base=baseProof(decision,context), nonce=crypto.randomBytes(32).toString('hex');
   validateProof({...base,launch_tag_sha:'0'.repeat(40)});
   const name='hoben-info-start-'+context.runId+'-attempt1';
