@@ -122,8 +122,9 @@ async function verify(options) {
     // Owner 09/11: the supported passive strategy may end INCONCLUSIVE
     // after an opaque candidate, without claiming a frame/continuation.
     // Only the reviewed, complete worker/guardian/receipt route can admit it.
-    if(!environment.approvalRequired)
-      throw mark(Error('manual_info_environment_approval_required'),'environment_approval');
+    // GitHub may authorize an environment without required reviewers. Do not
+    // invent an extra human approval; actualApproval still applies when GitHub
+    // configures required_reviewers, including post-environment rechecks.
     circuit=await inPhase('route_contract',()=>infoRoute.requireConnected({github,context}));
   }
   const name='hoben-manual-'+context.runId+'-attempt1';
