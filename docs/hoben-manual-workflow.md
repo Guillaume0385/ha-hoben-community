@@ -66,6 +66,15 @@ sa file sans annulation ; les anciens runs sont aussi recherchés avant collecte
 Ce scan API n'est pas un verrou atomique pour une ancienne voie hors mutex :
 le propriétaire doit contrôler les runs historiques avant une campagne.
 
+Un refus au préflight est signalé exclusivement par `phase=<categorie>`.
+Les catégories publiques fermées sont `provenance`, `merged_pr`, `ci`, `review`,
+`environment_policy`, `environment_api`, `environment_approval`,
+`concurrent_run`, `claim` et `route_contract`. Une erreur non classifiable
+devient `unknown` et reste refusée. Aucun détail d'exception, contenu de réponse
+GitHub, identité privée ou donnée Hoben ne doit être publié. Les anciens runs
+ayant seulement affiché le refus générique ne peuvent pas être recatégorisés
+rétroactivement : vérifier la politique effective avant tout nouvel essai.
+
 Pour `hoben-live`, les preuves techniques sont relues puis une règle effective
 de reviewers indépendants **doit être configurée** sur hoben-experimental.
 L'exception historique d'environnement sans reviewer ne vaut pas pour Info.
