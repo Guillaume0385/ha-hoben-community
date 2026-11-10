@@ -110,7 +110,7 @@ function wired(sources) {
   // permit another secret to be injected into its protected capture step.
   const protectedCapture = collect.slice(capture,exports);
   need(protectedCapture.includes('HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}') &&
-    (protectedCapture.match(/secrets\\./g)||[]).length === 1);
+    (protectedCapture.match(/secrets\./g)||[]).length === 1);
   need(collect.slice(exports).includes('info-manual-live-report.cjs') &&
     collect.slice(exports).includes('await api.prepare('));
   need(publish.includes('await api.publish(') && result.includes('validateForLivePublication'));
