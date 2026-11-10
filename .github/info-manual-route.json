@@ -29,7 +29,7 @@
     "scripts/launch_info_manual.py": "e12e0640b0dc2b4b30b4cd3447c76fd4925fc897abc5b7061e362d40f7a52693",
     "scripts/info_manual_contract.py": "2d76c64f181152f2f48170591e1c8a6c8fae5982fd3d7adfef2caef77e8afdc2",
     "scripts/info_manual_process.py": "67fcaa36a725ec0fafeebc3da3b6e7df8d78d0477e2f88a5aee03da261da5365",
-    "scripts/info_manual_worker.py": "f20e16459b82c8aa2d24dee0b66bd229d430a90efcdbd3c2cc26587702914e05",
+    "scripts/info_manual_worker.py": "7d40c79b9c234a2c2602d7ded847562a9e9b52698b6530d7bbcf57a8c791e6b1",
     "scripts/info_delivery_memory.py": "490f153e304f1b98293082cf75e3ad57741f5053cc072eed33383880b99ae5c0",
     "scripts/info_delivery_process_guard.py": "346d90891d66ded23a2513ebb1f1e653221529ddaecfbcf9c143889df1faf410",
     "scripts/info_delivery_scenario.py": "5d8c97dc083e198c552aa95b918646dfcf4edc2a22cf48453626c72349758de3",
