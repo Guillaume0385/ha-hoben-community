@@ -149,11 +149,19 @@ def validate_observation(value):
     need(integer(value["connections"], 1))
     need(integer(value["discarded_deliveries"], 1))
     for key in (
-        "deliveries", "post_candidate_reads", "tls_deliveries_since_candidate",
-        "delivery_timeline_omitted", "candidate_leads_unproven",
-        "ping_leads_unproven", "response_leads_unproven",
-        "data_updated_leads_unproven", "pings_validated", "pongs_written",
-        "read_requests", "verified_reads", "unconfirmed_read_requests",
+        "deliveries",
+        "post_candidate_reads",
+        "tls_deliveries_since_candidate",
+        "delivery_timeline_omitted",
+        "candidate_leads_unproven",
+        "ping_leads_unproven",
+        "response_leads_unproven",
+        "data_updated_leads_unproven",
+        "pings_validated",
+        "pongs_written",
+        "read_requests",
+        "verified_reads",
+        "unconfirmed_read_requests",
     ):
         need(integer(value[key], 8192))
     need(integer(value["candidate_segments_omitted"], 8192))
@@ -162,15 +170,18 @@ def validate_observation(value):
     need(integer(value["candidate_delivery_bytes"], 4096))
     need(integer(value["elapsed_ms"], LIMITS["total_ms"]))
     for key in (
-        "candidate_at_ms", "cleanup_started_ms",
-        "first_post_info_valid_v4_at_ms", "recovery_stability_start_ms",
+        "candidate_at_ms",
+        "cleanup_started_ms",
+        "first_post_info_valid_v4_at_ms",
+        "recovery_stability_start_ms",
     ):
         need(value[key] is None or integer(value[key], value["elapsed_ms"]))
     need(type(value["first_error"]) is str and value["first_error"] in ERRORS)
     need(type(value["cleanup_error"]) is str and value["cleanup_error"] in ERRORS)
     need(value["continuation"] == "not_proven")
     need(
-        value["verified_reads"] <= value["read_requests"] - value["unconfirmed_read_requests"]
+        value["verified_reads"]
+        <= value["read_requests"] - value["unconfirmed_read_requests"]
         and value["first_post_info_valid_v4_at_ms"] is None
         and value["recovery_stability_start_ms"] is None
         and value["recovery_stability_elapsed_ms"] == 0
@@ -182,15 +193,22 @@ def validate_observation(value):
         and value["tls_deliveries_since_candidate"] <= value["deliveries"]
         and value["tls_bytes_since_candidate"] <= value["received_bytes"]
     )
-    heads = sum(value[k] for k in (
-        "candidate_leads_unproven", "ping_leads_unproven",
-        "response_leads_unproven", "data_updated_leads_unproven",
-    ))
+    heads = sum(
+        value[k]
+        for k in (
+            "candidate_leads_unproven",
+            "ping_leads_unproven",
+            "response_leads_unproven",
+            "data_updated_leads_unproven",
+        )
+    )
     need(heads <= value["post_candidate_reads"])
     timeline = value["delivery_timeline"]
     need(type(timeline) is list and len(timeline) <= 96)
-    need(value["delivery_timeline_omitted"] ==
-         value["tls_deliveries_since_candidate"] - len(timeline))
+    need(
+        value["delivery_timeline_omitted"]
+        == value["tls_deliveries_since_candidate"] - len(timeline)
+    )
     previous = -1
     for entry in timeline:
         need(type(entry) is list and len(entry) == 2)
@@ -201,23 +219,42 @@ def validate_observation(value):
     if timeline:
         need(sum(entry[1] for entry in timeline) <= value["tls_bytes_since_candidate"])
         if not value["delivery_timeline_omitted"]:
-            need(sum(entry[1] for entry in timeline) == value["tls_bytes_since_candidate"])
+            need(
+                sum(entry[1] for entry in timeline)
+                == value["tls_bytes_since_candidate"]
+            )
     segments = value["candidate_segments"]
     need(type(segments) is list and len(segments) <= 16)
-    need(len(segments) + value["candidate_segments_omitted"]
-         == int(value["candidate_observed"]) + value["candidate_leads_unproven"])
+    need(
+        len(segments) + value["candidate_segments_omitted"]
+        == int(value["candidate_observed"]) + value["candidate_leads_unproven"]
+    )
     for segment in segments:
-        exact(segment, {
-            "start_at_ms", "observed_bytes_between_candidates",
-            "tls_deliveries", "end_kind",
-        })
+        exact(
+            segment,
+            {
+                "start_at_ms",
+                "observed_bytes_between_candidates",
+                "tls_deliveries",
+                "end_kind",
+            },
+        )
         need(integer(segment["start_at_ms"], value["elapsed_ms"]))
         need(integer(segment["observed_bytes_between_candidates"], 1048576))
         need(integer(segment["tls_deliveries"], 8192))
-        need(segment["observed_bytes_between_candidates"] >= segment["tls_deliveries"] >= 1)
-        need(segment["end_kind"] in (
-            "delivery_lead_unproven", "tls_eof", "observation_end",
-        ))
+        need(
+            segment["observed_bytes_between_candidates"]
+            >= segment["tls_deliveries"]
+            >= 1
+        )
+        need(
+            segment["end_kind"]
+            in (
+                "delivery_lead_unproven",
+                "tls_eof",
+                "observation_end",
+            )
+        )
     if value["candidate_observed"]:
         need(value["started"] and value["opening_accepted"])
         need(value["candidate_at_ms"] is not None)
@@ -227,9 +264,14 @@ def validate_observation(value):
         need(value["discarded_deliveries"] == 1)
         need(value["received_bytes"] >= value["candidate_delivery_bytes"])
         need(value["tls_bytes_since_candidate"] >= value["candidate_delivery_bytes"])
-        need(timeline and timeline[0] == [
-            value["candidate_at_ms"], value["candidate_delivery_bytes"],
-        ])
+        need(
+            timeline
+            and timeline[0]
+            == [
+                value["candidate_at_ms"],
+                value["candidate_delivery_bytes"],
+            ]
+        )
     else:
         need(value["candidate_at_ms"] is value["candidate_delivery_offset"] is None)
         need(value["candidate_delivery_bytes"] == value["discarded_deliveries"] == 0)
@@ -247,13 +289,19 @@ def validate_observation(value):
     if value["cleanup_attested"]:
         need(value["cleanup_started_ms"] is not None)
         need(
-            all(value[k] for k in (
-                "transport_close_requested", "transport_close_completed",
-                "rx_stopped", "operations_stopped",
-            ))
+            all(
+                value[k]
+                for k in (
+                    "transport_close_requested",
+                    "transport_close_completed",
+                    "rx_stopped",
+                    "operations_stopped",
+                )
+            )
         )
         need(value["cleanup_error"] == "none")
     return copy.deepcopy(value)
+
 
 def validate_process(value):
     exact(value, PROCESS)
