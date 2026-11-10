@@ -181,12 +181,14 @@ def test_consistent_json_is_not_an_authenticated_live_proof(field):
         tls_deliveries_since_candidate=1,
         tls_bytes_since_candidate=1,
         delivery_timeline=[[100, 1]],
-        candidate_segments=[{
-            "start_at_ms": 100,
-            "observed_bytes_between_candidates": 1,
-            "tls_deliveries": 1,
-            "end_kind": "observation_end",
-        }],
+        candidate_segments=[
+            {
+                "start_at_ms": 100,
+                "observed_bytes_between_candidates": 1,
+                "tls_deliveries": 1,
+                "end_kind": "observation_end",
+            }
+        ],
         cleanup_started_ms=110,
         transport_close_requested=True,
         transport_close_completed=True,
