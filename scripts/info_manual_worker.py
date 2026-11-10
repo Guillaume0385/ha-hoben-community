@@ -9,6 +9,7 @@ recovery is claimed from opaque deliveries.
 """
 
 import asyncio
+import copy
 import math
 import ssl
 import time
@@ -51,7 +52,7 @@ class PassiveTlsPort(
         self.session = None
         self.origin = self.end = None
         self.candidate = asyncio.Event()
-        self.facts = dict(OBSERVATION)
+        self.facts = copy.deepcopy(OBSERVATION)
         self._factory_calls = self._close_calls = self._writes = 0
         self._active_read = self._active_write = 0
         self._close_future = None
