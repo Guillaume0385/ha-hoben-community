@@ -1,5 +1,21 @@
 # Changelog
 
+## En cours — #186-D8, continuation TLS et demandes V4 diagnostiques
+
+- Après un candidat 0x0C, poursuivre le comptage des livraisons plaintext TLS
+  (nombre, tailles, offsets temporels et intervalles de candidats), sans
+  injecter de flux opaque dans le framer ni déduire une longueur Info.
+- Émettre la seule lecture V4 autorisée toutes les 30 s pendant le silence,
+  sérialisée, sans la politique de timeout/fermeture de `request_v4_data()`.
+  Avec transaction fixe 0xFFFF et frontières inconnues, les réponses restent
+  non corrélées : récupération 300 s et succès **non prouvables**, donc verdict
+  INCONCLUSIVE sûr et délai observation 3540+cleanup 60 s inchangé.
+- Rapport public fermé version 3, double validation Python/Node et listes
+  bornées avec compteurs d'omission ; aucun secret ou RX. Guardian, gates,
+  workflow HA distinct, plugin distribué et protections non modifiés.
+  Développement/tests hors ligne exclusivement ; aucun dispatch D8.
+
+
 ## En cours — #186-011, Info avec un seul secret
 
 - Correction ciblée : `collect-info` utilise uniquement `HOBEN_USER_GUID`,
