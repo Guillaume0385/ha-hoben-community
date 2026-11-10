@@ -153,3 +153,67 @@ def test_delivery_at_observation_deadline_is_not_a_candidate(monkeypatch, certs)
     report, _, _ = asyncio.run(scenario(monkeypatch, certs, plan=((3540000, b"\x0c"),)))
     assert not report["candidate_observed"] and report["observation_complete"]
     assert report["cleanup_attested"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        ("opened", None),
+        ("authorization", "HobenAuthorizationRequiredError"),
+        ("invalid_device", "HobenProtocolError"),
+        ("unknown_profile", "HobenUnsupportedProfileError"),
+    ],
+)
+def test_single_secret_info_session_adopts_device_only_after_valid_opened(
+    monkeypatch, certs, answer, error
+):
+    """Real V4Session and verified offline MemoryBIO TLS; never authorize pairing."""
+    import time
+
+    from custom_components.hoben.exceptions import (
+        HobenAuthorizationRequiredError,
+        HobenProtocolError,
+        HobenUnsupportedProfileError,
+    )
+    from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID, encode_open_client
+    from tests import info_manual_tls_fixture_186 as tls_fixture
+    from tests.test_v4_session import opened_prefix
+
+    if answer != "opened":
+        replies = {
+            "authorization": b"\\x2f",
+            "invalid_device": opened_prefix(identity=b"\\xff" * 32),
+            "unknown_profile": opened_prefix(profile=99),
+        }
+        monkeypatch.setattr(tls_fixture, "opened_prefix", lambda: replies[answer])
+
+    async def scenario():
+        state, user, _ = install_tls(monkeypatch, certs)
+        port = PassiveTlsPort()
+        session = make_session(user, INITIAL_DEVICE_GUID, port)
+        assert session.device_guid_for_persistence == INITIAL_DEVICE_GUID
+        port.bind(session, time.monotonic())
+        try:
+            if error is not None:
+                errors = {
+                    "HobenAuthorizationRequiredError": HobenAuthorizationRequiredError,
+                    "HobenProtocolError": HobenProtocolError,
+                    "HobenUnsupportedProfileError": HobenUnsupportedProfileError,
+                }
+                with pytest.raises(errors[error]):
+                    await session.connect()
+                assert session.device_guid_for_persistence == INITIAL_DEVICE_GUID
+            else:
+                await session.connect()
+                assert session.device_guid_for_persistence == "a" * 32
+            assert state.connections == 1
+            assert state.peer.transmissions[0] == encode_open_client(
+                user, session._opening_options.build,
+                INITIAL_DEVICE_GUID, session._opening_options.device_info,
+            )
+            assert all(message[:1] != b"\\x30" for message in state.peer.transmissions)
+            assert port.facts["tls_verified"]
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
