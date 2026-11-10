@@ -11,11 +11,15 @@ function model(p,candidate=true) {
     cleanup_started_ms:candidate?200:3540000,transport_close_requested:true,transport_close_completed:true,
     rx_stopped:true,operations_stopped:true,cleanup_attested:true,elapsed_ms:candidate?250:3540001};
   if(candidate)Object.assign(observation,{deliveries:1,received_bytes:1,candidate_observed:true,
-    candidate_delivery_bytes:1,candidate_at_ms:100,discarded_deliveries:1});
+    candidate_delivery_bytes:1,candidate_at_ms:100,candidate_delivery_offset:0,
+    discarded_deliveries:1,tls_deliveries_since_candidate:1,tls_bytes_since_candidate:1,
+    delivery_timeline:[[100,1]],candidate_segments:[{
+      start_at_ms:100,observed_bytes_between_candidates:1,tls_deliveries:1,
+      end_kind:'observation_end'}]});
   else observation.observation_complete=true;
   const process={...api.PROC,launch_attempted:true,spawned:true,isolated:true,child_report_bound:true,children_reaped:1,
     group_empty:true,guardian_waited:true,control_closed:true,exit_ok:true,elapsed_ms:observation.elapsed_ms+1};
-  return {schema:2,scenario:'info-passive-observation',selection:'hoben-live',execution:'protected_worker',
+  return {schema:3,scenario:'info-passive-observation',selection:'hoben-live',execution:'protected_worker',
     info_framing:'INCONCLUSIVE',boundary_proven:false,limits:{...api.LIMITS},proof:p,
     observation,process,result:'INCONCLUSIVE',
     reason:candidate?'candidate_observed_continuation_not_proven':'candidate_absent'};
@@ -90,6 +94,39 @@ for(const candidate of [false,true])test('no fabricated functional SUCCESS, cand
     for(const key of Object.keys(r)){const bad=clone(r);delete bad[key];assert.throws(()=>api.validateStructure(bad,p));}
     const old=require('../../.github/scripts/info-delivery-manual-report.cjs');
     assert.throws(()=>old.validateForLivePublication(r));
+  }finally{s.close();}
+});
+test('D8 delivery counts, omitted items and fixed-FFFF non-correlation fail closed',async()=>{
+  const s=fixture();try{
+    const p=await s.admit(),r=model(p);
+    Object.assign(r.observation,{
+      deliveries:4,received_bytes:12,post_candidate_reads:3,
+      tls_deliveries_since_candidate:4,tls_bytes_since_candidate:12,
+      delivery_timeline:[[100,1],[120,3],[130,4],[140,4]],
+      candidate_leads_unproven:1,response_leads_unproven:1,ping_leads_unproven:1,
+      candidate_segments:[{
+        start_at_ms:100,observed_bytes_between_candidates:8,tls_deliveries:3,
+        end_kind:'delivery_lead_unproven'},{
+        start_at_ms:140,observed_bytes_between_candidates:4,tls_deliveries:1,
+        end_kind:'observation_end'}],
+      read_requests:3,unconfirmed_read_requests:3,
+    });
+    assert.equal(api.validateStructure(r,p),r);
+    for(const modify of [
+      o=>o.tls_bytes_since_candidate=13,
+      o=>o.tls_deliveries_since_candidate=5,
+      o=>o.delivery_timeline_omitted=1,
+      o=>o.delivery_timeline[0][1]=2,
+      o=>o.candidate_segments[0].observed_bytes_between_candidates=-1,
+      o=>o.candidate_segments[1].end_kind='Info_complete',
+      o=>o.verified_reads=1,
+      o=>o.unconfirmed_read_requests=2,
+      o=>o.first_post_info_valid_v4_at_ms=150,
+      o=>o.recovery_stability_elapsed_ms=300000,
+      o=>o.delivery_timeline[1].push('private'),
+      o=>o.delivery_timeline.push([9999999,1]),
+      o=>o.private_bytes='secret',
+    ]){const t=clone(r);modify(t.observation);assert.throws(()=>api.validateStructure(t,p));}
   }finally{s.close();}
 });
 for(const mutation of ['signature','key','extra','clock','mode','missing','symlink'])
