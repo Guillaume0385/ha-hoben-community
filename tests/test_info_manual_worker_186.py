@@ -153,12 +153,14 @@ def test_fragment_after_candidate_is_counted_but_never_parsed_or_scanned(
     assert report["tls_deliveries_since_candidate"] == 2
     assert report["tls_bytes_since_candidate"] == 1 + len(suffix)
     assert report["delivery_timeline"] == [[1000, 1], [1001, len(suffix)]]
-    assert report["candidate_segments"] == [{
-        "start_at_ms": 1000,
-        "observed_bytes_between_candidates": 1 + len(suffix),
-        "tls_deliveries": 2,
-        "end_kind": "observation_end",
-    }]
+    assert report["candidate_segments"] == [
+        {
+            "start_at_ms": 1000,
+            "observed_bytes_between_candidates": 1 + len(suffix),
+            "tls_deliveries": 2,
+            "end_kind": "observation_end",
+        }
+    ]
     assert peer.read_requests > 0 and report["cleanup_attested"]
 
 
@@ -187,12 +189,14 @@ def test_delivery_lists_are_private_to_each_run():
 
     first, second = PassiveTlsPort(), PassiveTlsPort()
     first.facts["delivery_timeline"].append([100, 2])
-    first.facts["candidate_segments"].append({
-        "start_at_ms": 100,
-        "observed_bytes_between_candidates": 2,
-        "tls_deliveries": 1,
-        "end_kind": "observation_end",
-    })
+    first.facts["candidate_segments"].append(
+        {
+            "start_at_ms": 100,
+            "observed_bytes_between_candidates": 2,
+            "tls_deliveries": 1,
+            "end_kind": "observation_end",
+        }
+    )
     assert second.facts["delivery_timeline"] == []
     assert second.facts["candidate_segments"] == []
     assert OBSERVATION["delivery_timeline"] == []
@@ -225,23 +229,34 @@ def test_multiple_delivery_leads_are_not_message_headers_or_info_lengths(
     assert report["tls_deliveries_since_candidate"] == 6
     assert report["tls_bytes_since_candidate"] == 4 + 3 + 2 + 2 + 2 + 1
     assert report["delivery_timeline"] == [
-        [1000, 4], [1001, 3], [1002, 2],
-        [1003, 2], [1004, 2], [1005, 1],
+        [1000, 4],
+        [1001, 3],
+        [1002, 2],
+        [1003, 2],
+        [1004, 2],
+        [1005, 1],
     ]
-    assert [s["observed_bytes_between_candidates"] for s in report["candidate_segments"]] == [
-        4 + 3 + 2 + 2, 2, 1,
+    assert [
+        s["observed_bytes_between_candidates"] for s in report["candidate_segments"]
+    ] == [
+        4 + 3 + 2 + 2,
+        2,
+        1,
     ]
     assert report["verified_reads"] == 0 and peer.read_requests > 0
 
 
-def test_new_0c_inside_payload_does_not_count_as_another_candidate(
-    monkeypatch, certs
-):
+def test_new_0c_inside_payload_does_not_count_as_another_candidate(monkeypatch, certs):
     report, _, _ = asyncio.run(
-        scenario(monkeypatch, certs, plan=(
-            (1000, b"\x0c"), (1500, b"\x0e\x0c\x0a"),
-            (1600, b"\x00\x0c\x0a\x0e"),
-        ))
+        scenario(
+            monkeypatch,
+            certs,
+            plan=(
+                (1000, b"\x0c"),
+                (1500, b"\x0e\x0c\x0a"),
+                (1600, b"\x00\x0c\x0a\x0e"),
+            ),
+        )
     )
     assert report["candidate_leads_unproven"] == 0
     assert report["response_leads_unproven"] == 1
@@ -273,11 +288,13 @@ def test_peer_eof_after_info_is_a_real_loss_not_a_voluntary_silence_close(
 ):
     report, port, peer = asyncio.run(
         scenario(
-            monkeypatch, certs, plan=(
+            monkeypatch,
+            certs,
+            plan=(
                 (1000, b"\x0c\x00"),
                 (35000, b"\x0a"),
                 (35100, None),
-            )
+            ),
         )
     )
     assert report["peer_eof"]
