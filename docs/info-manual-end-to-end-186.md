@@ -51,6 +51,20 @@ sûre avec acquisition V4 fraîche corrélée dans la même session pourrait le
 permettre, sans prouver la frontière Info ; cette PR ne fabrique pas cette preuve.
 `info_framing=INCONCLUSIVE` et `boundary_proven=false` sont obligatoires.
 
+## Identité initiale — tâche #186-011
+
+La nouvelle voie Info injecte uniquement le secret `HOBEN_USER_GUID` dans
+`collect-info`, après le recheck GitHub et sa permission à usage unique.
+Le lanceur utilise `normalize_user_guid` et l'existant `INITIAL_DEVICE_GUID`,
+identique à la première ouverture des campagnes protocol et HA, sans valeur
+nouvelle ni second secret. `V4Session` n'adopte une identité attribuée par le
+serveur qu'après validation d'un `OpenedClient` V4 ; une demande d'association
+`DeviceAuthReq` échoue sans réponse d'autorisation automatique.
+Une identité utilisateur absente ou invalide est `NOT RUN` avant tout processus
+ou connexion. Aucune valeur d'identité, trame RX ni donnée domestique
+n'entre dans le rapport public ; le guardian et les preuves de cleanup restent
+inchangés.
+
 ## Admission et provenance distinctes des fixtures
 
 Le choix existant hoben-live de Tests Hoben manuels est réaffecté uniquement à

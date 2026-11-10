@@ -106,8 +106,11 @@ function wired(sources) {
     collect.includes("if: steps.recheck.outputs.approved == 'true'") &&
     collect.includes('run: python -I trusted/scripts/launch_info_manual.py'));
   need(collect.slice(recheck,capture).includes('writeLaunchPermit({github,context,root:process.env.RUNNER_TEMP})'));
-  need(collect.slice(capture,exports).includes('secrets.HOBEN_USER_GUID') &&
-    collect.slice(capture,exports).includes('secrets.HOBEN_DEVICE_GUID'));
+  // #186-011: Info has one Hoben secret. A repinned manifest must not
+  // permit another secret to be injected into its protected capture step.
+  const protectedCapture = collect.slice(capture,exports);
+  need(protectedCapture.includes('HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}') &&
+    (protectedCapture.match(/secrets\./g)||[]).length === 1);
   need(collect.slice(exports).includes('info-manual-live-report.cjs') &&
     collect.slice(exports).includes('await api.prepare('));
   need(publish.includes('await api.publish(') && result.includes('validateForLivePublication'));

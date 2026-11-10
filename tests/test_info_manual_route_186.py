@@ -171,3 +171,14 @@ def test_offline_success_is_not_a_live_attestation(monkeypatch):
     assert result.adapter_report["process_reap"] == "not_proven"
     assert result.adapter_report["mode"] == "offline"
     assert result.adapter_report["boundary_proven"] is False
+
+
+def test_collect_info_is_only_passed_user_secret():
+    """The historic collect campaign stays byte-for-byte under its own contract."""
+    jobs = workflow()["jobs"]
+    capture = next(
+        step for step in jobs["collect-info"]["steps"] if step.get("id") == "capture"
+    )
+    secret_env = {k: v for k, v in capture["env"].items() if "secrets." in str(v)}
+    assert secret_env == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
+    assert "HOBEN_DEVICE_GUID" not in json.dumps(jobs["collect-info"])

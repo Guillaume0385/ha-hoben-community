@@ -355,7 +355,6 @@ jobs:
         MANUAL_HOBEN_SCENARIO: hoben-live
         INFO_MANUAL_ADMISSION_TOKEN: ${{ github.token }}
         HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
-        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}
       run: python -I trusted/scripts/launch_info_manual.py
     - id: exports
       name: Info protected export

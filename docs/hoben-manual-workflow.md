@@ -18,6 +18,20 @@ Aucun protocole n'est promu vers main. La [tranche C2b](ha-session-live-c2b.md)
 avait ajouté le choix HA hoben-live après autorisation du 26/10 ; cette route du
 workflow manuel n'est plus admissible depuis D3. Le workflow HA dédié est inchangé.
 
+## Identité du scénario Info — secret unique #186-011
+
+Seul `HOBEN_USER_GUID` est injecté dans l'étape protégée `collect-info`.
+Le lanceur le valide et le normalise avec `normalize_user_guid`, puis utilise
+`INITIAL_DEVICE_GUID` du codec partagé comme DeviceGuid initial ; aucun
+second secret `HOBEN_DEVICE_GUID` n'est requis pour Info. Après un vrai
+`OpenedClient` V4 accepté, `V4Session` peut adopter en mémoire le DeviceGuid
+retourné. Toute demande d'autorisation/association provoque un refus fermé :
+pas de code d'association, aucune commande ni écriture Modbus.
+Sans UserGuid valide, rapport `NOT RUN` avec erreur publique `identity`,
+aucune ouverture TLS. Le secret, le DeviceGuid et les octets reçus restent privés.
+Aucune modification des campagnes historiques, du workflow HA dédié, de
+l'admission GitHub, de la supervision, des plafonds ou de l'anti-rejeu.
+
 ## Parcours prévu après un éventuel READY MANAGER, pas de lancement maintenant
 
 Dans **Actions → Tests Hoben manuels → Run workflow** :

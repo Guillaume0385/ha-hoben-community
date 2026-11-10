@@ -23,7 +23,10 @@ LAUNCH_TTL_SECONDS = 120
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from custom_components.hoben.myhoben import normalize_user_guid  # noqa: E402
+from custom_components.hoben.myhoben import (  # noqa: E402
+    INITIAL_DEVICE_GUID,
+    normalize_user_guid,
+)
 from scripts.info_manual_contract import (  # noqa: E402
     OBSERVATION,
     PROCESS,
@@ -226,16 +229,13 @@ def main():
         need(len(sys.argv) == 1)
         proof, folder = provenance(os.environ)
         phase = "identity"
+        # The shared protocol starts with its documented new-client identity.
+        # Only a validated V4 OpenedClient may assign a different DeviceGuid.
+        # An authorization challenge is refused by V4Session, never auto-paired.
         identity = {
-            "user": os.environ.pop("HOBEN_USER_GUID", ""),
-            "device": os.environ.pop("HOBEN_DEVICE_GUID", ""),
+            "user": normalize_user_guid(os.environ.pop("HOBEN_USER_GUID", "")),
+            "device": INITIAL_DEVICE_GUID,
         }
-        identity["user"] = normalize_user_guid(identity["user"])
-        need(
-            type(identity["device"]) is str
-            and re.fullmatch(r"[a-fA-F0-9]{32}", identity["device"])
-        )
-        need(set(identity["device"]) != {"0"})
         stopped = False
 
         def stop(signum, frame):
