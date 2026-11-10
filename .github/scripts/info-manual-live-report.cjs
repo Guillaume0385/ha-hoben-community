@@ -60,8 +60,8 @@ function validateObservation(o) {
     'first_post_info_valid_v4_at_ms','recovery_stability_start_ms'])
       need(o[k]===null||integer(o[k],o.elapsed_ms));
   need(error(o.first_error)&&error(o.cleanup_error));
-  need(o.continuation==='not_proven'&&o.verified_reads===0&&
-    o.unconfirmed_read_requests===o.read_requests&&
+  need(o.continuation==='not_proven'&&
+    o.verified_reads<=o.read_requests-o.unconfirmed_read_requests&&
     o.first_post_info_valid_v4_at_ms===null&&
     o.recovery_stability_start_ms===null&&o.recovery_stability_elapsed_ms===0);
   need(o.pongs_written<=o.pings_validated);
