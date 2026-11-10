@@ -181,8 +181,8 @@ def test_single_secret_info_session_adopts_device_only_after_valid_opened(
 
     if answer != "opened":
         replies = {
-            "authorization": b"\\x2f",
-            "invalid_device": opened_prefix(identity=b"\\xff" * 32),
+            "authorization": b"\x2f",
+            "invalid_device": opened_prefix(identity=b"\xff" * 32),
             "unknown_profile": opened_prefix(profile=99),
         }
         monkeypatch.setattr(tls_fixture, "opened_prefix", lambda: replies[answer])
@@ -211,7 +211,7 @@ def test_single_secret_info_session_adopts_device_only_after_valid_opened(
                 user, session._opening_options.build,
                 INITIAL_DEVICE_GUID, session._opening_options.device_info,
             )
-            assert all(message[:1] != b"\\x30" for message in state.peer.transmissions)
+            assert all(message[:1] != b"\x30" for message in state.peer.transmissions)
             assert port.facts["tls_verified"]
         finally:
             await session.close()
