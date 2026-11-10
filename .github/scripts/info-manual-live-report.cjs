@@ -142,7 +142,7 @@ function validateStructure(r,p) {
   validateProof(p);
   keys(r,['schema','scenario','selection','execution','info_framing','boundary_proven',
     'limits','proof','observation','process','result','reason']);
-  need(r.schema===3&&r.scenario='info-passive-observation'&&r.selection==='hoben-live'&&
+  need(r.schema===3&&r.scenario==='info-passive-observation'&&r.selection==='hoben-live'&&
     r.execution==='protected_worker'&&r.info_framing==='INCONCLUSIVE'&&r.boundary_proven===false);
   equal(r.limits,LIMITS);equal(validateProof(r.proof),p);
   const [result,reason]=verdict(r.observation,r.process);
