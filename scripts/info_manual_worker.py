@@ -240,7 +240,11 @@ class PassiveTlsPort(
             s._opening_options.device_info,
         )
         need(opening or data in (b"\x0b", READ_ONLY_V4))
-        need(data != READ_ONLY_V4 or not self.candidate.is_set() or self._probe_authorized)
+        need(
+            data != READ_ONLY_V4
+            or not self.candidate.is_set()
+            or self._probe_authorized
+        )
         need(self._writes < 8192)
         self._writes += 1
         self._active_write += 1
@@ -260,7 +264,11 @@ class PassiveTlsPort(
     async def close(self):
         self._close_calls += 1
         self.facts["transport_close_requested"] = True
-        if self.facts["first_error"] == "none" and not self.facts["peer_eof"] and self._reader is not None:
+        if (
+            self.facts["first_error"] == "none"
+            and not self.facts["peer_eof"]
+            and self._reader is not None
+        ):
             if self._reader.exception() is not None:
                 self.facts["first_error"] = "transport"
             elif self._reader.at_eof():
@@ -393,7 +401,9 @@ async def observe(session, port, *, origin, clock=time.monotonic, stop=None):
                 if candidate_wait in done and probe is None:
                     # The only parse attempt is the pre-existing first delivery
                     # drop. All subsequent reads are private, length-only.
-                    probe = asyncio.create_task(probe_loop(), name="hoben-info-v4-probe")
+                    probe = asyncio.create_task(
+                        probe_loop(), name="hoben-info-v4-probe"
+                    )
                     waiters.add(probe)
                 if probe is not None and probe in done:
                     try:
