@@ -367,3 +367,27 @@ def test_single_secret_info_session_adopts_device_only_after_valid_opened(
             await session.close()
 
     asyncio.run(scenario())
+
+
+def test_d8_ruff_format_diagnostic():
+    """Temporary CI diagnostic: show exact formatting diff, never edit files."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    files = (
+        "scripts/info_manual_worker.py",
+        "scripts/info_manual_contract.py",
+        "tests/test_info_manual_worker_186.py",
+        "tests/test_info_manual_process_186.py",
+        "tests/test_info_manual_route_186.py",
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "ruff", "format", "--diff", *files],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
