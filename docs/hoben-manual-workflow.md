@@ -1,5 +1,18 @@
 # Tests Hoben manuels — #119, phase 2 experimental
 
+**#186-D8 — continuation opaque actuelle, NOT RUN.** Après un candidat 0x0C,
+le même propriétaire TLS continue de comptabiliser les livraisons plaintext et
+leurs tailles sans les remettre au framer V4. Les seules sondes actives sont
+les lectures V4 fixes toutes les 30 s, sérialisées et sans timeout de silence
+déconnectant le client. Les réponses post-Info ne sont pas corrélables avec
+certitude : aucune minuterie de récupération 300 s n'est déclenchée sur la
+simple ressemblance d'un octet 0x0E. Verdict conservateur INCONCLUSIVE,
+Info framing INCONCLUSIVE, boundary_proven=false ; véritable EOF distinct,
+cleanup attesté et plafonds 3540+60=3600 s inchangés. La version D8 n'a
+**pas** été exécutée sur un Hoben réel par DEV/CI. Les paragraphes D7
+ci-dessous décrivent le comportement historique remplacé pour cette seule
+route. [Contrat D8](info-manual-end-to-end-186.md).
+
 **#186-D7 : préparation hors ligne, NOT RUN.** Le choix existant hoben-live est
 réaffecté à l'observation passive Info sous hoben-experimental ; l'ancien chemin
 HA est retiré de ce workflow. Le workflow HA dédié et les autres choix/all ne
