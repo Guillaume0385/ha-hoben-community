@@ -172,8 +172,6 @@ def test_offline_success_is_not_a_live_attestation(monkeypatch):
     assert result.adapter_report["mode"] == "offline"
     assert result.adapter_report["boundary_proven"] is False
 
-
-
 def test_collect_info_is_only_passed_user_secret():
     """The historic collect campaign stays byte-for-byte under its own contract."""
     jobs = workflow()["jobs"]
