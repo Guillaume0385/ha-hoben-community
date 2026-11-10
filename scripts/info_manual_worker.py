@@ -76,7 +76,8 @@ class PassiveTlsPort(
     def elapsed(self):
         value = self.clock() - self.origin
         need(math.isfinite(value) and 0 <= value * 1000 <= LIMITS["total_ms"])
-        return int(value * 1000)
+        # Diagnostic millisecond precision must not truncate 1.001 to 1.000.
+        return round(value * 1000)
 
     async def connect(self):
         need(self._factory_calls == 1 and self.facts["connections"] == 0)
