@@ -61,7 +61,7 @@ const FILES = Object.freeze([
   'custom_components/hoben/v4_state.py',
 ]);
 const LIMITS = Object.freeze({observation_ms: 3540000, cleanup_ms: 60000, total_ms: 3600000});
-const POLICY = Object.freeze({observation: 'passive_candidate_stop', continuation: 'never_force',
+const POLICY = Object.freeze({observation: 'continuous_opaque_tls', continuation: 'diagnostic_v4_30s_uncorrelated',
   info_framing: 'INCONCLUSIVE', boundary_proven: false});
 const BLOCKERS = Object.freeze(['manual_info_route_not_connected']);
 const bad = () => { throw Error('manual_info_route_not_connected'); };
