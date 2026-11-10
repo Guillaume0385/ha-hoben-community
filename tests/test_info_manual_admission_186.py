@@ -252,3 +252,61 @@ def test_no_public_cli_command_or_fixture_selector(monkeypatch):
         launch, "provenance", lambda s: pytest.fail("unsupported CLI used")
     )
     assert launch.main() == 1
+
+
+@pytest.mark.parametrize(
+    "provided_user",
+    ["abcdef0123456789abcdef0123456789", "ABCDEF01-2345-6789-ABCD-0123456789AB"],
+)
+def test_single_user_secret_reaches_worker_with_shared_initial_device(
+    monkeypatch, tmp_path, capsys, provided_user
+):
+    """Offline RED/GREEN: the Info launcher must not require a second secret."""
+    from custom_components.hoben.myhoben import INITIAL_DEVICE_GUID, normalize_user_guid
+
+    user = normalize_user_guid(provided_user)
+    proof = dict(PROOF)
+    calls = []
+    monkeypatch.setattr(launch, "provenance", lambda source: (proof, tmp_path))
+    monkeypatch.setattr(launch.sys, "argv", [str(launch.__file__)])
+    monkeypatch.setattr(launch.os, "environ", {"HOBEN_USER_GUID": provided_user})
+
+    def offline_worker(actual_proof, identity, *, cancelled):
+        assert actual_proof == proof
+        assert identity == {"user": user, "device": INITIAL_DEVICE_GUID}
+        assert not cancelled()
+        calls.append(dict(identity))
+        return build_report(proof, dict(OBSERVATION), dict(PROCESS))
+
+    monkeypatch.setattr(launch, "run_process", offline_worker)
+    assert launch.main() == 0
+    assert len(calls) == 1
+    output = capsys.readouterr()
+    assert not output.out and not output.err
+    envelope = json.loads((tmp_path / "sealed-report.json").read_text())
+    assert user not in json.dumps(envelope)
+    assert "HOBEN_USER_GUID" not in json.dumps(envelope)
+    assert "HOBEN_DEVICE_GUID" not in json.dumps(envelope)
+    assert len((tmp_path / "attestation.key").read_bytes()) == 32
+
+
+@pytest.mark.parametrize("invalid_user", [None, "", "invalid", "g" * 32, "a" * 31])
+def test_single_secret_invalid_user_refused_before_worker(
+    monkeypatch, tmp_path, invalid_user
+):
+    proof = dict(PROOF)
+    monkeypatch.setattr(launch, "provenance", lambda source: (proof, tmp_path))
+    monkeypatch.setattr(launch.sys, "argv", [str(launch.__file__)])
+    source = {} if invalid_user is None else {"HOBEN_USER_GUID": invalid_user}
+    monkeypatch.setattr(launch.os, "environ", source)
+    monkeypatch.setattr(
+        launch, "run_process", lambda *args, **kwargs: pytest.fail("worker launched")
+    )
+    assert launch.main() == 0
+    sealed = json.loads((tmp_path / "sealed-report.json").read_text())
+    report = sealed["report"]
+    assert report["result"] == "NOT RUN"
+    assert report["process"]["first_error"] == "identity"
+    assert report["process"]["launch_attempted"] is False
+    assert report["observation"]["connections"] == 0
+    assert invalid_user is None or invalid_user not in json.dumps(sealed)
