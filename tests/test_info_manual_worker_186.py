@@ -180,6 +180,23 @@ def test_delivery_at_observation_deadline_is_not_a_candidate(monkeypatch, certs)
     assert report["cleanup_attested"]
 
 
+def test_delivery_lists_are_private_to_each_run():
+    from scripts.info_manual_contract import OBSERVATION
+
+    first, second = PassiveTlsPort(), PassiveTlsPort()
+    first.facts["delivery_timeline"].append([100, 2])
+    first.facts["candidate_segments"].append({
+        "start_at_ms": 100,
+        "observed_bytes_between_candidates": 2,
+        "tls_deliveries": 1,
+        "end_kind": "observation_end",
+    })
+    assert second.facts["delivery_timeline"] == []
+    assert second.facts["candidate_segments"] == []
+    assert OBSERVATION["delivery_timeline"] == []
+    assert OBSERVATION["candidate_segments"] == []
+
+
 def test_multiple_delivery_leads_are_not_message_headers_or_info_lengths(
     monkeypatch, certs
 ):
