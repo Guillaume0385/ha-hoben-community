@@ -136,3 +136,15 @@ test('gate has no live override or source-integrity-only success', () => {
     assert.throws(() => route.assess(altered, m.files));
   }
 });
+
+
+test('Info route refuses a second secret even after source hash is repinned', async () => {
+  const s=remote(),file='.github/workflows/hoben-manual.yml';
+  const old='        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}\\n';
+  assert.ok(s.files[file].includes(old));
+  s.files[file]=s.files[file].replace(old,old+
+    '        HOBEN_DEVICE_GUID: ${{ secrets.HOBEN_DEVICE_GUID }}\\n');
+  s.manifest.files[file]=hash(s.files[file]);
+  await assert.rejects(() => route.inspect(s),
+    {message:'manual_info_route_not_connected'});
+});
