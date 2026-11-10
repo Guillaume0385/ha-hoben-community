@@ -137,8 +137,6 @@ test('gate has no live override or source-integrity-only success', () => {
   }
 });
 
-
-
 test('Info route refuses a second secret even after source hash is repinned', async () => {
   const s=remote(),file='.github/workflows/hoben-manual.yml';
   const old='        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}'+String.fromCharCode(10);
