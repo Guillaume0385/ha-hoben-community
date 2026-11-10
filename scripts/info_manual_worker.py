@@ -238,7 +238,7 @@ class PassiveTlsPort(
             s._opening_options.device_info,
         )
         need(opening or data in (b"\x0b", READ_ONLY_V4))
-        need(data != READ_ONLY_V4 or (self.candidate.is_set() and self._probe_authorized))
+        need(data != READ_ONLY_V4 or not self.candidate.is_set() or self._probe_authorized)
         need(self._writes < 8192)
         self._writes += 1
         self._active_write += 1
@@ -250,6 +250,8 @@ class PassiveTlsPort(
                 self.facts["pongs_written"] += 1
             elif data == READ_ONLY_V4:
                 self.facts["read_requests"] += 1
+                if self._probe_authorized:
+                    self.facts["unconfirmed_read_requests"] += 1
         finally:
             self._active_write -= 1
 
@@ -282,7 +284,6 @@ class PassiveTlsPort(
         if f["first_error"] == "none" and s._rx_error is not None and not f["peer_eof"]:
             f["first_error"] = error_category(s._rx_error)
         f["verified_reads"] = s.verified_read_sequence
-        f["unconfirmed_read_requests"] = f["read_requests"]
         f["discarded_deliveries"] = s._info_delivery_drop._count
         f["rx_stopped"] = s._rx_task is not None and s._rx_task.done()
         f["operations_stopped"] = (
