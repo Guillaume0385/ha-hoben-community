@@ -1,5 +1,16 @@
 # Changelog
 
+## En cours — #186-011, Info avec un seul secret
+
+- Correction ciblée : `collect-info` utilise uniquement `HOBEN_USER_GUID`,
+  validé par `normalize_user_guid`. Le lanceur prend `INITIAL_DEVICE_GUID`
+  du codec partagé, puis `V4Session` n'adopte que l'identité renvoyée par un
+  `OpenedClient` V4 accepté. UserGuid absent/invalide : NOT RUN avant TLS.
+- Aucune association automatique, commande, écriture Modbus, exposition
+  d'identité ou RX, modification des scénarios historiques/HA, des gates
+  GitHub, de l'anti-rejeu, de la supervision ou du budget global 3600 s.
+  Tests hors ligne RED/GREEN et manifeste SHA256 recalculé.
+
 ## En cours — #186, diagnostic du lancement manuel Info 0x0C
 
 - Le préflight affiche une catégorie publique fixe et non sensible pour chaque
