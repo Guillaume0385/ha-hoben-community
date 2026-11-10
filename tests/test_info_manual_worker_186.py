@@ -208,8 +208,10 @@ def test_single_secret_info_session_adopts_device_only_after_valid_opened(
                 assert session.device_guid_for_persistence == "a" * 32
             assert state.connections == 1
             assert state.peer.transmissions[0] == encode_open_client(
-                user, session._opening_options.build,
-                INITIAL_DEVICE_GUID, session._opening_options.device_info,
+                user,
+                session._opening_options.build,
+                INITIAL_DEVICE_GUID,
+                session._opening_options.device_info,
             )
             assert all(message[:1] != b"\x30" for message in state.peer.transmissions)
             assert port.facts["tls_verified"]
