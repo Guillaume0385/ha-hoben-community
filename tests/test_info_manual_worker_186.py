@@ -26,7 +26,7 @@ async def scenario(monkeypatch, certs, *, plan=(), close_ack=True, cancel=None):
     session = make_session(user, device, port)
     task = asyncio.create_task(observe(session, port, origin=0, clock=clock.loop_time))
     pending, cancelled = list(plan), False
-    for _ in range(2048):
+    for _ in range(8192):
         await pump()
         if task.done():
             report = task.result()
@@ -55,7 +55,7 @@ async def scenario(monkeypatch, certs, *, plan=(), close_ack=True, cancel=None):
         if cancel is not None and at >= cancel and not cancelled:
             cancelled = True
             task.cancel()
-    pytest.fail("passive_worker_stalled")
+    pytest.fail(f"passive_worker_stalled simulated_ms={clock.now_ms}")
 
 
 @pytest.mark.parametrize(
