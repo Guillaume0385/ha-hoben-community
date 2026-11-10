@@ -1,8 +1,11 @@
-"""Dedicated D7 passive TLS observer; no CLI, retries or HA activation.
+"""D8 manual-only bounded TLS delivery observer; no invented Info framing.
 
-One actual plaintext delivery may be discarded by the existing private B
-capability. Subsequent reads are parked, never scanned/reframed. With today's
-evidence the observation ends INCONCLUSIVE after cleanup, not SUCCESS.
+The existing private drop owns the first admissible 0x0C-leading delivery.
+After that drop the SAME session RX task only counts future plaintext TLS
+deliveries: not a single byte returns to V4Session's framer. A serialized,
+fixed diagnostic read can still be emitted every 30 seconds. No fixed-FFFF
+reply can prove freshness/correlation after an unanswered read, so no functional
+recovery is claimed from opaque deliveries.
 """
 
 import asyncio
@@ -14,6 +17,7 @@ from custom_components.hoben.myhoben import encode_open_client
 from custom_components.hoben.transport import (
     AsyncTlsTransport,
     TransportCertificateError,
+    TransportEOF,
     TransportError,
 )
 from custom_components.hoben.v4_session import (
@@ -52,6 +56,8 @@ class PassiveTlsPort(
         self._active_read = self._active_write = 0
         self._close_future = None
         self._original_writer = None
+        self._probe_authorized = False
+        self._segment = None
 
     def bind(self, session, origin):
         need(self.session is None and type(session) is V4Session)
@@ -94,16 +100,58 @@ class PassiveTlsPort(
             )
         self.facts["tls_verified"] = True
 
+    def _segment_end(self, kind):
+        """Close a scalar observation interval, NEVER an Info frame length."""
+        segment = self._segment
+        if segment is None:
+            return
+        f = self.facts
+        entry = {
+            "start_at_ms": segment[0],
+            "observed_bytes_between_candidates": segment[1],
+            "tls_deliveries": segment[2],
+            "end_kind": kind,
+        }
+        if len(f["candidate_segments"]) < 16:
+            f["candidate_segments"].append(entry)
+        else:
+            f["candidate_segments_omitted"] += 1
+        self._segment = None
+
     def delivered(self, data):
-        """Only called directly by read(), with the actual returned object."""
+        """Observe only the return of a genuine read by the sole session RX task."""
         s, f = self.session, self.facts
         need(asyncio.current_task() is s._rx_task and s._transport is self)
         need(type(data) is bytes and 1 <= len(data) <= 4096)
         need(f["deliveries"] < 8192 and f["received_bytes"] + len(data) <= 1048576)
         f["deliveries"] += 1
         f["received_bytes"] += len(data)
-        # This proves only a candidate at the start of a post-open delivery.
-        # No suffix scan, subcode, frame length or declared fixture layout.
+        at = self.elapsed()
+        if f["candidate_observed"]:
+            f["post_candidate_reads"] += 1
+            f["tls_deliveries_since_candidate"] += 1
+            f["tls_bytes_since_candidate"] += len(data)
+            if len(f["delivery_timeline"]) < 96:
+                f["delivery_timeline"].append([at, len(data)])
+            else:
+                f["delivery_timeline_omitted"] += 1
+            # These are leading bytes of TLS deliveries, NOT message headers.
+            # No scanning of the payload for look-alike discriminants.
+            if data[:1] == b"\x0c":
+                f["candidate_leads_unproven"] += 1
+                self._segment_end("delivery_lead_unproven")
+                self._segment = [at, 0, 0]
+            elif data[:1] == b"\x0a":
+                f["ping_leads_unproven"] += 1
+            elif data[:1] == b"\x0e":
+                f["response_leads_unproven"] += 1
+            elif data[:1] == b"\x1b":
+                f["data_updated_leads_unproven"] += 1
+            self._segment[1] += len(data)
+            self._segment[2] += 1
+            return
+        # Before the first candidate only: this is a clean-framer, post-open
+        # delivery lead with a known offset 0, not a proven Info frame.
         if (
             data[:1] == b"\x0c"
             and self.clock() < self.end
@@ -113,43 +161,72 @@ class PassiveTlsPort(
             and not s._data_updated.active
             and s._rx_error is None
         ):
-            need(not f["candidate_observed"])
             f["candidate_observed"] = True
+            f["candidate_delivery_offset"] = 0
             f["candidate_delivery_bytes"] = len(data)
-            f["candidate_at_ms"] = self.elapsed()
+            f["candidate_at_ms"] = at
+            f["tls_deliveries_since_candidate"] = 1
+            f["tls_bytes_since_candidate"] = len(data)
+            f["delivery_timeline"].append([at, len(data)])
+            self._segment = [at, len(data), 1]
             self.candidate.set()
 
     async def read(self, max_bytes=4096, *, bounded=True):
         need(self._active_read == 0)
+        # This read invocation starts AFTER the first delivery returned to
+        # V4Session and its private drop consumed it. Opaque data must never be
+        # returned to its framer. No second reader, byte scan or guessed skip.
+        opaque = self.candidate.is_set() and not bounded
         self._active_read += 1
         try:
-            if self.candidate.is_set():
-                # Cancellation by the same session's cleanup is the only exit.
-                # No second transport read can consume a candidate's suffix.
-                await asyncio.Future()
-            if not bounded:
-                if (
-                    self.facts["deliveries"] >= 8192
-                    or self.facts["received_bytes"] >= 1048576
-                ):
-                    if self.facts["first_error"] == "none":
-                        self.facts["first_error"] = "budget"
-                    raise TransportError("delivery_budget")
-                max_bytes = min(max_bytes, 1048576 - self.facts["received_bytes"])
-            data = await super().read(max_bytes, bounded=bounded)
-            if not bounded:
-                if self.clock() >= self.end:
-                    # A late delivery is not an observation in the window and
-                    # cannot be fed to the private drop/continuation path.
-                    await asyncio.Future()
-                self.delivered(data)
-            return data
+            while True:
+                if not bounded:
+                    if self.clock() >= self.end:
+                        await asyncio.Future()  # Cleanup cancels this sole RX.
+                    if (
+                        self.facts["deliveries"] >= 8192
+                        or self.facts["received_bytes"] >= 1048576
+                    ):
+                        if self.facts["first_error"] == "none":
+                            self.facts["first_error"] = "budget"
+                        raise TransportError("delivery_budget")
+                    max_bytes = min(max_bytes, 1048576 - self.facts["received_bytes"])
+                try:
+                    data = await super().read(max_bytes, bounded=bounded)
+                except TransportEOF:
+                    # A real TLS peer EOF is not a local close nor silent idle.
+                    self.facts["peer_eof"] = True
+                    raise
+                if not bounded:
+                    if self.clock() >= self.end:
+                        await asyncio.Future()
+                    self.delivered(data)
+                    if opaque:
+                        continue
+                return data
         finally:
             self._active_read -= 1
 
     def allow_v4_read(self):
-        # New owner decision allows observation without an unsafe continuation.
+        # No V4Session request waiter may be attached to opaque deliveries.
         return False
+
+    async def send_diagnostic_v4(self):
+        """Only a fixed read packet; serialize with all session TX operations."""
+        s = self.session
+        need(self.candidate.is_set() and s._transport is self)
+        async with s._tx_lock:
+            need(
+                s.state is SessionState.CONNECTED
+                and s._rx_error is None
+                and self._close_calls == 0
+                and self._active_write == 0
+            )
+            self._probe_authorized = True
+            try:
+                await self.write(READ_ONLY_V4)
+            finally:
+                self._probe_authorized = False
 
     async def write(self, data):
         need(type(data) is bytes and self._active_write == 0)
@@ -161,25 +238,25 @@ class PassiveTlsPort(
             s._opening_options.device_info,
         )
         need(opening or data in (b"\x0b", READ_ONLY_V4))
-        need(not self.candidate.is_set() or data != READ_ONLY_V4)
+        need(data != READ_ONLY_V4 or (self.candidate.is_set() and self._probe_authorized))
         need(self._writes < 8192)
         self._writes += 1
         self._active_write += 1
         if data == b"\x0b":
             self.facts["pings_validated"] += 1
-        elif data == READ_ONLY_V4:
-            self.facts["read_requests"] += 1
         try:
             await super().write(data)
             if data == b"\x0b":
                 self.facts["pongs_written"] += 1
+            elif data == READ_ONLY_V4:
+                self.facts["read_requests"] += 1
         finally:
             self._active_write -= 1
 
     async def close(self):
         self._close_calls += 1
         self.facts["transport_close_requested"] = True
-        if self.facts["first_error"] == "none" and self._reader is not None:
+        if self.facts["first_error"] == "none" and not self.facts["peer_eof"] and self._reader is not None:
             if self._reader.exception() is not None:
                 self.facts["first_error"] = "transport"
             elif self._reader.at_eof():
@@ -201,9 +278,11 @@ class PassiveTlsPort(
 
     def finish(self, worker_report=None):
         s, f = self.session, self.facts
-        if f["first_error"] == "none" and s._rx_error is not None:
+        self._segment_end("tls_eof" if f["peer_eof"] else "observation_end")
+        if f["first_error"] == "none" and s._rx_error is not None and not f["peer_eof"]:
             f["first_error"] = error_category(s._rx_error)
         f["verified_reads"] = s.verified_read_sequence
+        f["unconfirmed_read_requests"] = f["read_requests"]
         f["discarded_deliveries"] = s._info_delivery_drop._count
         f["rx_stopped"] = s._rx_task is not None and s._rx_task.done()
         f["operations_stopped"] = (
@@ -239,11 +318,11 @@ def make_session(user, device, port):
 
 
 async def observe(session, port, *, origin, clock=time.monotonic, stop=None):
-    """One session, no resynchronization/request/reconnect after opaque Info.
+    """One V4 opening and one RX owner; never parse an opaque continuation.
 
-    stop is a private OS signal event, never a caller-provided live option.
-    Every helper is cancelled/reaped. Repeated cancellation cannot reset the
-    immutable deadline or cancel a cleanup that is already in progress.
+    All V4 diagnostic TX follow the original 30-second monotonic cadence and
+    cannot turn a late fixed-FFFF response into correlated V4 proof. An external
+    process guardian owns the unchanged absolute 3600-second OS deadline.
     """
     need(type(session) is V4Session and type(port) is PassiveTlsPort)
     port.bind(session, origin)
@@ -252,8 +331,19 @@ async def observe(session, port, *, origin, clock=time.monotonic, stop=None):
     end = origin + LIMITS["observation_ms"] / 1000
     cancelled = False
 
+    async def probe_loop():
+        next_at = clock() + 30.0
+        while clock() < end:
+            await asyncio.sleep(max(0, next_at - clock()))
+            if clock() >= end or session._rx_task.done():
+                return
+            await port.send_diagnostic_v4()
+            # Never burst missed intervals or exceed one write at a time.
+            next_at = max(next_at + 30.0, clock() + 30.0)
+
     async def work():
-        waiters = []
+        waiters = set()
+        probe = None
 
         def fail(category):
             if f["first_error"] == "none":
@@ -265,24 +355,49 @@ async def observe(session, port, *, origin, clock=time.monotonic, stop=None):
             async with asyncio.timeout(min(30, remaining)):
                 await session.connect()
             f["opening_accepted"] = bool(session.snapshot.opening is not None)
-            waiters = [
-                asyncio.create_task(port.candidate.wait()),
-                asyncio.create_task(asyncio.sleep(max(0, end - clock()))),
-            ]
-            if stop is not None:
-                waiters.append(asyncio.create_task(stop.wait()))
-            await asyncio.wait(
-                [*waiters, session._rx_task], return_when=asyncio.FIRST_COMPLETED
-            )
-            if clock() >= end:
-                f["observation_complete"] = True
-            if session._rx_task.done():
-                if session._rx_error is not None:
-                    fail(error_category(session._rx_error))
-                else:
-                    fail("closed")
-            elif not port.candidate.is_set() and clock() < end:
-                fail("cancelled")
+            candidate_wait = asyncio.create_task(port.candidate.wait())
+            end_wait = asyncio.create_task(asyncio.sleep(max(0, end - clock())))
+            stop_wait = asyncio.create_task(stop.wait()) if stop is not None else None
+            waiters.update((candidate_wait, end_wait))
+            if stop_wait is not None:
+                waiters.add(stop_wait)
+            while True:
+                watched = {session._rx_task, end_wait}
+                if not port.candidate.is_set():
+                    watched.add(candidate_wait)
+                if stop_wait is not None:
+                    watched.add(stop_wait)
+                if probe is not None:
+                    watched.add(probe)
+                done, _ = await asyncio.wait(
+                    watched, return_when=asyncio.FIRST_COMPLETED
+                )
+                if session._rx_task in done:
+                    if port.facts["peer_eof"]:
+                        break
+                    fail(
+                        error_category(session._rx_error)
+                        if session._rx_error is not None
+                        else "closed"
+                    )
+                    break
+                if end_wait in done or clock() >= end:
+                    f["observation_complete"] = True
+                    break
+                if stop_wait is not None and stop_wait in done:
+                    fail("cancelled")
+                    break
+                if candidate_wait in done and probe is None:
+                    # The only parse attempt is the pre-existing first delivery
+                    # drop. All subsequent reads are private, length-only.
+                    probe = asyncio.create_task(probe_loop(), name="hoben-info-v4-probe")
+                    waiters.add(probe)
+                if probe is not None and probe in done:
+                    try:
+                        probe.result()
+                    except Exception as error:
+                        fail(error_category(error))
+                    break
         except asyncio.CancelledError:
             fail("cancelled")
         except Exception as error:
@@ -299,7 +414,7 @@ async def observe(session, port, *, origin, clock=time.monotonic, stop=None):
             except (Exception, asyncio.CancelledError):
                 f["cleanup_error"] = "cleanup"
 
-    task = asyncio.create_task(work(), name="hoben-info-passive-worker")
+    task = asyncio.create_task(work(), name="hoben-info-continuous-worker")
     while not task.done():
         try:
             await asyncio.shield(task)
