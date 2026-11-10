@@ -174,9 +174,19 @@ def test_consistent_json_is_not_an_authenticated_live_proof(field):
         candidate_observed=True,
         candidate_delivery_bytes=1,
         candidate_at_ms=100,
+        candidate_delivery_offset=0,
         discarded_deliveries=1,
         deliveries=1,
         received_bytes=1,
+        tls_deliveries_since_candidate=1,
+        tls_bytes_since_candidate=1,
+        delivery_timeline=[[100, 1]],
+        candidate_segments=[{
+            "start_at_ms": 100,
+            "observed_bytes_between_candidates": 1,
+            "tls_deliveries": 1,
+            "end_kind": "observation_end",
+        }],
         cleanup_started_ms=110,
         transport_close_requested=True,
         transport_close_completed=True,
@@ -248,6 +258,7 @@ def worker(identity,result,origin):
         original(self,data)
         if data[:1]==b'\x03':
             asyncio.get_running_loop().call_later(.05,self.deliver,b'\x0c\x0a')
+            asyncio.get_running_loop().call_later(.12,self.reader.feed_eof)
     patch.setattr(MemoryTlsPeer,'write',write)
     g._worker(identity,result,origin)
 g._guardian(int(sys.argv[4]),int(sys.argv[5]),int(sys.argv[6]),time.monotonic(),worker=worker)
@@ -283,10 +294,11 @@ def test_real_worker_memory_tls_and_os_guardian_share_actual_cleanup(
     monkeypatch.setattr(guard.subprocess, "Popen", spawn)
     report = guard.run_process(PROOF, {"user": USER_GUID, "device": DEVICE_GUID})
     assert report["result"] == "INCONCLUSIVE"
-    assert report["reason"] == "candidate_observed_continuation_not_proven"
+    assert report["reason"] == "server_eof"
     assert report["observation"]["cleanup_attested"]
     assert report["observation"]["discarded_deliveries"] == 1
     assert report["observation"]["read_requests"] == 0
+    assert report["observation"]["peer_eof"]
     assert report["process"]["children_reaped"] == 1
     assert report["process"]["child_report_bound"] and report["process"]["group_empty"]
     assert report["process"]["guardian_waited"] and report["process"]["exit_ok"]
