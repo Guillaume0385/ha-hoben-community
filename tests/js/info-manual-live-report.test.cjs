@@ -120,7 +120,7 @@ test('D8 delivery counts, omitted items and fixed-FFFF non-correlation fail clos
       o=>o.candidate_segments[0].observed_bytes_between_candidates=-1,
       o=>o.candidate_segments[1].end_kind='Info_complete',
       o=>o.verified_reads=1,
-      o=>o.unconfirmed_read_requests=2,
+      o=>o.unconfirmed_read_requests=4,
       o=>o.first_post_info_valid_v4_at_ms=150,
       o=>o.recovery_stability_elapsed_ms=300000,
       o=>o.delivery_timeline[1].push('private'),
