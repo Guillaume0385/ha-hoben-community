@@ -180,8 +180,6 @@ def test_collect_info_is_only_passed_user_secret():
     capture = next(
         step for step in jobs["collect-info"]["steps"] if step.get("id") == "capture"
     )
-    secret_env = {
-        k: v for k, v in capture["env"].items() if "secrets." in str(v)
-    }
+    secret_env = {k: v for k, v in capture["env"].items() if "secrets." in str(v)}
     assert secret_env == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
     assert "HOBEN_DEVICE_GUID" not in json.dumps(jobs["collect-info"])
