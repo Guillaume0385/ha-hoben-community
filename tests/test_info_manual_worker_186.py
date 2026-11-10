@@ -26,7 +26,7 @@ async def scenario(monkeypatch, certs, *, plan=(), close_ack=True, cancel=None):
     session = make_session(user, device, port)
     task = asyncio.create_task(observe(session, port, origin=0, clock=clock.loop_time))
     pending, cancelled = list(plan), False
-    for _ in range(8192):
+    for _ in range(4096):
         await pump()
         if task.done():
             report = task.result()
@@ -41,7 +41,9 @@ async def scenario(monkeypatch, certs, *, plan=(), close_ack=True, cancel=None):
         if cancel is not None and not cancelled:
             times.append(cancel / 1000)
         assert times
-        at = max(clock.now_ms, int(min(times) * 1000))
+        # A scheduled 1.001 s can be 1.0009999999999999 in binary.
+        # Truncation would leave an undelivered 1001-ms plan item forever.
+        at = max(clock.now_ms, round(min(times) * 1000))
         assert at <= 3600000
         clock.advance_to(at)
         while pending and pending[0][0] <= at:
