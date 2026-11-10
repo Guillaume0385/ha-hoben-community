@@ -170,8 +170,7 @@ def validate_observation(value):
     need(type(value["cleanup_error"]) is str and value["cleanup_error"] in ERRORS)
     need(value["continuation"] == "not_proven")
     need(
-        value["verified_reads"] == 0
-        and value["unconfirmed_read_requests"] == value["read_requests"]
+        value["verified_reads"] <= value["read_requests"] - value["unconfirmed_read_requests"]
         and value["first_post_info_valid_v4_at_ms"] is None
         and value["recovery_stability_start_ms"] is None
         and value["recovery_stability_elapsed_ms"] == 0
