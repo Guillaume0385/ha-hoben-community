@@ -1,4 +1,4 @@
-"""D7 actual session/verified local TLS; never dispatch or Hoben network."""
+"""D8 continuous opaque RX and diagnostic reads over verified local MemoryBIO TLS."""
 
 import asyncio
 import json
@@ -76,7 +76,17 @@ def test_opaque_candidate_needs_no_length_and_never_forces_continuation(
     assert report["candidate_delivery_bytes"] == len(candidate)
     assert report["discarded_deliveries"] == 1
     assert report["continuation"] == "not_proven"
-    assert report["post_candidate_reads"] == report["read_requests"] == 0
+    assert report["post_candidate_reads"] == 0
+    assert report["read_requests"] > 0
+    assert report["unconfirmed_read_requests"] == report["read_requests"]
+    assert report["verified_reads"] == 0
+    assert report["first_post_info_valid_v4_at_ms"] is None
+    assert report["recovery_stability_start_ms"] is None
+    assert report["recovery_stability_elapsed_ms"] == 0
+    assert peer.read_requests == report["read_requests"]
+    assert report["tls_deliveries_since_candidate"] == 1
+    assert report["tls_bytes_since_candidate"] == len(candidate)
+    assert report["delivery_timeline"] == [[1100, len(candidate)]]
     assert report["pongs_written"] == report["pings_validated"] == 1
     assert report["cleanup_attested"] and report["tls_verified"]
     assert report["first_error"] == "none"
@@ -124,7 +134,7 @@ def test_partial_known_response_never_relabels_its_suffix_as_info(
 
 
 @pytest.mark.parametrize("suffix", [b"\x00", b"\x07", b"\xff", b"\x0a", RESPONSE])
-def test_fragment_after_candidate_is_never_consumed_or_scanned(
+def test_fragment_after_candidate_is_counted_but_never_parsed_or_scanned(
     monkeypatch, certs, suffix
 ):
     report, _, peer = asyncio.run(
@@ -134,9 +144,20 @@ def test_fragment_after_candidate_is_never_consumed_or_scanned(
             plan=((1000, b"\x0c"), (1001, suffix)),
         )
     )
-    assert report["candidate_delivery_bytes"] == report["received_bytes"] == 1
+    assert report["candidate_delivery_bytes"] == 1
+    assert report["received_bytes"] == 1 + len(suffix)
     assert report["discarded_deliveries"] == 1
-    assert not peer.read_requests and report["cleanup_attested"]
+    assert report["post_candidate_reads"] == 1
+    assert report["tls_deliveries_since_candidate"] == 2
+    assert report["tls_bytes_since_candidate"] == 1 + len(suffix)
+    assert report["delivery_timeline"] == [[1000, 1], [1001, len(suffix)]]
+    assert report["candidate_segments"] == [{
+        "start_at_ms": 1000,
+        "observed_bytes_between_candidates": 1 + len(suffix),
+        "tls_deliveries": 2,
+        "end_kind": "observation_end",
+    }]
+    assert peer.read_requests > 0 and report["cleanup_attested"]
 
 
 @pytest.mark.parametrize("fault", [None, OSError("synthetic"), b"\x05\x03", b"\xff"])
@@ -145,7 +166,11 @@ def test_eof_tls_closeclient_unknown_do_not_invent_info_or_retry(
 ):
     report, _, _ = asyncio.run(scenario(monkeypatch, certs, plan=((1000, fault),)))
     assert not report["candidate_observed"]
-    assert report["first_error"] != "none" and report["connections"] == 1
+    assert report["connections"] == 1
+    if fault is None:
+        assert report["peer_eof"] and report["first_error"] == "none"
+    else:
+        assert report["first_error"] != "none"
     assert report["post_candidate_reads"] == 0
 
 
@@ -153,6 +178,110 @@ def test_delivery_at_observation_deadline_is_not_a_candidate(monkeypatch, certs)
     report, _, _ = asyncio.run(scenario(monkeypatch, certs, plan=((3540000, b"\x0c"),)))
     assert not report["candidate_observed"] and report["observation_complete"]
     assert report["cleanup_attested"]
+
+
+def test_multiple_delivery_leads_are_not_message_headers_or_info_lengths(
+    monkeypatch, certs
+):
+    report, _, peer = asyncio.run(
+        scenario(
+            monkeypatch,
+            certs,
+            plan=(
+                (1000, b"\x0c\x0a\x0e\x0c"),
+                (1001, b"\x0e\x0c\x0a"),
+                (1002, b"\x0a\x0c"),
+                (1003, b"\x1b\x0c"),
+                (1004, b"\x0c\x0e"),
+                (1005, b"\x0c"),
+            ),
+        )
+    )
+    assert report["candidate_observed"] and report["candidate_delivery_offset"] == 0
+    assert report["candidate_delivery_bytes"] == 4
+    assert report["candidate_leads_unproven"] == 2
+    assert report["response_leads_unproven"] == 1
+    assert report["ping_leads_unproven"] == 1
+    assert report["data_updated_leads_unproven"] == 1
+    assert report["tls_deliveries_since_candidate"] == 6
+    assert report["tls_bytes_since_candidate"] == 4 + 3 + 2 + 2 + 2 + 1
+    assert report["delivery_timeline"] == [
+        [1000, 4], [1001, 3], [1002, 2],
+        [1003, 2], [1004, 2], [1005, 1],
+    ]
+    assert [s["observed_bytes_between_candidates"] for s in report["candidate_segments"]] == [
+        4 + 3 + 2 + 2, 2, 1,
+    ]
+    assert report["verified_reads"] == 0 and peer.read_requests > 0
+
+
+def test_new_0c_inside_payload_does_not_count_as_another_candidate(
+    monkeypatch, certs
+):
+    report, _, _ = asyncio.run(
+        scenario(monkeypatch, certs, plan=(
+            (1000, b"\x0c"), (1500, b"\x0e\x0c\x0a"),
+            (1600, b"\x00\x0c\x0a\x0e"),
+        ))
+    )
+    assert report["candidate_leads_unproven"] == 0
+    assert report["response_leads_unproven"] == 1
+    assert report["post_candidate_reads"] == 2
+    assert report["verified_reads"] == 0
+    assert report["continuation"] == "not_proven"
+
+
+@pytest.mark.parametrize("later", [299_000, 300_000, 600_000])
+def test_late_v4_shaped_deliveries_never_fabricate_300s_recovery(
+    monkeypatch, certs, later
+):
+    report, _, peer = asyncio.run(
+        scenario(
+            monkeypatch,
+            certs,
+            plan=((1000, b"\x0c"), (1000 + later, RESPONSE)),
+        )
+    )
+    assert report["response_leads_unproven"] == 1
+    assert report["first_post_info_valid_v4_at_ms"] is None
+    assert report["recovery_stability_elapsed_ms"] == 0
+    assert report["verified_reads"] == 0
+    assert report["read_requests"] == peer.read_requests > 0
+
+
+def test_peer_eof_after_info_is_a_real_loss_not_a_voluntary_silence_close(
+    monkeypatch, certs
+):
+    report, port, peer = asyncio.run(
+        scenario(
+            monkeypatch, certs, plan=(
+                (1000, b"\x0c\x00"),
+                (35000, b"\x0a"),
+                (35100, None),
+            )
+        )
+    )
+    assert report["peer_eof"]
+    assert report["first_error"] == "none"
+    assert report["cleanup_attested"] and report["connections"] == 1
+    assert report["tls_deliveries_since_candidate"] == 2
+    assert report["candidate_segments"][0]["end_kind"] == "tls_eof"
+    assert report["read_requests"] == peer.read_requests >= 1
+    assert port._active_read == port._active_write == 0
+
+
+def test_delivery_timeline_aggregates_without_discarding_global_totals(
+    monkeypatch, certs
+):
+    plan = [(1000, b"\x0c")]
+    plan.extend((2000 + i * 10, b"\x00\x0a\x0c") for i in range(110))
+    report, _, _ = asyncio.run(scenario(monkeypatch, certs, plan=tuple(plan)))
+    assert report["tls_deliveries_since_candidate"] == 111
+    assert len(report["delivery_timeline"]) == 96
+    assert report["delivery_timeline_omitted"] == 15
+    assert report["tls_bytes_since_candidate"] == 331
+    assert report["candidate_leads_unproven"] == 0
+    assert report["candidate_segments"][0]["observed_bytes_between_candidates"] == 331
 
 
 @pytest.mark.parametrize(
