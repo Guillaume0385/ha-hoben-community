@@ -19,7 +19,7 @@
     ".github/scripts/manual-hoben-gate.cjs": "0e3cc82c39d61eccf700f1fff3b5b2f8f8b2821f8421d273e458a8338b7ee887",
     ".github/scripts/info-manual-route.cjs": "9aa8e65e196a4502f1d6fe3f92a1d709fddeee1e75e06106d2503d12d4b04a07",
     ".github/scripts/info-manual-report.cjs": "95c56b7313676a9fd71e39db7ba1777d33f0065540e099e48d478c37923534cb",
-    ".github/scripts/info-manual-live-report.cjs": "ead9d20957035890d0b71f5b45a3a085b4fde09b4e0a8de0cc8e370dfa25e7ab",
+    ".github/scripts/info-manual-live-report.cjs": "777918fde20ec9f41a4fe89ead6828fd7998eab896b73ebe5df1daf54ef75418",
     ".github/scripts/experimental-report-file.cjs": "1eabef68b64d1db4f2beaf2bd825c361e97332921ca33bfdb976ea9429e4babd",
     ".github/scripts/experimental-lab-gate.cjs": "14bc2d4db976bc17dbcaf50b2aab820f2b4cb25e368a9a97626745547a368d24",
     ".github/scripts/experimental-push-preflight.cjs": "26b1ff0527859495c3ce83e7a3b93888f48b856b584f791f95ab85149379adca",
