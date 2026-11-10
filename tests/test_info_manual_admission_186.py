@@ -309,4 +309,5 @@ def test_single_secret_invalid_user_refused_before_worker(
     assert report["process"]["first_error"] == "identity"
     assert report["process"]["launch_attempted"] is False
     assert report["observation"]["connections"] == 0
-    assert invalid_user is None or invalid_user not in json.dumps(sealed)
+    assert "HOBEN_USER_GUID" not in json.dumps(sealed)
+    assert "HOBEN_DEVICE_GUID" not in json.dumps(sealed)
