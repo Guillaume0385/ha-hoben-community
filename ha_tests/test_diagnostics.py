@@ -226,6 +226,7 @@ async def test_loaded_diagnostics_schema_is_private_deterministic_and_read_only(
             "domain": DOMAIN,
             "entry": {"state": "loaded", "version": 1, "minor_version": 1},
             "runtime_available": True,
+            "session": None,
             "client": {
                 "state": "ready",
                 "profile": "v4",

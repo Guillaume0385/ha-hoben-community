@@ -412,6 +412,7 @@ class V4Session:
         "_unsupported_delivery_drops",
         "_preserve_read_timeouts",
         "_correlation_lost",
+        "_diagnostics",
     )
 
     def __init__(
@@ -467,6 +468,7 @@ class V4Session:
             raise HobenInvalidInputError()
         self._preserve_read_timeouts = preserve_read_timeouts
         self._correlation_lost = False
+        self._diagnostics = None
         if _info_delivery_drop is not None:
             if (
                 type(_info_delivery_drop) is not _InfoDeliveryDropExperiment
@@ -574,6 +576,8 @@ class V4Session:
     def _mark_read_uncertain(self):
         if not self._correlation_lost:
             self._correlation_lost = True
+            if self._diagnostics is not None:
+                self._diagnostics.note("acquisition_uncertain")
             pending = self._pending_read
             if pending is not None and not pending.done():
                 # Shield's caller may already be cancelled by its deadline.
@@ -692,6 +696,8 @@ class V4Session:
                     with error_boundary("tls_read"):
                         data = await transport.read(4096, bounded=False)
                 except TransportTimeout:
+                    if self._diagnostics is not None:
+                        self._diagnostics.note("rx_timeouts")
                     if not self._keep_silent_transport():
                         raise
                     # A broken reader may fail immediately on every call.
@@ -730,6 +736,8 @@ class V4Session:
                     finally:
                         recovery.read_deadline = None
             except TransportTimeout:
+                if self._diagnostics is not None:
+                    self._diagnostics.note("rx_timeouts")
                 if not self._keep_silent_transport():
                     raise
                 await asyncio.sleep(1.0)
@@ -793,6 +801,8 @@ class V4Session:
             or data[0] in POST_OPEN_SUPPORTED_TYPES | POST_OPEN_AUTH_TYPES
         ):
             return False
+        if self._diagnostics is not None:
+            self._diagnostics.drop(len(data), info_candidate=data[0] == 12)
         count = self._unsupported_delivery_drops
         if count < 65535:
             count += 1
@@ -944,6 +954,8 @@ class V4Session:
         raise self._rx_error or HobenClientClosedError()
 
     def _signal_loss(self):
+        if self._diagnostics is not None and self._rx_error is not None:
+            self._diagnostics.note("terminal_error")
         self._loss_event.set()
         self._unavailable.set()
 
@@ -1133,10 +1145,16 @@ class V4Session:
         async with self._tx_lock:
             transport, self._transport = self._transport, None
             if transport is not None:
+                if self._diagnostics is not None:
+                    self._diagnostics.note("transport_close_requested")
                 try:
                     with close_generation(self._framer):
                         await transport.close()
+                    if self._diagnostics is not None:
+                        self._diagnostics.note("transport_closed")
                 except (Exception, asyncio.CancelledError) as failure:
+                    if self._diagnostics is not None:
+                        self._diagnostics.note("transport_close_failed")
                     self._cleanup_failed = True
                     if self.close_client_received:
                         self._rx_error._cleanup_failed = True
@@ -1180,6 +1198,8 @@ class V4Session:
                 or self._transport is not transport
             ):
                 raise SessionStateError()
+            if self._diagnostics is not None:
+                self._diagnostics.note("pings")
             if self._no_pong is not None and self._no_pong.suppress(
                 self._experiment_generation
             ):
@@ -1188,6 +1208,8 @@ class V4Session:
                 self._tx_in_flight = True
                 try:
                     await transport.write(_PONG)
+                    if self._diagnostics is not None:
+                        self._diagnostics.note("pongs")
                 finally:
                     self._tx_in_flight = False
             except asyncio.CancelledError:
@@ -1281,6 +1303,8 @@ class V4Session:
                     response_buffer=self._opening_buffer,
                     answer_ping=self._mode is V4SessionMode.PERSISTENT,
                 )
+                if self._diagnostics is not None:
+                    self._diagnostics.note("tls_connected")
                 if isinstance(result, AuthorizationRequiredResult):
                     raise HobenAuthorizationRequiredError()
                 if isinstance(result, ClosedSessionResult):
@@ -1343,6 +1367,8 @@ class V4Session:
                         process_deadline_ms=process,
                         suite_deadline_ms=suite,
                     )
+                if self._diagnostics is not None:
+                    self._diagnostics.note("v4_accepted")
                 self._transition(SessionState.CONNECTED)
                 # Handshake reads have finished before this sole RX task starts.
                 self._rx_task = asyncio.create_task(
@@ -1443,6 +1469,8 @@ class V4Session:
             )
         except TransportError as failure:
             self._transport_eof = type(failure) is TransportEOF
+            if self._transport_eof and self._diagnostics is not None:
+                self._diagnostics.note("eof_received")
             self._retryable_loss = not isinstance(failure, TransportTimeout)
             if self._retryable_loss:
                 self._record_transport_loss()
@@ -1821,6 +1849,8 @@ class V4Session:
             ):
                 raise HobenProtocolError()
             if self.acquisition_uncertain:
+                if self._diagnostics is not None:
+                    self._diagnostics.note("v4_responses_uncredited")
                 # Decode/validate known responses, but never publish a late or
                 # duplicate FFFF reply, even after the old response was drained.
                 return
@@ -1836,6 +1866,8 @@ class V4Session:
             else:
                 pending.set_result(response)
                 self._verified_read_sequence += 1
+                if self._diagnostics is not None:
+                    self._diagnostics.correlated_response()
             return
         except HobenInternalError as failure:
             error = failure
@@ -1966,8 +1998,12 @@ class V4Session:
                     self._read_sent = True
                     self._tx_in_flight = True
                     try:
+                        if self._diagnostics is not None:
+                            self._diagnostics.note("v4_write_attempts")
                         await transport.write(request)
                         tx_completed = True
+                        if self._diagnostics is not None:
+                            self._diagnostics.note("v4_requests")
                     finally:
                         self._tx_in_flight = False
                 # A private probe has no external cancellation owner; letting

@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #207-D3, diagnostics HA scalaires
+
+- Projection fermée des compteurs de la tentative TLS HA courante/dernière :
+  livraisons inconnues abandonnées et tailles TLS, candidat Info opaque, lectures
+  émises/réponses corrélées ou non créditées, Ping/Pong traités, EOF et cleanup.
+  Saturation explicite à 65535, DEBUG échantillonné, aucune valeur domestique,
+  identité ou donnée RX exportée. Fermeture du transport distincte du réapage
+  complet ; la projection ne donne aucun droit de reprise ou d'admission.
+- Recette hors ligne de préparation du Live HA existant documentée, avec ses
+  limites de raccordement et de protections. Liste fixe et empreintes des sources
+  #186 complétées avec autorisation ; aucune règle de gate, workflow, collecteur
+  ou politique D1/D2/B7/B8 changée. Aucun test réel exécuté, #192 non résolu.
+  [Contrat et préparation manuelle](docs/ha-live-diagnostics-207.md).
+
 ## En cours — #207-D2, silence TLS et réponses V4 tardives
 
 - Le seul propriétaire HA persistant conserve TLS et RX/Pong lors d'un silence
