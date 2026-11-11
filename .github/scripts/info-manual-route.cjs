@@ -48,6 +48,7 @@ const FILES = Object.freeze([
   'custom_components/hoben/safe_reports.py',
   'custom_components/hoben/sensor.py',
   'custom_components/hoben/session.py',
+  'custom_components/hoben/session_diagnostics.py',
   'custom_components/hoben/session_monitor.py',
   'custom_components/hoben/session_observation.py',
   'custom_components/hoben/session_sensor.py',

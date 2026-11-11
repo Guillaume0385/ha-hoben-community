@@ -15,6 +15,7 @@ from .client import RawStoveSnapshot
 from .const import DOMAIN, UPDATE_INTERVAL
 from .coordinator import HobenCoordinatorData
 from .safe_reports import PROFILES, safe_error_report, select_report
+from .session_diagnostics import project_report
 
 # These are public OpenedClient metadata widths/counts, not register values.
 _SNAPSHOT_NUMBERS = {
@@ -59,6 +60,7 @@ async def async_get_config_entry_diagnostics(
         {"close_client_subcode": 255},
         boolean_fields=("has_assigned_device_guid",),
     )
+    result["session"] = project_report(runtime.client.session_diagnostics)
     result["coordinator"] = {
         "last_update_success": coordinator.last_update_success is True,
         "update_interval_seconds": int(UPDATE_INTERVAL.total_seconds()),

@@ -348,6 +348,13 @@ class HobenClient:
             return "recovering"
         return "connected"
 
+    @property
+    def session_diagnostics(self):
+        """Bounded current/last HA TLS attempt; no I/O or identity access."""
+        return (
+            self._lifecycle.session_diagnostics if self._lifecycle is not None else None
+        )
+
     def safe_report(self) -> dict[str, str | bool | int]:
         """Allowlisted diagnostics; no dataclass/session or generic identity export."""
         self._adopt_persistent_identity()

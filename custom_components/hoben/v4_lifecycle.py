@@ -168,6 +168,7 @@ class V4Lifecycle:
         "_status_callback",
         "_ha_acquisition_generation",
         "_ha_fast_reconnect",
+        "_diagnostics",
     )
 
     def __init__(
@@ -241,6 +242,7 @@ class V4Lifecycle:
         self._ha_fast_reconnect = ha_fast_reconnect
         self._status_callback = _status_callback
         self._ha_acquisition_generation = None
+        self._diagnostics = None
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -610,21 +612,39 @@ class V4Lifecycle:
         )
         return response
 
+    @property
+    def session_diagnostics(self):
+        return (
+            self._diagnostics.safe_report() if self._diagnostics is not None else None
+        )
+
     async def _cleanup(self, *, _quarantine_permit=None) -> None:
         session = self._session
         if session is not None:
+            if self._diagnostics is not None:
+                self._diagnostics.note("cleanup_requested")
             try:
                 if _quarantine_permit is not None:
                     await session._cleanup_quarantine(self, _quarantine_permit)
                 else:
                     await session.abort()
             except asyncio.CancelledError:
+                if self._diagnostics is not None:
+                    self._diagnostics.note("cleanup_interrupted")
                 raise  # Keep ownership so explicit close can finish cancellation.
             except Exception as failure:
+                if self._diagnostics is not None:
+                    self._diagnostics.note("cleanup_failed")
                 self._observation = replace(self._observation, cleanup_failed=True)
                 self._session = None
                 raise with_phase(failure, "cleanup")
             else:
+                if self._diagnostics is not None:
+                    self._diagnostics.note(
+                        "cleanup_succeeded"
+                        if session.cleanup_succeeded
+                        else "cleanup_failed"
+                    )
                 if session.cleanup_succeeded:
                     if self._active_generation is not None:
                         self._observation = replace(
@@ -668,6 +688,11 @@ class V4Lifecycle:
             )
         ):
             raise HobenInvalidInputError()
+        if self._ha_reconnect:
+            from .session_diagnostics import SessionDiagnostics
+
+            self._diagnostics = SessionDiagnostics(attempt)
+            session._diagnostics = self._diagnostics
         session._status_callback = self._status_callback
         if session._framer is not None:
             session._framer.frame_log.generation = attempt
