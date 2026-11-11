@@ -95,6 +95,9 @@ from .v4_eof_quarantine import (
     State,
 )
 from .v4_experiment import (
+    KNOWN_TYPE_DISCRIMINANTS,
+    POST_OPEN_AUTH_TYPES,
+    POST_OPEN_SUPPORTED_TYPES,
     BudgetTransport,
     ExperimentalCloseClientError,
     ExperimentalV4Framer,
@@ -405,6 +408,8 @@ class V4Session:
         "_data_updated",
         "_read_idle",
         "_info_delivery_drop",
+        "_discard_unsupported_deliveries",
+        "_unsupported_delivery_drops",
     )
 
     def __init__(
@@ -420,6 +425,7 @@ class V4Session:
         _quarantine: _QuarantineCapability | None = None,
         recover_data_updated: bool = False,
         classify_frame_boundary: bool = False,
+        discard_unsupported_deliveries: bool = False,
         _info_delivery_drop: _InfoDeliveryDropExperiment | None = None,
     ) -> None:
         if not callable(transport_factory):
@@ -443,6 +449,15 @@ class V4Session:
             classify_frame_boundary and mode is not V4SessionMode.PERSISTENT
         ):
             raise HobenInvalidInputError()
+        if type(discard_unsupported_deliveries) is not bool or (
+            discard_unsupported_deliveries
+            and (
+                mode is not V4SessionMode.PERSISTENT or _info_delivery_drop is not None
+            )
+        ):
+            raise HobenInvalidInputError()
+        self._discard_unsupported_deliveries = discard_unsupported_deliveries
+        self._unsupported_delivery_drops = 0
         if _info_delivery_drop is not None:
             if (
                 type(_info_delivery_drop) is not _InfoDeliveryDropExperiment
@@ -613,10 +628,16 @@ class V4Session:
             if not recovery.active:
                 with error_boundary("tls_read"):
                     data = await transport.read(4096, bounded=False)
-                if self._info_delivery_drop is not None and self._discard_info_delivery(
-                    data, transport
+                production_drop = self._discard_unsupported_delivery(data, transport)
+                if production_drop or (
+                    self._info_delivery_drop is not None
+                    and self._discard_info_delivery(data, transport)
                 ):
                     data = b""  # Release the entire delivery before the next await.
+                    if production_drop:
+                        # A continuously buffered stream must not starve stop,
+                        # the pending read deadline, or other HA tasks.
+                        await asyncio.sleep(0)
                     continue
                 return data
             remaining = (
@@ -663,18 +684,13 @@ class V4Session:
                 continue  # Drop immediately, never accumulate opaque RX.
             return data
 
-    def _discard_info_delivery(self, data, transport):
-        """Private #186 hypothesis at a genuine read completion, never a suffix.
-
-        No subcode, scan, buffer reset, acquisition success or timeout rearm.
-        Partial frames/tails and the DataUpdated probe retain their contracts.
-        Even a coalesced Ping/response is deliberately lost with this delivery.
-        """
-        if (
+    def _delivery_drop_allowed(self, data, transport):
+        """Only a genuine new read by this healthy, post-open RX owner."""
+        return not (
             type(data) is not bytes
             or not 1 <= len(data) <= 4096
-            or data[0] != 12
             or asyncio.current_task() is not self._rx_task
+            or asyncio.current_task().cancelling()
             or transport is not self._transport
             or self.state is not SessionState.CONNECTED
             or self._cleanup_failed
@@ -683,6 +699,46 @@ class V4Session:
             or type(self._framer) is not ExperimentalV4Framer
             or self._framer.partial
             or self._framer._tail is not None
+        )
+
+    def _discard_unsupported_delivery(self, data, transport):
+        """HA #207 hypothesis: lose the entire opaque delivery, never scan it.
+
+        This is not application framing. No suffix, success, deadline reset or
+        reconnect is produced. A known partial frame always bypasses the drop.
+        The diagnostic counter saturates; its cap never terminates reception.
+        """
+        if (
+            not self._discard_unsupported_deliveries
+            or not self._delivery_drop_allowed(data, transport)
+            or data[0] in POST_OPEN_SUPPORTED_TYPES | POST_OPEN_AUTH_TYPES
+        ):
+            return False
+        count = self._unsupported_delivery_drops
+        if count < 65535:
+            count += 1
+            self._unsupported_delivery_drops = count
+            if count <= 4 or count & (count - 1) == 0:
+                _LOGGER.debug(
+                    "Hoben HA RX event=unsupported_delivery_discarded "
+                    "category=%s delivery_bytes=%d discarded_deliveries=%d "
+                    "length_scope=tls_delivery boundary_proven=false",
+                    "unsupported" if data[0] in KNOWN_TYPE_DISCRIMINANTS else "unknown",
+                    len(data),
+                    count,
+                )
+        return True
+
+    def _discard_info_delivery(self, data, transport):
+        """Private #186 fixture remains default-off, Info-only and capped.
+
+        Shares eligibility, not the production policy or its lifetime counter.
+        No subcode, scan, buffer reset, acquisition success or timeout rearm.
+        """
+        if (
+            self._info_delivery_drop is None
+            or not self._delivery_drop_allowed(data, transport)
+            or data[0] != 12
         ):
             return False
         experiment = self._info_delivery_drop

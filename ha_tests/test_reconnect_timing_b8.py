@@ -120,7 +120,13 @@ async def test_actual_acquisition_timeout_recovers_at_30_without_periodic_poll(
 
 
 @pytest.mark.parametrize(
-    "fault", [TransportError(), TransportTlsError(), b"\xff", b"\x05\x09"]
+    "fault",
+    [
+        TransportError(),
+        TransportTlsError(),
+        b"\x0e\xff\xff\x00\x00\xff\xff",
+        b"\x05\x09",
+    ],
 )
 async def test_conservative_class_waits_60_and_does_not_invent_fast_acquisition(
     hass, entry, peers, timeline, fault

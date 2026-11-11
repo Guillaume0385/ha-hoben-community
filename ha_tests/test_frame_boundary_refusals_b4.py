@@ -58,7 +58,7 @@ async def test_unclassified_errors_and_failed_cleanup_never_reopen(
     elif kind in {"postopen_auth", "postopen_auth_response"}:
         fault = b"\x2f" if kind == "postopen_auth" else b"\x30"
     else:
-        fault = b"\x04"
+        fault = b"\x0e\xff\xff\x00\x00\xff\xff"
         if kind == "unconfirmed":
             monkeypatch.setattr(
                 V4Session, "cleanup_succeeded", property(lambda _: False)
@@ -100,7 +100,7 @@ async def test_auth_refusal_after_boundary_is_terminal_without_false_reconnect(
     script_transport(second, openings=[[reply]])
     coordinator = await load(hass, entry)
     stamp = coordinator.last_successful_read_at
-    first.queue.put_nowait(b"\x04")
+    first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
     assert await peers.backoff.entered.get() == 60
     peers.backoff.release.put_nowait(None)
     await pump()
@@ -115,7 +115,7 @@ async def test_auth_refusal_after_boundary_is_terminal_without_false_reconnect(
 async def test_boundary_during_first_read_recovers_on_same_setup_owner(
     hass, entry, peers
 ):
-    first = peers.wire(DEVICE_GUID, [[b"\x04"]])
+    first = peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
     peers.wire(DEVICE_GUID, [[RESPONSE]])
     setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
     try:
@@ -151,7 +151,7 @@ async def test_unload_during_owned_cleanup_or_backoff_prevents_late_open(
             await asyncio.Future()
 
         first.close.side_effect = close
-    first.queue.put_nowait(b"\x04")
+    first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
     if stop_at == "cleanup":
         await entered.wait()
     else:
@@ -199,7 +199,7 @@ async def test_open_failures_keep_one_supervisor_and_60s_wait_without_attempt_ca
     if recover:
         peers.wire(DEVICE_GUID, [[RESPONSE]])
     coordinator = await load(hass, entry)
-    first.queue.put_nowait(b"\x04")
+    first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
     try:
         for number in range(1, 5):
             assert await peers.backoff.entered.get() == 60
@@ -225,7 +225,7 @@ async def test_open_failures_keep_one_supervisor_and_60s_wait_without_attempt_ca
 async def test_b7_partial_eof_keeps_owner_loss_visible_while_retaining_old_values(
     hass, entry, peers
 ):
-    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x04"]])
+    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     second = peers.wire(DEVICE_GUID, [])
     coordinator = await load(hass, entry)
     previous, stamp = coordinator.data, coordinator.last_successful_read_at
@@ -262,7 +262,7 @@ async def test_native_reload_reaps_boundary_supervisor_before_new_client(
     coordinator = await load(hass, entry)
     coordinator._async_unsub_refresh()
     old_client, old_owner = coordinator.client, peers.lifecycles[0]
-    first.queue.put_nowait(b"\x04")
+    first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
     assert await peers.backoff.entered.get() == 60
     assert await hass.config_entries.async_reload(entry.entry_id)
     new = entry.runtime_data.coordinator

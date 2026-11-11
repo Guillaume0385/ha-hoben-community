@@ -196,7 +196,7 @@ def tls(monkeypatch, freezer):
 
 
 @pytest.mark.parametrize("mode", ["normal", "reset", "ssl_error", "unconfirmed"])
-@pytest.mark.parametrize("incident", [b"\x0c", b"\x05\x03"])
+@pytest.mark.parametrize("incident", [b"\x0e\xff\xff\x00\x00\xff\xff", b"\x05\x03"])
 async def test_s1_rx_loss_and_real_close_callback(
     hass, entry, tls, mode, incident, caplog
 ):
@@ -226,7 +226,9 @@ async def test_s1_rx_loss_and_real_close_callback(
         assert len(logs) == 1, "close operation discrimination is missing"
         check_trace(logs[0], 1, mode)
         assert session._rx_error.code == (
-            "malformed_response" if incident == b"\x0c" else "experimental_close_client"
+            "malformed_response"
+            if incident == b"\x0e\xff\xff\x00\x00\xff\xff"
+            else "experimental_close_client"
         )
         assert first.close_count == 1
         assert session._rx_task.done() and not session._operations
@@ -241,7 +243,7 @@ async def test_s1_rx_loss_and_real_close_callback(
             assert session_state(hass, entry).state == "reconnecting"
             assert sensor(hass, entry).state != "unavailable"
             assert len(tls.transports) == 1
-            delay = 60 if incident == b"\x0c" else 10
+            delay = 60 if incident == b"\x0e\xff\xff\x00\x00\xff\xff" else 10
             assert tls.delays == [delay]
             tls.tick(delay - 0.001)
             await pump()
@@ -409,7 +411,7 @@ async def test_s1_nested_closers_or_concurrent_cancel_keep_original_close_owner(
     client, owner = coordinator.client, tls.owners[0]
     session = owner._session
     stamp = coordinator.last_successful_read_at
-    first.reader.feed_data(b"\x0c")
+    first.reader.feed_data(b"\x0e\xff\xff\x00\x00\xff\xff")
     await pump()
     assert first.closing and first.close_count == 1
     if cancel:

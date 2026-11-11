@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #207-D1, RX HA après livraison inconnue
+
+- Le propriétaire HA persistant abandonne intégralement une nouvelle livraison
+  TLS à tête non prise en charge, puis reprend le vrai framer sur le même RX/TLS.
+  Perte des messages concaténés acceptée, aucune longueur Info supposée, aucune
+  acquisition ou fraîcheur créditée par un drop. Gardes partiel/tail/ouverture,
+  DataUpdated et authentification conservées ; prototype privé #186 séparé.
+- Diagnostics DEBUG bornés et échantillonnés sans arrêt artificiel après 16
+  drops ; tests synthétiques protocole/HA et régressions cleanup mises à jour.
+  Timeouts/TID FFFF inchangés : D2 et cleanup réel #192 non résolus, aucun test réel.
+  [Contrat et limites](docs/ha-unknown-delivery-rx-207.md).
+
 ## En cours — #186-D8, continuation TLS et demandes V4 diagnostiques
 
 - Après un candidat 0x0C, poursuivre le comptage des livraisons plaintext TLS

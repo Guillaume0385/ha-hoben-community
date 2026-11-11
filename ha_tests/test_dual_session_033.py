@@ -148,7 +148,7 @@ async def exercise033(
             "eof": [TransportEOF("PRIVATE_PAYLOAD")],
             "auth": [b"\x05\x04"],
             "internal": [RuntimeError("PRIVATE_PAYLOAD")],
-            "unknown": [b"\xff"],
+            "unknown": [b"\x0a\xff"],
             "partial": [b"\x05", TransportEOF("PRIVATE_PAYLOAD")],
         }
         for fault in faults.get(kind, []):

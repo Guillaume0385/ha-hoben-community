@@ -188,10 +188,10 @@ async def test_two_real_sessions_follow_180_360_660_schedule(
 
 @pytest.mark.parametrize(
     "fault",
-    [b"\x05\x03", b"\xff", b"", b"\x0e\xff"],
-    ids=["close-client", "unknown", "eof", "partial-eof"],
+    [b"\x05\x03", b"\x0e\xff\xff\x00\x00\xff\xff", b"", b"\x0e\xff"],
+    ids=["close-client", "invalid-mbap", "eof", "partial-eof"],
 )
-async def test_loss_or_unknown_framing_never_passes(
+async def test_loss_or_malformed_framing_never_passes(
     hass, entry, peers, monkeypatch, fault
 ):
     e, _, _ = await exercise(hass, entry, peers, monkeypatch, fault)

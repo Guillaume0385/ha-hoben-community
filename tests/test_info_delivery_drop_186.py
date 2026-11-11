@@ -169,10 +169,18 @@ def test_good_read_does_not_reload_the_total_drop_budget():
     asyncio.run(scenario())
 
 
-def test_drops_preserve_pending_identity_and_original_acquisition_deadline(monkeypatch):
+@pytest.mark.parametrize("production", [False, True])
+def test_drops_preserve_pending_identity_and_original_acquisition_deadline(
+    monkeypatch, production
+):
     async def scenario():
         clock = Clock(monkeypatch)
-        session, wire, factory = owner([b"\x0c" + RESPONSE], limit=4)
+        session, wire, factory = owner(
+            [b"\x0c" + RESPONSE],
+            limit=4,
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         task = asyncio.create_task(session.request_v4_data(timeout=10))
         try:
@@ -261,15 +269,24 @@ def test_all_other_failures_keep_existing_terminal_cleanup(fault):
     asyncio.run(scenario())
 
 
-def test_auth_and_internal_exceptions_after_drop_are_not_ignored():
+@pytest.mark.parametrize("production", [False, True])
+def test_auth_and_internal_exceptions_after_drop_are_not_ignored(production):
     async def scenario(fault, error_type):
-        session, wire, factory = owner([b"\x0c", fault])
+        session, wire, factory = owner(
+            [b"\x0c", fault],
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
             with pytest.raises(error_type):
                 await session.request_v4_data()
             assert session.verified_read_sequence == 0
-            assert session._info_delivery_drop._count == 1
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 1
         finally:
             await clean(session, wire, factory)
 
@@ -306,18 +323,35 @@ def test_drop_cannot_accept_wrong_correlation_or_an_unsolicited_response():
     asyncio.run(unsolicited())
 
 
-def test_non_owner_cannot_discard_and_retained_terminal_tail_is_not_skipped():
+@pytest.mark.parametrize("production", [False, True])
+def test_non_owner_cannot_discard_and_retained_terminal_tail_is_not_skipped(production):
     async def scenario():
-        session, wire, factory = owner([RESPONSE])
+        session, wire, factory = owner(
+            [RESPONSE],
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
-            assert not session._discard_info_delivery(b"\x0c", wire)
-            assert session._info_delivery_drop._count == 0
+            assert not (
+                session._discard_unsupported_delivery
+                if production
+                else session._discard_info_delivery
+            )(b"\x0c", wire)
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
             await session.request_v4_data()
             wire.queue.put_nowait(b"\x05\x03\x0c")
             with pytest.raises(HobenClosedError):
                 await session.wait_rx_stopped()
-            assert session._info_delivery_drop._count == 0
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
             assert session._framer._tail is not None  # Never drained after terminal RX.
         finally:
             await clean(session, wire, factory)
@@ -326,19 +360,28 @@ def test_non_owner_cannot_discard_and_retained_terminal_tail_is_not_skipped():
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("production", [False, True])
 @pytest.mark.parametrize("kind", [14, 7, 27])
-def test_info_byte_inside_a_partial_frame_is_never_a_drop_candidate(kind):
+def test_info_byte_inside_a_partial_frame_is_never_a_drop_candidate(kind, production):
     async def scenario():
         frame = RESPONSE if kind == 14 else ignored_frame(kind)
         cut = 10 if kind == 14 else len(frame) - 2
         frame = frame[:cut] + b"\x0c" + frame[cut + 1 :]
         deliveries = [frame[:cut], frame[cut:]] + ([] if kind == 14 else [RESPONSE])
-        session, wire, factory = owner(deliveries)
+        session, wire, factory = owner(
+            deliveries,
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
             await session.request_v4_data()
             assert session.verified_read_sequence == 1
-            assert session._info_delivery_drop._count == 0
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
         finally:
             await clean(session, wire, factory)
 
@@ -350,14 +393,23 @@ def test_info_byte_inside_a_partial_frame_is_never_a_drop_candidate(kind):
     [b"\x0c", PING + b"\x0c", RESPONSE],
     ids=["info", "ping-info", "unsolicited-response"],
 )
-def test_opening_suffix_has_no_new_delivery_provenance(suffix):
+@pytest.mark.parametrize("production", [False, True])
+def test_opening_suffix_has_no_new_delivery_provenance(suffix, production):
     async def scenario():
-        session, wire, factory = owner(suffix=suffix)
+        session, wire, factory = owner(
+            suffix=suffix,
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
             with pytest.raises(HobenProtocolError):
                 await session.request_v4_data()
-            assert session._info_delivery_drop._count == 0
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
             assert session.verified_read_sequence == 0
         finally:
             await clean(session, wire, factory)
@@ -380,10 +432,18 @@ def test_opening_ping_suffix_does_not_prevent_later_genuine_delivery_drop():
     asyncio.run(scenario())
 
 
-def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(monkeypatch):
+@pytest.mark.parametrize("production", [False, True])
+def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(
+    monkeypatch, production
+):
     async def scenario():
         clock = Clock(monkeypatch)
-        session, wire, factory = owner([RESPONSE], recover_data_updated=True)
+        session, wire, factory = owner(
+            [RESPONSE],
+            recover_data_updated=True,
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
             wire.queue.put_nowait(INVALID_UPDATED)
@@ -394,7 +454,11 @@ def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(monkeypatch):
             await pump()
             await clock.advance(29)
             assert len(wire.writes) == 1 and session.verified_read_sequence == 0
-            assert session._info_delivery_drop._count == 0
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
             await clock.advance(1.001)
             assert session.verified_read_sequence == 1
             assert not session.data_updated_recovering and wire.close_count == 0
@@ -405,17 +469,27 @@ def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_dataupdated_probe_info_uses_recovery_guard_not_drop(monkeypatch):
+@pytest.mark.parametrize("production", [False, True])
+def test_dataupdated_probe_info_uses_recovery_guard_not_drop(monkeypatch, production):
     async def scenario():
         clock = Clock(monkeypatch)
-        session, wire, factory = owner([b"\x0c"], recover_data_updated=True)
+        session, wire, factory = owner(
+            [b"\x0c"],
+            recover_data_updated=True,
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
         await session.connect()
         try:
             wire.queue.put_nowait(INVALID_UPDATED)
             await pump()
             await clock.advance(30.001)
             assert session.data_updated_recovering and not session._data_updated.probing
-            assert session._info_delivery_drop._count == 0
+            assert (
+                session._unsupported_delivery_drops
+                if production
+                else session._info_delivery_drop._count
+            ) == 0
             assert session.verified_read_sequence == 0 and wire.close_count == 0
         finally:
             await clean(session, wire, factory)
@@ -423,9 +497,12 @@ def test_dataupdated_probe_info_uses_recovery_guard_not_drop(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_pending_cancel_and_concurrent_abort_reap_the_one_reader():
+@pytest.mark.parametrize("production", [False, True])
+def test_pending_cancel_and_concurrent_abort_reap_the_one_reader(production):
     async def scenario():
-        session, wire, factory = owner([b"\x0c"])
+        session, wire, factory = owner(
+            [b"\x0c"], enabled=not production, discard_unsupported_deliveries=production
+        )
         await session.connect()
         task = asyncio.create_task(session.request_v4_data())
         await pump()
@@ -440,9 +517,14 @@ def test_pending_cancel_and_concurrent_abort_reap_the_one_reader():
     asyncio.run(scenario())
 
 
-def test_failed_cleanup_remains_unproven_after_a_drop():
+@pytest.mark.parametrize("production", [False, True])
+def test_failed_cleanup_remains_unproven_after_a_drop(production):
     async def scenario():
-        session, wire, factory = owner([b"\x0c", TransportEOF()])
+        session, wire, factory = owner(
+            [b"\x0c", TransportEOF()],
+            enabled=not production,
+            discard_unsupported_deliveries=production,
+        )
 
         async def fail_close():
             wire.close_count += 1

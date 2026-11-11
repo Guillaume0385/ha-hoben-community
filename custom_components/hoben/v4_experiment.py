@@ -47,8 +47,11 @@ RECONNECT_DIAGNOSTIC_MESSAGES = DIAGNOSTIC_MESSAGES | {
 }
 # Only the discriminator names listed in protocol.md §3, never message lengths.
 KNOWN_TYPE_DISCRIMINANTS = frozenset((*range(25), *range(26, 49), *range(80, 89), 96))
+POST_OPEN_SUPPORTED_TYPES = frozenset({5, 7, 10, 14, 27})
+# These markers have explicit terminal authorization handling, not drop policy.
+POST_OPEN_AUTH_TYPES = frozenset({47, 48})
 # Post-open only: opening/authorization codecs and TX Pong remain unchanged.
-UNSUPPORTED_MESSAGE_TYPES = KNOWN_TYPE_DISCRIMINANTS - {5, 7, 10, 14, 27}
+UNSUPPORTED_MESSAGE_TYPES = KNOWN_TYPE_DISCRIMINANTS - POST_OPEN_SUPPORTED_TYPES
 IGNORED_PREFIXES = {7: 1, 27: 5}
 
 
