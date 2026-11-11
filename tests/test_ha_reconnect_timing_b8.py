@@ -113,10 +113,10 @@ def test_ambiguous_or_generic_loss_keeps_60_and_has_no_accelerated_read(fault):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("close_seconds", [0, 5, 31])
-def test_acquisition_timeout_uses_original_deadline_including_cleanup(close_seconds):
+@pytest.mark.parametrize("later_seconds", [0, 5, 31])
+def test_silent_acquisition_timeout_has_no_reconnect_deadline(later_seconds):
     async def scenario():
-        clock, factory, close_gate = Clock(), Factory(), asyncio.Event()
+        clock, factory = Clock(), Factory()
         life = V4Lifecycle(
             user_guid="b" * 32,
             mode=V4SessionMode.PERSISTENT,
@@ -127,34 +127,23 @@ def test_acquisition_timeout_uses_original_deadline_including_cleanup(close_seco
             sleep=clock.sleep,
             clock=lambda: clock.now,
         )
-        request = None
         try:
             await life.connect()
             wire = factory.transports[0]
-            wire.close_gate = close_gate
             request = asyncio.create_task(life.request_v4_data(timeout=30))
             await wire.data_sent.wait()
             wire.rx.set_exception(TransportTimeout("read"))
-            await wire.close_started.wait()
-            assert (
-                len(factory.sessions) == 1 and not factory.sessions[0].cleanup_succeeded
-            )
-            clock.now = close_seconds
-            close_gate.set()
             with pytest.raises(HobenTimeoutError):
                 await request
-            delay = await clock.waiting.get()
-            assert delay == max(0, 30 - close_seconds)
-            assert factory.sessions[0].cleanup_succeeded
-            await clock.advance(delay)
-            await life.wait_connected()
-            assert life.ha_acquisition_generation == 2
-            assert len(factory.sessions) == 2
+            clock.now = later_seconds
+            assert life.acquisition_uncertain and not wire.close_started.is_set()
+            assert clock.waiting.empty() and len(factory.sessions) == 1
+            assert life.ha_acquisition_generation is None
+            with pytest.raises(HobenTimeoutError):
+                await life.request_v4_data()
+            assert [packet[0] for packet in wire.writes] == [3, 13]
         finally:
-            close_gate.set()
             await life.close()
-            if request is not None:
-                await asyncio.gather(request, return_exceptions=True)
             assert_clean(factory)
 
     asyncio.run(scenario())

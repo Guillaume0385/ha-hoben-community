@@ -10,7 +10,11 @@ from custom_components.hoben.client import HobenClient
 from custom_components.hoben.coordinator import HobenDataUpdateCoordinator
 from custom_components.hoben.exceptions import HobenTimeoutError
 from custom_components.hoben.safe_reports import safe_error_report, wrap_error
-from custom_components.hoben.transport import TransportEOF, TransportError
+from custom_components.hoben.transport import (
+    TransportEOF,
+    TransportError,
+    TransportTimeout,
+)
 from custom_components.hoben.v4_lifecycle import V4Lifecycle
 from ha_tests.test_persistent_client import RESPONSE, assert_stopped, opening
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
@@ -132,7 +136,9 @@ async def exercise033(
             if cleanup == "slow":
                 await clock.sleep(2)
             elif cleanup == "timeout":
-                await clock.sleep(1000)
+                # Match the real transport's bounded close, without attesting it.
+                await clock.sleep(5)
+                raise TransportTimeout("cleanup")
             elif cleanup == "cancelled":
                 raise asyncio.CancelledError()
             else:
@@ -146,6 +152,8 @@ async def exercise033(
         faults = {
             "close_client": [b"\x05", b"\x03"],
             "eof": [TransportEOF("PRIVATE_PAYLOAD")],
+            "fresh_auth": [TransportEOF()],
+            "fresh_internal": [TransportEOF()],
             "auth": [b"\x05\x04"],
             "internal": [RuntimeError("PRIVATE_PAYLOAD")],
             "unknown": [b"\x0a\xff"],
@@ -232,6 +240,16 @@ async def test_seventh_read_interruption_has_role_and_safe_recovery(
     e, first, _, _ = await exercise033(
         hass, entry, peers, freezer, monkeypatch, kind=kind, b_offset=b_offset
     )
+    if kind in {"silence", "stale"}:
+        assert not e["completed"] and not recovered(e)
+        cause = e["incident"] or e["failure"]
+        assert cause is not None and cause["category"] == "timeout"
+        if e["incident"] is not None:
+            assert e["incident"]["kind"] == "timeout"
+        assert sum(r["decoded"] for r in e["reads"]) == 6
+        assert e["resources"]["a"]["opens"] == 1
+        assert_private_values_absent(caplog.text)
+        return  # D2 cannot credit recovery with the same ambiguous FFFF.
     assert e["completed"] and recovered(e) and not continuous(e), (
         e["incident"],
         e["failure"],
@@ -286,11 +304,13 @@ async def test_read_timeout_remains_first_even_when_original_close_fails(
     e, _, _, fresh = await exercise033(
         hass, entry, peers, freezer, monkeypatch, cleanup=cleanup
     )
-    assert e["incident"]["kind"] == "timeout"
+    assert e["failure"]["category"] == "timeout"
+    if e["incident"] is not None:
+        assert e["incident"]["kind"] == "timeout"
     if cleanup == "slow":
-        assert recovered(e)
-        a = [o for o in e["owners"] if o["role"] == "a"]
-        assert a[1]["open_ms"] >= a[0]["cleaned_ms"] + 60000
+        assert not recovered(e) and not e["completed"]
+        assert e["resources"]["a"]["cleanup"]
+        fresh.connect.assert_not_awaited()
     else:
         assert not e["completed"] and not recovered(e)
         assert e["failure"]["category"] == "timeout"
@@ -313,8 +333,8 @@ async def test_independent_failure_of_new_generation_is_terminal(
     hass, entry, peers, freezer, monkeypatch, kind
 ):
     e, _, _, _ = await exercise033(hass, entry, peers, freezer, monkeypatch, kind=kind)
-    assert not e["completed"] and e["incident"]["kind"] == "timeout"
-    assert e["failure"]["category"] == "timeout"
+    assert not e["completed"] and e["incident"]["kind"] == "eof"
+    assert e["failure"]["category"] == "transport"
     assert e["terminal"]["category"] == (
         "authorization" if kind == "fresh_auth" else "unexpected"
     )
@@ -350,7 +370,7 @@ def test_dual_classifier_keeps_structured_timeout_through_ha_wrapper():
     assert category(error) == "timeout"
 
 
-async def test_actual_silent_read_deadline_recovers_without_production_change(
+async def test_actual_silent_deadline_only_recovers_after_a_distinct_eof(
     hass, entry, peers, freezer, caplog
 ):
     first = peers.wire(DEVICE_GUID, [[RESPONSE], []])
@@ -378,6 +398,9 @@ async def test_actual_silent_read_deadline_recovers_without_production_change(
             coordinator.data is previous
             and coordinator.last_successful_read_at == stamp
         )
+        assert not peers.backoff.delays and client.acquisition_uncertain
+        first.close.assert_not_awaited()
+        first.queue.put_nowait(TransportEOF())
         assert await peers.backoff.entered.get() == 60
         first.close.assert_awaited_once_with()
         assert peers.factory.call_count == 1

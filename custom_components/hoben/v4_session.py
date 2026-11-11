@@ -410,6 +410,8 @@ class V4Session:
         "_info_delivery_drop",
         "_discard_unsupported_deliveries",
         "_unsupported_delivery_drops",
+        "_preserve_read_timeouts",
+        "_correlation_lost",
     )
 
     def __init__(
@@ -426,6 +428,7 @@ class V4Session:
         recover_data_updated: bool = False,
         classify_frame_boundary: bool = False,
         discard_unsupported_deliveries: bool = False,
+        preserve_read_timeouts: bool = False,
         _info_delivery_drop: _InfoDeliveryDropExperiment | None = None,
     ) -> None:
         if not callable(transport_factory):
@@ -458,6 +461,12 @@ class V4Session:
             raise HobenInvalidInputError()
         self._discard_unsupported_deliveries = discard_unsupported_deliveries
         self._unsupported_delivery_drops = 0
+        if type(preserve_read_timeouts) is not bool or (
+            preserve_read_timeouts and mode is not V4SessionMode.PERSISTENT
+        ):
+            raise HobenInvalidInputError()
+        self._preserve_read_timeouts = preserve_read_timeouts
+        self._correlation_lost = False
         if _info_delivery_drop is not None:
             if (
                 type(_info_delivery_drop) is not _InfoDeliveryDropExperiment
@@ -527,7 +536,10 @@ class V4Session:
         self._rx_error: HobenError | None = None
         self._tx_lock = asyncio.Lock()
         self._pending_read: (
-            asyncio.Future[ModbusReadResponse | HobenDataUpdatedRecoveryError] | None
+            asyncio.Future[
+                ModbusReadResponse | HobenDataUpdatedRecoveryError | HobenTimeoutError
+            ]
+            | None
         ) = None
         self._read_sent = False
         self._loss_event = asyncio.Event()
@@ -548,6 +560,54 @@ class V4Session:
     def data_updated_recovering(self):
         """Local acquisition pause, never a claim of a lost/replaced transport."""
         return self.state is SessionState.CONNECTED and self._data_updated.active
+
+    @property
+    def acquisition_uncertain(self) -> bool:
+        """No FFFF response can prove a new acquisition after an abandoned read."""
+        return (
+            self._correlation_lost
+            and self.state is SessionState.CONNECTED
+            and self._transport is not None
+            and self._rx_error is None
+        )
+
+    def _mark_read_uncertain(self):
+        if not self._correlation_lost:
+            self._correlation_lost = True
+            pending = self._pending_read
+            if pending is not None and not pending.done():
+                # Shield's caller may already be cancelled by its deadline.
+                # An internal result token never leaks an unobserved exception.
+                pending.set_result(
+                    with_phase(HobenTimeoutError(), "request_correlation")
+                )
+            result = self._data_updated.result
+            if result is not None and not result.done():
+                result.set_result(
+                    with_phase(HobenTimeoutError(), "request_correlation")
+                )
+            notify_status(
+                self._status_callback,
+                SessionEvent("recovery", "timeout", "request_correlation"),
+            )
+
+    def _keep_silent_transport(self):
+        """A read timeout is not EOF; retain RX, never reset its acquisition."""
+        if not (
+            self._preserve_read_timeouts
+            and self.state is SessionState.CONNECTED
+            and self._transport is not None
+            and self._rx_error is None
+            and not self._cleanup_failed
+        ):
+            return False
+        if (
+            self._read_sent
+            and self._pending_read is not None
+            and not self._pending_read.done()
+        ):
+            self._mark_read_uncertain()
+        return True
 
     def _begin_data_updated_recovery(self, diagnostic):
         length, reason = diagnostic
@@ -584,6 +644,8 @@ class V4Session:
         except asyncio.CancelledError:
             raise
         except (HobenDataUpdatedRecoveryError, HobenModbusError, TimeoutError) as error:
+            if self.acquisition_uncertain:
+                return  # A second probe with FFFF cannot repair correlation.
             # A rejected/expired probe never becomes a snapshot or a reconnect.
             # Require a fresh silence window; one task/one probe at a time.
             if not isinstance(error, HobenDataUpdatedRecoveryError):
@@ -626,8 +688,16 @@ class V4Session:
         recovery = self._data_updated
         while True:
             if not recovery.active:
-                with error_boundary("tls_read"):
-                    data = await transport.read(4096, bounded=False)
+                try:
+                    with error_boundary("tls_read"):
+                        data = await transport.read(4096, bounded=False)
+                except TransportTimeout:
+                    if not self._keep_silent_transport():
+                        raise
+                    # A broken reader may fail immediately on every call.
+                    # Bound retry frequency without treating silence as EOF.
+                    await asyncio.sleep(1.0)
+                    continue
                 production_drop = self._discard_unsupported_delivery(data, transport)
                 if production_drop or (
                     self._info_delivery_drop is not None
@@ -646,7 +716,9 @@ class V4Session:
                     max(recovery.quiet_since + 30, recovery.probe_started + 30)
                     - asyncio.get_running_loop().time(),
                 )
-                if recovery.active and recovery.task is None
+                if recovery.active
+                and recovery.task is None
+                and not self._correlation_lost
                 else 30
             )
             try:
@@ -658,11 +730,18 @@ class V4Session:
                     finally:
                         recovery.read_deadline = None
             except TransportTimeout:
-                raise  # Genuine I/O expiry is distinct from our silence timer.
+                if not self._keep_silent_transport():
+                    raise
+                await asyncio.sleep(1.0)
+                continue
             except TimeoutError:
                 if not deadline.expired():
                     raise  # Never classify an inner failure as elapsed silence.
-                if recovery.active and recovery.task is None:
+                if (
+                    recovery.active
+                    and recovery.task is None
+                    and not self._correlation_lost
+                ):
                     # Purge only under the owner's hypothesis, not wire proof.
                     self._framer.clear()
                     self._fail_pending_read(HobenDataUpdatedRecoveryError())
@@ -770,6 +849,8 @@ class V4Session:
         except TimeoutError:
             if self._rx_error is not None:
                 raise self._rx_error from None
+            if self.acquisition_uncertain:
+                raise with_phase(HobenTimeoutError(), "request_correlation") from None
             raise HobenDataUpdatedRecoveryError() from None
         except asyncio.CancelledError:
             await self.close()
@@ -1169,6 +1250,7 @@ class V4Session:
                 self._experiment.partial = False
         self._cleanup_failed = False
         self._rx_error = None
+        self._correlation_lost = False  # Only a fresh transport restores this epoch.
         self._loss_event.clear()
         self._unavailable.clear()
         self._retryable_loss = False
@@ -1704,11 +1786,25 @@ class V4Session:
         failure_phase = "request_correlation"
         try:
             if (
+                self._preserve_read_timeouts
+                and self._read_timeout is not None
+                and self._read_timeout.expired()
+                and self._read_sent
+                and pending is not None
+                and not pending.done()
+                and type(event) is DelimitedV4DataResponse
+                and event._exchange is pending
+            ):
+                self._mark_read_uncertain()
+            if (
                 type(event) is not DelimitedV4DataResponse
-                or pending is None
-                or pending.done()
-                or event._exchange is not pending
-                or not self._read_sent
+                or not self.acquisition_uncertain
+                and (
+                    pending is None
+                    or pending.done()
+                    or event._exchange is not pending
+                    or not self._read_sent
+                )
             ):
                 raise HobenProtocolError()
             failure_phase = "response_validation"
@@ -1724,6 +1820,10 @@ class V4Session:
                 and len(response.registers) != 20
             ):
                 raise HobenProtocolError()
+            if self.acquisition_uncertain:
+                # Decode/validate known responses, but never publish a late or
+                # duplicate FFFF reply, even after the old response was drained.
+                return
             if isinstance(response, ModbusExceptionResponse):
                 error = with_phase(
                     HobenModbusError(response.exception_code), "pdu_decode"
@@ -1795,10 +1895,13 @@ class V4Session:
 
         Conservative RX has no dispatch; the explicit routing modes opt in. The total
         deadline covers TX queueing,
-        write and response. Abandoned requests close the session: fixed FFFF
-        cannot distinguish a late wire response on a reused transport.
+        write and response. The conservative default closes abandoned requests.
+        HA keeps a silent transport but fences acquisitions for the entire
+        generation: fixed FFFF cannot prove which later reply is fresh.
         """
         _validate_delay(timeout)
+        if self.acquisition_uncertain:
+            raise with_phase(HobenTimeoutError(), "request_correlation")
         recovery = self._data_updated
         if not _recovery and recovery.observer:
             raise HobenDataUpdatedRecoveryError()
@@ -1870,13 +1973,24 @@ class V4Session:
                 # A private probe has no external cancellation owner; letting
                 # its deadline cancel the waiter avoids abandoned shield logs.
                 response = await pending if _recovery else await asyncio.shield(pending)
-                if type(response) is HobenDataUpdatedRecoveryError:
+                if self._rx_error is not None:
+                    raise self._rx_error from None
+                if type(response) in (HobenDataUpdatedRecoveryError, HobenTimeoutError):
                     raise response
                 self._require_tx_allowed()
                 if self._rx_error is not None:
                     raise self._rx_error from None
                 return response
-        except (HobenDataUpdatedRecoveryError, _QuarantinedRead):
+        except (HobenDataUpdatedRecoveryError, _QuarantinedRead) as failure:
+            if (
+                type(failure) is HobenDataUpdatedRecoveryError
+                and tx_completed
+                and self._keep_silent_transport()
+            ):
+                self._mark_read_uncertain()
+                # Discarding an outstanding read during a quarantine cannot
+                # make a later probe's identical FFFF reply distinguishable.
+                raise with_phase(HobenTimeoutError(), "request_correlation") from None
             raise  # Dispose the waiter/timeout below without closing RX.
         except asyncio.CancelledError:
             if _recovery:
@@ -1885,15 +1999,35 @@ class V4Session:
             cancelled = True
             error = HobenTransportError()
         except (TransportTimeout, TimeoutError) as failure:
-            if self.data_updated_recovering and tx_completed:
-                raise HobenDataUpdatedRecoveryError() from None
-            self._quarantine_stop(Event.LOCAL_CLOSE)
-            if self._acquisition_timeout_at is None and type(failure) in (
-                TransportTimeout,
-                TimeoutError,
-            ):
-                self._acquisition_timeout_at = self._loss_clock()
-            error = HobenTimeoutError()
+            if self._preserve_read_timeouts and self._rx_error is not None:
+                error = self._rx_error  # A proven terminal cause wins a deadline race.
+            else:
+                if (
+                    tx_completed
+                    and self.acquisition_uncertain
+                    and type(failure) is HobenTimeoutError
+                ):
+                    raise
+                if (
+                    type(failure) is TimeoutError
+                    and self._read_timeout.expired()
+                    and (tx_completed or not self._read_sent)
+                    and self._keep_silent_transport()
+                ):
+                    if tx_completed:
+                        self._mark_read_uncertain()
+                    raise with_phase(
+                        HobenTimeoutError(), "request_correlation"
+                    ) from None
+                if self.data_updated_recovering and tx_completed:
+                    raise HobenDataUpdatedRecoveryError() from None
+                self._quarantine_stop(Event.LOCAL_CLOSE)
+                if self._acquisition_timeout_at is None and type(failure) in (
+                    TransportTimeout,
+                    TimeoutError,
+                ):
+                    self._acquisition_timeout_at = self._loss_clock()
+                error = HobenTimeoutError()
         except TransportCertificateError:
             error = HobenTlsVerificationError()
         except TransportError:

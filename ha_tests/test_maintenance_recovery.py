@@ -22,7 +22,7 @@ from custom_components.hoben.transport import (
     AsyncTlsTransport,
     TransportCertificateError,
     TransportError,
-    TransportTimeout,
+    TransportTlsError,
 )
 from ha_tests.test_persistent_client import RESPONSE, assert_stopped, load, sensor
 from ha_tests.test_persistent_client import peers as peers  # noqa: F401
@@ -194,7 +194,7 @@ async def test_simulated_concurrent_app_close_during_pending_ha_refresh(
         b"\x0e\xff\xff\x00\x00\xff\xff",
         RESPONSE + b"\xff",
         bytes.fromhex("0effff0001002b"),  # invalid MBAP protocol id
-        TransportTimeout("read"),
+        TransportTlsError("read"),
     ],
 )
 async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
@@ -212,7 +212,9 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
     report = await async_get_config_entry_diagnostics(hass, entry)
     assert report["client"]["state"] == "ready"  # object is not explicitly closed
     assert report["coordinator"]["last_error"]["error"] == (
-        "timeout" if isinstance(reply, TransportTimeout) else "malformed_response"
+        "transport_unavailable"
+        if isinstance(reply, TransportTlsError)
+        else "malformed_response"
     )
     assert await peers.backoff.entered.get() == 60.0
     first.close.assert_awaited_once_with()

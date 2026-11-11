@@ -1,5 +1,22 @@
 # Changelog
 
+## En cours — #207-D2, silence TLS et réponses V4 tardives
+
+- Le seul propriétaire HA persistant conserve TLS et RX/Pong lors d'un silence
+  de réponse. Après abandon d'une demande émise avec TID fixe FFFF, les
+  acquisitions sont suspendues pour cette génération : réponse tardive, doublon
+  et sonde DataUpdated ambiguë ne deviennent jamais une mesure fraîche.
+- Après un timeout RX immédiat, attendre 1 s avant la prochaine lecture :
+  fréquence bornée, annulation et cleanup effectifs, aucune fermeture pour silence.
+- Le dernier snapshot garde son horodatage et au plus 300 s de disponibilité
+  depuis la première incertitude, sans renouvellement par poll ou réponse tardive.
+  Sans mesure préalable, setup attend le même propriétaire, annulable à l'arrêt.
+- Une vraie perte conserve cleanup et politique de reconnexion existants ; seule
+  une nouvelle génération nettoyée rétablit une acquisition corrélée. EOF, TLS,
+  auth, erreur connue et échec cleanup ne sont pas masqués. Aucun nouveau sondage,
+  délai, workflow ou test réel ; #192 demeure non résolu.
+  [Contrat et limites](docs/ha-late-response-correlation-207.md).
+
 ## En cours — #207-D1, RX HA après livraison inconnue
 
 - Le propriétaire HA persistant abandonne intégralement une nouvelle livraison

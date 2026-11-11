@@ -37,11 +37,11 @@
     "scripts/info_delivery_tls_adapter.py": "4083b6916e9a35deab2e1ab17c6d8ea1a57d8f18f36032def942e8b6b3eb3ba1",
     "custom_components/hoben/__init__.py": "f0c1c842ef39f6e4643dbe2902cca0515717753325ed584849b390fc7136d5b6",
     "custom_components/hoben/binary_sensor.py": "b507c4668fb05265cc741eb79518a2939eb98e5a684fab0e75cc27474ee37594",
-    "custom_components/hoben/client.py": "2a180113304ff129029a231bbf9f15e6d1ca130534d8a3758b6c8d15572b1800",
+    "custom_components/hoben/client.py": "6be8996aeb026fd0049250849ff293494ab3f16aaabb08da4b4d9a555bd3a862",
     "custom_components/hoben/close_diagnostic.py": "5589b34a36b8065ed41517470f87230077da81d7c992edd421fd15f9f5d21e53",
     "custom_components/hoben/config_flow.py": "c4080b79437eb6e3ca1e0c6f4cd522f9bed7f4ed09e5088b4dcca26d8569b088",
     "custom_components/hoben/const.py": "4b51f3f236ffb9216fdef31e7813e7dd3ecb6d277fdfe50f9ae87779dc12a584",
-    "custom_components/hoben/coordinator.py": "00ddf83fdd3de97eb14ea7603966334f8457bd85ce8bf587ff7d66e692a53efe",
+    "custom_components/hoben/coordinator.py": "5626ca07ee5dc1e5e4281b3bd1b32d4a0e0983d469d799c3bb6ab2621277c14b",
     "custom_components/hoben/data_updated_recovery.py": "30460aff7c7129e5a02b59af8b47bbf1771970bc39decc7727b464c76cd5b199",
     "custom_components/hoben/diagnostics.py": "e782bf50aeeef3c5d8bf257dd31ea501db8333362f5f5e175e3850167c882742",
     "custom_components/hoben/entity.py": "b5987c16db17da96c9a231ac75b8ef042b34ddf878ab4b700c70ddbe28e9b9ce",
@@ -62,10 +62,10 @@
     "custom_components/hoben/transport.py": "925d81e69d58c870bd338311cc356eac53f6a38b70fcf9979fe16653d7654b68",
     "custom_components/hoben/v4_eof_quarantine.py": "f2aadf8951a2f769cd8a8524d701f54fad729e9f9200e420c244f14316250ec9",
     "custom_components/hoben/v4_experiment.py": "5537574748ed5efe277c191dde7594e5aeee55a38b581e0d75d4142c9ac3e09e",
-    "custom_components/hoben/v4_lifecycle.py": "585009b8b93584ec77f942cfcc1293fb53794e12831af1af3da357edd0b6e537",
+    "custom_components/hoben/v4_lifecycle.py": "9593722892099c3432a7e260bf2b571e524130a238879505247ed3e6058c559c",
     "custom_components/hoben/v4_no_pong.py": "f6be20deaf7d20c89d6457f01eef84b8a462b66191aaf5e890c6be5dc46461b9",
     "custom_components/hoben/v4_read.py": "7a962d2f4370df8f6020152d5dd8636b6d9758e0c485db68d4f68393326658cb",
-    "custom_components/hoben/v4_session.py": "2572e93f9f1e2a386fabaed834a9d130627753aa42c0ee61a48fa67f15fcae7e",
+    "custom_components/hoben/v4_session.py": "1c6870e3537863e8698db59c1f264d719ac84af198764ec5d622d9201be76651",
     "custom_components/hoben/v4_state.py": "53f6a37f1044fb4366892f99d71eb855cd0f342c2f2ee999871bc0fe578d42ce"
   }
 }

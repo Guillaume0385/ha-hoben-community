@@ -5,7 +5,10 @@ import logging
 
 import pytest
 
-from custom_components.hoben.exceptions import HobenDataUpdatedRecoveryError
+from custom_components.hoben.exceptions import (
+    HobenDataUpdatedRecoveryError,
+    HobenTimeoutError,
+)
 from custom_components.hoben.transport import (
     TransportCertificateError,
     TransportEOF,
@@ -104,9 +107,7 @@ def test_continuous_rx_is_discarded_without_accumulation_or_new_reads(monkeypatc
     asyncio.run(scenario())
 
 
-def test_old_waiter_is_invalidated_and_only_fresh_probe_can_complete_observer(
-    monkeypatch,
-):
+def test_abandoned_original_read_fences_a_new_probe_with_the_same_tid(monkeypatch):
     async def scenario():
         clock, factory = Clock(monkeypatch), Factory()
         life = make_owner(factory)
@@ -118,14 +119,16 @@ def test_old_waiter_is_invalidated_and_only_fresh_probe_can_complete_observer(
             await pump()
             observer = asyncio.create_task(life.request_v4_data(timeout=120))
             await pump()
-            assert not old.done() and not observer.done()
-            stream.chunks = [response()]
             await clock.advance(30)
-            with pytest.raises(HobenDataUpdatedRecoveryError):
-                await old
-            assert (await observer).registers == (17,) * 20
-            assert life.witness.verified_read_sequence == 1
-            assert [w[0] for w in stream.writes] == [3, 13, 13]
+            for task in (old, observer):
+                with pytest.raises(HobenTimeoutError):
+                    await task
+            assert life.acquisition_uncertain and life.data_updated_recovering
+            assert life.witness.verified_read_generation is None
+            assert [w[0] for w in stream.writes] == [3, 13]
+            stream.queue.put_nowait(response())
+            await clock.advance(61)
+            assert factory.sessions[0].verified_read_sequence == 0
             assert len(factory.streams) == 1 and stream.close_count == 0
         finally:
             await life.close()
@@ -165,9 +168,15 @@ def test_failed_probe_returns_to_bounded_recovery_without_reconnect(
             stream.chunks = [response()]
             await clock.advance(1)
             await pump()
-            assert [w[0] for w in stream.writes] == [3, 13, 13]
-            assert not life.data_updated_recovering
-            assert factory.sessions[0].verified_read_sequence == 1
+            if reply == bytes.fromhex("0effff00000003018402"):
+                # A correlated Modbus exception consumed the previous reply.
+                assert [w[0] for w in stream.writes] == [3, 13, 13]
+                assert not life.data_updated_recovering
+                assert factory.sessions[0].verified_read_sequence == 1
+            else:
+                assert [w[0] for w in stream.writes] == [3, 13]
+                assert life.acquisition_uncertain and life.data_updated_recovering
+                assert factory.sessions[0].verified_read_sequence == 0
             assert len(factory.streams) == 1 and stream.close_count == 0
             # B3 adds separate per-frame diagnostics; the recovery transition
             # itself must still warn only once for this episode.
@@ -214,8 +223,12 @@ def test_real_transport_failure_during_recovery_still_stops_the_old_generation(
             await pump()
             stream.queue.put_nowait(failure)
             await pump()
-            assert factory.sessions[0].state is SessionState.CLOSED
-            assert stream.close_count == 1
+            if type(failure) is TransportTimeout:
+                assert factory.sessions[0].state is SessionState.CONNECTED
+                assert stream.close_count == 0
+            else:
+                assert factory.sessions[0].state is SessionState.CLOSED
+                assert stream.close_count == 1
         finally:
             await life.close()
             factory.assert_clean()
