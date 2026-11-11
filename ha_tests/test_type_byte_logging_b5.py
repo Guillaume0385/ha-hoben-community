@@ -22,7 +22,9 @@ async def test_ha_warning_is_text_only_and_keeps_b4_recovery(
     peers.wire(DEVICE_GUID, [[RESPONSE]])
     coordinator = await load(hass, entry)
     previous, stamp = coordinator.data, coordinator.last_successful_read_at
-    wire.queue.put_nowait(bytes([head]) + b"PRIVATE_PAYLOAD")
+    # A supported leading Ping keeps this on the strict framer path. D1
+    # discards only an unknown head of a genuinely new read, not suffixes.
+    wire.queue.put_nowait(b"\x0a" + bytes([head]) + b"PRIVATE_PAYLOAD")
     try:
         assert await peers.backoff.entered.get() == 60
         await coordinator.async_refresh()

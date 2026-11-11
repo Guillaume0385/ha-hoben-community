@@ -17,7 +17,7 @@ from tests.test_frame_logging import records
 from tests.test_tls_cleanup_b9 import connected
 
 
-async def test_unknown_type_with_real_asyncio_close_witness_recovers_after_ack(
+async def test_malformed_mbap_with_real_asyncio_close_witness_recovers_after_ack(
     hass, entry, tls_peers, freezer
 ):
     first = tls_peers.wire([[RESPONSE], []])
@@ -35,7 +35,7 @@ async def test_unknown_type_with_real_asyncio_close_witness_recovers_after_ack(
     refresh = asyncio.create_task(coordinator.async_refresh())
     try:
         await pump()
-        first.queue.put_nowait(b"\x0c")
+        first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
         await pump()
         for _ in range(5):
             freezer.tick(1.001)
@@ -66,7 +66,7 @@ async def test_unknown_type_with_real_asyncio_close_witness_recovers_after_ack(
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_three_unknown_boundaries_wait_for_abort_ack_then_reconnect(
+async def test_three_malformed_boundaries_wait_for_abort_ack_then_reconnect(
     hass, entry, tls_peers, freezer, monkeypatch, caplog
 ):
     # Retain the actual entry's B8 policy, unlike B6's legacy timing fixture.
@@ -101,7 +101,9 @@ async def test_three_unknown_boundaries_wait_for_abort_ack_then_reconnect(
             await pump()
             assert session._pending_read is not None
             # A concatenated suffix must not become a new frame or a length.
-            wire.queue.put_nowait(b"\x0c" + b"\x0a" * generation)
+            wire.queue.put_nowait(
+                b"\x0e\xff\xff\x00\x00\xff\xff" + b"\x0a" * generation
+            )
             await pump()
             assert safe_error_report(session._rx_error)["phase"] == "frame_boundary"
             assert not session.cleanup_succeeded
@@ -164,10 +166,10 @@ async def test_three_unknown_boundaries_wait_for_abort_ack_then_reconnect(
         assert_private_values_absent(caplog.text + repr(client.safe_report()))
         errors = records(caplog, "error")
         assert len(errors) == 3
-        assert all(r["received_bytes"] == 1 for r in errors)
+        assert all(r["received_bytes"] == 7 for r in errors)
         assert all(r["expected_total_bytes"] == "unknown" for r in errors)
         assert all("message_type_byte" not in r for r in errors)
-        assert caplog.text.count("message_type_byte=0x0C") == 3
+        assert caplog.text.count("message_type_byte=0x0C") == 0
     finally:
         if refresh is not None and not refresh.done():
             refresh.cancel()
@@ -256,7 +258,7 @@ async def test_timeout_racing_with_probe_or_tx_joins_the_same_confirmed_abort(
 @pytest.mark.parametrize(
     "fault", ["no_ack", "wait_error", "abort_error", "cancel", "unload"]
 )
-async def test_unknown_boundary_with_unproven_or_cancelled_cleanup_stays_terminal(
+async def test_malformed_boundary_with_unproven_or_cancelled_cleanup_stays_terminal(
     hass, entry, tls_peers, freezer, fault, caplog
 ):
     first = tls_peers.wire([[RESPONSE], []])
@@ -280,7 +282,7 @@ async def test_unknown_boundary_with_unproven_or_cancelled_cleanup_stays_termina
     unloaded = False
     try:
         await pump()
-        first.queue.put_nowait(b"\x0c")
+        first.queue.put_nowait(b"\x0e\xff\xff\x00\x00\xff\xff")
         await pump()
         assert safe_error_report(session._rx_error)["phase"] == "frame_boundary"
         if fault == "unload":

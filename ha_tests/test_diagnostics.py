@@ -727,7 +727,7 @@ async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
     response = b"\x0e\xff\xff\x00\x00\x00\x2b\x01\x04\x28" + registers
     failures = {
         "malformed": [b"\x0e\xff\xfe\x00\x00\x00\x03\x01\x84\x07"],
-        "ambiguous": [SECRET.encode()],
+        "ambiguous": [b"\x0a" + SECRET.encode()],
         "modbus": [b"\x0e\xff\xff\x00\x00\x00\x03\x01\x84\x07"],
         "closed": [b"\x05\x06"],
     }

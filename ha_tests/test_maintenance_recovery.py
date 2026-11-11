@@ -191,7 +191,7 @@ async def test_simulated_concurrent_app_close_during_pending_ha_refresh(
     "reply",
     [
         RESPONSE[:1] + b"\x00\x00" + RESPONSE[3:],
-        b"\xff",
+        b"\x0e\xff\xff\x00\x00\xff\xff",
         RESPONSE + b"\xff",
         bytes.fromhex("0effff0001002b"),  # invalid MBAP protocol id
         TransportTimeout("read"),
@@ -237,7 +237,7 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
 async def test_malformed_setup_recovers_on_same_owner_after_cleanup(
     hass, entry, peers, freezer, phase
 ):
-    first = peers.wire(DEVICE_GUID, [[b"\xff"]])
+    first = peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
     if phase == "opening":
         script_transport(first, openings=[[b"\xff"]])
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
@@ -261,9 +261,9 @@ async def test_malformed_setup_recovers_on_same_owner_after_cleanup(
 async def test_repeated_malformed_errors_continue_beyond_two_openings(
     hass, entry, peers, caplog
 ):
-    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     for _ in range(3):
-        peers.wire(ROTATED_DEVICE_GUID, [[b"\xff"]])
+        peers.wire(ROTATED_DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
     final = peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
     coordinator = await load(hass, entry)
     previous = coordinator.data
@@ -332,7 +332,7 @@ async def test_permanent_failures_never_reconnect(
 async def test_unload_cancels_malformed_backoff_without_parking_a_refresh(
     hass, entry, peers
 ):
-    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     coordinator = await load(hass, entry)
     await coordinator.async_refresh()
     await peers.backoff.entered.get()
@@ -348,7 +348,7 @@ async def test_unload_cancels_malformed_backoff_without_parking_a_refresh(
 
 
 async def test_failed_cleanup_forbids_recovery_after_malformed(hass, entry, peers):
-    first = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    first = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     coordinator = await load(hass, entry)
     first.close.side_effect = TransportError("PRIVATE-PAYLOAD")
     await coordinator.async_refresh()
@@ -366,7 +366,7 @@ async def test_setup_survives_four_failures_on_one_owner(
     hass, entry, peers, phase, caplog
 ):
     for _ in range(4):
-        wire = peers.wire(DEVICE_GUID, [[b"\xff"]])
+        wire = peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
         if phase == "opening":
             script_transport(wire, openings=[[b"\xff"]])
     peers.wire(ROTATED_DEVICE_GUID, [[RESPONSE]])
@@ -392,7 +392,7 @@ async def test_setup_survives_four_failures_on_one_owner(
 async def test_ha_stop_cancels_backoff_without_late_opening(
     hass, entry, peers, freezer, during_setup
 ):
-    wire = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    wire = peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     setup = None
     if during_setup:
         script_transport(wire, openings=[[b"\x05\x06"]])
@@ -416,7 +416,7 @@ async def test_ha_stop_cancels_backoff_without_late_opening(
 
 @pytest.mark.parametrize("phase", ["opening", "read"])
 async def test_failed_setup_cleanup_is_permanent(hass, entry, peers, phase, freezer):
-    wire = peers.wire(DEVICE_GUID, [[b"\xff"]])
+    wire = peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
     if phase == "opening":
         script_transport(wire, openings=[[b"\xff"]])
     wire.close.side_effect = TransportError("PRIVATE")

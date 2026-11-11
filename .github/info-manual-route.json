@@ -61,11 +61,11 @@
     "custom_components/hoben/session_sensor.py": "eacf3307818df8feb4d7e7c953374d525f7f9114dd3bc589564e3912ae15e706",
     "custom_components/hoben/transport.py": "925d81e69d58c870bd338311cc356eac53f6a38b70fcf9979fe16653d7654b68",
     "custom_components/hoben/v4_eof_quarantine.py": "f2aadf8951a2f769cd8a8524d701f54fad729e9f9200e420c244f14316250ec9",
-    "custom_components/hoben/v4_experiment.py": "7a6ca5b79b5b131d679ba9f70d956c15218e7394566f4a79ea6f2b2227693811",
-    "custom_components/hoben/v4_lifecycle.py": "21d4347db423770e75883cbccbcbb2909a22d9dcf4ad1a06f030ab4c9ab10ca4",
+    "custom_components/hoben/v4_experiment.py": "5537574748ed5efe277c191dde7594e5aeee55a38b581e0d75d4142c9ac3e09e",
+    "custom_components/hoben/v4_lifecycle.py": "585009b8b93584ec77f942cfcc1293fb53794e12831af1af3da357edd0b6e537",
     "custom_components/hoben/v4_no_pong.py": "f6be20deaf7d20c89d6457f01eef84b8a462b66191aaf5e890c6be5dc46461b9",
     "custom_components/hoben/v4_read.py": "7a962d2f4370df8f6020152d5dd8636b6d9758e0c485db68d4f68393326658cb",
-    "custom_components/hoben/v4_session.py": "eea9c8ac4fb530ac221179594c44bed97cbeec3eacbb689b2d6c2fd1aadbe2d2",
+    "custom_components/hoben/v4_session.py": "2572e93f9f1e2a386fabaed834a9d130627753aa42c0ee61a48fa67f15fcae7e",
     "custom_components/hoben/v4_state.py": "53f6a37f1044fb4366892f99d71eb855cd0f342c2f2ee999871bc0fe578d42ce"
   }
 }

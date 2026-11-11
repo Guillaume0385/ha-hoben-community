@@ -74,7 +74,7 @@ def test_frank_loss_waits_10_after_cleanup_then_10_after_acceptance(fault):
         HobenTimeoutError(),
         b"\x05\x09",
         b"\x05\xff",
-        b"\xff",
+        b"\x0e\xff\xff\x00\x00\xff\xff",  # malformed known MBAP
     ],
 )
 def test_ambiguous_or_generic_loss_keeps_60_and_has_no_accelerated_read(fault):

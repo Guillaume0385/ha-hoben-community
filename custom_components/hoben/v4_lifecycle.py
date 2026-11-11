@@ -633,6 +633,7 @@ class V4Lifecycle:
         if self._ha_reconnect:
             kwargs["recover_data_updated"] = True
             kwargs["classify_frame_boundary"] = True
+            kwargs["discard_unsupported_deliveries"] = True
         if self._opening_options is not None:
             kwargs["opening_options"] = self._opening_options
         if cap is not None:

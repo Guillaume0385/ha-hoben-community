@@ -167,7 +167,7 @@ async def test_data_updated_recovery_is_visible_before_any_measurement_poll(
 async def test_pending_polls_do_not_increment_episode_count_or_error_date(
     hass, entry, peers
 ):
-    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\xff"]])
+    peers.wire(DEVICE_GUID, [[RESPONSE], [b"\x0e\xff\xff\x00\x00\xff\xff"]])
     coordinator = await load(hass, entry)
     before = measures(hass, entry)
     await coordinator.async_refresh()
@@ -276,7 +276,7 @@ async def test_model_rejection_is_one_recovery_episode_even_without_a_snapshot(
 async def test_first_read_failure_then_failed_open_never_invents_a_reconnect(
     hass, entry, peers
 ):
-    peers.wire(DEVICE_GUID, [[b"\xff"]])
+    peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
     second = peers.wire(DEVICE_GUID, [])
     second.connect.side_effect = TransportCertificateError("PRIVATE_PAYLOAD")
     client = HobenClient(entry.data["user_guid"], DEVICE_GUID, ha_reconnect=True)

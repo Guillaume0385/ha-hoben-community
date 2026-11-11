@@ -48,7 +48,7 @@ async def test_three_classified_boundaries_reconnect_after_cleanup_and_60_second
     assert type(client) is HobenClient and client.ha_reconnect_enabled
     lifecycle = peers.lifecycles[0]
     faults = (
-        (b"\x04",),  # unsupported post-open discriminator, no length invented
+        (b"\x0e\xff\xff\x00\x01\x00\x2b",),  # invalid MBAP protocol id
         (b"\x0e\xff\xff\x00\x00\xff\xff",),  # rejected MBAP length
         (b"\x05", TransportEOF(PRIVATE_TEXT)),  # EOF before the close subcode
     )
