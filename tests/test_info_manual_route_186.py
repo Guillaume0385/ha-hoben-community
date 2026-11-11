@@ -61,8 +61,8 @@ def test_d7_route_manifest_binds_sources_and_opaque_candidate_policy():
     }
     assert manifest["schema"] == 2
     assert manifest["policy"] == {
-        "observation": "passive_candidate_stop",
-        "continuation": "never_force",
+        "observation": "continuous_opaque_tls",
+        "continuation": "diagnostic_v4_30s_uncorrelated",
         "info_framing": "INCONCLUSIVE",
         "boundary_proven": False,
     }

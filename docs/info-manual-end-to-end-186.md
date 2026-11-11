@@ -1,3 +1,74 @@
+# #186-D8 — continuation TLS et sondes V4 sans frontière Info supposée
+
+Tâche CHAT DEV `HOBEN-186-INFO-CONTINUATION-012`, base `experimental`
+`edeaf12ee5943a7141610deb9afd052f2ad02c15`.
+[Consigne MANAGER D8](https://github.com/Guillaume0385/ha-hoben-community/issues/186#issuecomment-6780073519).
+**Développement et tests exclusivement hors ligne ; aucune campagne réelle D8 exécutée.**
+
+Le test manuel conserve le même TLS vérifié `myhoben.fr:465`, l'identité
+`HOBEN_USER_GUID` unique, un seul propriétaire RX, zéro reconnexion automatique,
+les protections d'admission/claim/recheck, le guardian OS, le cleanup réel et la
+limite monotone **3540 s observation + 60 s cleanup = 3600 s absolues**.
+Le workflow HA dédié, les campagnes historiques et l'intégration HA distribuée
+restent inchangés.
+
+Dès un premier discriminateur 0x0C au début d'une livraison TLS, avec framer
+post-open vide et sans récupération DataUpdated, la capacité B existante abandonne
+**une livraison entière**, sans interpréter sa charge. Lors de ses lectures
+suivantes, le **même** propriétaire RX compte chaque livraison plaintext mais
+ne remet plus aucun de ses octets au framer V4 : il n'y a ni scanner de suffixe,
+ni saut de deux octets, ni seconde tâche lisant TLS. Le discriminateur de
+livraisons ultérieures commençant par 0x0C, 0x0A, 0x0E ou 0x1B est classé
+`delivery_lead_unproven`, jamais « message décodé ». L'offset initial zéro
+est l'offset dans la livraison, non une frontière de message. Les octets
+ressemblants contenus au milieu d'un payload ne sont jamais parcourus.
+
+Le rapport fermé recense `tls_deliveries_since_candidate`,
+`tls_bytes_since_candidate`, l'offset/instant/taille du premier candidat,
+une chronologie ordonnée `[offset_ms, delivery_bytes]` limitée aux 96 premières
+livraisons et son compteur exact d'entrées omises, et jusqu'à 16 segments
+d'observation. Dans chaque segment, `observed_bytes_between_candidates` et
+`tls_deliveries` comptent les livraisons jusqu'à la **tête de livraison
+suivante** ressemblant à 0x0C ou jusqu'à la fin ; **ce n'est jamais la longueur
+d'un Info**. Les compteurs agrégés ne sont pas tronqués quand les listes sont
+abrégées. Aucun RX, identifiant, registre, donnée domestique ou exception
+libre ne sort ; rapports et manifeste sont vérifiés indépendamment en Python
+et Node, scellés et limités à 8192 octets.
+
+Après le premier candidat, une sonde de diagnostic **privée** émet uniquement
+le paquet V4 0x0D + Modbus 04 de 20 registres déjà autorisé, nominalement
+toutes les 30 secondes depuis l'horloge monotone. Chaque TX est sérialisée
+sous le verrou de V4Session ; aucun appel à `request_v4_data()` et donc aucun
+timeout applicatif ne provoque de fermeture sur le seul silence. Toute erreur
+de vraie transmission, EOF TLS ou annulation garde un arrêt et un cleanup bornés.
+Une demande émise n'est pas une réponse reçue. Les réponses au début de
+livraisons ne sont qu'une ressemblance binaire, pas un 0x0E complet validé.
+
+**Limite de preuve majeure (conservatrice)** : le transaction ID de lecture
+0xFFFF est fixe et la longueur Info est inconnue. Après un premier échange
+sans réponse, ni la fraîcheur d'un futur 0x0E ni son rattachement à l'une des
+sondes successives ne sont prouvables sur le même flux opaque. La suppression
+de ces octets du framer évite une désynchronisation, mais empêche également la
+validation d'un retour V4. Les champs
+`first_post_info_valid_v4_at_ms` et `recovery_stability_start_ms` restent
+`null`, `recovery_stability_elapsed_ms=0`, toutes les lectures émises sont
+`unconfirmed_read_requests`. Le scénario ne fabrique donc **aucun SUCCESS**
+ni départ de minuterie 300 s, même avec 300 secondes de données ressemblantes.
+Un candidat suivi de silence/continuation ambiguë reste
+`INCONCLUSIVE/candidate_observed_continuation_not_proven` à la borne fixe.
+Un véritable EOF serveur attesté rend `INCONCLUSIVE/server_eof`, séparé
+d'une fermeture volontaire locale ; un défaut de transport/processus/cleanup
+prouvé rend FAILURE. Sans candidat à la fin complète : INCONCLUSIVE/candidate_absent.
+Cette limitation nécessite une nouvelle preuve protocolaire ou décision MANAGER
+avant tout succès fonctionnel 300 s : ni le run #42898613631 ni les fixtures
+ne démontrent le cadrage Info ou la corrélation des réponses tardives.
+
+Le schéma public D8 passe à la version 3 ; le contrat d'intégrité de route
+conserve sa version 2 mais épingle la nouvelle politique et tous les SHA256
+des sources modifiées. Aucun nouveau dispatch ou rerun par CHAT DEV.
+
+---
+
 # #186-D7 — observation passive, préparation hors ligne
 
 Tâche `HOBEN-186-INFO-MANUAL-END-TO-END-010`, base experimental

@@ -9,7 +9,13 @@ const FIELDS=Object.freeze(['merge_sha','candidate_sha','pr_number','ci_run_id',
   'run_attempt','environment_id','environment_digest','claim_sha','contract_digest','launch_tag_sha']);
 const OBS=Object.freeze({started:false,opening_accepted:false,tls_verified:false,connections:0,
   deliveries:0,received_bytes:0,candidate_observed:false,candidate_delivery_bytes:0,
-  candidate_at_ms:null,discarded_deliveries:0,continuation:'not_proven',post_candidate_reads:0,
+  candidate_at_ms:null,candidate_delivery_offset:null,discarded_deliveries:0,
+  continuation:'not_proven',post_candidate_reads:0,tls_deliveries_since_candidate:0,
+  tls_bytes_since_candidate:0,delivery_timeline:[],delivery_timeline_omitted:0,
+  candidate_leads_unproven:0,ping_leads_unproven:0,response_leads_unproven:0,
+  data_updated_leads_unproven:0,candidate_segments:[],candidate_segments_omitted:0,
+  peer_eof:false,unconfirmed_read_requests:0,first_post_info_valid_v4_at_ms:null,
+  recovery_stability_start_ms:null,recovery_stability_elapsed_ms:0,
   pings_validated:0,pongs_written:0,read_requests:0,verified_reads:0,observation_complete:false,
   first_error:'none',cleanup_error:'none',cleanup_started_ms:null,transport_close_requested:false,
   transport_close_completed:false,rx_stopped:false,operations_stopped:false,
@@ -41,20 +47,68 @@ function validateProof(p) {
 function validateObservation(o) {
   keys(o,Object.keys(OBS));
   for(const [k,v] of Object.entries(OBS))if(typeof v==='boolean')need(typeof o[k]==='boolean');
-  for(const k of ['connections','discarded_deliveries','post_candidate_reads'])need(integer(o[k],1));
-  for(const k of ['deliveries','pings_validated','pongs_written','read_requests','verified_reads'])need(integer(o[k],8192));
-  need(integer(o.received_bytes,1048576)&&integer(o.candidate_delivery_bytes,4096)&&integer(o.elapsed_ms,3600000));
-  for(const k of ['candidate_at_ms','cleanup_started_ms'])need(o[k]===null||integer(o[k],o.elapsed_ms));
+  need(integer(o.connections,1)&&integer(o.discarded_deliveries,1));
+  for(const k of ['deliveries','post_candidate_reads','tls_deliveries_since_candidate',
+    'delivery_timeline_omitted','candidate_leads_unproven','ping_leads_unproven',
+    'response_leads_unproven','data_updated_leads_unproven','pings_validated',
+    'pongs_written','read_requests','verified_reads','unconfirmed_read_requests'])
+      need(integer(o[k],8192));
+  need(integer(o.candidate_segments_omitted,8192));
+  need(integer(o.received_bytes,1048576)&&integer(o.tls_bytes_since_candidate,1048576));
+  need(integer(o.candidate_delivery_bytes,4096)&&integer(o.elapsed_ms,3600000));
+  for(const k of ['candidate_at_ms','cleanup_started_ms',
+    'first_post_info_valid_v4_at_ms','recovery_stability_start_ms'])
+      need(o[k]===null||integer(o[k],o.elapsed_ms));
   need(error(o.first_error)&&error(o.cleanup_error));
-  need(o.continuation==='not_proven'&&o.post_candidate_reads===0);
-  need(o.pongs_written<=o.pings_validated&&o.verified_reads<=o.read_requests);
-  if(o.candidate_observed)need(o.started&&o.opening_accepted&&o.candidate_at_ms!==null&&
-    o.candidate_at_ms<3540000&&o.candidate_delivery_bytes>=1&&o.deliveries>=1&&
-    o.received_bytes>=o.candidate_delivery_bytes);
-  else need(o.candidate_at_ms===null&&o.candidate_delivery_bytes===0&&o.discarded_deliveries===0);
-  if(o.discarded_deliveries)need(o.candidate_observed);
+  need(o.continuation==='not_proven'&&
+    o.verified_reads<=o.read_requests-o.unconfirmed_read_requests&&
+    o.first_post_info_valid_v4_at_ms===null&&
+    o.recovery_stability_start_ms===null&&o.recovery_stability_elapsed_ms===0);
+  need(o.pongs_written<=o.pings_validated);
+  need(o.post_candidate_reads+Number(o.candidate_observed)===o.tls_deliveries_since_candidate&&
+    o.tls_deliveries_since_candidate<=o.deliveries&&o.tls_bytes_since_candidate<=o.received_bytes);
+  const heads=o.candidate_leads_unproven+o.ping_leads_unproven+
+    o.response_leads_unproven+o.data_updated_leads_unproven;
+  need(heads<=o.post_candidate_reads);
+  need(Array.isArray(o.delivery_timeline)&&o.delivery_timeline.length<=96);
+  need(o.delivery_timeline_omitted===o.tls_deliveries_since_candidate-o.delivery_timeline.length);
+  let previous=-1,bytes=0;
+  for(const entry of o.delivery_timeline) {
+    need(Array.isArray(entry)&&entry.length===2&&integer(entry[0],o.elapsed_ms)&&
+      entry[0]>=previous&&integer(entry[1],4096)&&entry[1]>=1);
+    previous=entry[0];bytes+=entry[1];
+  }
+  need(bytes<=o.tls_bytes_since_candidate);
+  if(!o.delivery_timeline_omitted)need(bytes===o.tls_bytes_since_candidate);
+  need(Array.isArray(o.candidate_segments)&&o.candidate_segments.length<=16);
+  need(o.candidate_segments.length+o.candidate_segments_omitted===
+    Number(o.candidate_observed)+o.candidate_leads_unproven);
+  for(const seg of o.candidate_segments) {
+    keys(seg,['start_at_ms','observed_bytes_between_candidates','tls_deliveries','end_kind']);
+    need(integer(seg.start_at_ms,o.elapsed_ms)&&
+      integer(seg.observed_bytes_between_candidates,1048576)&&
+      integer(seg.tls_deliveries,8192)&&
+      seg.observed_bytes_between_candidates>=seg.tls_deliveries&&seg.tls_deliveries>=1);
+    need(['delivery_lead_unproven','tls_eof','observation_end'].includes(seg.end_kind));
+  }
+  if(o.candidate_observed) {
+    need(o.started&&o.opening_accepted&&o.candidate_at_ms!==null&&
+      o.candidate_at_ms<3540000&&o.candidate_delivery_offset===0&&
+      o.candidate_delivery_bytes>=1&&o.discarded_deliveries===1&&
+      o.received_bytes>=o.candidate_delivery_bytes&&
+      o.tls_bytes_since_candidate>=o.candidate_delivery_bytes&&
+      o.delivery_timeline.length>=1&&o.delivery_timeline[0][0]===o.candidate_at_ms&&
+      o.delivery_timeline[0][1]===o.candidate_delivery_bytes);
+  } else {
+    need(o.candidate_at_ms===null&&o.candidate_delivery_offset===null&&
+      o.candidate_delivery_bytes===0&&o.discarded_deliveries===0&&
+      o.tls_deliveries_since_candidate===0&&o.tls_bytes_since_candidate===0&&
+      o.delivery_timeline.length===0&&o.candidate_segments.length===0&&
+      heads===0&&o.candidate_segments_omitted===0);
+  }
   if(o.observation_complete)need(o.cleanup_started_ms!==null&&o.cleanup_started_ms>=3540000);
   if(o.opening_accepted)need(o.started&&o.tls_verified&&o.connections===1);
+  if(o.peer_eof)need(o.started&&o.opening_accepted);
   if(o.cleanup_attested)need(o.cleanup_started_ms!==null&&o.cleanup_error==='none'&&
     ['transport_close_requested','transport_close_completed','rx_stopped','operations_stopped'].every(k=>o[k]));
   return o;
@@ -79,6 +133,7 @@ function verdict(o,p) {
   if(o.first_error!=='none')return ['FAILURE',o.first_error];
   if(!o.cleanup_attested)return ['FAILURE','cleanup'];
   if(!o.opening_accepted||o.connections!==1||!o.tls_verified)return ['FAILURE','provenance'];
+  if(o.peer_eof)return ['INCONCLUSIVE','server_eof'];
   if(o.candidate_observed&&o.discarded_deliveries===1)return ['INCONCLUSIVE','candidate_observed_continuation_not_proven'];
   if(!o.candidate_observed&&o.observation_complete)return ['INCONCLUSIVE','candidate_absent'];
   return ['FAILURE','provenance'];
@@ -87,7 +142,7 @@ function validateStructure(r,p) {
   validateProof(p);
   keys(r,['schema','scenario','selection','execution','info_framing','boundary_proven',
     'limits','proof','observation','process','result','reason']);
-  need(r.schema===2&&r.scenario==='info-passive-observation'&&r.selection==='hoben-live'&&
+  need(r.schema===3&&r.scenario==='info-passive-observation'&&r.selection==='hoben-live'&&
     r.execution==='protected_worker'&&r.info_framing==='INCONCLUSIVE'&&r.boundary_proven===false);
   equal(r.limits,LIMITS);equal(validateProof(r.proof),p);
   const [result,reason]=verdict(r.observation,r.process);
