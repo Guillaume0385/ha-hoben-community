@@ -694,7 +694,9 @@ class V4Session:
                 except TransportTimeout:
                     if not self._keep_silent_transport():
                         raise
-                    await asyncio.sleep(0)
+                    # A broken reader may fail immediately on every call.
+                    # Bound retry frequency without treating silence as EOF.
+                    await asyncio.sleep(1.0)
                     continue
                 production_drop = self._discard_unsupported_delivery(data, transport)
                 if production_drop or (
@@ -730,7 +732,7 @@ class V4Session:
             except TransportTimeout:
                 if not self._keep_silent_transport():
                     raise
-                await asyncio.sleep(0)
+                await asyncio.sleep(1.0)
                 continue
             except TimeoutError:
                 if not deadline.expired():

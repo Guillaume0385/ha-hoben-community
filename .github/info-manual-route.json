@@ -65,7 +65,7 @@
     "custom_components/hoben/v4_lifecycle.py": "9593722892099c3432a7e260bf2b571e524130a238879505247ed3e6058c559c",
     "custom_components/hoben/v4_no_pong.py": "f6be20deaf7d20c89d6457f01eef84b8a462b66191aaf5e890c6be5dc46461b9",
     "custom_components/hoben/v4_read.py": "7a962d2f4370df8f6020152d5dd8636b6d9758e0c485db68d4f68393326658cb",
-    "custom_components/hoben/v4_session.py": "48aadf5622e0eca2132c734497c0d74410228465fe4c0da43f13529b702062a8",
+    "custom_components/hoben/v4_session.py": "1c6870e3537863e8698db59c1f264d719ac84af198764ec5d622d9201be76651",
     "custom_components/hoben/v4_state.py": "53f6a37f1044fb4366892f99d71eb855cd0f342c2f2ee999871bc0fe578d42ce"
   }
 }

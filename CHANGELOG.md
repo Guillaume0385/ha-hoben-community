@@ -6,6 +6,8 @@
   de réponse. Après abandon d'une demande émise avec TID fixe FFFF, les
   acquisitions sont suspendues pour cette génération : réponse tardive, doublon
   et sonde DataUpdated ambiguë ne deviennent jamais une mesure fraîche.
+- Après un timeout RX immédiat, attendre 1 s avant la prochaine lecture :
+  fréquence bornée, annulation et cleanup effectifs, aucune fermeture pour silence.
 - Le dernier snapshot garde son horodatage et au plus 300 s de disponibilité
   depuis la première incertitude, sans renouvellement par poll ou réponse tardive.
   Sans mesure préalable, setup attend le même propriétaire, annulable à l'arrêt.

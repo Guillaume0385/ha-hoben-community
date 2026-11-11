@@ -10,6 +10,12 @@ reçoivent pas cette activation. Aucun changement de workflow, codec ou TID.
 
 Un délai de réponse expiré ne prouve ni EOF ni erreur TLS. Le RX propriétaire,
 le framer incrémental et les réponses Pong restent sur le même transport.
+Un `TransportTimeout` immédiat impose 1 s avant la prochaine tentative RX,
+y compris en récupération DataUpdated : pas de boucle chaude à `sleep(0)`,
+pas de fermeture, pas de deuxième lecteur. L'attente reste annulable ; les
+événements suivants EOF/TLS/auth gardent leur traitement et leur provenance
+(l'authentification ne peut pas être déduite de bytes en quarantaine inconnue).
+Ce délai de retry RX ne change aucun backoff de reconnexion B8.
 L'échec d'acquisition reste un timeout typé, phase `request_correlation` ; il
 n'est jamais converti en succès ni en perte de transport attestée.
 

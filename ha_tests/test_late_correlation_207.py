@@ -141,3 +141,69 @@ async def test_first_acquisition_silence_keeps_one_setup_owner_without_spin(
         if not setup.done():
             setup.cancel()
             await asyncio.gather(setup, return_exceptions=True)
+
+
+async def test_old_cleanup_cannot_cover_next_generation_or_extend_300s(
+    hass, entry, peers, freezer, monkeypatch
+):
+    ui = LocalClock(monkeypatch, freezer)
+    first = peers.wire(DEVICE_GUID, [[RESPONSE], []])
+    second = peers.wire(DEVICE_GUID, [])
+    coordinator = await load(hass, entry)
+    coordinator._async_unsub_refresh()
+    clock = Clock(monkeypatch)
+    life = peers.lifecycles[0]
+    stamp = coordinator.last_successful_read_at
+    close_started, release = asyncio.Event(), asyncio.Event()
+
+    async def close_second():
+        close_started.set()
+        await release.wait()
+
+    second.close.side_effect = close_second
+    refresh = asyncio.create_task(coordinator.async_refresh())
+    try:
+        await pump()
+        await ui.advance(30.001)
+        await clock.advance(30.001)
+        await refresh
+        until = coordinator._connection_hold_until
+        assert coordinator.last_snapshot_held and life.acquisition_uncertain
+        first.queue.put_nowait(TransportEOF())
+        assert await peers.backoff.entered.get() == 60
+        await ui.advance(60)
+        peers.backoff.release.put_nowait(None)
+        await life.wait_connected()
+        assert coordinator.client.session_observation.cleaned_generation == 1
+        assert coordinator.client.session_observation.generation == 2
+        assert coordinator.last_snapshot_held
+        second.queue.put_nowait(TransportEOF())
+        await close_started.wait()
+        await pump()
+        # Generation 1 is clean, but generation 2 still owns an unclosed TLS.
+        assert coordinator.client.session_observation.cleaned_generation == 1
+        assert not life._session.cleanup_succeeded
+        assert not coordinator._cleanup_proven(2)
+        assert not coordinator.last_snapshot_held
+        assert coordinator._connection_hold_until == until
+        release.set()
+        assert await peers.backoff.entered.get() == 60
+        assert coordinator.client.session_observation.cleaned_generation == 2
+        assert coordinator.last_snapshot_held
+        assert coordinator.last_successful_read_at == stamp
+        assert coordinator.client.session_observation.read_generation is None
+        await ui.advance(239.999)
+        assert coordinator.last_snapshot_held
+        await ui.advance(0.001)
+        assert not coordinator.last_snapshot_held
+        await ui.advance(1)
+        assert not coordinator.snapshot_available
+        assert coordinator.last_successful_read_at == stamp
+        assert coordinator._connection_hold_until == until
+        assert peers.factory.call_count == 2
+    finally:
+        release.set()
+        refresh.cancel()
+        await asyncio.gather(refresh, return_exceptions=True)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert_stopped(peers)
