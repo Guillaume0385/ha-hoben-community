@@ -168,7 +168,8 @@ async def test_setup_recovery_can_be_cancelled_without_reconnection_or_orphan_pr
     await pump()
     await clock.advance(30)
     assert not setup.done()
-    assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13, 13]
+    assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
+    assert peers.lifecycles[0].acquisition_uncertain
     setup.cancel()
     with pytest.raises(asyncio.CancelledError):
         await setup
@@ -180,10 +181,11 @@ async def test_setup_recovery_can_be_cancelled_without_reconnection_or_orphan_pr
     )
 
 
-async def test_setup_consumes_a_completed_probe_once_without_a_third_read(
+async def test_setup_needs_a_new_generation_after_an_ambiguous_original_read(
     hass, entry, peers, monkeypatch
 ):
     wire = peers.wire(DEVICE_GUID, [[BAD], [RESPONSE]])
+    peers.wire(DEVICE_GUID, [[RESPONSE]])
     received = asyncio.Event()
     original_read = wire.read.side_effect
 
@@ -199,11 +201,18 @@ async def test_setup_consumes_a_completed_probe_once_without_a_third_read(
     await received.wait()
     await pump()
     await clock.advance(30)
+    assert not setup.done() and peers.lifecycles[0].acquisition_uncertain
+    wire.queue.put_nowait(RESPONSE)
+    await pump()
+    assert not setup.done() and peers.factory.call_count == 1
+    wire.queue.put_nowait(TransportEOF())
+    assert await peers.backoff.entered.get() == 60
+    peers.backoff.release.put_nowait(None)
     assert await setup
     try:
         assert entry.runtime_data.coordinator.last_update_success
-        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13, 13]
-        assert peers.factory.call_count == 1
+        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
+        assert peers.factory.call_count == 2
     finally:
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert_stopped(peers)

@@ -14,7 +14,7 @@ from custom_components.hoben.transport import (
     TransportCertificateError,
     TransportEOF,
     TransportError,
-    TransportTimeout,
+    TransportTlsError,
 )
 from custom_components.hoben.v4_state import V4DecodeError
 from ha_tests.test_cleanup_b6 import timeout_on
@@ -53,7 +53,7 @@ class LocalClock:
         await pump()
 
 
-@pytest.mark.parametrize("failure", [TransportEOF, TransportTimeout, "close_client"])
+@pytest.mark.parametrize("failure", [TransportEOF, TransportTlsError, "close_client"])
 async def test_hold_until_exactly_300_from_loss_and_expire_without_poll(
     hass, entry, peers, monkeypatch, freezer, failure
 ):
@@ -167,7 +167,7 @@ async def test_double_reconnect_and_failed_polls_cannot_renew_grace_without_read
 
 
 @pytest.mark.parametrize(
-    "failure", [TransportEOF(), TransportTimeout("read"), b"\x05\x03"]
+    "failure", [TransportEOF(), TransportTlsError("read"), b"\x05\x03"]
 )
 async def test_no_prior_decoded_read_never_holds_or_schedules_a_ui_grace(
     hass, entry, peers, monkeypatch, freezer, failure

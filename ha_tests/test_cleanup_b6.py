@@ -100,7 +100,7 @@ async def timeout_on(coordinator, first, session, freezer, origin):
         if origin == "probe_write":
             freezer.tick(10.001)
         else:
-            first.queue.put_nowait(TimeoutError("PRIVATE_PAYLOAD"))
+            first.queue.put_nowait(ssl.SSLError("PRIVATE_PAYLOAD"))
         refresh = None
     else:
         refresh = asyncio.create_task(coordinator.async_refresh())
@@ -110,6 +110,11 @@ async def timeout_on(coordinator, first, session, freezer, origin):
             await pump()
         freezer.tick(30.001 if origin == "read" else 10.001)
     await pump()
+    if origin == "read":
+        # D2 keeps silence open. A separate, genuine EOF exercises RX cleanup.
+        assert session.acquisition_uncertain and not first.writer.close.called
+        first.queue.put_nowait(b"")
+        await pump()
     return refresh
 
 
@@ -117,7 +122,7 @@ async def timeout_on(coordinator, first, session, freezer, origin):
     "origin", ["read", "read_write", "pong", "probe_write", "probe_read"]
 )
 @pytest.mark.parametrize("double_close", [False, True])
-async def test_timeout_cleanup_finishes_before_backoff_and_new_tls(
+async def test_eof_tls_and_write_timeout_cleanup_precede_backoff_and_new_tls(
     hass, entry, tls_peers, freezer, caplog, origin, double_close
 ):
     first = tls_peers.wire([[RESPONSE], []])
@@ -184,13 +189,19 @@ async def test_timeout_cleanup_finishes_before_backoff_and_new_tls(
         assert client.session_observation.cleaned_generation == 1
         assert tls_peers.waits == [60]
         assert not life._task.done() and life._session is None
-        assert session._rx_error.code == "timeout"
-        assert life._failure.code == "timeout"
+        assert session._rx_error.code == (
+            "transport_unavailable" if origin in {"read", "probe_read"} else "timeout"
+        )
+        assert life._failure.code == (
+            "transport_unavailable" if origin in {"read", "probe_read"} else "timeout"
+        )
         state = session_state(hass, entry)
         assert (
             state.state == "reconnecting" and state.attributes["reconnect_count"] == 0
         )
-        assert state.attributes["last_error_category"] == "timeout"
+        assert state.attributes["last_error_category"] == (
+            "transport_unavailable" if origin in {"read", "probe_read"} else "timeout"
+        )
         assert state.attributes["last_successful_read_age"] >= 10
         await coordinator.async_refresh()
         coordinator._async_unsub_refresh()
@@ -270,7 +281,9 @@ async def test_real_cleanup_failure_or_stop_never_opens_another_tls(
     unloaded = False
     try:
         refresh = await timeout_on(coordinator, first, session, freezer, origin)
-        assert session._rx_error.code == "timeout"  # Original error survives.
+        assert session._rx_error.code == (
+            "transport_unavailable" if origin in {"read", "probe_read"} else "timeout"
+        )  # Original error survives.
         if fault in {"timeout", "unload"}:
             assert entered.is_set() and not session.cleanup_succeeded
             assert not tls_peers.waits and len(tls_peers.transports) == 1
@@ -293,7 +306,9 @@ async def test_real_cleanup_failure_or_stop_never_opens_another_tls(
         assert life._task.done() and not tls_peers.waits
         assert len(tls_peers.transports) == 1 and len(tls_peers.owners) == 1
         first.writer.transport.abort.assert_called_once_with()
-        assert session._rx_error.code == "timeout"
+        assert session._rx_error.code == (
+            "transport_unavailable" if origin in {"read", "probe_read"} else "timeout"
+        )
         assert (
             session._rx_task.done()
             and not session._operations

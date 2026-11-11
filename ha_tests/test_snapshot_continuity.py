@@ -15,7 +15,6 @@ from custom_components.hoben.diagnostics import async_get_config_entry_diagnosti
 from custom_components.hoben.transport import (
     TransportCertificateError,
     TransportEOF,
-    TransportTimeout,
     TransportTlsError,
 )
 from custom_components.hoben.v4_state import V4DecodeError
@@ -33,7 +32,7 @@ def states(hass, entry):
     }
 
 
-@pytest.mark.parametrize("failure", ["malformed_response", "timeout", "decode"])
+@pytest.mark.parametrize("failure", ["malformed_response", "tls", "decode"])
 async def test_validated_snapshot_survives_acquisition_error_without_fake_refresh(
     hass, entry, peers, freezer, caplog, failure
 ):
@@ -44,7 +43,7 @@ async def test_validated_snapshot_survives_acquisition_error_without_fake_refres
         bad = (
             RESPONSE[:1] + b"\x00\x00" + RESPONSE[3:]
             if failure == "malformed_response"
-            else TransportTimeout("PRIVATE_PAYLOAD")
+            else TransportTlsError("PRIVATE_PAYLOAD")
         )
         peers.wire(DEVICE_GUID, [[RESPONSE], [bad]])
         peers.wire(DEVICE_GUID, [[fresh]])
@@ -72,7 +71,11 @@ async def test_validated_snapshot_survives_acquisition_error_without_fake_refres
         listener.assert_not_called()
         report = await async_get_config_entry_diagnostics(hass, entry)
         assert report["coordinator"]["last_error"]["error"] == (
-            "invalid_v4_snapshot" if failure == "decode" else failure
+            "invalid_v4_snapshot"
+            if failure == "decode"
+            else "transport_unavailable"
+            if failure == "tls"
+            else failure
         )
         assert report["coordinator"]["last_successful_read_age"] == 20
         stamp = coordinator.last_successful_read_at

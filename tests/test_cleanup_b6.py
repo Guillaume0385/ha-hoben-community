@@ -5,13 +5,15 @@ import asyncio
 import pytest
 
 from custom_components.hoben.exceptions import HobenTimeoutError
-from custom_components.hoben.transport import TransportTimeout
+from custom_components.hoben.transport import TransportEOF, TransportTimeout
 from tests.test_data_updated_silence import BAD, Clock, make_owner, pump
 from tests.test_v4_persistent import Factory
 
 
 @pytest.mark.parametrize("origin", ["read", "probe_write"])
-def test_timeout_does_not_cancel_the_rx_owned_tls_shutdown(monkeypatch, origin):
+def test_silence_then_eof_or_write_timeout_cannot_cancel_rx_tls_shutdown(
+    monkeypatch, origin
+):
     async def scenario():
         clock, factory = Clock(monkeypatch), Factory()
         life = make_owner(factory)
@@ -54,6 +56,9 @@ def test_timeout_does_not_cancel_the_rx_owned_tls_shutdown(monkeypatch, origin):
                     request = asyncio.create_task(life.request_v4_data(timeout=30))
                     await pump()
                     await clock.advance(30)
+                    assert session.acquisition_uncertain
+                    assert not close_started.is_set()
+                    stream.queue.put_nowait(TransportEOF())
                 await pump()
                 assert close_started.is_set()
                 assert len(factory.sessions) == generation
@@ -66,7 +71,9 @@ def test_timeout_does_not_cancel_the_rx_owned_tls_shutdown(monkeypatch, origin):
                 assert not interrupted, "internal teardown cancelled TLS shutdown"
                 assert finished == list(range(1, generation + 1))
                 assert session.cleanup_succeeded
-                assert session._rx_error.code == "timeout"
+                assert session._rx_error.code == (
+                    "transport_unavailable" if origin == "read" else "timeout"
+                )
                 assert session._rx_task.done() and not session._operations
                 assert not session._tx_operations and session._pending_read is None
                 assert not life.session_observation.cleanup_failed

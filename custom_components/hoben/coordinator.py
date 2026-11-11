@@ -193,7 +193,10 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             or self.last_successful_read_at is None
         ):
             return
-        if self.client.data_updated_transport_alive is not True:
+        if (
+            self.client.data_updated_transport_alive is not True
+            or self.client.acquisition_uncertain is True
+        ):
             if self._connection_hold_until is None:
                 # Loss is degradation, never a successful HA update. Retained
                 # values use their separate availability rule; this also lets
@@ -285,7 +288,13 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 and not self._connection_hold_revoked
                 and monotonic() < self._connection_hold_until
                 and self._connection_hold_safe
-                and self._cleanup_proven(cleanup_generation)
+                and (
+                    self.client.acquisition_uncertain is True
+                    and observation.active is True
+                    and observation.generation == self._connection_loss_generation
+                    and self.client.data_updated_transport_alive is True
+                    or self._cleanup_proven(cleanup_generation)
+                )
             )
         return (
             self._snapshot_hold
@@ -388,7 +397,7 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             self._hold_loss_generation = self.client.session_observation.loss_generation
             self._snapshot_hold = self.last_snapshot_held
             self._notify_held_failure = was_holding and not self._snapshot_hold
-            if not pending_owner:
+            if not pending_owner and self.client.acquisition_uncertain is not True:
                 # A model rejection is degraded even before A1 has a cache.
                 self._session_event(
                     report_event(
@@ -431,6 +440,10 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def _async_update_once(self) -> HobenCoordinatorData:
         """Decode successful reads; also persist identities accepted before loss."""
         try:
+            if self.data is None and self.client.acquisition_uncertain is True:
+                # Do not spin the first-refresh retry loop or close solely for
+                # silence. This waiter wakes on real loss/stop, never a timer.
+                await self.client.async_wait_acquisition_ready()
             try:
                 snapshot = await self.client.async_refresh()
             except (HobenError, asyncio.CancelledError):

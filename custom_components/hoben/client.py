@@ -262,6 +262,25 @@ class HobenClient:
         )
 
     @property
+    def acquisition_uncertain(self) -> bool:
+        return (
+            not self._closed
+            and self._lifecycle is not None
+            and self._lifecycle.acquisition_uncertain
+        )
+
+    async def async_wait_acquisition_ready(self) -> None:
+        """Only initial HA setup waits; ordinary failed polls remain bounded."""
+        from .v4_lifecycle import LifecycleStoppedError
+
+        if self._closed or self._lifecycle is None:
+            raise HobenClientClosedError()
+        try:
+            await self._lifecycle.wait_acquisition_ready()
+        except LifecycleStoppedError:
+            raise HobenClientClosedError() from None
+
+    @property
     def acquisition_recovery_pending(self) -> bool:
         """Read-only HA hint; never hide a later transport/permanent failure.
 
@@ -321,7 +340,11 @@ class HobenClient:
             return "reconnecting"
         if not self.data_updated_transport_alive:
             return "disconnected"
-        if self.data_updated_recovering or self.session_monitor.recovering:
+        if (
+            self.acquisition_uncertain
+            or self.data_updated_recovering
+            or self.session_monitor.recovering
+        ):
             return "recovering"
         return "connected"
 

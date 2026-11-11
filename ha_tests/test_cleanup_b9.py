@@ -209,7 +209,9 @@ async def test_timeout_racing_with_probe_or_tx_joins_the_same_confirmed_abort(
     closers = []
     try:
         refresh = await timeout_on(coordinator, first, session, freezer, origin)
-        assert session._rx_error.code == "timeout"
+        assert session._rx_error.code == (
+            "transport_unavailable" if origin == "probe_read" else "timeout"
+        )
         closers = [
             asyncio.create_task(session.close()),
             asyncio.create_task(session.abort()),
@@ -229,7 +231,9 @@ async def test_timeout_racing_with_probe_or_tx_joins_the_same_confirmed_abort(
         assert session.cleanup_succeeded and session._rx_task.done()
         assert not session._operations and not session._tx_operations
         assert session._data_updated.task is None and not session._data_updated.closing
-        assert session._rx_error.code == "timeout"
+        assert session._rx_error.code == (
+            "transport_unavailable" if origin == "probe_read" else "timeout"
+        )
         assert tls_peers.waits == [60]
         assert coordinator.last_successful_read_at == stamp
         freezer.tick(59)

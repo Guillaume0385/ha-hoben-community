@@ -89,7 +89,7 @@ async def test_real_ha_cleanup_then_10_tls_then_10_new_read(
     assert_stopped(peers)
 
 
-async def test_actual_acquisition_timeout_recovers_at_30_without_periodic_poll(
+async def test_silence_waits_for_real_eof_then_uses_existing_10_plus_10(
     hass, entry, peers, timeline
 ):
     first = peers.wire(DEVICE_GUID, [[RESPONSE], []])
@@ -102,13 +102,21 @@ async def test_actual_acquisition_timeout_recovers_at_30_without_periodic_poll(
     assert first.write.await_count == 3
     await timeline.advance(30)
     await refresh
-    assert await timeline.waiting.get() == 30
+    assert timeline.waiting.empty() and coordinator.client.acquisition_uncertain
     assert not coordinator.last_update_success
-    await timeline.advance(29.999)
+    await timeline.advance(30)
     assert (
         peers.factory.call_count == 1 and coordinator.last_successful_read_at == stamp
     )
-    await timeline.advance(0.0011)
+    first.queue.put_nowait(RESPONSE)
+    await pump()
+    assert coordinator.client.session_observation.read_sequence == 1
+    first.close.assert_not_awaited()
+    first.queue.put_nowait(TransportEOF())
+    assert await timeline.waiting.get() == 10
+    await timeline.advance(10)
+    assert await timeline.waiting.get() == 10
+    await timeline.advance(10)
     await pump()
     assert peers.factory.call_count == 2 and fresh.write.await_count == 2
     assert (
@@ -331,7 +339,7 @@ def tls_timeline(hass, tls_peers, monkeypatch, freezer):
 
 
 @pytest.mark.parametrize("double_close", [False, True])
-async def test_real_tls_wait_closed_proof_precedes_timeout_deadline_and_new_read(
+async def test_real_tls_wait_closed_after_silence_then_eof_precedes_new_read(
     hass, entry, tls_peers, tls_timeline, double_close, caplog
 ):
     first = tls_peers.wire([[RESPONSE], []])
@@ -350,6 +358,9 @@ async def test_real_tls_wait_closed_proof_precedes_timeout_deadline_and_new_read
     refresh = asyncio.create_task(coordinator.async_refresh())
     await pump()
     await tls_timeline.advance(30)
+    assert life.acquisition_uncertain and not first.writer.close.called
+    first.queue.put_nowait(b"")
+    await pump()
     assert entered.is_set() and not session.cleanup_succeeded
     assert len(tls_peers.transports) == 1 and tls_timeline.waiting.empty()
     closers = (
@@ -361,14 +372,16 @@ async def test_real_tls_wait_closed_proof_precedes_timeout_deadline_and_new_read
     release.set()
     await refresh
     await asyncio.gather(*closers)
-    assert await tls_timeline.waiting.get() == 27
+    assert await tls_timeline.waiting.get() == 10
     assert session.cleanup_succeeded and session._rx_task.done()
     assert not session._operations and not session._tx_operations
     assert coordinator.client.session_observation.cleaned_generation == 1
     assert coordinator.last_successful_read_at == stamp
-    await tls_timeline.advance(26.999)
+    await tls_timeline.advance(9.999)
     assert len(tls_peers.transports) == 1
     await tls_timeline.advance(0.0011)
+    assert await tls_timeline.waiting.get() == 10
+    await tls_timeline.advance(10)
     await life.wait_connected()  # Real certificate context executor also finishes.
     await hass.async_block_till_done()
     await pump()
@@ -385,7 +398,7 @@ async def test_real_tls_wait_closed_proof_precedes_timeout_deadline_and_new_read
 
 
 @pytest.mark.parametrize("fault", ["wait_error", "cancel", "timeout"])
-async def test_real_tls_failed_cleanup_never_retries_despite_proven_timeout(
+async def test_real_tls_failed_cleanup_after_silence_then_eof_never_retries(
     hass, entry, tls_peers, tls_timeline, fault, caplog
 ):
     first = tls_peers.wire([[RESPONSE], []])
@@ -405,11 +418,17 @@ async def test_real_tls_failed_cleanup_never_retries_despite_proven_timeout(
     refresh = asyncio.create_task(coordinator.async_refresh())
     await pump()
     await tls_timeline.advance(30)
+    assert life.acquisition_uncertain and not first.writer.close.called
+    first.queue.put_nowait(b"")
+    await pump()
     if fault == "timeout":
         await tls_timeline.advance(5.001)
     await asyncio.gather(refresh, return_exceptions=True)
     await pump()
-    assert old._rx_error.code == "timeout" and life._failure.code == "cleanup_failed"
+    assert (
+        old._rx_error.code == "transport_unavailable"
+        and life._failure.code == "cleanup_failed"
+    )
     assert coordinator.client.session_observation.cleanup_failed
     assert not old.cleanup_succeeded and life._task.done()
     assert (

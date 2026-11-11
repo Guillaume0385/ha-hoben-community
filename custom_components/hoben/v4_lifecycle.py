@@ -523,6 +523,20 @@ class V4Lifecycle:
             and self._session.data_updated_recovering
         )
 
+    @property
+    def acquisition_uncertain(self) -> bool:
+        return self._session is not None and self._session.acquisition_uncertain
+
+    async def wait_acquisition_ready(self) -> None:
+        """Setup can await a genuinely new epoch without closing the old TLS."""
+        while self.acquisition_uncertain:
+            session = self._session
+            try:
+                await session.wait_lost()
+            except HobenError:
+                pass  # This supervisor alone decides cleanup/retry eligibility.
+            await self.wait_connected()
+
     async def wait_connected(self) -> None:
         """Wait for recovery, or raise its terminal result without cancelling it."""
         if self._stopping:
@@ -634,6 +648,7 @@ class V4Lifecycle:
             kwargs["recover_data_updated"] = True
             kwargs["classify_frame_boundary"] = True
             kwargs["discard_unsupported_deliveries"] = True
+            kwargs["preserve_read_timeouts"] = True
         if self._opening_options is not None:
             kwargs["opening_options"] = self._opening_options
         if cap is not None:

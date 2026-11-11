@@ -88,8 +88,10 @@ async def test_first_timeout_is_not_replaced_by_cleanup_or_later_poll(
     d = e["diagnostic"]
     assert d["first"][0:2] == ["a", 1]
     assert d["first"][3:5] == ["timeout", "request_correlation"]
-    if ha_policy and not failed_close:
-        assert d["terminal"] is None  # Backoff followed by deliberate observer stop.
+    if ha_policy:
+        assert (
+            d["terminal"] is None
+        )  # D2 leaves TLS alive; any later close failure belongs to cleanup.
     else:
         assert d["terminal"][3] == (
             "cleanup_failed"
