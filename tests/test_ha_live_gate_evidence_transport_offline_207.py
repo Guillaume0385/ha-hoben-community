@@ -28,7 +28,8 @@ def test_node_mock_transport_adversaries():
 )
 def test_missing_injected_transport_refuses_without_leaking(value):
     script = """
-const {collect}=require('./.github/scripts/ha-live-gate-evidence-transport-offline.cjs');
+const {collect}=require('./.github/scripts/' +
+  'ha-live-gate-evidence-transport-offline.cjs');
 const value=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
 collect(value).then(()=>{process.exitCode=1},e=>process.stdout.write(e.message));
 """
