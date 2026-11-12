@@ -41,8 +41,7 @@ CLAIM_IF = (
     "needs.preflight.outputs.admitted == 'true' }}"
 )
 COLLECT_IF = (
-    "${{ needs.claim.result == 'success' && "
-    "needs.claim.outputs.claim_ref != '' }}"
+    "${{ needs.claim.result == 'success' && needs.claim.outputs.claim_ref != '' }}"
 )
 WORKER_IF = (
     "${{ success() && steps.recheck.outcome == 'success' && "
@@ -145,8 +144,14 @@ def _source_text(source: dict[str, Any], commit_sha: str) -> str:
     return raw.decode("utf-8", errors="strict")
 
 
-def _script(step: dict[str, Any], sid: str, *, condition: str | None = None,
-            secret: bool = False, claim_ref: bool = False) -> None:
+def _script(
+    step: dict[str, Any],
+    sid: str,
+    *,
+    condition: str | None = None,
+    secret: bool = False,
+    claim_ref: bool = False,
+) -> None:
     expected = {"id", "run", "shell"}
     if condition is not None:
         expected.add("if")
@@ -190,8 +195,10 @@ def _job(job: dict[str, Any], name: str) -> None:
     _keys(job, base)
     _require(job["runs-on"] == "ubuntu-latest")
     _require(type(job["timeout-minutes"]) is int and 1 <= job["timeout-minutes"] <= 40)
-    permissions = {"contents": "write"} if name == "claim" else (
-        {"contents": "read"} if name in ("collect", "result") else {}
+    permissions = (
+        {"contents": "write"}
+        if name == "claim"
+        else ({"contents": "read"} if name in ("collect", "result") else {})
     )
     _require(job["permissions"] == permissions)
     expected = {
@@ -216,9 +223,12 @@ def _job(job: dict[str, Any], name: str) -> None:
         _require(job["environment"] == "hoben-live")
     steps = job["steps"]
     _require(type(steps) is list)
-    ids = {"preflight": ["checkout", "preflight"], "claim": ["checkout", "claim"],
-           "collect": ["checkout", "recheck", "worker", "cleanup"],
-           "result": ["checkout", "publish"]}[name]
+    ids = {
+        "preflight": ["checkout", "preflight"],
+        "claim": ["checkout", "claim"],
+        "collect": ["checkout", "recheck", "worker", "cleanup"],
+        "result": ["checkout", "publish"],
+    }[name]
     _require([s.get("id") if type(s) is dict else None for s in steps] == ids)
     _checkout(steps[0])
     if name == "preflight":
@@ -241,8 +251,15 @@ def _structure(tree: dict[str, Any]) -> None:
     _keys(tree["on"]["workflow_dispatch"]["inputs"], {"scenario"})
     selection = tree["on"]["workflow_dispatch"]["inputs"]["scenario"]
     _keys(selection, {"type", "required", "default", "options"})
-    _require(selection == {"type": "choice", "required": True,
-                           "default": "hoben-live", "options": ["hoben-live"]})
+    _require(
+        selection
+        == {
+            "type": "choice",
+            "required": True,
+            "default": "hoben-live",
+            "options": ["hoben-live"],
+        }
+    )
     _require(tree["permissions"] == {})
     _keys(tree["concurrency"], {"group", "cancel-in-progress", "queue"})
     _require(
