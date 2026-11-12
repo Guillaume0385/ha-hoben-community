@@ -24,7 +24,7 @@ def _node(script: str, value: object) -> subprocess.CompletedProcess[str]:
 
 def test_simulated_atomic_race_and_adversarial_matrix():
     result = subprocess.run(
-        ["node", "--test", "tests/js/ha-live-claim-port-offline.test.cjs"],
+        ["node", "--test", "--test-reporter=tap", "tests/js/ha-live-claim-port-offline.test.cjs"],
         cwd=ROOT,
         capture_output=True,
         text=True,
