@@ -95,12 +95,15 @@ function snapshot(raw,now){
   }
   keys(e,['id','name','protected_branches','custom_branch_policies','branches','reviewers','prevent_self_review','can_admins_bypass','wait_minutes']);
   need(positive(e.id)&&e.name==='hoben-live'&&e.protected_branches===false&&e.custom_branch_policies===true&&
-    e.can_admins_bypass===false&&typeof e.prevent_self_review==='boolean'&&
+    e.can_admins_bypass===false&&e.prevent_self_review===true&&
     Number.isSafeInteger(e.wait_minutes)&&e.wait_minutes>=0&&e.wait_minutes<=43200&&
-    Array.isArray(e.branches)&&e.branches.length===1&&Array.isArray(e.reviewers)&&e.reviewers.length<=6);
+    Array.isArray(e.branches)&&e.branches.length===1&&Array.isArray(e.reviewers)&&
+    e.reviewers.length>0&&e.reviewers.length<=6);
   keys(e.branches[0],['id','name','type']);
   need(positive(e.branches[0].id)&&e.branches[0].name==='experimental'&&e.branches[0].type==='branch');
-  e.reviewers.forEach(user);need(new Set(e.reviewers.map(u=>u.id)).size===e.reviewers.length);
+  e.reviewers.forEach(user);
+  need(new Set(e.reviewers.map(u=>u.id)).size===e.reviewers.length&&
+    e.reviewers.some(u=>u.id!==c.actor.id)); // A protected gate requires an eligible independent reviewer.
   keys(w,['path','commit_sha','trigger','environment','group','cancel_in_progress','order']);
   need(w.path===FILE&&w.commit_sha===c.sha&&w.trigger==='workflow_dispatch'&&w.environment==='hoben-live'&&
     w.group===GROUP&&w.cancel_in_progress===false&&same(w.order,ORDER));
@@ -114,14 +117,14 @@ function approved(raw,before,after){
   need(a.environment_id===after.environment.id&&a.run_id===after.c.run_id&&a.attempt===1&&
     a.sha===after.c.sha&&a.job==='collect'&&positive(a.deployment_id)&&instant(a.entered_at)&&
     a.entered_at>=before.snapshot.observed_at+after.environment.wait_minutes*60000&&a.entered_at<=after.snapshot.observed_at&&Array.isArray(a.approvals));
-  if(after.environment.reviewers.length===0){need(a.approvals.length===0);return;}
+  // No policy may substitute missing human approval with a successful simulation.
   need(a.approvals.length===1);const v=a.approvals[0];
   keys(v,['state','reviewer','environment_id','deployment_id','run_id','attempt','sha','at']);user(v.reviewer);
   need(v.state==='approved'&&v.environment_id===a.environment_id&&v.deployment_id===a.deployment_id&&
     v.run_id===a.run_id&&v.attempt===1&&v.sha===a.sha&&instant(v.at)&&
     v.at>=before.snapshot.observed_at&&v.at<=a.entered_at&&
     after.environment.reviewers.some(u=>same(u,v.reviewer))&&
-    (!after.environment.prevent_self_review||v.reviewer.id!==after.c.actor.id));
+    v.reviewer.id!==after.c.actor.id);
 }
 class OfflineClaims {
   #claims=new Map(); #tickets=new WeakMap(); #last=0;
