@@ -1,5 +1,21 @@
 # Changelog
 
+## En cours — #207-D4-A, contrat d'admission HA hors ligne
+
+- Correction de revue D4-A : reviewers indépendants obligatoires,
+  `prevent_self_review=true`, approbation positive liée à la tentative et
+  au deployment ; refus sans reviewer et de l'auto-approbation. Tests de dérive
+  de politique préflight/recheck et consommation anti-rejeu du ticket.
+
+- Contrat séparé et simulateur fail-closed pour les preuves GitHub, HEAD/PR/revue,
+  quatre CI, politique hoben-live, approbation liée à la tentative, recheck frais,
+  anti-rejeu en mémoire et mutex partagé synthétique. Tests adversariaux Node et
+  Python ; refus fermés sans erreur API ou entrée privée publiée.
+- Aucun raccordement aux workflows, gates actifs, secrets ou HA : même un cas
+  accepté reste NOT RUN, sans permis live. Réservation durable et protections
+  réelles à attester dans des tâches ultérieures ; #192 toujours non résolu.
+  [Contrat et limites](docs/ha-live-gate-contract-207.md).
+
 ## En cours — #207-D3, diagnostics HA scalaires
 
 - Projection fermée des compteurs de la tentative TLS HA courante/dernière :
