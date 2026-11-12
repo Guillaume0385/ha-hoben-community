@@ -118,7 +118,7 @@ for(const [path,value] of [
  ['data.environment_id',8],['data.run_id',12],['data.attempt',2],['data.sha',H],['data.job','admission'],
  ['data.entered_at',999],['data.entered_at',2001],['data.deployment_id',0],
  ['data.approvals',[]],['data.approvals.0.reviewer.id',18246624],
- ['data.approvals.0.state','rejected'],['data.approvals.0.reviewer.id',99],
+ ['data.approvals.0.state','rejected'],['data.approvals.0.reviewer.id',98],
  ['data.approvals.0.environment_id',8],['data.approvals.0.deployment_id',34],
  ['data.approvals.0.run_id',12],['data.approvals.0.attempt',2],['data.approvals.0.sha',H],
  ['data.approvals.0.at',999],['data.approvals.0.at',1501],['status',403]
@@ -264,7 +264,7 @@ test('ambiguous PR, checks, branches, policy rules and numeric types refuse',()=
     s=>{s.proofs.ci.data.jobs[0].conclusion='skipped';},
     s=>{s.context.attempt='1';},s=>{s.context.run_id=Number.MAX_SAFE_INTEGER+1;},
     s=>{s.observed_at=NaN;},s=>{s.observed_at=Infinity;},s=>{s.observed_at=1000.1;},
-    s=>{s.proofs.environment.data.reviewers.push(clone(owner));},
+    s=>{s.proofs.environment.data.reviewers.push(clone(reviewer));},
   ]){const f=fixture();mutate(f.before);denied(()=>new OfflineClaims().reserve(f.before,1000));}
 });
 test('all post-approval endpoints are required and fresh, including mutex',()=>{
