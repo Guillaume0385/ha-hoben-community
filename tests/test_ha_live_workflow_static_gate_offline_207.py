@@ -43,10 +43,13 @@ def script(name, *, condition=None, env=None):
 def job(
     name, steps, *, needs=None, condition, permissions, outputs=None, environment=None
 ):
-    result = {"runs-on": "ubuntu-latest", "timeout-minutes": 5,
-              "permissions": permissions,
-              "steps": [copy.deepcopy(CHECKOUT_STEP), *steps],
-              "if": condition}
+    result = {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "permissions": permissions,
+        "steps": [copy.deepcopy(CHECKOUT_STEP), *steps],
+        "if": condition,
+    }
     if needs is not None:
         result["needs"] = needs
     if outputs is not None:
@@ -59,62 +62,115 @@ def job(
 def candidate():
     return {
         "name": "Vérification réelle Home Assistant",
-        "on": {"workflow_dispatch": {"inputs": {"scenario": {
-            "type": "choice", "required": True, "default": "hoben-live",
-            "options": ["hoben-live"],
-        }}}},
+        "on": {
+            "workflow_dispatch": {
+                "inputs": {
+                    "scenario": {
+                        "type": "choice",
+                        "required": True,
+                        "default": "hoben-live",
+                        "options": ["hoben-live"],
+                    }
+                }
+            }
+        },
         "permissions": {},
-        "concurrency": {"group": "hoben-read-only-observation",
-                        "cancel-in-progress": False, "queue": "max"},
+        "concurrency": {
+            "group": "hoben-read-only-observation",
+            "cancel-in-progress": False,
+            "queue": "max",
+        },
         "jobs": {
-            "preflight": job("preflight", [script("preflight")], condition=ENTRY,
-                             permissions={}, outputs={
-                                 "admitted": "${{ steps.preflight.outputs.admitted }}"
-                             }),
-            "claim": job("claim", [script("claim")], needs="preflight",
-                         condition=CLAIM_IF, permissions={"contents": "write"},
-                         outputs={"claim_ref": "${{ steps.claim.outputs.claim_ref }}"}),
-            "collect": job("collect", [
-                script(
-                    "recheck", env={"CLAIM_REF": "${{ needs.claim.outputs.claim_ref }}"}
-                ),
-                script("worker", condition=WORKER_IF,
-                       env={"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}),
-                script("cleanup", condition=ALWAYS),
-            ], needs="claim", condition=COLLECT_IF,
-                           permissions={"contents": "read"}, environment="hoben-live"),
-            "result": job("result", [script("publish")], needs="collect",
-                          condition=ALWAYS, permissions={"contents": "read"}),
+            "preflight": job(
+                "preflight",
+                [script("preflight")],
+                condition=ENTRY,
+                permissions={},
+                outputs={"admitted": "${{ steps.preflight.outputs.admitted }}"},
+            ),
+            "claim": job(
+                "claim",
+                [script("claim")],
+                needs="preflight",
+                condition=CLAIM_IF,
+                permissions={"contents": "write"},
+                outputs={"claim_ref": "${{ steps.claim.outputs.claim_ref }}"},
+            ),
+            "collect": job(
+                "collect",
+                [
+                    script(
+                        "recheck",
+                        env={"CLAIM_REF": "${{ needs.claim.outputs.claim_ref }}"},
+                    ),
+                    script(
+                        "worker",
+                        condition=WORKER_IF,
+                        env={"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"},
+                    ),
+                    script("cleanup", condition=ALWAYS),
+                ],
+                needs="claim",
+                condition=COLLECT_IF,
+                permissions={"contents": "read"},
+                environment="hoben-live",
+            ),
+            "result": job(
+                "result",
+                [script("publish")],
+                needs="collect",
+                condition=ALWAYS,
+                permissions={"contents": "read"},
+            ),
         },
     }
 
 
 def mock_source(tree=None):
-    payload = yaml.safe_dump(tree if tree is not None else candidate(),
-                             sort_keys=False, allow_unicode=True).encode("utf8")
+    payload = yaml.safe_dump(
+        tree if tree is not None else candidate(), sort_keys=False, allow_unicode=True
+    ).encode("utf8")
     blob = b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload
-    return {"request": f"{ROOT}/contents/{WORKFLOW}?ref={M}", "status": 200,
-            "items": {"path": WORKFLOW, "sha": hashlib.sha1(blob).hexdigest(),
-                      "encoding": "base64",
-                      "content": base64.b64encode(payload).decode()},
-            "next": None}
+    return {
+        "request": f"{ROOT}/contents/{WORKFLOW}?ref={M}",
+        "status": 200,
+        "items": {
+            "path": WORKFLOW,
+            "sha": hashlib.sha1(blob).hexdigest(),
+            "encoding": "base64",
+            "content": base64.b64encode(payload).decode(),
+        },
+        "next": None,
+    }
 
 
 def refused(value, **kwargs):
     v = audit_workflow(value, **kwargs)
-    assert asdict(v) == {"execution": "offline", "admission": "NOT RUN",
-                         "secrets_allowed": False, "live_ready": False,
-                         "complete": False, "structure": "REFUSED"}
+    assert asdict(v) == {
+        "execution": "offline",
+        "admission": "NOT RUN",
+        "secrets_allowed": False,
+        "live_ready": False,
+        "complete": False,
+        "structure": "REFUSED",
+    }
 
 
 def test_positive_synthetic_is_only_structural_and_never_live():
-    for value, args in [(candidate(), {}),
-                        (yaml.safe_dump(candidate(), allow_unicode=True), {}),
-                        (mock_source(), {"expected_commit_sha": M})]:
+    for value, args in [
+        (candidate(), {}),
+        (yaml.safe_dump(candidate(), allow_unicode=True), {}),
+        (mock_source(), {"expected_commit_sha": M}),
+    ]:
         v = audit_workflow(value, **args)
         assert v.structure == "CANDIDATE_ONLY"
-        assert (v.execution, v.admission, v.complete, v.live_ready,
-                v.secrets_allowed) == ("offline", "NOT RUN", False, False, False)
+        assert (
+            v.execution,
+            v.admission,
+            v.complete,
+            v.live_ready,
+            v.secrets_allowed,
+        ) == ("offline", "NOT RUN", False, False, False)
 
 
 def test_actual_ha_workflow_is_not_d4_admissible():
@@ -200,13 +256,21 @@ def test_secrets_must_not_be_in_preflight_claim_job_or_cleanup():
         refused(bad)
     bad = candidate()
     bad["jobs"]["collect"]["steps"][3]["env"] = {
-        "LEAK": "${{ secrets.HOBEN_USER_GUID }}"}
+        "LEAK": "${{ secrets.HOBEN_USER_GUID }}"
+    }
     refused(bad)
 
 
-@pytest.mark.parametrize("suffix", [
-    "&page=2", "&ref=main", "#fragment", "?", "&redirect=https://example.org",
-])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "&page=2",
+        "&ref=main",
+        "#fragment",
+        "?",
+        "&redirect=https://example.org",
+    ],
+)
 def test_source_request_must_be_exactly_pinned(suffix):
     src = mock_source()
     src["request"] += suffix
@@ -246,11 +310,20 @@ def test_source_sha_content_encoding_status_size_and_unknown_fields():
     refused(mock_source(), expected_commit_sha="main")
 
 
-@pytest.mark.parametrize("text", [
-    "on: 1\non: 2\n", "a: &alias 1\nb: *alias\n", "a: !!python/object:os.system 1",
-    "a: !unknown 1", "a: [unfinished", "a: 1\n---\na: 2",
-    "a: {<<: value}", "a: [yes, off]", "x: " + ("X" * 50000),
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on: 1\non: 2\n",
+        "a: &alias 1\nb: *alias\n",
+        "a: !!python/object:os.system 1",
+        "a: !unknown 1",
+        "a: [unfinished",
+        "a: 1\n---\na: 2",
+        "a: {<<: value}",
+        "a: [yes, off]",
+        "x: " + ("X" * 50000),
+    ],
+)
 def test_yamls_with_duplicate_anchor_tag_malformed_or_oversized_refuse(text):
     refused(text)
 
@@ -268,7 +341,11 @@ def test_non_json_ast_and_cycles_refuse_without_exceptions_or_echo():
 def test_node_adversarial_tests_are_part_of_python_suite():
     p = subprocess.run(
         ["node", "--test", "tests/js/ha-live-workflow-static-gate-offline.test.cjs"],
-        cwd=ROOT_DIR, capture_output=True, text=True, timeout=20, check=False,
+        cwd=ROOT_DIR,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
     assert p.returncode == 0, p.stdout + p.stderr
     assert "VERY_PRIVATE_TOKEN" not in p.stdout + p.stderr
