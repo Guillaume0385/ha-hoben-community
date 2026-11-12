@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #207-D4-C2, port anti-rejeu atomique simulé et hors ligne
+
+- Ajout d'un port de création conditionnelle atomique injecté et d'un stockage
+  partagé **simulé** entre instances indépendantes. Une seule réservation par
+  SHA et version de contrat gagne ; collision, replay inter-runs, timeout,
+  annulation, crash ou réponse ambiguë entraînent un refus expurgé, sans retry,
+  suppression, release ou TTL.
+- Tests adversariaux Node/Python et documentation des limites : un ACK/readback
+  de mock ne vaut aucune preuve GitHub durable ni permission Live. Aucun workflow,
+  gate, client HA ou source de secret changé ; `admission:NOT RUN`,
+  `complete:false`, `secrets_allowed:false`, `live_ready:false` conservés.
+  Live HA et HA installé non exécutés, #192 cleanup en attente.
+  [Contrat et limites](docs/ha-live-claim-port-offline-207.md).
+
 ## En cours — #207-D4-C1, audit statique HA Live hors ligne
 
 - Ajout d'un vérificateur pur et fail-closed de structure YAML/AST et de la
