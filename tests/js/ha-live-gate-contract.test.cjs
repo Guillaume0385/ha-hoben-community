@@ -11,6 +11,7 @@ test('offline contract exists without a live admission entry point',()=>{
 const {OfflineClaims}=require(file);
 const clone=v=>structuredClone(v), M='a'.repeat(40), H='b'.repeat(40), T='c'.repeat(40);
 const owner={id:18246624,login:'Guillaume0385',type:'User'};
+const reviewer={id:99,login:'offline-reviewer',type:'User'};
 const repo={id:1401398724,full_name:'Guillaume0385/ha-hoben-community'};
 const wrap=data=>({status:200,complete:true,data});
 function fixture(){
@@ -29,7 +30,7 @@ function fixture(){
       conclusion:'success',path:'.github/workflows/validate.yml',repository:repo,head_repository:repo,updated_at:600,
       jobs:['tests','ha-tests','hacs','hassfest'].map(name=>({name,run_id:22,head_sha:H,status:'completed',conclusion:'success'}))}),
     environment:wrap({id:9,name:'hoben-live',protected_branches:false,custom_branch_policies:true,
-      branches:[{id:6,name:'experimental',type:'branch'}],reviewers:[owner],prevent_self_review:false,
+      branches:[{id:6,name:'experimental',type:'branch'}],reviewers:[reviewer],prevent_self_review:true,
       can_admins_bypass:false,wait_minutes:0}),
     workflow:wrap({path:'.github/workflows/hoben-ha-manual.yml',commit_sha:M,trigger:'workflow_dispatch',
       environment:'hoben-live',group:'hoben-read-only-observation',cancel_in_progress:false,
@@ -37,7 +38,7 @@ function fixture(){
     concurrency:wrap({group:'hoben-read-only-observation',runs:[]})}};
   const after=clone(before);after.observed_at=2000;
   const approval=wrap({environment_id:9,run_id:11,attempt:1,sha:M,job:'collect',deployment_id:33,entered_at:1500,
-    approvals:[{state:'approved',reviewer:owner,environment_id:9,deployment_id:33,run_id:11,attempt:1,sha:M,at:1200}]});
+    approvals:[{state:'approved',reviewer,environment_id:9,deployment_id:33,run_id:11,attempt:1,sha:M,at:1200}]});
   return clone({before,after,approval});
 }
 function complete(f=fixture(),store=new OfflineClaims()){
@@ -88,7 +89,10 @@ const negatives=[
  ['proofs.environment.data.name','hoben-experimental'],['proofs.environment.data.can_admins_bypass',true],
  ['proofs.environment.data.protected_branches',true],['proofs.environment.data.custom_branch_policies',false],
  ['proofs.environment.data.branches.0.name','main'],['proofs.environment.data.branches.0.type','tag'],
- ['proofs.environment.data.wait_minutes',-1],['proofs.environment.data.reviewers.0.type','Team'],
+ ['proofs.environment.data.wait_minutes',-1],['proofs.environment.data.reviewers',[]],
+ ['proofs.environment.data.prevent_self_review',false],
+ ['proofs.environment.data.reviewers.0.id',18246624],
+ ['proofs.environment.data.reviewers.0.type','Team'],
  ['proofs.workflow.data.commit_sha',H],['proofs.workflow.data.trigger','push'],
  ['proofs.workflow.data.environment','hoben-experimental'],['proofs.workflow.data.cancel_in_progress',true],
  ['proofs.workflow.data.group','unshared-mutex'],['proofs.workflow.data.order',['preflight','secrets','recheck']],
@@ -112,7 +116,8 @@ for(const name of ['tests','ha-tests','hacs','hassfest'])test('mandatory exact c
 });
 for(const [path,value] of [
  ['data.environment_id',8],['data.run_id',12],['data.attempt',2],['data.sha',H],['data.job','admission'],
- ['data.entered_at',999],['data.entered_at',2001],['data.approvals',[]],
+ ['data.entered_at',999],['data.entered_at',2001],['data.deployment_id',0],
+ ['data.approvals',[]],['data.approvals.0.reviewer.id',18246624],
  ['data.approvals.0.state','rejected'],['data.approvals.0.reviewer.id',99],
  ['data.approvals.0.environment_id',8],['data.approvals.0.deployment_id',34],
  ['data.approvals.0.run_id',12],['data.approvals.0.attempt',2],['data.approvals.0.sha',H],
@@ -121,12 +126,26 @@ for(const [path,value] of [
 test('environment status alone never proves approval; duplicate approval is ambiguous',()=>{
   let f=fixture();f.approval={status:200,complete:true,data:{status:'approved'}};denied(()=>complete(f));
   f=fixture();f.approval.data.approvals.push(clone(f.approval.data.approvals[0]));denied(()=>complete(f));
-  f=fixture();f.before.proofs.environment.data.prevent_self_review=true;
-  f.after.proofs.environment.data.prevent_self_review=true;denied(()=>complete(f));
+  f=fixture();for(const s of [f.before,f.after])s.proofs.environment.data.reviewers=[owner];
+  denied(()=>complete(f));
 });
-test('actual policy without required reviewers invents no approval',()=>{
+test('empty reviewers and absent positive approval refuse, never ACCEPTED',()=>{
   const f=fixture();for(const s of [f.before,f.after])s.proofs.environment.data.reviewers=[];
-  f.approval.data.approvals=[];assert.equal(complete(f).admission,'NOT RUN');
+  f.approval.data.approvals=[];denied(()=>complete(f));
+});
+test('configured owner cannot approve own dispatch even alongside eligible independent reviewer',()=>{
+  const f=fixture();for(const s of [f.before,f.after])s.proofs.environment.data.reviewers=[owner,reviewer];
+  f.approval.data.approvals[0].reviewer=owner;denied(()=>complete(f));
+});
+test('missing independent reviewer and non-protective self review policy refuse before claim',()=>{
+  for(const change of [
+    e=>{e.reviewers=[owner];},
+    e=>{e.reviewers=[];},
+    e=>{e.prevent_self_review=false;},
+  ]){
+    const f=fixture();change(f.before.proofs.environment.data);
+    denied(()=>new OfflineClaims().reserve(f.before,1000));
+  }
 });
 test('wait timer is enforced and preflight may wait without rearming recheck freshness',()=>{
   const f=fixture();for(const s of [f.before,f.after])s.proofs.environment.data.wait_minutes=1;
@@ -137,6 +156,47 @@ test('wait timer is enforced and preflight may wait without rearming recheck fre
 test('recheck catches branch/policy/CI/workflow drift after approval',()=>{
   for(const path of ['proofs.branch.data.sha','proofs.ci.data.head_sha','proofs.environment.data.id','proofs.workflow.data.commit_sha']){
     const f=fixture();put(f.after,path,path.endsWith('.id')?10:T);denied(()=>complete(f));
+  }
+});
+
+test('policy drift between preflight and recheck burns the ticket even on valid restoration',()=>{
+  const policyChanges=[
+    ['proofs.environment.data.reviewers',[]],
+    ['proofs.environment.data.reviewers',[owner]],
+    ['proofs.environment.data.reviewers',[owner,reviewer]],
+    ['proofs.environment.data.prevent_self_review',false],
+    ['proofs.environment.data.id',10],
+    ['proofs.environment.data.name','other-environment'],
+    ['proofs.environment.data.branches.0.id',7],
+    ['proofs.environment.data.wait_minutes',1],
+    ['proofs.environment.data.can_admins_bypass',true],
+    ['proofs.environment.data.reviewers.0.login','changed-reviewer'],
+    ['context.sha',H],
+    ['context.attempt',2],
+    ['proofs.run.data.id',12],
+    ['proofs.workflow.data.commit_sha',H],
+  ];
+  for(const [path,value] of policyChanges){
+    const f=fixture(),store=new OfflineClaims(),ticket=store.reserve(f.before,1000);
+    const changed=clone(f.after);put(changed,path,value);
+    denied(()=>store.recheck(ticket,changed,f.approval,2000));
+    denied(()=>store.recheck(ticket,f.after,f.approval,2000));
+    denied(()=>store.reserve(f.before,2000));
+  }
+});
+test('missing or changed deployment-specific approval burns claim before any replay',()=>{
+  for(const mutate of [
+    a=>{a.data.approvals=[];},
+    a=>{a.data.approvals[0].deployment_id=34;},
+    a=>{a.data.approvals[0].run_id=12;},
+    a=>{a.data.approvals[0].sha=H;},
+    a=>{a.data.approvals[0].attempt=2;},
+    a=>{a.data.approvals[0].reviewer=owner;},
+  ]){
+    const f=fixture(),store=new OfflineClaims(),ticket=store.reserve(f.before,1000);
+    const changed=clone(f.approval);mutate(changed);
+    denied(()=>store.recheck(ticket,f.after,changed,2000));
+    denied(()=>store.recheck(ticket,f.after,f.approval,2000));
   }
 });
 test('stale and future observations and clock rollback refuse',()=>{
@@ -186,9 +246,9 @@ test('copy protects reserved facts from mutation and property order is immateria
 });
 
 test('independent configured reviewer satisfies prevent-self-review',()=>{
-  const f=fixture(),reviewer={id:99,login:'offline-reviewer',type:'User'};
+  const f=fixture();
   for(const s of [f.before,f.after]){
-    s.proofs.environment.data.reviewers=[reviewer];
+    s.proofs.environment.data.reviewers=[owner,reviewer];
     s.proofs.environment.data.prevent_self_review=true;
   }
   f.approval.data.approvals[0].reviewer=reviewer;
