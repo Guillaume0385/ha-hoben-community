@@ -2,6 +2,11 @@
 
 ## En cours — #207-D4-A, contrat d'admission HA hors ligne
 
+- Correction de revue D4-A : reviewers indépendants obligatoires,
+  `prevent_self_review=true`, approbation positive liée à la tentative et
+  au deployment ; refus sans reviewer et de l'auto-approbation. Tests de dérive
+  de politique préflight/recheck et consommation anti-rejeu du ticket.
+
 - Contrat séparé et simulateur fail-closed pour les preuves GitHub, HEAD/PR/revue,
   quatre CI, politique hoben-live, approbation liée à la tentative, recheck frais,
   anti-rejeu en mémoire et mutex partagé synthétique. Tests adversariaux Node et
