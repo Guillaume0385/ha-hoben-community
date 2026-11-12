@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #207-D4-C1, audit statique HA Live hors ligne
+
+- Ajout d'un vérificateur pur et fail-closed de structure YAML/AST et de la
+  source Contents REST simulée D4-B1/B2, avec pin du commit, intégrité blob,
+  parser sûr et dépendances explicites preflight → claim → environnement
+  hoben-live → recheck → worker/secret → cleanup.
+- Le workflow HA actuel est **REFUSED** pour D4. Les mocks conformes ne sont
+  que des candidats structurels : `execution:offline`, `admission:NOT RUN`,
+  `complete:false`, `secrets_allowed:false`, `live_ready:false`. Aucun
+  workflow/gate existant modifié, aucun déclenchement, claim réel ni approbation.
+  Tests adversariaux Node/Python ; #192 et validations réelles non résolus.
+  [Contrat et limites](docs/ha-live-workflow-static-gate-offline-207.md).
+
 ## En cours — #207-D4-B2, transport de preuves simulé et borné
 
 - Ajout d'un collecteur **GET uniquement et hors ligne**, avec transport de test
