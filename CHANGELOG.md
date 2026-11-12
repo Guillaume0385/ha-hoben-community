@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #207-D4-B2, transport de preuves simulé et borné
+
+- Ajout d'un collecteur **GET uniquement et hors ligne**, avec transport de test
+  explicitement injecté, 13 routes fixes D4-B1, contrôle des headers/date/Link,
+  pagination bornée sans saut ni doublon, et refus expurgés des erreurs HTTP,
+  redirections, ambiguïtés, données volumineuses, timeout et annulation.
+- Les fixtures sont vérifiées par le normaliseur D4-B1 inchangé : les neuf
+  enveloppes restent `complete:false`, `execution:offline`,
+  `admission:NOT RUN`, `secrets_allowed:false` et `live_ready:false`.
+  Aucun client API réel, secret, approval, claim, workflow ni permission Live.
+  Tests Node/Python simulés ; #192 et validations réelles toujours non résolus.
+  [Portée et limites](docs/ha-live-gate-evidence-transport-offline-207.md).
+
 ## En cours — #207-D4-B1, adaptation de preuves GitHub hors ligne
 
 - Ajout d'un normaliseur pur de réponses REST GitHub **synthétiques** :
