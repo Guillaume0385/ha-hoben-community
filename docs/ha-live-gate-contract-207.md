@@ -41,9 +41,12 @@ Le modèle vérifie :
   supplémentaire, rerun ou workflow de CI substitué n'est accepté.
 - Politique `hoben-live` avec seule branche custom experimental, sans bypass
   administrateur ; reviewers User explicites, règle de self-review et wait timer.
-  Si aucun reviewer n'est configuré, aucune approbation humaine n'est inventée.
-  Sinon, la décision effective doit appartenir à un reviewer autorisé et être
-  liée au run, tentative 1, SHA, environnement et deployment du job collect.
+  L'admission refuse dès le préflight une liste vide de reviewers, une politique
+  `prevent_self_review=false` ou l'absence de reviewer User indépendant de
+  l'acteur. La décision effective d'un reviewer éligible distinct de l'acteur
+  est obligatoire, liée au run, tentative 1, SHA, environnement et deployment
+  du job collect. Une auto-approbation est refusée, même si d'autres reviewers
+  indépendants sont configurés.
   Un statut d'environnement ou deployment ne remplace jamais cette décision.
 - Projection statique du futur workflow : SHA exact, environnement hoben-live,
   mutex `hoben-read-only-observation`, `cancel-in-progress: false`, ordre
@@ -51,7 +54,9 @@ Le modèle vérifie :
   Aucune autre observation active n'est admise avant ou après approbation.
 - Recheck frais après entrée effective dans l'environnement, avant tout secret ;
   contexte et preuves statiques identiques au preflight. Tout changement de
-  branche, politique, review, CI ou workflow refuse.
+  reviewers, `prevent_self_review`, identifiant/règle d'environnement, branche,
+  SHA, tentative, deployment, review, CI ou workflow refuse et consomme le ticket,
+  y compris si les preuves originales sont ensuite restaurées.
 
 La réservation est un **compare-and-insert synchrone en mémoire**, par SHA de
 merge et version du contrat, sans appel GitHub ni création de claim réel.
