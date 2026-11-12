@@ -58,7 +58,10 @@ const fs=require('node:fs');
 const {{OfflineClaimPort,SharedMockClaimStore}}=require('./{MODULE}');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
 (async()=>{{
-  try {{await new OfflineClaimPort(new SharedMockClaimStore()).reserve(input);process.exitCode=1;}}
+  try {{
+    await new OfflineClaimPort(new SharedMockClaimStore()).reserve(input);
+    process.exitCode=1;
+  }}
   catch(e) {{process.stdout.write(e.message);}}
 }})();
 """
