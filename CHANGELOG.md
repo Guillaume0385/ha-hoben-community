@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #207-D4-B1, adaptation de preuves GitHub hors ligne
+
+- Ajout d'un normaliseur pur de réponses REST GitHub **synthétiques** :
+  identité dépôt/owner/acteurs, branche experimental, dispatch initial, PR
+  fusionnée et arbres, revue, quatre jobs CI, politique d'environnement et
+  approbations liées au déploiement. Pagination, erreurs API, incohérences et
+  champs non attestables provoquent un refus sûr, sans donnée privée publiée.
+- Les neuf preuves projetées restent toutes `complete: false` ; aucun parcours
+  de fixture ne crée d'autorisation Live. Le contrat D4-A conserve
+  `execution: offline`, `admission: NOT RUN`, `secrets_allowed: false`,
+  `live_ready: false`. Aucun workflow, gate ou client HA modifié.
+  [Contrat et limites](docs/ha-live-gate-evidence-offline-207.md).
+
 ## En cours — #207-D4-A, contrat d'admission HA hors ligne
 
 - Correction de revue D4-A : reviewers indépendants obligatoires,
