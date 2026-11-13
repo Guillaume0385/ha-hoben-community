@@ -65,8 +65,16 @@ def _snapshot(raw: Any) -> dict[str, int | bool] | None:
     }
 
 
-def _result(*, observation: str, elapsed: int, drop: int, recovery: int,
-            generation: int | None, final: dict | None, cleaned: bool) -> dict:
+def _result(
+    *,
+    observation: str,
+    elapsed: int,
+    drop: int,
+    recovery: int,
+    generation: int | None,
+    final: dict | None,
+    cleaned: bool,
+) -> dict:
     """Never include raw bytes, home values, credentials or exception strings."""
     return {
         "schema": 1,
