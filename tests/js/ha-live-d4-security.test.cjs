@@ -87,6 +87,35 @@ test('native HTTP adapter is GET-only fixed-origin, no redirect or echo',async()
     await assert.rejects(p.get('/repos/Guillaume0385/ha-hoben-community/branches/experimental'),fail);
   }
 });
+test('deleted mutable claim can be replayed: mock reservation never proves durable anti-replay',async()=>{
+  const {CONTRACT,OfflineClaimPort} =
+    require('../../.github/scripts/ha-live-claim-port-offline.cjs');
+  const records=new Map();
+  const mutableStore={
+    async createIfAbsent({key,metadata}){
+      if(records.has(key))return {created:false};
+      records.set(key,metadata);
+      return {created:true,key,metadata};
+    },
+    async lookup({key}){
+      if(!records.has(key))return {found:false};
+      return {found:true,key,metadata:records.get(key)};
+    },
+  };
+  const context={repository:{id:1401398724,full_name:'Guillaume0385/ha-hoben-community'},
+    ref:'refs/heads/experimental',sha:base.sha,contract:CONTRACT,run_id:123,attempt:1};
+  const first=await new OfflineClaimPort(mutableStore).reserve(context);
+  assert.equal(first.secrets_allowed,false);
+  // Simulate an attacker deleting the GitHub ref between independent runs.
+  records.clear();
+  const replay=await new OfflineClaimPort(mutableStore).reserve({...context,run_id:124});
+  assert.equal(replay.simulation,'RESERVED_ONLY');
+  assert.equal(replay.admission,'NOT RUN');
+  // Even both ACK+readback successes cannot bypass unresolved real claim policy.
+  await assert.rejects(preflight({rawContext:base,
+    port:port([branch,protection,environment,rulesets])}),fail);
+});
+
 test('no automatic retries, cancellation, or private error output',async()=>{
   let count=0;
   const token='synthetic-private-credential';
