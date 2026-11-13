@@ -14,6 +14,11 @@ MANAGER avant fusion. **Live HA : NOT RUN. Home Assistant installé : NOT RUN.**
   reviewer non indépendant ou SHA mouvant => refus fixe. **Même une fixture
   parfaite n'émet aucune autorisation Live** : aucune preuve de durabilité de
   réservation ou de décision MANAGER fraîche/immutable n'est acquise.
+- `.github/scripts/ha-live-d4-rest-read.cjs` : transport REST authentifiable
+  distinct du mock B2, avec 13 routes permises fixées au contexte, pages 1..8,
+  réponses JSON bornées et URLs d'origine exacte. Seul un transport HTTP
+  injecté est exercé dans les tests ; aucun appel GitHub réel, aucun droit
+  pour claim/secret et aucune transformation de fixture en preuve Live.
 - `scripts/ha_live_d4_preflight.cjs` : point d'entrée manuel seul, fail-closed,
   retourne NOT RUN (code non nul), ne lit aucun secret Hoben, ne réserve aucun
   tag et ne possède ni worker, ni appel réseau poêle.
