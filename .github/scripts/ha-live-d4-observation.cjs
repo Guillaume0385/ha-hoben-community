@@ -22,7 +22,8 @@ function classify(raw) {
     need(typeof raw.cleanup.completed === 'boolean' &&
       integer(raw.cleanup.at_ms,0,360000) &&
       integer(raw.cleanup.generation,1,2147483647));
-    let previous = -1, drop, read, held, failure = false;
+    let previous = -1, drop, read, held, lastFresh, repeated = 0;
+    let continuity = true, failure = false;
     for (const event of raw.events) {
       exact(event,['kind','at_ms','generation','correlated']);
       need(TYPES.has(event.kind) && integer(event.at_ms,0,360000) &&
@@ -33,10 +34,22 @@ function classify(raw) {
       previous = event.at_ms;
       if (event.kind === 'unknown_drop' && drop === undefined) drop = event;
       if (event.kind === 'fresh_v4_correlated' && drop !== undefined &&
-          event.generation === drop.generation && event.at_ms > drop.at_ms && read === undefined)
-        read = event;
-      if (event.kind === 'tls_open' && read !== undefined &&
-          event.generation === read.generation && event.at_ms - read.at_ms >= 300000)
+          event.generation === drop.generation && event.at_ms > drop.at_ms) {
+        if (read === undefined) {
+          read = event;
+          lastFresh = event;
+        } else {
+          if (event.at_ms - lastFresh.at_ms > 60000) continuity = false;
+          repeated++;
+          lastFresh = event;
+        }
+      }
+      // Merely observing TLS open 300s after ONE read cannot establish HA
+      // functionality: require repeated correlated reads without long gaps.
+      if (event.kind === 'tls_open' && read !== undefined && repeated > 0 &&
+          continuity && event.generation === read.generation &&
+          event.at_ms - read.at_ms >= 300000 && lastFresh &&
+          event.at_ms - lastFresh.at_ms <= 60000)
         held = event;
       if (['eof','timeout','local_close','transport_error'].includes(event.kind))
         failure = true;
