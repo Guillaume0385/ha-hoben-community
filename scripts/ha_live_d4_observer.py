@@ -167,9 +167,16 @@ async def observe(coordinator, *, clock=None, sleep=None):
             if not current["tls_connected"] or not current["v4_accepted"]:
                 await sleep(POLL)
                 continue
-            old = before if before and before["generation"] == current["generation"] else None
+            old = (
+                before
+                if before and before["generation"] == current["generation"]
+                else None
+            )
             if drop < 0 and (
-                (old and current["unsupported_deliveries"] > old["unsupported_deliveries"])
+                (
+                    old
+                    and current["unsupported_deliveries"] > old["unsupported_deliveries"]
+                )
                 or (old is None and current["unsupported_deliveries"] > 0)
             ):
                 generation, drop = current["generation"], now_ms
@@ -225,7 +232,9 @@ async def observe(coordinator, *, clock=None, sleep=None):
         except BaseException:
             failed = True
         final = _snapshot(getattr(client, "session_diagnostics", None))
-        cleaned = bool(final and final["cleanup_succeeded"] and not final["cleanup_failed"])
+        cleaned = bool(
+            final and final["cleanup_succeeded"] and not final["cleanup_failed"]
+        )
     elapsed = int((stamp() - start) * 1000)
     status = (
         "FAILED"
