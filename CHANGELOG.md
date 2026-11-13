@@ -1,5 +1,21 @@
 # Changelog
 
+## En cours — #207-D4-D, sécurité de la voie Live HA (préparation partielle)
+
+- Port REST GitHub à GET allowlisté, schémas et refus constants, tests adversariaux
+  sur politiques de branche, reviewers, environment, rulesets, SHA et HTTP 403/400.
+  Le préflight sans secret demeure NOT RUN faute de preuves authentifiées
+  complètes et de claim indélébile ; aucune écriture GitHub réelle.
+- L'ancien collecteur HA ne reçoit plus directement `hoben-live`. La sélection
+  `all`, qui contient historiquement cette voie, est temporairement refusée
+  également (limite à arbitrer par MANAGER). Les autres sélections sont
+  conservées et #186 n'est pas modifiée.
+- Classificateur d'observation HA strictement synthétique : candidats inconnus,
+  nouvelle corrélation V4 sur la même génération TLS, maintien 300 s, EOF,
+  timeout, cleanup et refus de champs privés. Les validations Live HA et HA
+  installée restent NOT RUN, aucun permis secret.
+  [Périmètre et limitations](docs/ha-live-d4d-secure-offline-207.md).
+
 ## En cours — #207-D4-C2, port anti-rejeu atomique simulé et hors ligne
 
 - Ajout d'un port de création conditionnelle atomique injecté et d'un stockage
