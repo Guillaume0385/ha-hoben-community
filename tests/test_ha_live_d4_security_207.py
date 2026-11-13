@@ -24,6 +24,19 @@ def test_offline_d4_security_node_matrix():
     assert "synthetic-private-credential" not in result.stdout + result.stderr
 
 
+def test_offline_d4_rest_read_node_matrix():
+    result = subprocess.run(
+        ["node", "--test", "tests/js/ha-live-d4-rest-read.test.cjs"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "synthetic-test-token" not in result.stdout + result.stderr
+
+
 def test_offline_300_second_verdict_node_matrix():
     result = subprocess.run(
         ["node", "--test", "tests/js/ha-live-d4-observation.test.cjs"],
