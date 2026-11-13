@@ -7,8 +7,9 @@ const event = (kind,at_ms,generation=1) => ({
 });
 const base=()=>({schema:1,scenario:'hoben-live',sha:'a'.repeat(40),run_id:1,attempt:1,
   events:[event('unknown_drop',0),event('fresh_v4_correlated',1000),
-    event('tls_open',301000)],
-  cleanup:{completed:true,at_ms:302000,generation:1}});
+    ...Array.from({length:10},(_,i)=>event('fresh_v4_correlated',31000+i*30000)),
+    event('tls_open',302000)],
+  cleanup:{completed:true,at_ms:303000,generation:1}});
 const good = x => {const r=classify(x);assert.equal(r.admission,'NOT RUN');
   assert.equal(r.execution,'offline');assert.equal(r.live_ready,false);
   assert.equal(r.secrets_allowed,false);assert.equal(r.boundary_proven,false);
@@ -17,21 +18,27 @@ test('300 seconds after genuinely correlated fresh read on same TLS generation',
   assert.equal(good(base()),'SUCCESS');
 });
 test('exactly 299999 ms or no unknown drop or no correlation is inconclusive',()=>{
-  const late=base();late.events[2].at_ms=300999;
-  late.cleanup.at_ms=301000;
+  const late=base();late.events[1].at_ms=3000;
   assert.equal(good(late),'INCONCLUSIVE');
   const noUnknown=base();noUnknown.events.shift();
   assert.equal(good(noUnknown),'INCONCLUSIVE');
   const noCorr=base();noCorr.events[1]=event('tls_open',1000);
   assert.equal(good(noCorr),'INCONCLUSIVE');
-  const newGeneration=base();newGeneration.events[1]=event('fresh_v4_correlated',1000,2);
-  newGeneration.events[2]=event('tls_open',301000,2);
+  const newGeneration=base();
+  newGeneration.events.slice(1).forEach(e=>{e.generation=2;});
   newGeneration.cleanup.generation=2;
   assert.equal(good(newGeneration),'INCONCLUSIVE');
+  const singleRead=base();
+  singleRead.events=[singleRead.events[0],singleRead.events[1],singleRead.events.at(-1)];
+  assert.equal(good(singleRead),'INCONCLUSIVE');
+  const silence=base();
+  silence.events=[silence.events[0],silence.events[1],
+    event('fresh_v4_correlated',200000),silence.events.at(-1)];
+  assert.equal(good(silence),'INCONCLUSIVE');
 });
 test('actual EOF, local close, timeout or cleanup failure never pass',()=>{
   for(const kind of ['eof','timeout','local_close','transport_error']){
-    const v=base();v.events.push(event(kind,301500));
+    const v=base();v.events.push(event(kind,302500));
     assert.equal(good(v),'FAILED');
   }
   const v=base();v.cleanup.completed=false;
