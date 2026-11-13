@@ -124,7 +124,8 @@ def test_unknown_drop_then_new_read_and_300_real_monotonic_seconds_simulated():
     assert report["correlated_at_ms"] > report["drop_at_ms"] >= 0
     assert report["elapsed_ms"] >= report["correlated_at_ms"] + 300_000
     assert report["info_candidates"] == 1
-    assert report["correlated_after_drop"] == 1
+    # Continued functional recovery requires fresh correlated reads during the tail.
+    assert report["correlated_after_drop"] >= 2
     assert report["cleanup_attested"] is True
 
 
