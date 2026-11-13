@@ -62,9 +62,10 @@ class Client:
 
 
 class Coordinator:
-    def __init__(self, client, actions=()):
+    def __init__(self, client, actions=(), repeat=False):
         self.client = client
         self.actions = list(actions)
+        self.repeat = repeat
         self.reads = 0
 
     async def async_refresh(self):
@@ -72,6 +73,8 @@ class Coordinator:
         if self.actions:
             action = self.actions.pop(0)
             action(self.client.session_diagnostics)
+        elif self.repeat and self.reads % 6 == 0:
+            correlation(self.client.session_diagnostics)
         return None
 
 
@@ -99,11 +102,11 @@ def change_generation(report):
     report["tls_generation"] = 2
 
 
-def run(*actions, fail_close=False):
+def run(*actions, fail_close=False, repeat=False):
     clock = Clock()
     client = Client()
     client.fail_close = fail_close
-    coordinator = Coordinator(client, actions)
+    coordinator = Coordinator(client, actions, repeat=repeat)
     report = asyncio.run(observe(coordinator, clock=clock, sleep=clock.sleep))
     assert client.closed == 1
     assert report["admission"] == "NOT RUN"
@@ -116,7 +119,7 @@ def run(*actions, fail_close=False):
 
 
 def test_unknown_drop_then_new_read_and_300_real_monotonic_seconds_simulated():
-    report = run(drop, correlation)
+    report = run(drop, correlation, repeat=True)
     assert report["observation"] == "SUCCESS"
     assert report["correlated_at_ms"] > report["drop_at_ms"] >= 0
     assert report["elapsed_ms"] >= report["correlated_at_ms"] + 300_000
@@ -126,7 +129,14 @@ def test_unknown_drop_then_new_read_and_300_real_monotonic_seconds_simulated():
 
 
 def test_no_candidate_no_response_same_interval_or_generation_change():
-    for actions in [(), (drop,), (both,), (drop, change_generation), (correlation,)]:
+    for actions in [
+        (),
+        (drop,),
+        (both,),
+        (drop, correlation),
+        (drop, change_generation),
+        (correlation,),
+    ]:
         report = run(*actions)
         assert report["observation"] == "INCONCLUSIVE"
         assert report["cleanup_attested"] is True
