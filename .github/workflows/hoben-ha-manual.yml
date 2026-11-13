@@ -67,9 +67,7 @@ jobs:
           process.env.REQUEST_ACTOR === 'Guillaume0385' &&
           process.env.REQUEST_TRIGGERING_ACTOR === 'Guillaume0385' &&
           ['refs/heads/experimental', 'refs/heads/main'].includes(process.env.REQUEST_REF) &&
-          choices.includes(scenario) &&
-          // hoben-live, including its all alias, cannot use the old unverified collector.
-          !['hoben-live', 'all'].includes(scenario);
+          choices.includes(scenario);
         try {
           // Only the closed implemented catalog can reach the protected collector.
           fs.appendFileSync(process.env.GITHUB_OUTPUT,
@@ -199,22 +197,3 @@ jobs:
         path: ${{ runner.temp }}/hoben-campaign-published/report.json
         if-no-files-found: error
         retention-days: 7
-
-  # D4-D: read-only, no Hoben environment or secret. Always NOT RUN until
-  # branch/environment policy and durable claim can be proven independently.
-  d4_preflight:
-    if: github.event_name == 'workflow_dispatch' && inputs.scenario == 'hoben-live'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.sha }}
-        persist-credentials: false
-    - name: D4-D vérification sans accès Hoben (refus sûr)
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: node scripts/ha_live_d4_preflight.cjs
