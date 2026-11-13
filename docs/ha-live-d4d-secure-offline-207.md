@@ -34,7 +34,10 @@ MANAGER avant fusion. **Live HA : NOT RUN. Home Assistant installé : NOT RUN.**
 - `.github/scripts/ha-live-d4-observation.cjs` : classification *synthétique*
   d'événements fermés et ordonnés, durée 300 s **à compter d'une réponse
   réellement corrélée**, même génération TLS, événement de livraison inconnue,
-  absence EOF/fermeture/timeout et cleanup. Erreurs et cleanup KO => FAILED ;
+  acquisitions V4 nouvelles répétées (intervalle sans réponse de 60 s maximum),
+  absence EOF/fermeture/timeout et cleanup. Un seul read suivi de 300 s de
+  silence ou d'un simple événement TLS ouvert demeure INCONCLUSIVE.
+  Erreurs et cleanup KO => FAILED ;
   candidat/réponse absents => INCONCLUSIVE. Le champ `simulation_only:true`
   interdit toute confusion avec une preuve opérationnelle.
 
