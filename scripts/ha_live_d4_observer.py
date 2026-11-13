@@ -46,7 +46,12 @@ def _snapshot(raw: Any) -> dict[str, int | bool] | None:
         return None
     generation = raw.get("tls_generation")
     if (
-        type(generation) is not int
+        raw.get("schema") != 1
+        or raw.get("scope") != "tls_attempt"
+        or raw.get("length_scope") != "tls_delivery"
+        or raw.get("info_framing") != "INCONCLUSIVE"
+        or raw.get("counters_capped") is not False
+        or type(generation) is not int
         or not 1 <= generation <= LIMIT_GENERATION
         or any(type(raw.get(k)) is not int or not 0 <= raw[k] <= CAP for k in COUNTERS)
         or any(type(raw.get(k)) is not bool for k in FLAGS)
