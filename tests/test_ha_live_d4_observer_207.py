@@ -163,7 +163,8 @@ def test_saturated_diagnostics_do_not_establish_fresh_correlation():
         report["unsupported_deliveries"] = 65535
 
     report = run(capped)
-    assert report["observation"] == "INCONCLUSIVE"
+    # Saturated counters invalidate the closed D3 proof, including cleanup.
+    assert report["observation"] == "FAILED"
 
 
 def test_an_invalid_observer_never_starts_network_or_session():
