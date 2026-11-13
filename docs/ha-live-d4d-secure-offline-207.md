@@ -58,6 +58,11 @@ modification persistante du workflow HA ne peut satisfaire les tests #186.
    indépendante propre au run/tentative/déploiement/SHA. Le connecteur actuel
    ne peut pas appeler cet endpoint.
 3. Démontrer une réservation GitHub atomique **durable et irréversible** :
+   un test adversarial D4-D avec deux ports indépendants et un store mutable
+   reproduit le rejeu lorsque la référence simulée est supprimée entre deux
+   runs : les deux réservations obtiennent ACK et readback, mais aucune n'est
+   un permis Live. Cette démonstration impose un refus si le serveur ne peut
+   pas garantir une trace durable impossible à réutiliser.
    création conditionnelle seule ne suffit pas ; les règles de protection
    des refs/tags, l'absence de capacité de suppression/réécriture et la
    disponibilité d'une preuve non falsifiable doivent être arbitrées.
