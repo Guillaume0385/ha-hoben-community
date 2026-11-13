@@ -21,6 +21,11 @@ class Clock:
 
 def diagnostics(generation=1):
     return {
+        "schema": 1,
+        "scope": "tls_attempt",
+        "length_scope": "tls_delivery",
+        "info_framing": "INCONCLUSIVE",
+        "counters_capped": False,
         "tls_generation": generation,
         "boundary_proven": False,
         "unsupported_deliveries": 0,
@@ -139,6 +144,15 @@ def test_secret_data_and_forged_session_diagnostics_never_escape():
     report = run(break_fields)
     assert report["observation"] == "INCONCLUSIVE"
     assert report["unknown_drops"] == 0
+
+
+def test_saturated_diagnostics_do_not_establish_fresh_correlation():
+    def capped(report):
+        report["counters_capped"] = True
+        report["unsupported_deliveries"] = 65535
+
+    report = run(capped)
+    assert report["observation"] == "INCONCLUSIVE"
 
 
 def test_an_invalid_observer_never_starts_network_or_session():
