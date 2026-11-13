@@ -119,7 +119,8 @@ async def observe(coordinator, *, clock=None, sleep=None):
         if (
             type(value) not in (int, float)
             or not math.isfinite(value)
-            or last_clock is not None and value < last_clock
+            or last_clock is not None
+            and value < last_clock
         ):
             raise ValueError("ha_live_d4_observer_refused")
         last_clock = value
