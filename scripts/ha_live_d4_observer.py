@@ -93,7 +93,6 @@ async def observe(coordinator, *, clock=None, sleep=None):
     uncertainty prevents success. A 900 s upper budget includes observation;
     coordinator/client cleanup gets a separate bounded 10 s finally budget.
     """
-    native = clock is None and sleep is None
     clock = time.monotonic if clock is None else clock
     sleep = asyncio.sleep if sleep is None else sleep
     client = getattr(coordinator, "client", None)
@@ -114,7 +113,6 @@ async def observe(coordinator, *, clock=None, sleep=None):
         return value
 
     start = stamp()
-    previous = _snapshot(getattr(client, "session_diagnostics", None))
     generation = None
     drop = recovery = -1
     failed = False
@@ -152,7 +150,6 @@ async def observe(coordinator, *, clock=None, sleep=None):
                 break
             if not current["tls_connected"] or not current["v4_accepted"]:
                 await sleep(POLL)
-                previous = current
                 continue
             old = before if before and before["generation"] == current["generation"] else None
             if drop < 0 and (
@@ -181,7 +178,6 @@ async def observe(coordinator, *, clock=None, sleep=None):
             ):
                 provisional_success = True
                 break
-            previous = current
             await sleep(POLL)
     except asyncio.CancelledError:
         failed = True
