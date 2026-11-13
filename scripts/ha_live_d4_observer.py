@@ -120,6 +120,9 @@ async def observe(coordinator, *, clock=None, sleep=None):
     start = stamp()
     generation = None
     drop = recovery = -1
+    last_fresh = -1
+    last_fresh_counter = 0
+    continued_reads = 0
     failed = False
     provisional_success = False
     final = None
@@ -175,8 +178,27 @@ async def observe(coordinator, *, clock=None, sleep=None):
                 and not current["acquisition_uncertain"]
             ):
                 recovery = now_ms
+                last_fresh = now_ms
+                last_fresh_counter = current["responses_after_drop"]
+            elif (
+                recovery >= 0
+                and old is not None
+                and current["generation"] == generation
+                and current["responses_after_drop"] > last_fresh_counter
+                and current["v4_responses_correlated"] > old["v4_responses_correlated"]
+                and not current["acquisition_uncertain"]
+            ):
+                continued_reads += 1
+                last_fresh = now_ms
+                last_fresh_counter = current["responses_after_drop"]
+            # One isolated fresh read followed by 300 seconds of silence is
+            # NOT a functional 300-second recovery. Require repeated verified
+            # acquisitions and never silently use stale HA snapshots.
+            if recovery >= 0 and now_ms - last_fresh > 60000:
+                break
             if (
                 recovery >= 0
+                and continued_reads >= 1
                 and now_ms - recovery >= DURATION * 1000
                 and current["generation"] == generation
                 and not current["acquisition_uncertain"]
