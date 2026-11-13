@@ -2,6 +2,8 @@
 
 ## En cours — #207-D4-D, sécurité de la voie Live HA (préparation partielle)
 
+- Transport GET authentifiable pour les 13 routes B2 et pagination bornée,
+  testé seulement sur un HTTP fake, sans certificat ou token réel ni admission.
 - Port REST GitHub à GET allowlisté, schémas et refus constants, tests adversariaux
   sur politiques de branche, reviewers, environment, rulesets, SHA et HTTP 403/400.
   Le préflight sans secret demeure NOT RUN faute de preuves authentifiées
