@@ -108,8 +108,7 @@ def test_protected_ha_and_experimental_info_workflows_still_exist():
     assert "environment: hoben-live" in ha
     assert "workflow_dispatch" in ha
     assert "info" in info.lower() or "collect-info" in info
-    # The old collector is never used for the D4 selection or the all alias.
-    assert "!['hoben-live', 'all'].includes(scenario)" in ha
-    assert "d4_preflight:" in ha
-    assert "node scripts/ha_live_d4_preflight.cjs" in ha
-    assert "GITHUB_TOKEN: ${{ github.token }}" in ha
+    # Protected #186 route hashes the HA workflow. Pending MANAGER authorization,
+    # the D4 CLI must remain INERT rather than modifying the old HA workflow.
+    assert "d4_preflight:" not in ha
+    assert "choices.includes(scenario);" in ha
