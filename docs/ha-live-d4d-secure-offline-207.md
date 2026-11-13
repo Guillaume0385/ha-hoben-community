@@ -22,21 +22,27 @@ MANAGER avant fusion. **Live HA : NOT RUN. Home Assistant installé : NOT RUN.**
 - `scripts/ha_live_d4_preflight.cjs` : point d'entrée manuel seul, fail-closed,
   retourne NOT RUN (code non nul), ne lit aucun secret Hoben, ne réserve aucun
   tag et ne possède ni worker, ni appel réseau poêle.
-- `.github/workflows/hoben-ha-manual.yml` : la sélection directe
-  `hoben-live` ne rejoint plus le collecteur historique. Un job
-  `d4_preflight` sans environnement Hoben et avec seulement `contents:read`
-  effectue un diagnostic REST authentifié. Même si le diagnostic se déroulait
-  normalement, la conclusion reste NOT RUN. L'alias `all` comprend
-  historiquement `hoben-live` : il est **temporairement refusé dans son
-  ensemble**, afin d'éviter un détour autour du nouveau gate. Cela nécessite
-  arbitrage MANAGER avant fusion ; les autres sélections individuelles ne sont
-  pas modifiées. Le workflow expérimental Info #186 reste inchangé.
+- Le workflow HA existant est **strictement inchangé** à ce stade.
+  L'empreinte SHA256 de ce fichier est épinglée dans
+  `.github/info-manual-route.json` du parcours #186 ; le changement initial
+  du YAML a provoqué des échecs officiels `manual_info_route_not_connected`.
+  Il a été retiré intégralement de la PR, sans toucher au manifeste, au
+  routage Info ou aux protections #186. Le CLI `d4_preflight` n'est raccordé
+  à aucun job et n'accorde jamais de permis. **Le scénario hoben-live du
+  workflow actuel ne doit PAS être exécuté, y compris par `all`** : aucune
+  nouvelle campagne n'est autorisée.
 - `.github/scripts/ha-live-d4-observation.cjs` : classification *synthétique*
   d'événements fermés et ordonnés, durée 300 s **à compter d'une réponse
   réellement corrélée**, même génération TLS, événement de livraison inconnue,
   absence EOF/fermeture/timeout et cleanup. Erreurs et cleanup KO => FAILED ;
   candidat/réponse absents => INCONCLUSIVE. Le champ `simulation_only:true`
   interdit toute confusion avec une preuve opérationnelle.
+
+**Arbitrage supplémentaire demandé :** autoriser explicitement, dans le
+périmètre D4-D, la révision vérifiée de l'empreinte du workflow HA dans le
+manifeste fermé #186 (sans altérer son gate, sa politique ou sa liste de
+fichiers) et la revue de non-régression. Sans cette autorisation, aucune
+modification persistante du workflow HA ne peut satisfaire les tests #186.
 
 ## Prérequis MANAGER non remplis
 
