@@ -152,7 +152,8 @@ def test_secret_data_and_forged_session_diagnostics_never_escape():
         report["unsupported_deliveries"] = "fake"
 
     report = run(break_fields)
-    assert report["observation"] == "INCONCLUSIVE"
+    # A corrupt D3 schema prevents cleanup attestation too: fail closed.
+    assert report["observation"] == "FAILED"
     assert report["unknown_drops"] == 0
 
 
