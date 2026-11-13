@@ -172,13 +172,8 @@ async def observe(coordinator, *, clock=None, sleep=None):
                 if before and before["generation"] == current["generation"]
                 else None
             )
-            if drop < 0 and (
-                (
-                    old
-                    and current["unsupported_deliveries"] > old["unsupported_deliveries"]
-                )
-                or (old is None and current["unsupported_deliveries"] > 0)
-            ):
+            previously_dropped = old["unsupported_deliveries"] if old else 0
+            if drop < 0 and current["unsupported_deliveries"] > previously_dropped:
                 generation, drop = current["generation"], now_ms
             # Never credit a drop and read delivered in the SAME observed
             # interval: order cannot be established from aggregate counters.
