@@ -59,19 +59,27 @@ la continuité RX/Ping/Pong, les réponses FFFF tardives ou fragmentées, le
 cleanup avant reconnexion, l'échec de cleanup, les pertes indépendantes,
 l'arrêt et la rétention HA sans fausse fraîcheur.
 
-Les sources runtime modifiées sont épinglées dans
-`.github/info-manual-route.json`. La consigne #212 interdit actuellement de
-modifier ce manifeste : aucune empreinte n'est donc réépinglée ici. Tant que
-cette restriction n'est pas explicitement arbitrée, les contrôles d'intégrité
-#186 doivent continuer à refuser ces sources et la livraison ne peut pas être
-annoncée avec quatre CI vertes. Aucun gate ou test n'est contourné.
+L'arbitrage MANAGER du 14/11/2026 dans la consigne canonique autorise deux
+extensions limitées. Les SHA256 de `v4_session.py` et `v4_lifecycle.py` sont
+recalculés dans `.github/info-manual-route.json` ; tous les autres champs sont
+comparés à `experimental` et restent identiques. Route Info, gates, workflows,
+validateur et tests #186 conservent leur logique.
 
-La récupération ajoute aussi une génération et des événements au rapport du
-banc de double session. Deux cas existants `stale` produisent actuellement un
-rapport dépassant 8 192 octets, refusé par le validateur inchangé. Une adaptation
-bornée du producteur `scripts/ha_dual_observer.py` nécessite une extension de
-périmètre ; elle n'est pas incluse sans cette autorisation. La suite HA complète
-compte à ce stade 838 réussites et ces deux échecs, sans les masquer.
+Le banc de double session conserve le verdict d'échec du scénario `stale` :
+la réponse tardive de génération 1 n'est pas créditée. Après les trois échecs,
+la génération 2 peut fournir ses propres acquisitions corrélées ; la fenêtre
+restante ne prouve cependant pas les 300 secondes de récupération exigées par
+ce scénario. Le rapport ne transforme donc pas cette observation en succès.
+
+Le producteur réduit seulement deux résumés d'en-têtes ordinaires de génération
+1, avant l'incident, lorsque leurs lectures réussies sont déjà attestées avec
+les mêmes horodatages. Il conserve les compteurs, toutes les lectures, les
+réponses tardives, l'incident, l'échec, le terminal, l'ordre des transitions,
+les générations et leurs preuves de cleanup. Les en-têtes non ordinaires et
+celui après l'incident restent présents. Les cas reproduits passent de
+8 360 à 7 872 octets, enveloppe superviseur comprise, sous le plafond inchangé
+de 8 192 octets. Les tests RED/GREEN comparent le rapport complet avant/après,
+vérifient son expurgation et l'absence de changement pour les autres scénarios.
 
 V4 lecture seule, TLS vérifié vers `myhoben.fr:465`, aucun secret, RX brut ou
 donnée domestique exporté. Live HA et Home Assistant installé : **NOT RUN**.

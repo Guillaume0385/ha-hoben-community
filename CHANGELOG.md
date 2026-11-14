@@ -9,8 +9,9 @@
   relances ne publient pas de mesures ambiguës et n'allongent pas la rétention
   HA. Une nouvelle génération exige une vraie acquisition corrélée.
 - Tests déterministes avec les vrais propriétaires et le runtime HA simulé.
-  Livraison suspendue à l'arbitrage des empreintes d'intégrité #186 ; aucun
-  résultat Live ou quatre CI vertes revendiqué. Voir
+  Empreintes #186 actualisées dans le périmètre autorisé par MANAGER ;
+  rapports `stale` réduits sous 8 192 octets en conservant leurs preuves et
+  leur verdict d'échec. Aucun test Live exécuté. Voir
   [la politique et ses limites](docs/v4-three-request-recovery-212.md).
 
 ## En cours — #207-D4-C2, port anti-rejeu atomique simulé et hors ligne
