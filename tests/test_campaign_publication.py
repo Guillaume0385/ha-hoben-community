@@ -153,7 +153,10 @@ def test_workflow_wiring_preserves_native_environments_mutex_and_no_live_ci(camp
         "cancel-in-progress": False,
         "queue": "max",
     }
-    assert set(w["jobs"]) == {"admission", "collect", "result"}
+    jobs = {"admission", "collect", "result"}
+    if campaign == "ha":
+        jobs |= {"d4-preflight", "d4-claim"}
+    assert set(w["jobs"]) == jobs
     admission, collect, result = (
         w["jobs"][k] for k in ("admission", "collect", "result")
     )
@@ -161,9 +164,23 @@ def test_workflow_wiring_preserves_native_environments_mutex_and_no_live_ci(camp
     assert collect["environment"] == (
         "hoben-experimental" if campaign == "protocol" else "hoben-live"
     )
-    assert (
-        "collector_ready == 'true'" in collect["if"] and collect["needs"] == "admission"
-    )
+    assert "collector_ready == 'true'" in collect["if"]
+    if campaign == "ha":
+        assert set(collect["needs"]) == {
+            "admission",
+            "d4-preflight",
+            "d4-claim",
+        }
+        assert "needs.d4-claim.result == 'success'" in collect["if"]
+        assert "inputs.scenario != 'all'" in collect["if"]
+        assert w["jobs"]["d4-preflight"]["needs"] == "admission"
+        assert w["jobs"]["d4-claim"]["needs"] == "d4-preflight"
+        assert w["jobs"]["d4-claim"]["permissions"] == {"contents": "write"}
+        for key in ("d4-preflight", "d4-claim"):
+            assert "secrets." not in json.dumps(w["jobs"][key])
+            assert "environment" not in w["jobs"][key]
+    else:
+        assert collect["needs"] == "admission"
     for job in (collect, result):
         assert job["permissions"] == {"contents": "read"}
         checkout = next(s for s in job["steps"] if "checkout@" in s.get("uses", ""))
@@ -171,16 +188,34 @@ def test_workflow_wiring_preserves_native_environments_mutex_and_no_live_ci(camp
             "ref": "${{ github.sha }}",
             "persist-credentials": False,
         }
+    expected_needs = (
+        ["admission", "d4-preflight", "d4-claim", "collect"]
+        if campaign == "ha"
+        else ["admission", "collect"]
+    )
     assert (
         result["if"] == "always()"
-        and result["needs"] == ["admission", "collect"]
+        and result["needs"] == expected_needs
         and "environment" not in result
     )
     secret_steps = [s for s in collect["steps"] if "secrets." in json.dumps(s)]
-    assert (
-        len(secret_steps) == 1
-        and secret_steps[0]["run"] == "python -I scripts/run_campaign.py " + campaign
-    )
+    historic = next(s for s in collect["steps"] if s.get("id") == "capture")
+    assert historic["env"] == {
+        "HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"
+    }
+    assert historic["run"] == "python -I scripts/run_campaign.py " + campaign
+    if campaign == "ha":
+        new = next(s for s in collect["steps"] if s.get("id") == "d4-capture")
+        assert new["env"] == historic["env"]
+        assert new["run"] == "python -I scripts/ha_live_d4_run.py"
+        assert new["if"] == (
+            "inputs.scenario == 'hoben-live' && "
+            "steps.d4-recheck.outputs.approved == 'true'"
+        )
+        assert historic["if"] == "inputs.scenario != 'hoben-live'"
+        assert secret_steps == [historic, new]
+    else:
+        assert secret_steps == [historic]
     assert "secrets." not in json.dumps(
         result
     ) and "${{ inputs.scenario }}" not in json.dumps(w)
