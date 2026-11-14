@@ -327,9 +327,7 @@ def test_campaign_only_requests_user_secret_in_protected_capture(campaign):
     assert capture["env"] == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
     permitted = [capture]
     if campaign == "ha":
-        d4 = next(
-            s for s in jobs["collect"]["steps"] if s.get("id") == "d4-capture"
-        )
+        d4 = next(s for s in jobs["collect"]["steps"] if s.get("id") == "d4-capture")
         assert d4["env"] == capture["env"]
         assert "steps.d4-recheck.outputs.approved == 'true'" in d4["if"]
         permitted.append(d4)
@@ -368,7 +366,8 @@ def test_actual_minimal_controller_reaches_only_protected_implemented_slot(
     # Their refusal is not a failure of the historical offline campaigns.
     rejected = campaign == "ha" and (
         scenario == "all"
-        or scenario == "hoben-live" and ref != "refs/heads/experimental"
+        or scenario == "hoben-live"
+        and ref != "refs/heads/experimental"
     )
     expected = "false" if rejected else "true"
     assert result.returncode == (1 if rejected else 0) and outputs == {

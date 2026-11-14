@@ -40,11 +40,24 @@ def _context(source):
 def _project(raw, sha, run_id, attempt):
     """Allowlist every scalar; an unknown or synthetic result cannot be exported."""
     fields = {
-        "schema", "scenario", "execution", "admission", "live_ready",
-        "secrets_allowed", "boundary_proven", "observation", "elapsed_ms",
-        "drop_at_ms", "correlated_at_ms", "tls_generation",
-        "unknown_drops", "info_candidates", "correlated_after_drop",
-        "pings", "pongs", "cleanup_attested",
+        "schema",
+        "scenario",
+        "execution",
+        "admission",
+        "live_ready",
+        "secrets_allowed",
+        "boundary_proven",
+        "observation",
+        "elapsed_ms",
+        "drop_at_ms",
+        "correlated_at_ms",
+        "tls_generation",
+        "unknown_drops",
+        "info_candidates",
+        "correlated_after_drop",
+        "pings",
+        "pongs",
+        "cleanup_attested",
     }
     if type(raw) is not dict or set(raw) != fields:
         raise ValueError("ha_d4_report_refused")
@@ -61,12 +74,17 @@ def _project(raw, sha, run_id, attempt):
     ):
         raise ValueError("ha_d4_report_refused")
     numeric = (
-        "elapsed_ms", "drop_at_ms", "correlated_at_ms", "unknown_drops",
-        "info_candidates", "correlated_after_drop", "pings", "pongs",
+        "elapsed_ms",
+        "drop_at_ms",
+        "correlated_at_ms",
+        "unknown_drops",
+        "info_candidates",
+        "correlated_after_drop",
+        "pings",
+        "pongs",
     )
     if any(
-        type(raw[key]) is not int or not -1 <= raw[key] <= 900000
-        for key in numeric
+        type(raw[key]) is not int or not -1 <= raw[key] <= 900000 for key in numeric
     ):
         raise ValueError("ha_d4_report_refused")
     if raw["tls_generation"] is not None and (
@@ -87,12 +105,23 @@ def _project(raw, sha, run_id, attempt):
         "sha": sha,
         "run_id": run_id,
         "attempt": attempt,
-        **{k: raw[k] for k in (
-            "observation", "elapsed_ms", "drop_at_ms", "correlated_at_ms",
-            "tls_generation", "unknown_drops", "info_candidates",
-            "correlated_after_drop", "pings", "pongs", "cleanup_attested",
-            "boundary_proven",
-        )},
+        **{
+            k: raw[k]
+            for k in (
+                "observation",
+                "elapsed_ms",
+                "drop_at_ms",
+                "correlated_at_ms",
+                "tls_generation",
+                "unknown_drops",
+                "info_candidates",
+                "correlated_after_drop",
+                "pings",
+                "pongs",
+                "cleanup_attested",
+                "boundary_proven",
+            )
+        },
     }
 
 
@@ -134,9 +163,9 @@ def main():
         folder = root / "hoben-d4-public"
         folder.mkdir(mode=0o700)
         file = folder / "report.json"
-        encoded = json.dumps(
-            report, separators=(",", ":"), allow_nan=False
-        ).encode("ascii")
+        encoded = json.dumps(report, separators=(",", ":"), allow_nan=False).encode(
+            "ascii"
+        )
         if len(encoded) > 4096:
             raise ValueError("ha_d4_report_refused")
         fd = os.open(file, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)

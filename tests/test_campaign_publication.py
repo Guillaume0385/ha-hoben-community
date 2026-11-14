@@ -200,9 +200,7 @@ def test_workflow_wiring_preserves_native_environments_mutex_and_no_live_ci(camp
     )
     secret_steps = [s for s in collect["steps"] if "secrets." in json.dumps(s)]
     historic = next(s for s in collect["steps"] if s.get("id") == "capture")
-    assert historic["env"] == {
-        "HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"
-    }
+    assert historic["env"] == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
     assert historic["run"] == "python -I scripts/run_campaign.py " + campaign
     if campaign == "ha":
         new = next(s for s in collect["steps"] if s.get("id") == "d4-capture")
