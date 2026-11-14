@@ -64,7 +64,10 @@ def _project(raw, sha, run_id, attempt):
         "elapsed_ms", "drop_at_ms", "correlated_at_ms", "unknown_drops",
         "info_candidates", "correlated_after_drop", "pings", "pongs",
     )
-    if any(type(raw[key]) is not int or not -1 <= raw[key] <= 900000 for key in numeric):
+    if any(
+        type(raw[key]) is not int or not -1 <= raw[key] <= 900000
+        for key in numeric
+    ):
         raise ValueError("ha_d4_report_refused")
     if raw["tls_generation"] is not None and (
         type(raw["tls_generation"]) is not int
@@ -94,8 +97,8 @@ def _project(raw, sha, run_id, attempt):
 
 
 async def _collect(identity):
-    from scripts.ha_session_live_worker import collect
     from scripts.ha_live_d4_observer import observe
+    from scripts.ha_session_live_worker import collect
 
     result = None
 
