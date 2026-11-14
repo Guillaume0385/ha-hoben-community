@@ -325,10 +325,16 @@ def test_campaign_only_requests_user_secret_in_protected_capture(campaign):
     jobs = workflow["jobs"]
     capture = next(s for s in jobs["collect"]["steps"] if s.get("id") == "capture")
     assert capture["env"] == {"HOBEN_USER_GUID": "${{ secrets.HOBEN_USER_GUID }}"}
+    permitted = [capture]
+    if campaign == "ha":
+        d4 = next(s for s in jobs["collect"]["steps"] if s.get("id") == "d4-capture")
+        assert d4["env"] == capture["env"]
+        assert "steps.d4-recheck.outputs.approved == 'true'" in d4["if"]
+        permitted.append(d4)
     for job_name, job in jobs.items():
         for step in job["steps"]:
             if "secrets." in json.dumps(step):
-                assert job_name == "collect" and step == capture
+                assert job_name == "collect" and step in permitted
     assert jobs["collect"]["environment"] == (
         "hoben-experimental" if campaign == "protocol" else "hoben-live"
     )
@@ -356,10 +362,20 @@ def test_actual_minimal_controller_reaches_only_protected_implemented_slot(
         tmp_path,
         {"GITHUB_RUN_ATTEMPT": str(attempt)},
     )
-    assert result.returncode == 0 and outputs == {
-        "admitted": "true",
-        "collector_ready": "true",
+    # Only the HA manual Live and all choices require the new #207 route.
+    # Their refusal is not a failure of the historical offline campaigns.
+    rejected = campaign == "ha" and (
+        scenario == "all"
+        or scenario == "hoben-live"
+        and ref != "refs/heads/experimental"
+    )
+    expected = "false" if rejected else "true"
+    assert result.returncode == (1 if rejected else 0) and outputs == {
+        "admitted": expected,
+        "collector_ready": expected,
     }
+    if campaign == "ha" and scenario == "hoben-live" and not rejected:
+        assert "needs.d4-claim.result == 'success'" in current["jobs"]["collect"]["if"]
     assert current["jobs"]["collect"]["environment"] == (
         "hoben-experimental" if campaign == "protocol" else "hoben-live"
     )

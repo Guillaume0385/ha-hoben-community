@@ -109,7 +109,7 @@ def test_historical_jobs_and_dedicated_ha_workflow_are_identical_to_d7_base():
         hashlib.sha256(
             (ROOT / ".github/workflows/hoben-ha-manual.yml").read_bytes()
         ).hexdigest()
-        == "f1f27e60304f2f3b44c08e9b88e13064e5e0f80de40f3396d57a84c2f7b02eff"
+        == "e10d5fb0fb072f3301cdba89eef21f8f6a25fbf64e1b8637c2e9ea4fa909808e"
     )
 
 

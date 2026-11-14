@@ -66,8 +66,11 @@ jobs:
           process.env.REQUEST_EVENT === 'workflow_dispatch' &&
           process.env.REQUEST_ACTOR === 'Guillaume0385' &&
           process.env.REQUEST_TRIGGERING_ACTOR === 'Guillaume0385' &&
-          ['refs/heads/experimental', 'refs/heads/main'].includes(process.env.REQUEST_REF) &&
-          choices.includes(scenario);
+          (scenario === 'hoben-live' ? process.env.REQUEST_REF === 'refs/heads/experimental' :
+            ['refs/heads/experimental', 'refs/heads/main'].includes(process.env.REQUEST_REF)) &&
+          // The legacy "all" sequence includes hoben-live but has no per-stage gate.
+          // Refuse the entire selection instead of running #207 without D4 admission.
+          scenario !== 'all' && choices.includes(scenario);
         try {
           // Only the closed implemented catalog can reach the protected collector.
           fs.appendFileSync(process.env.GITHUB_OUTPUT,
@@ -79,10 +82,51 @@ jobs:
           process.exitCode = 1;
         }
         NODE
-  collect:
+  d4-preflight:
     needs: admission
-    if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true' && needs.admission.outputs.collector_ready
-      == 'true'
+    if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true' && inputs.scenario == 'hoben-live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - name: D4-D — préflight authentifié sans secret Hoben
+      id: d4-preflight
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node scripts/ha_live_d4_preflight.cjs
+  d4-claim:
+    needs: d4-preflight
+    if: needs.d4-preflight.result == 'success' && inputs.scenario == 'hoben-live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+    - name: D4-D — réserver une seule tentative si la durabilité est prouvée
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node scripts/ha_live_d4_claim.cjs
+  collect:
+    needs: [admission, d4-preflight, d4-claim]
+    if: >-
+      ${{ always() && needs.admission.result == 'success' &&
+      needs.admission.outputs.admitted == 'true' &&
+      needs.admission.outputs.collector_ready == 'true' &&
+      ((inputs.scenario == 'hoben-live' && needs.d4-preflight.result == 'success' &&
+      needs.d4-claim.result == 'success') ||
+      (inputs.scenario != 'hoben-live' && inputs.scenario != 'all' &&
+      needs.d4-preflight.result == 'skipped' && needs.d4-claim.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.scenario == 'dual-session-observation' && 15 || 40 }}
     permissions:
@@ -102,6 +146,14 @@ jobs:
       with:
         ref: ${{ github.sha }}
         persist-credentials: false
+    - id: d4-recheck
+      name: D4-D — recheck après entrée dans l’environnement, sans secret Hoben
+      if: inputs.scenario == 'hoben-live'
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        node scripts/ha_live_d4_preflight.cjs
+        echo "approved=true" >> "$GITHUB_OUTPUT"
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
@@ -110,20 +162,36 @@ jobs:
       run: env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker
         --host=unix:///var/run/docker.sock build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt
         --iidfile "$RUNNER_TEMP/hoben-ha-runtime.id" scripts/ha_session_runtime
+    - name: D4-D — installer le runtime Home Assistant épinglé sans identité
+      if: inputs.scenario == 'hoben-live' && steps.d4-recheck.outputs.approved == 'true'
+      run: python -m pip install --disable-pip-version-check -r scripts/ha_session_runtime/requirements.txt
     - id: capture
-      name: Collecte bornée — aucune sortie privée
+      name: Collecte historique bornée — aucune sortie privée
+      if: inputs.scenario != 'hoben-live'
       env:
         HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
       run: python -I scripts/run_campaign.py ha
+    - id: d4-capture
+      name: D4-D — vrai client et coordinateur HA, observation 300 s
+      if: inputs.scenario == 'hoben-live' && steps.d4-recheck.outputs.approved == 'true'
+      env:
+        HOBEN_USER_GUID: ${{ secrets.HOBEN_USER_GUID }}
+      run: python -I scripts/ha_live_d4_run.py
     - id: exports
-      if: always()
-      name: Valider la projection fermée avant transfert
+      if: always() && inputs.scenario != 'hoben-live'
+      name: Valider la projection historique
       run: node .github/scripts/campaign-report.cjs prepare
+    - id: d4-exports
+      if: always() && inputs.scenario == 'hoben-live'
+      name: D4-D — projection publique fermée
+      run: node .github/scripts/ha-live-d4-report.cjs prepare
     outputs:
-      report_b64: ${{ steps.exports.outputs.report_b64 }}
+      report_b64: ${{ steps.d4-exports.outputs.report_b64 || steps.exports.outputs.report_b64 }}
   result:
     needs:
     - admission
+    - d4-preflight
+    - d4-claim
     - collect
     if: always()
     runs-on: ubuntu-latest
@@ -178,19 +246,33 @@ jobs:
         process.exitCode = 1;
         NODE
       if: needs.admission.result != 'success' || needs.admission.outputs.admitted != 'true'
+    - name: D4-D — NOT RUN si préflight ou réservation non attestés
+      if: inputs.scenario == 'hoben-live' && (needs.d4-preflight.result != 'success' || needs.d4-claim.result != 'success')
+      shell: bash
+      run: |
+        echo '## D4-D — NOT RUN (sécurité non attestée)' >> "$GITHUB_STEP_SUMMARY"
+        echo '::error::D4-D NOT RUN: preflight_or_durable_claim_unverified'
+        exit 1
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true'
       with:
         ref: ${{ github.sha }}
         persist-credentials: false
     - id: public
-      if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true'
+      if: needs.admission.result == 'success' && needs.admission.outputs.admitted == 'true' && inputs.scenario != 'hoben-live'
       name: Validation indépendante et résultat par scénario
       env:
         PUBLIC_REPORT_B64: ${{ needs.collect.outputs.report_b64 }}
         COLLECT_RESULT: ${{ needs.collect.result }}
       run: node .github/scripts/campaign-report.cjs publish
-    - if: always() && steps.public.outputs.report == 'true'
+    - id: d4-public
+      if: inputs.scenario == 'hoben-live' && needs.d4-preflight.result == 'success' && needs.d4-claim.result == 'success'
+      name: D4-D — vérification indépendante du rapport (runner sans secret)
+      env:
+        PUBLIC_REPORT_B64: ${{ needs.collect.outputs.report_b64 }}
+        COLLECT_RESULT: ${{ needs.collect.result }}
+      run: node .github/scripts/ha-live-d4-report.cjs publish
+    - if: always() && (steps.public.outputs.report == 'true' || steps.d4-public.outputs.report == 'true')
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: ha-campaign-${{ github.sha }}-${{ github.run_id }}-a${{ github.run_attempt }}

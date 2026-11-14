@@ -76,7 +76,15 @@ def test_current_workflow_from_admission_to_fresh_runner_report(
 
     filename, w = workflow(campaign)
     monkeypatch.setattr(historical, "workflow", lambda _: w)
-    selection = CHOICES[campaign][0] if selection == "individual" else selection
+    # HA #207 changes only the dedicated hoben-live and all manual routes.
+    # Continue exercising the historical run_campaign path via open-errors.
+    selection = (
+        "open-errors"
+        if campaign == "ha" and selection == "individual"
+        else CHOICES[campaign][0]
+        if selection == "individual"
+        else selection
+    )
     ctx = admission_context(selection, "refs/heads/" + ref)
     admitted, outputs, _ = controller(
         filename,
@@ -85,6 +93,14 @@ def test_current_workflow_from_admission_to_fresh_runner_report(
         tmp_path,
         {"GITHUB_RUN_ATTEMPT": str(attempt)},
     )
+    if campaign == "ha" and selection == "all":
+        # all includes #207; the manual HA gate must deny it, never silently
+        # run the old campaign worker or skip the D4 claim.
+        assert admitted.returncode == 1 and outputs == {
+            "admitted": "false",
+            "collector_ready": "false",
+        }
+        return
     assert admitted.returncode == 0 and outputs["collector_ready"] == "true"
     source = {
         "GITHUB_EVENT_PATH": str(tmp_path / "event.json"),
@@ -131,7 +147,13 @@ def test_current_workflow_from_admission_to_fresh_runner_report(
         "GITHUB_STEP_SUMMARY": str(collector / "summary"),
     }
     exports = next(s for s in w["jobs"]["collect"]["steps"] if s.get("id") == "exports")
-    assert exports["if"] == "always()" and command(exports, env).returncode == 0
+    expected_export_gate = (
+        "always() && inputs.scenario != 'hoben-live'"
+        if campaign == "ha"
+        else "always()"
+    )
+    assert exports["if"] == expected_export_gate
+    assert command(exports, env).returncode == 0
     encoded = (collector / "output").read_text().removeprefix("report_b64=").strip()
     env.update(
         RUNNER_TEMP=str(publisher),

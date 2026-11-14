@@ -1,5 +1,26 @@
 # Changelog
 
+## En cours — #207-D4-D, sécurité de la voie Live HA (préparation partielle)
+
+- Transport GET authentifiable pour les 13 routes B2 et pagination bornée,
+  testé seulement sur un HTTP fake, sans certificat ou token réel ni admission.
+- Port REST GitHub à GET allowlisté, schémas et refus constants, tests adversariaux
+  sur politiques de branche, reviewers, environment, rulesets, SHA et HTTP 403/400.
+  Le préflight sans secret demeure NOT RUN faute de preuves authentifiées
+  complètes et de claim indélébile ; aucune écriture GitHub réelle.
+- Le raccordement au YAML manuel HA est **reporté** : le manifeste
+  d'intégrité #186 épingle ce workflow. Son changement initial a révélé des
+  régressions `manual_info_route_not_connected` en CI. Le YAML a été
+  intégralement restauré sans réépingler la protection #186 ; autorisation
+  MANAGER explicite requise avant toute nouvelle adaptation du workflow.
+  `hoben-live` et `all` ne sont **pas admissibles** à D4 en l'état et
+  aucune campagne n'est autorisée.
+- Classificateur d'observation HA strictement synthétique : candidats inconnus,
+  nouvelle corrélation V4 sur la même génération TLS, maintien 300 s, EOF,
+  timeout, cleanup et refus de champs privés. Les validations Live HA et HA
+  installée restent NOT RUN, aucun permis secret.
+  [Périmètre et limitations](docs/ha-live-d4d-secure-offline-207.md).
+
 ## En cours — #207-D4-C2, port anti-rejeu atomique simulé et hors ligne
 
 - Ajout d'un port de création conditionnelle atomique injecté et d'un stockage

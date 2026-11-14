@@ -147,7 +147,12 @@ def test_closed_campaigns_match_manual_unconnected_yaml_and_cannot_be_mutated():
     for campaign, path in PATHS.items():
         data = yaml.load((ROOT / path).read_text(), Loader=yaml.BaseLoader)
         assert set(data["on"]) == {"workflow_dispatch"}
-        assert set(data["jobs"]) == {"admission", "collect", "result"}
+        expected = {"admission", "collect", "result"}
+        if campaign is dispatch.Campaign.HA:
+            expected |= {"d4-preflight", "d4-claim"}
+            assert data["jobs"]["d4-claim"]["needs"] == "d4-preflight"
+            assert "needs.d4-claim.result == 'success'" in data["jobs"]["collect"]["if"]
+        assert set(data["jobs"]) == expected
         gate = data["jobs"]["admission"]["steps"][0]["run"]
         assert "collector_ready=" in gate and "String(admitted)" in gate
         assert dispatch._PATHS[campaign] == path
