@@ -102,3 +102,37 @@ revenir aux fichiers de workflow antérieurs par une nouvelle PR examinée.
 TLS vérifié `myhoben.fr:465`, V4 en lecture seule, aucun 06/16/22 ou commande,
 aucune valeur domestique/GUID/RX secret publiée, aucune supposition sur la
 longueur du message Info `0x0C`. La voie #186 et #192 restent séparées.
+
+
+## 14/11/2026 — raccordement fail-closed au workflow HA existant
+
+La décision prioritaire MANAGER permet de modifier exclusivement
+`.github/workflows/hoben-ha-manual.yml` et de réépingler les quatre
+références d’intégrité du YAML / routeur #186. Le scénario manuel
+`hoben-live` traverse désormais `admission`, `d4-preflight`,
+`d4-claim`, le job `collect` sous l’environnement déjà nommé
+`hoben-live`, `d4-recheck`, `d4-capture` et la publication D4-D séparée.
+`d4-capture` appelle le vrai `ha_session_live_worker.collect`, le
+coordinateur Home Assistant et `ha_live_d4_observer.observe`. Le runtime
+Home Assistant est installé depuis les versions figées déjà présentes ;
+aucune fixture n’est utilisable en collecte. Le lanceur retire l’identité et
+les métadonnées Actions de l’environnement du client avant l’observation.
+Les rapports ne contiennent que des scalaires et catégories validés
+successivement par Python et Node, puis par un runner sans secret Hoben.
+
+Le choix `all` est refusé globalement avec `NOT RUN` : sa séquence
+historique comporte `hoben-live` et ne dispose pas d’un claim individuel.
+Les autres scénarios historiques restent sélectionnables individuellement.
+Le choix `hoben-live` de `.github/workflows/hoben-manual.yml` demeure Info
+#186, inchangé.
+
+**La voie reste volontairement NON AUTORISÉE et NOT RUN.** Les API de
+protection de `experimental` (403), l’environnement `hoben-live`
+(non exposé par le connecteur) et l’indélébilité de la réservation
+(`rulesets:[]`) ne sont toujours pas attestés. Le CLI preflight et
+le claim D4 refusent explicitement ; aucun état simulé ne peut ouvrir
+`d4-capture`. Le chemin est raccordé techniquement, mais **ni la preuve
+d’admission, ni une campagne réelle, ni le fonctionnement du nouveau
+worker au contact de Hoben ne sont validés**. MANAGER doit décider des
+prérequis indépendants avant tout lancement manuel. Les quatre CI ne
+prouvent pas ces protections ou le comportement Live.
