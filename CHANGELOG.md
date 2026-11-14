@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #212, récupération V4 après trois demandes sans réponse exploitable
+
+- Le superviseur HA conserve TLS/RX/Ping-Pong après les deux premiers timeouts
+  et émet deux relances au maximum, chacune 60 s après le timeout précédent.
+  Le troisième échec passe par le cleanup existant avant toute reconnexion.
+- Les réponses tardives au TID fixe `0xFFFF` restent non créditées : les
+  relances ne publient pas de mesures ambiguës et n'allongent pas la rétention
+  HA. Une nouvelle génération exige une vraie acquisition corrélée.
+- Tests déterministes avec les vrais propriétaires et le runtime HA simulé.
+  Livraison suspendue à l'arbitrage des empreintes d'intégrité #186 ; aucun
+  résultat Live ou quatre CI vertes revendiqué. Voir
+  [la politique et ses limites](docs/v4-three-request-recovery-212.md).
+
 ## En cours — #207-D4-C2, port anti-rejeu atomique simulé et hors ligne
 
 - Ajout d'un port de création conditionnelle atomique injecté et d'un stockage

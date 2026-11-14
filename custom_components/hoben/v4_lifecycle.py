@@ -55,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 HA_RECONNECT_SECONDS = 60.0
 HA_PROVEN_LOSS_SECONDS = 10.0
 HA_ACQUISITION_RECONNECT_SECONDS = 30.0
+HA_READ_RETRY_SECONDS = 60.0
 
 
 def _monotonic():
@@ -169,6 +170,7 @@ class V4Lifecycle:
         "_ha_acquisition_generation",
         "_ha_fast_reconnect",
         "_diagnostics",
+        "_read_retry_task",
     )
 
     def __init__(
@@ -243,6 +245,7 @@ class V4Lifecycle:
         self._status_callback = _status_callback
         self._ha_acquisition_generation = None
         self._diagnostics = None
+        self._read_retry_task = None
         self._opening_metadata: OpeningMetadata | None = None
         self._accepted_device_guid: str | None = None
         self._clock = clock
@@ -539,6 +542,51 @@ class V4Lifecycle:
                 pass  # This supervisor alone decides cleanup/retry eligibility.
             await self.wait_connected()
 
+    async def _recover_timed_out_reads(self, session):
+        """Notify the original loss waiter, without delaying its notification."""
+        try:
+            await self._retry_timed_out_reads(session)
+        except asyncio.CancelledError:
+            raise
+        except HobenError as failure:
+            if session._rx_error is None:
+                session._rx_error = failure
+                session._signal_loss()
+        except Exception:
+            if session._rx_error is None:
+                session._rx_error = HobenInternalError()
+                session._signal_loss()
+
+    async def _retry_timed_out_reads(self, session):
+        """Observe one generation and issue only its two permitted retry reads.
+
+        Fixed FFFF cannot identify a fresh reply after an abandoned exchange.
+        These probes therefore never publish measurements. After the third
+        failure this owner returns to the existing cleanup/reconnect path.
+        DataUpdated quarantine retains its separate silence-based policy.
+        """
+        await session._read_failure_event.wait()
+        while session._failed_reads < 3:
+            if session.data_updated_recovering:
+                await session.wait_lost()
+            deadline = session._failed_read_at + HA_READ_RETRY_SECONDS
+            await asyncio.sleep(max(0.0, deadline - asyncio.get_running_loop().time()))
+            await session._read_idle.wait()
+            if self._stopping or session is not self._session:
+                raise LifecycleStoppedError()
+            if session.data_updated_recovering:
+                await session.wait_lost()
+            previous = session._failed_reads
+            try:
+                await session._retry_uncertain_read()
+            except HobenTimeoutError:
+                if session._failed_reads == previous:
+                    # A deadline waiting for the TX lock did not send a read.
+                    # It cannot consume an attempt or trigger a hot retry loop.
+                    session._failed_read_at = asyncio.get_running_loop().time()
+        session._acquisition_timeout_at = session._loss_clock()
+        raise with_phase(HobenTimeoutError(), "request_correlation")
+
     async def wait_connected(self) -> None:
         """Wait for recovery, or raise its terminal result without cancelling it."""
         if self._stopping:
@@ -619,6 +667,12 @@ class V4Lifecycle:
         )
 
     async def _cleanup(self, *, _quarantine_permit=None) -> None:
+        task = self._read_retry_task
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            self._read_retry_task = None
         session = self._session
         if session is not None:
             if self._diagnostics is not None:
@@ -884,6 +938,11 @@ class V4Lifecycle:
                     ):
                         self._ha_acquisition_generation = self._generation
                         notify_status(self._status_callback)
+                    if self._ha_reconnect:
+                        self._read_retry_task = asyncio.create_task(
+                            self._recover_timed_out_reads(session),
+                            name="hoben-ha-read-retry",
+                        )
                     if self._quarantine is None:
                         await session.wait_lost()
                     else:
