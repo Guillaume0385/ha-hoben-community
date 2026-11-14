@@ -412,6 +412,10 @@ class V4Session:
         "_unsupported_delivery_drops",
         "_preserve_read_timeouts",
         "_correlation_lost",
+        "_read_failure_event",
+        "_failed_reads",
+        "_failed_read_at",
+        "_failed_read_timeout",
         "_diagnostics",
     )
 
@@ -468,6 +472,10 @@ class V4Session:
             raise HobenInvalidInputError()
         self._preserve_read_timeouts = preserve_read_timeouts
         self._correlation_lost = False
+        self._read_failure_event = asyncio.Event()
+        self._failed_reads = 0
+        self._failed_read_at = None
+        self._failed_read_timeout = None
         self._diagnostics = None
         if _info_delivery_drop is not None:
             if (
@@ -612,6 +620,36 @@ class V4Session:
         ):
             self._mark_read_uncertain()
         return True
+
+    def _note_read_timeout(self, timeout):
+        """Count a completed TX whose response deadline was abandoned.
+
+        This generation-local notification gives the lifecycle sole ownership
+        of the two retry timers. A late FFFF reply never resets the counter.
+        The asyncio clock drives both the request deadline and retry interval.
+        """
+        self._failed_reads += 1
+        self._failed_read_at = asyncio.get_running_loop().time()
+        self._failed_read_timeout = timeout
+        self._read_failure_event.set()
+
+    async def _retry_uncertain_read(self):
+        """Emit a bounded observation read without restoring correlation.
+
+        Only the lifecycle calls this after its 60-second wait. Ordinary HA
+        refreshes still fail closed while the generation is uncertain. Known
+        replies are decoded but cannot become data or complete this waiter.
+        """
+        if not (
+            self._preserve_read_timeouts
+            and self.acquisition_uncertain
+            and 1 <= self._failed_reads < 3
+            and not self.data_updated_recovering
+        ):
+            raise SessionStateError()
+        return await self._tracked_v4_request(
+            timeout=self._failed_read_timeout, _uncertain_retry=True
+        )
 
     def _begin_data_updated_recovery(self, diagnostic):
         length, reason = diagnostic
@@ -1865,6 +1903,8 @@ class V4Session:
                 pending.set_exception(error)
             else:
                 pending.set_result(response)
+                self._failed_reads = 0
+                self._read_failure_event.clear()
                 self._verified_read_sequence += 1
                 if self._diagnostics is not None:
                     self._diagnostics.correlated_response()
@@ -1911,17 +1951,23 @@ class V4Session:
 
     async def request_v4_data(self, *, timeout: float = 30.0) -> ModbusReadResponse:
         """Track a single caller through deterministic lifecycle teardown."""
+        return await self._tracked_v4_request(timeout=timeout)
+
+    async def _tracked_v4_request(self, *, timeout, _uncertain_retry=False):
+        """Join ordinary requests and lifecycle probes during final cleanup."""
         task = asyncio.current_task()
         done = asyncio.get_running_loop().create_future()
         self._operations[task] = done
         try:
-            return await self._request_v4_data(timeout=timeout)
+            return await self._request_v4_data(
+                timeout=timeout, _uncertain_retry=_uncertain_retry
+            )
         finally:
             self._operations.pop(task, None)
             done.set_result(None)
 
     async def _request_v4_data(
-        self, *, timeout: float, _recovery=False
+        self, *, timeout: float, _recovery=False, _uncertain_retry=False
     ) -> ModbusReadResponse:
         """Send the sole fixed V4 read and await a delimited contract response.
 
@@ -1932,7 +1978,7 @@ class V4Session:
         generation: fixed FFFF cannot prove which later reply is fresh.
         """
         _validate_delay(timeout)
-        if self.acquisition_uncertain:
+        if self.acquisition_uncertain and not _uncertain_retry:
             raise with_phase(HobenTimeoutError(), "request_correlation")
         recovery = self._data_updated
         if not _recovery and recovery.observer:
@@ -2029,7 +2075,7 @@ class V4Session:
                 raise with_phase(HobenTimeoutError(), "request_correlation") from None
             raise  # Dispose the waiter/timeout below without closing RX.
         except asyncio.CancelledError:
-            if _recovery:
+            if _recovery or _uncertain_retry:
                 raise  # The closing session owns this private probe's cleanup.
             self._quarantine_stop(Event.CANCEL)
             cancelled = True
@@ -2043,6 +2089,7 @@ class V4Session:
                     and self.acquisition_uncertain
                     and type(failure) is HobenTimeoutError
                 ):
+                    self._note_read_timeout(timeout)
                     raise
                 if (
                     type(failure) is TimeoutError
@@ -2052,6 +2099,7 @@ class V4Session:
                 ):
                     if tx_completed:
                         self._mark_read_uncertain()
+                        self._note_read_timeout(timeout)
                     raise with_phase(
                         HobenTimeoutError(), "request_correlation"
                     ) from None

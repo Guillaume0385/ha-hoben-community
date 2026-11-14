@@ -28,6 +28,50 @@ from scripts.ha_dual_instrumentation import (
 )
 
 
+def _compact_stale_report(e):
+    """Omit only redundant routine headers preceding a failed late-response run.
+
+    Decoded acquisition rows already attest these successful reads. Keep all
+    incident/late-frame metadata, counters, generations, reads and cleanup;
+    in particular the post-incident frame summary is never eligible.
+    """
+    incident = e["incident"]
+    if (
+        e["completed"]
+        or incident is None
+        or incident["kind"] != "timeout"
+        or incident["late_frame"] is None
+        or e["failure"] is None
+        or e["failure"]["category"] != "timeout"
+        or e["resources"]["a"]["opens"] != 2
+    ):
+        return
+    for phase in e["phases"][:2]:
+        stats = phase["a"]
+        frame = stats["last_frame"]
+        if (
+            frame is not None
+            and not any(stats[k] for k in ("invalid", "unexpected", "truncated"))
+            and frame["event"] == "header"
+            and frame["generation"] == 1
+            and frame["message_type"] == "data_response_client"
+            and frame["length_scope"] == "frame"
+            and frame["provenance"] == "validated_header"
+            and frame["phase"] == "frame_boundary"
+            and frame["category"] == "none"
+            and frame["status"] == "partial"
+            and any(
+                read["decoded"]
+                and read["attempted"]
+                and read["generation"] == 1
+                and read["at_ms"] == frame["at_ms"] == read["end_ms"]
+                and read["end_ms"] < incident["read_ms"]
+                for read in e["reads"]
+            )
+        ):
+            stats["last_frame"] = None
+
+
 async def observe(
     coordinator, *, evidence=None, clock=None, sleep=None, absolute_end=None
 ):
@@ -275,4 +319,5 @@ async def observe(
                         tracker.fail(role, "closed", "cleanup")
             e["completed"] = positive(e)
             e.update(diagnostic_schema=1, diagnostic=tracker.diagnostic.snapshot())
+    _compact_stale_report(e)
     return e

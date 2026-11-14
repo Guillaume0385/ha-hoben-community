@@ -246,8 +246,16 @@ async def test_seventh_read_interruption_has_role_and_safe_recovery(
         assert cause is not None and cause["category"] == "timeout"
         if e["incident"] is not None:
             assert e["incident"]["kind"] == "timeout"
-        assert sum(r["decoded"] for r in e["reads"]) == 6
-        assert e["resources"]["a"]["opens"] == 1
+        assert sum(r["decoded"] for r in e["reads"] if r["generation"] == 1) == 6
+        if kind == "stale":
+            assert e["resources"]["a"]["opens"] == 2
+            assert [
+                r["sequence"]
+                for r in e["reads"]
+                if r["decoded"] and r["generation"] == 2
+            ] == [1, 2, 3]
+        else:
+            assert e["resources"]["a"]["opens"] == 1
         assert_private_values_absent(caplog.text)
         return  # D2 cannot credit recovery with the same ambiguous FFFF.
     assert e["completed"] and recovered(e) and not continuous(e), (
