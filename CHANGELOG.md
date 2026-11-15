@@ -8,6 +8,9 @@
 - Parseur pur enveloppe/MBAP/PDU avec cinq statuts et diagnostics DEBUG
   structurels expurgés ; aucun contenu opaque, identifiant, registre ou valeur
   publié. Entités, snapshots et polling HA restent indépendants des notifications.
+- Après arbitrage MANAGER, le parseur rejoint la liste fermée d’intégrité #186 ;
+  seules ses empreintes et celles des sources concernées sont actualisées,
+  sans changement de logique d’admission ni de workflow.
 - Tests synthétiques et non-régressions #160/#212 ; aucune observation réelle
   revendiquée. L'étape 2 attend une validation HA puis une autorisation distincte.
   Voir [le contrat et ses limites](docs/data-updated-recovery.md).
