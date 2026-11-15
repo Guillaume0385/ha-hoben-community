@@ -89,7 +89,8 @@ def test_invalid_dataupdated_alone_keeps_160_recovery_without_boundary_failure()
         classify_frame_boundary=True, recover_data_updated=True
     )
     assert framer.feed(b"\x1bMETA\xff\xff\x00\x00\xff\xff", None) == []
-    assert framer.invalid_data_updated == (65535, "invalid_length")
+    assert framer.invalid_data_updated == (None, "not_read_start")
+    # #219 keeps this stream-only marker unexamined; real reads are parsed by RX.
     assert framer.boundary_failure is None
 
 

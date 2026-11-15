@@ -487,6 +487,13 @@ class ExperimentalV4Framer:
                     if index + 1 < len(data):
                         self._tail = (data[index + 1 :], exchange)
                     return events  # Never scan/process bytes past terminal RX.
+            elif self._buffer[0] == 27 and self._recover_data_updated:
+                # #219 HA policy handles eligible 0x1B in the original read.
+                # A marker reaching this stream framer is opening/coalesced
+                # residue, never a new delivery. Preserve preceding events but
+                # do not use MBAP to split or assemble this notification.
+                self.invalid_data_updated = (None, "not_read_start")
+                return events
             elif self._buffer[0] not in {7, 14, 27}:
                 message = (
                     "unknown"
@@ -512,18 +519,6 @@ class ExperimentalV4Framer:
                     self.frame_log.failure(
                         HobenProtocolError(), phase="mbap_header", status="invalid"
                     )
-                    if self._buffer[0] == 27 and self._recover_data_updated:
-                        # Only persistent reception opts into owner-authorized
-                        # recovery. No size/boundary is inferred from this header.
-                        length = int.from_bytes(self._buffer[9:11], "big")
-                        self.clear()
-                        self.invalid_data_updated = (
-                            length,
-                            "invalid_length"
-                            if not 2 <= length <= 254
-                            else "invalid_protocol",
-                        )
-                        return []
                     self._fail("frame_boundary", "ambiguous")
                 if self._classify_frame_boundary and (
                     type(size) is not int or not prefix + 8 <= size <= prefix + 260

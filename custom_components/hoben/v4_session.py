@@ -24,6 +24,7 @@ from .client import (
     _validate_device_guid,
 )
 from .close_diagnostic import close_generation
+from .data_updated_parser import parse_data_updated, unexamined_delivery
 from .data_updated_recovery import DataUpdatedRecovery
 from .error_phases import error_boundary, phase_of, with_phase
 from .exceptions import (
@@ -44,7 +45,7 @@ from .exceptions import (
     HobenTransportError,
     HobenUnsupportedProfileError,
 )
-from .frame_diagnostic import FrameEvidence
+from .frame_diagnostic import FrameEvidence, emit_data_updated
 from .malformed import (
     MalformedDiagnostic,
     message_name,
@@ -406,6 +407,7 @@ class V4Session:
         "_opening_options",
         "_cleanup_failed",
         "_data_updated",
+        "_data_updated_deliveries",
         "_read_idle",
         "_info_delivery_drop",
         "_discard_unsupported_deliveries",
@@ -562,6 +564,7 @@ class V4Session:
         self._operations: dict[asyncio.Task, asyncio.Future[None]] = {}
         self._tx_operations: set[asyncio.Task] = set()
         self._data_updated = DataUpdatedRecovery()
+        self._data_updated_deliveries = 0
         self._status_callback = None
         self._read_idle = asyncio.Event()
         self._read_idle.set()
@@ -651,20 +654,20 @@ class V4Session:
             timeout=self._failed_read_timeout, _uncertain_retry=True
         )
 
-    def _begin_data_updated_recovery(self, diagnostic):
+    def _begin_data_updated_recovery(self, diagnostic, *, phase="mbap_header"):
         length, reason = diagnostic
         recovery = self._data_updated
         recovery.begin()
         notify_status(
             self._status_callback,
-            SessionEvent("recovery", "malformed_response", "mbap_header"),
+            SessionEvent("recovery", "malformed_response", phase),
         )
         if recovery.task is not None:
             self._fail_pending_read(HobenDataUpdatedRecoveryError())
         if not recovery.warned:
             recovery.warned = True
             _LOGGER.warning(
-                "Hoben DataUpdated invalid_mbap [reason=%s, declared_length=%d, "
+                "Hoben DataUpdated recovery_required [reason=%s, declared_length=%s, "
                 "recovery=silence_30s_hypothesis]",
                 reason,
                 length,
@@ -721,6 +724,46 @@ class V4Session:
                     else None
                 )
 
+    def _diagnose_data_updated(self, result):
+        self._data_updated_deliveries = min(65535, self._data_updated_deliveries + 1)
+        emit_data_updated(
+            result,
+            generation=self._framer.frame_log.generation,
+            index=self._data_updated_deliveries,
+        )
+
+    def _consume_data_updated_delivery(self, data, transport):
+        """#219: only a fresh post-open read at an idle framer is admissible.
+
+        Entire delivery consumed under a reversible hypothesis, never a TLS
+        record/message proof. Incomplete/ambiguous candidates use #160's guard;
+        their possible suffix is not fed back or assembled on another read.
+        """
+        if (
+            not self._framer._recover_data_updated
+            or not self._delivery_drop_allowed(data, transport)
+            or data[0] != 27
+        ):
+            return False
+        result = parse_data_updated(data)
+        self._diagnose_data_updated(result)
+        report = result.safe_report()
+        if report["status"] not in {"parsed", "unsupported"}:
+            self._begin_data_updated_recovery(
+                (report["declared_mbap_length"], report["reason"]),
+                phase="mbap_header"
+                if report["reason"]
+                in {
+                    "missing_metadata",
+                    "missing_mbap",
+                    "invalid_length",
+                    "invalid_protocol",
+                }
+                else "pdu_decode",
+            )
+            self._framer.clear()
+        return True
+
     async def _read_framed_delivery(self, transport):
         """Discard during recovery, with bounded deliveries and rolling silence.
 
@@ -741,6 +784,10 @@ class V4Session:
                     # A broken reader may fail immediately on every call.
                     # Bound retry frequency without treating silence as EOF.
                     await asyncio.sleep(1.0)
+                    continue
+                if self._consume_data_updated_delivery(data, transport):
+                    data = b""
+                    await asyncio.sleep(0)
                     continue
                 production_drop = self._discard_unsupported_delivery(data, transport)
                 if production_drop or (
@@ -805,6 +852,10 @@ class V4Session:
             if recovery.active:
                 recovery.quiet_since = asyncio.get_running_loop().time()
             if recovery.active and not recovery.probing:
+                if data[0] == 27:
+                    self._diagnose_data_updated(
+                        unexamined_delivery(len(data), "recovery_discarded")
+                    )
                 data = b""
                 continue  # Drop immediately, never accumulate opaque RX.
             return data
@@ -1310,6 +1361,7 @@ class V4Session:
                 self._experiment.partial = False
         self._cleanup_failed = False
         self._rx_error = None
+        self._data_updated_deliveries = 0
         self._correlation_lost = False  # Only a fresh transport restores this epoch.
         self._loss_event.clear()
         self._unavailable.clear()
@@ -1560,6 +1612,7 @@ class V4Session:
             exchange = (
                 None if first else (self._pending_read if self._read_sent else None)
             )
+            read_delivery = not first
             first = False
             events = []
             rejected_close = False
@@ -1586,11 +1639,6 @@ class V4Session:
             except Exception as failure:
                 self._framer.frame_log.failure(failure)
                 raise
-            if self._framer.invalid_data_updated is not None:
-                self._begin_data_updated_recovery(self._framer.invalid_data_updated)
-                self._framer.clear()
-                events = []
-                data = b""
             if rejected_close:
                 if self._quarantine_policy is None:
                     raise HobenProtocolError()
@@ -1604,6 +1652,21 @@ class V4Session:
                 raise HobenProtocolError()
             if self._experiment is not None:
                 self._experiment.partial = self._framer.partial
+            if self._framer.invalid_data_updated is not None:
+                # Gate new reads BEFORE any prior Pong can yield. Delimited
+                # Ping/0E before this marker retain their own exchange.
+                # The marker itself is not at the start of a fresh read: no
+                # MBAP framing, suffix scan or notification reassembly is safe.
+                self._diagnose_data_updated(
+                    unexamined_delivery(
+                        len(data) if read_delivery else None, "not_read_start"
+                    )
+                )
+                self._begin_data_updated_recovery(
+                    self._framer.invalid_data_updated, phase="frame_boundary"
+                )
+                self._framer.clear()
+                data = b""
             for event in events:
                 if event.payload[:1] == b"\x05":
                     subcode = event.payload[1]

@@ -2,11 +2,13 @@
 
 Counts belong to one logical frame's examined prefix/body, not a TLS delivery.
 Unexamined tails cannot be attributed to a message with an unknown boundary.
+The separate #219 event explicitly describes a read delivery, never a frame.
 """
 
 import logging
 from dataclasses import dataclass, replace
 
+from .data_updated_parser import DataUpdatedResult
 from .error_phases import PHASES, phase_of
 from .exceptions import (
     HobenClosedError,
@@ -21,6 +23,7 @@ from .malformed import TEXT_FIELDS, message_name
 from .transport import TransportCertificateError, TransportError, TransportTimeout
 
 _LOGGER = logging.getLogger(__name__)
+_DATA_UPDATED_LOGGER = logging.getLogger(__name__ + ".data_updated")
 
 
 def _number(value, maximum):
@@ -256,3 +259,30 @@ class FrameDiagnostic:
                 else None,
             )
             self.failed = True
+
+
+def emit_data_updated(result, *, generation, index):
+    """One safe event per #219 read candidate, including rejected candidates.
+
+    This separate schema cannot enter frame evidence or existing live reports.
+    Parsed content and arbitrary exception text never reach logging handlers.
+    """
+    if type(result) is not DataUpdatedResult:
+        return
+    fields = {
+        "event": "data_updated_delivery",
+        "generation": generation
+        if _number(generation, 2147483647) and generation > 0
+        else "unknown",
+        "index": index if _number(index, 65535) and index > 0 else "unknown",
+        "counter_capped": type(index) is int and index == 65535,
+        **result.safe_report(),
+    }
+    try:
+        _DATA_UPDATED_LOGGER.debug(
+            "Hoben DataUpdated %s",
+            " ".join(f"{key}={value}" for key, value in fields.items()),
+            extra={"hoben_data_updated": fields.copy()},
+        )
+    except Exception:
+        pass  # Diagnostic failure cannot change RX, freshness or cleanup policy.

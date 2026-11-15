@@ -75,7 +75,8 @@ def test_invalid_mbap_and_dataupdated_recovery_have_no_type_disclosure(caplog, p
     assert "message_type_byte" not in caplog.text
     assert "PRIVATE_PAYLOAD" not in caplog.text
     if prefix[0] == 27:
-        assert framer.invalid_data_updated == (65535, "invalid_length")
+        assert framer.invalid_data_updated == (None, "not_read_start")
+        # #219 keeps this stream-only marker unexamined; real reads are parsed by RX.
 
 
 def test_known_bodies_metadata_ping_and_close_never_disclose_an_octet(caplog):

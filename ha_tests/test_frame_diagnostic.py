@@ -35,8 +35,18 @@ async def test_actual_ha_headers_use_one_generation_and_never_include_payloads(
         "ping",
         "data_response_client",
         "data_response_server",
-        "data_updated",
     ]
+    # #219 separates delivery candidates from established frame evidence.
+    (notification,) = [
+        r.hoben_data_updated for r in caplog.records if hasattr(r, "hoben_data_updated")
+    ]
+    assert notification["generation"] == 1
+    assert notification["reason"] == "not_read_start"
+    assert (
+        notification["status"] == "ambiguous"
+        and notification["boundary_proven"] is False
+    )
+    assert notification["delivery_bytes"] == 155
     assert all(h["generation"] == 1 for h in headers)
     assert (
         headers[0]["expected_total_bytes"] == "unknown"

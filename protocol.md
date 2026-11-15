@@ -128,6 +128,62 @@ Cette règle est une **hypothèse autorisée, pas une preuve de frontière ou de
 fraîcheur serveur**. Les contrats expérimentaux restent inchangés et aucun
 résultat réel nouveau n'est établi.
 
+### Réception HA DataUpdated par livraison — hypothèse locale #219-A
+
+La [décision propriétaire du 15/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6902070360)
+autorise la réception et le diagnostic, **sans alimentation des entités**.
+Elle remplace le framing MBAP de `0x1B` uniquement pour la politique HA qui
+active la récupération DataUpdated ; les campagnes/clients bornés conservent
+leur contrat antérieur. L'enveloppe statique et les règles Modbus du §6 ne changent pas.
+
+Un candidat admissible est **toute la livraison non vide d'un unique
+`transport.read()`**, au plus 4096 octets, commençant par `0x1B` à un framer
+post-open vide, sur le transport/génération encore possédés par l'unique RX.
+Aucune concaténation de lectures, délimitation par MBAP.Length, recherche de
+signature ou réinjection d'un suffixe n'est effectuée. Une livraison de
+`StreamReader.read()` ne prouve **ni record TLS ni frontière de message** :
+`length_scope=read_delivery`, `boundary_proven=false`, même pour `parsed`.
+
+Le parseur pur vérifie l'enveloppe, garde les quatre métadonnées **opaques**,
+puis analyse la cohérence interne MBAP et des réponses Modbus 03/04 ou de
+leurs formes d'exception (§6). Le Length annoncé n'est qu'un contrôle interne
+sur le candidat entier. Les UInt16 restent internes, sans adresse de départ,
+conversion physique, corrélation V4 ou règle de fusion inventée. Les statuts sont :
+
+- `parsed` : structure interne connue cohérente, sans preuve de frontière ;
+- `unsupported` : MBAP cohérent mais fonction non interprétée, corps opaque ;
+- `incomplete` : section/champ/corps attendu absent de cette livraison ;
+- `malformed` : protocole/longueur MBAP ou structure PDU invalide ;
+- `ambiguous` : octets supplémentaires ou frontière de livraison non admissible.
+
+Un candidat incomplet, malformé ou ambigu rejoint la garde #160 sur **la même
+TLS** : pas d'assemblage, de scan, de fermeture pour cette seule anomalie ni de
+réponse créditée depuis le suffixe. Silence glissant, purge, sonde V4 unique,
+limites de corrélation et cleanup restent ceux de #160/#212. Une fonction non
+supportée mais internement bornée est seulement consommée/diagnostiquée sous
+l'hypothèse de livraison, sans interprétation supplémentaire.
+
+Un `0x1B` rencontré après un Ping/0x0E déjà délimité ou dans le résidu
+d'ouverture n'est pas une nouvelle livraison admissible : les événements
+antérieurs gardent leur ordre et leur échange, puis la garde #160 prend le
+relais sans framing MBAP de la notification. Une livraison continuant un vrai
+0x0E partiel reste au framer de ce 0x0E, même si son premier octet vaut `0x1B`.
+L'abandon d'un candidat `0x1B` peut aussi perdre un Ping/0x0E coalescé dans le
+même read ; ce coût de l'hypothèse reste explicite, sans faux Pong/acquisition.
+
+Chaque candidat émet en DEBUG un rapport fermé et expurgé : génération/index
+bornés, taille réelle livrée lorsqu'elle est connue, sections/champs présents,
+Length annoncé, cohérence et compte de valeurs seulement. Pendant la garde,
+un read commençant par `0x1B` est diagnostiqué **sans examen** comme
+`recovery_discarded` ; ce n'est pas une identification de message prouvée.
+Le résidu d'ouverture n'est jamais étiqueté avec une fausse taille de read.
+Aucun identifiant, contenu opaque, registre/adresse, valeur, code d'exception
+reçu ou RX/hex brut ne sort en log, y compris dans les replis d'erreur.
+
+Tests synthétiques seulement ; réception naturelle et structure réelle
+**À VALIDER sur HA par le propriétaire, NOT RUN par CODEX DEV**. L'étape 2
+(snapshot/entités et fin du polling périodique) reste non autorisée.
+
 ### Prototype privé Info — hypothèse #186-B, désactivée par défaut
 
 Le [prototype offline #186-B](docs/info-delivery-drop-experiment-186.md) peut

@@ -1,27 +1,59 @@
-# DataUpdated ignoré et récupération locale — #160
+# Réception DataUpdated et récupération locale — #160 / #219-A
 
 Décision propriétaire du 30/10/2026, **option B**, dans
 [l’Issue #160](https://github.com/Guillaume0385/ha-hoben-community/issues/160).
 Cette politique est un choix de récupération, sans validation réelle revendiquée.
 
-## Réception normale
+## Réception HA par livraison — #219-A
 
-À la frontière post-ouverture admise par le chemin persistant existant, le framer
-attend cinq octets d’enveloppe puis six octets MBAP. Protocole nul et Length
-dans 2..254 donnent exactement `11 + Length` octets. Le corps est consommé sans
-décodage de registre ni interprétation des quatre octets opaques. Les suffixes
-et leur propriétaire d’échange sont conservés. Une notification ne complète
-jamais une lecture 0x0E, ne produit aucun snapshot et ne déclenche aucun listener
-HA. Une fragmentation normale n’active pas la récupération.
+L'[étape 1 de #219](https://github.com/Guillaume0385/ha-hoben-community/issues/219)
+remplace le framing MBAP de la notification pour la seule politique HA qui
+active #160. L'unique RX reçoit un candidat entier lorsque son vrai read
+commence par `0x1B`, après ouverture et avec framer vide. Le candidat n'est
+ni assemblé sur plusieurs reads ni découpé selon MBAP.Length. Ce choix local
+ne démontre aucune frontière TLS/message : `read_delivery`,
+`boundary_proven=false` dans tous les rapports.
+
+Le parseur pur contrôle enveloppe/MBAP/PDU et les réponses Modbus 03/04 ou
+exceptions documentées. Les quatre métadonnées restent opaques ; données,
+identifiants et valeurs décodées demeurent internes, sans correspondance
+aux entités ni au snapshot V4. Les fonctions inconnues restent `unsupported`.
+Le [contrat et les cinq statuts](../protocol.md#réception-ha-dataupdated-par-livraison--hypothèse-locale-219-a)
+distinguent structure interne et hypothèse de frontière.
+
+Les candidats `incomplete`, `malformed` ou `ambiguous` sont consommés sans scan
+puis entrent dans la garde ci-dessous. Aucun suffixe Ping/0x0E coalescé après
+`0x1B` ne peut être crédité. Un Ping/0x0E déjà délimité avant la notification
+garde son ordre et son échange ; la notification qui suit n'est pas un nouveau
+read et déclenche la garde sans assemblage MBAP. Le framer d'un vrai 0x0E
+partiel garde ses octets de continuation, y compris un premier octet `0x1B`.
+Les résidus d'ouverture ne bénéficient jamais de la nouvelle convention.
+
+Chaque candidat produit un événement DEBUG `hoben_data_updated` : compteur
+saturant par tentative, génération, taille réellement livrée, sections et
+présence des champs, cohérence, raison fermée et nombre de valeurs. Aucun
+contenu brut, métadonnée opaque, ID, adresse, valeur domestique ou texte
+arbitraire n'est journalisé, même en repli. La saturation n'arrête ni RX ni
+les événements. Une erreur du handler de log ne change pas la politique RX.
+Dans la garde, une livraison commençant par `0x1B` produit un état ambigu
+`recovery_discarded` sans examiner son contenu ni prouver son type.
+
+## Contrat antérieur conservé pour campagnes/clients bornés
+
+Sans activation de la politique HA, le framer conserve l'ignorance exacte de
+`11 + MBAP.Length` octets après validation de l'en-tête et des bornes 2..254.
+Les tests de fragmentation/concaténation de cette voie restent inchangés.
+Une notification ne complète jamais une lecture 0x0E, ne produit aucun
+snapshot et ne déclenche aucun listener HA sur l'une ou l'autre voie.
 
 ## Hypothèse de silence explicitement autorisée
 
 Seule la politique d’entrée HA (`ha_reconnect=True`) active cette extension du
 gestionnaire partagé. Les campagnes, clients bornés et codecs gardent leurs
-contrats antérieurs. Un en-tête DataUpdated dont le MBAP est invalide déclenche :
+contrats antérieurs. Un candidat DataUpdated rejeté (ou une frontière non admissible) déclenche :
 
-1. Un WARNING par épisode : type DataUpdated, raison fermée `invalid_length`
-   ou `invalid_protocol`, Length annoncé (UInt16), hypothèse `silence_30s`.
+1. Un WARNING par épisode : type DataUpdated, raison fermée du parseur/de la frontière, Length
+   annoncé lorsqu’il est disponible (UInt16), hypothèse `silence_30s`.
    Aucun octet opaque, identifiant, registre ou texte d’exception n’est publié.
 2. Une phase explicite de récupération sur le **même TLS** : arrêt du décodage
    et des nouvelles lectures ordinaires. L’unique RX abandonne immédiatement
@@ -76,3 +108,13 @@ continues, sondes refusées/expirées, waiter ancien, annulation/générations,
 maintien HA sans faux rafraîchissement et perte réelle pendant la récupération.
 **Tests réels : NOT RUN.** Aucun accès serveur, écriture Modbus, commande poêle,
 nouvelle émission DataUpdated ou modification des budgets expérimentaux.
+
+## Validation de l'étape 1 et suite
+
+Les tests #219-A sont entièrement synthétiques : livraison, parsing, champs
+expurgés, fragments/coalescences, échanges adjacents, générations et absence
+de mutation HA. Le polling périodique et les réessais #212 restent actifs.
+Après revue MANAGER et fusion sur experimental, seule une observation passive
+volontaire du propriétaire sur HA, avec SHA chargé prouvé, pourra apporter
+les preuves réelles. **Étape 2 non attribuée ; aucune fin du polling ni mise
+à jour des entités par DataUpdated dans cette PR. Live / HA réel : NOT RUN.**
