@@ -79,15 +79,16 @@ def test_unknown_and_opened_prefix_cannot_claim_a_message_total(caplog, head):
     assert len(records(caplog, "header")) == 1
 
 
+@pytest.mark.parametrize("recover", [False, True])
 @pytest.mark.parametrize("prefix", [b"\x0e", b"\x07", b"\x1bSECR"])
 @pytest.mark.parametrize(
     "protocol,length", [(1, 43), (0, 0), (0, 1), (0, 255), (0, 65535)]
 )
 def test_invalid_mbap_never_credits_declared_length_or_unexamined_suffix(
-    caplog, prefix, protocol, length
+    caplog, prefix, protocol, length, recover
 ):
     caplog.set_level(logging.DEBUG, logger=LOGGER)
-    framer = ExperimentalV4Framer(recover_data_updated=True)
+    framer = ExperimentalV4Framer(recover_data_updated=recover)
     header = (
         prefix + b"\xff\xff" + protocol.to_bytes(2, "big") + length.to_bytes(2, "big")
     )
@@ -95,6 +96,14 @@ def test_invalid_mbap_never_credits_declared_length_or_unexamined_suffix(
         framer.feed(b"\x0a" + header + b"PRIVATE_PAYLOAD" + response(), None)
     except HobenProtocolError:
         pass
+    if recover and prefix[0] == 27:
+        # #219: only the RX owner can admit a real delivery. This stream
+        # suffix has no such provenance; no MBAP bytes may be examined.
+        assert framer.invalid_data_updated == (None, "not_read_start")
+        assert not records(caplog, "error") and framer.boundary_failure is None
+        assert len(framer._buffer) == 1
+        assert "PRIVATE_PAYLOAD" not in caplog.text and "SECR" not in caplog.text
+        return
     (error,) = records(caplog, "error")
     assert error["received_bytes"] == len(header)
     assert error["expected_total_bytes"] == "unknown" and error["status"] == "invalid"

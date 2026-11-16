@@ -322,21 +322,31 @@ def test_unsolicited_response_is_never_counted_as_correlated():
 
 
 @pytest.mark.parametrize("split", [1, 2, 5, 7, 12])
-def test_valid_dataupdated_fragments_never_count_as_delivery_drops(split):
+def test_fragmented_dataupdated_guard_is_not_an_unsupported_delivery_drop(split):
     from tests.test_session_ignored_rx import ignored_frame
 
     async def run():
         factory = Factory()
         life = factory.lifecycle(ha_reconnect=True, recover_acquisition=True)
+        pending = None
         try:
             await life.connect()
             frame = ignored_frame(27)
             factory.streams[0].chunks = [frame[:split], frame[split:], response()]
-            await life.request_v4_data()
+            pending = asyncio.create_task(life.request_v4_data())
+            await pump()
             r = life.session_diagnostics
             assert r["unsupported_deliveries"] == r["info_candidate_deliveries"] == 0
-            assert r["v4_responses_correlated"] == 1
+            # #219 never assembles separate deliveries or credits a response
+            # discarded during #160's guard as a fresh acquisition.
+            assert r["v4_responses_correlated"] == 0
+            assert life.data_updated_recovering and not pending.done()
+            assert not factory.sessions[0]._framer.partial
+            assert factory.streams[0].close_count == 0
         finally:
+            if pending is not None:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
             await life.close()
             factory.assert_clean()
 

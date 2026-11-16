@@ -123,6 +123,8 @@ def test_notifications_on_closed_generation_cannot_satisfy_a_fresh_read():
 def test_invalid_dataupdated_length_warns_without_immediate_close_or_reconnect(
     protocol, length, caplog
 ):
+    caplog.set_level(logging.DEBUG, logger="custom_components.hoben.frame_diagnostic")
+
     async def scenario():
         factory = Factory()
         life = factory.lifecycle(
@@ -154,15 +156,24 @@ def test_invalid_dataupdated_length_warns_without_immediate_close_or_reconnect(
                 )
                 == 1
             )
-            (frame,) = [
-                r.hoben_frame
-                for r in warnings
-                if r.name == "custom_components.hoben.frame_diagnostic"
+            (delivery,) = [
+                r.hoben_data_updated
+                for r in caplog.records
+                if hasattr(r, "hoben_data_updated")
             ]
-            assert (
-                frame["received_bytes"] == 11
-                and frame["expected_total_bytes"] == "unknown"
+            # #219 records the actual read, rather than the old 11-byte prefix.
+            assert delivery["delivery_bytes"] == len(
+                b"\x1bPRIVATE"[:5]
+                + b"\xff\xff"
+                + protocol.to_bytes(2)
+                + length.to_bytes(2)
+                + b"PRIVATE_PAYLOAD\x0a"
+                + response()
             )
+            assert delivery["declared_mbap_length"] == length
+            assert delivery["status"] == "malformed"
+            assert delivery["length_scope"] == "read_delivery"
+            assert delivery["boundary_proven"] is False
             assert "PRIVATE" not in caplog.text
         finally:
             await life.close()

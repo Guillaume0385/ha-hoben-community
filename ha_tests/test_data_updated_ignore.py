@@ -26,7 +26,8 @@ async def test_idle_notifications_do_not_publish_snapshot_or_trigger_coordinator
     listener = Mock()
     unsubscribe = coordinator.async_add_listener(listener)
     try:
-        wire.queue.put_nowait(notification() * 5)
+        for _ in range(5):
+            wire.queue.put_nowait(notification())
         for _ in range(40):
             await asyncio.sleep(0)
         await hass.async_block_till_done()
@@ -45,7 +46,7 @@ async def test_idle_notifications_do_not_publish_snapshot_or_trigger_coordinator
 
 
 async def test_notification_never_completes_a_pending_ha_refresh(hass, entry, peers):
-    wire = peers.wire(DEVICE_GUID, [[RESPONSE], [notification() * 3]])
+    wire = peers.wire(DEVICE_GUID, [[RESPONSE], [notification()] * 3])
     coordinator = await load(hass, entry)
     previous = coordinator.data
     try:

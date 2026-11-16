@@ -34,6 +34,7 @@ const FILES = Object.freeze([
   'custom_components/hoben/config_flow.py',
   'custom_components/hoben/const.py',
   'custom_components/hoben/coordinator.py',
+  'custom_components/hoben/data_updated_parser.py',
   'custom_components/hoben/data_updated_recovery.py',
   'custom_components/hoben/diagnostics.py',
   'custom_components/hoben/entity.py',
