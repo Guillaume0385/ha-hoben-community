@@ -172,10 +172,7 @@ et `source=DataUpdated` figurent sur chacune des vingt lignes.
 Ni la forme de la notification, ni ce journal ne prouvent le mapping.
 Les autres formes restent diagnostiquées seulement en catégories expurgées.
 
-Pour isoler les nombres des exports HA, ce journal est un flux de texte
-étiqueté DEBUG, **pas un logger Python** : aucun LogRecord, LogRecordFactory,
-handler HA, stdout/stderr, fichier ordinaire ou diagnostic de support ne reçoit
-les couples. Le DEBUG général et le logger shadow catégoriel ne l'activent pas.
+**Décision propriétaire du 17/11/2026 :** les identifiants de registres candidats et valeurs numériques envoyées par le poêle **peuvent être affichés en clair dans les logs Home Assistant locaux et enregistrés dans un fichier local sur le serveur HA**. Cette permission ne concerne ni GitHub, ni les CI, ni les diagnostics de support ou exports publics. GUID, identifiants de compte, secrets, métadonnées opaques et trames RX brutes restent exclus. Cette autorisation documentaire ne change pas le code déjà fusionné : dans la PR #223, le journal reste un flux de texte étiqueté DEBUG, **pas un logger Python** ; aucun LogRecord, LogRecordFactory, handler HA, stdout/stderr, fichier ordinaire ou diagnostic de support ne reçoit actuellement les couples. Le DEBUG général et le logger shadow catégoriel ne l'activent pas.
 Le module ne crée aucun fichier, n'installe aucun handler et ne garde aucun
 writer, candidat ou historique entre notifications/générations.
 
@@ -196,14 +193,10 @@ mkfifo -m 600 /dev/shm/hoben-private/dataupdated.pipe
 cat <> /dev/shm/hoben-private/dataupdated.pipe
 ```
 
-Ces commandes sont une procédure propriétaire, jamais exécutée par CODEX DEV
-sur HA installé. Ne pas rediriger la sortie vers un fichier, un logger, une
-capture de terminal, un collecteur ou un ticket de support. Ce contenu contient
-des données domestiques privées : aucun partage GitHub/CI/diagnostics.
+Ces commandes sont une procédure propriétaire, jamais exécutée par CODEX DEV sur HA installé. **La redirection vers un fichier local ou l'affichage dans les logs HA locaux est autorisé par le propriétaire** ; cette possibilité n'est pas implémentée directement par la PR #223 et dépend de la configuration locale. Ne jamais envoyer ces valeurs dans GitHub, CI, un diagnostic de support ou un collecteur externe. Utiliser des permissions restrictives pour les fichiers locaux.
 Le `<>` Linux garde la FIFO ouverte entre les notifications sans conserver
 de writer dans le module HA ; Ctrl-C ferme ce lecteur privé et arrête la sortie.
-Si la plateforme ne permet pas ce canal local séparé, laisser l'option inactive ;
-aucun repli vers les logs HA n'est proposé. Fermer le lecteur arrête les sorties
+Si la plateforme ne permet pas ce canal local séparé, l'implémentation actuelle reste inactive ; aucun repli automatique vers les logs HA n'est encore implémenté. Cela n'interdit pas une évolution locale explicitement autorisée. Fermer le lecteur arrête les sorties
 immédiatement ; retirer le commutateur et redémarrer HA désactive aussi le chemin.
 Le répertoire/FIFO peut ensuite être supprimé par le propriétaire.
 

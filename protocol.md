@@ -177,8 +177,7 @@ Length annoncé, cohérence et compte de valeurs seulement. Pendant la garde,
 un read commençant par `0x1B` est diagnostiqué **sans examen** comme
 `recovery_discarded` ; ce n'est pas une identification de message prouvée.
 Le résidu d'ouverture n'est jamais étiqueté avec une fausse taille de read.
-Aucun identifiant, contenu opaque, registre/adresse, valeur, code d'exception
-reçu ou RX/hex brut ne sort en log, y compris dans les replis d'erreur.
+Aucun identifiant de compte, GUID, secret, contenu opaque, code d'exception reçu ou RX/hex brut ne sort dans les diagnostics partageables ni dans les replis d'erreur. Les identifiants de registres et valeurs numériques DataUpdated peuvent être affichés en clair dans les journaux et fichiers **locaux** de Home Assistant, sur autorisation du propriétaire ; ils ne doivent jamais être exportés vers GitHub, CI ou les rapports de support.
 
 Tests synthétiques seulement ; réception naturelle et structure réelle
 **À VALIDER sur HA par le propriétaire, NOT RUN par CODEX DEV**. L'étape 2
@@ -197,8 +196,7 @@ aucune preuve statique ou observation réelle. Les champs V4 encore partiels
 (notamment 1033/1042) ne deviennent pas des mesures exploitées.
 
 Ce journal porte `mapping=unverified`, `simulated=true`, `source=DataUpdated`
-et passe seulement par une FIFO privée éphémère explicitement activée, jamais
-par les logs HA ou diagnostics exportables. Les autres formes n'obtiennent
+et, dans l'implémentation actuelle de la PR #223, passe par une FIFO privée éphémère explicitement activée. **Il ne s'agit plus d'une restriction de politique pour Home Assistant local** : le propriétaire autorise aussi les valeurs numériques en clair dans les logs et fichiers locaux HA (décision [#219](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959127890)). La PR #223 ne fournit pas encore cette sortie alternative. Les diagnostics exportés vers GitHub/CI/support restent expurgés. Les autres formes n'obtiennent
 aucune adresse candidate. Aucun entity_id, snapshot, fraîcheur HA ou polling
 modifié ; aucun TX/RX supplémentaire. Voir le
 [contrat d'isolation et d'arrêt](docs/data-updated-recovery.md#219-du-register-log-003--debug-numérique-local-privé-hypothèse-candidate).
