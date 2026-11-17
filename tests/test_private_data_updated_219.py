@@ -56,6 +56,42 @@ def fields(line):
     return dict(field.split("=", 1) for field in line.split()[1:])
 
 
+def test_explicit_ha_debug_logs_twenty_pairs_without_env_or_fifo(caplog, monkeypatch):
+    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.delenv(FIFO, raising=False)
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    for index in range(20):
+        words = (0, 65535, *range(49123 + index, 49141 + index))
+        shadow.observe_data_updated(
+            parse_data_updated(notification(words)), generation=7, index=index + 1
+        )
+        records = [r for r in caplog.records if r.name == LOGGER]
+        assert len(records) == index + 1  # One block per notification, not 20 records.
+        record = records[-1]
+        event = record.hoben_shadow
+        assert "candidate_registers" in event, (
+            "HA DEBUG lacks the candidate register block"
+        )
+        rows = event["candidate_registers"]
+        assert len(rows) == 20
+        assert [row["index"] for row in rows] == list(range(20))
+        assert [row["register_candidate"] for row in rows] == list(range(1024, 1044))
+        assert [row["raw_value"] for row in rows] == list(words)
+        assert rows[0]["name"] == "erarMode_ConsigneMarchArret"
+        assert rows[-1]["name"] == "erarTemperatureRFConv"
+        assert event["generation"] == 7 and event["index"] == index + 1
+        assert event["mapping"] == "unverified" and event["simulated"]
+        assert event["source"] == "DataUpdated" and event["proposals"] == 0
+        message = record.getMessage()
+        assert message.startswith("Hoben SHADOW SIMULATION")
+        assert "source=DataUpdated" in message
+        assert "mapping=unverified" in message and "simulated=true" in message
+        assert json.loads(message.split("candidate_registers=", 1)[1]) == rows
+        assert record.levelno == logging.DEBUG and record.exc_info is None
+        assert len(message.encode("utf8")) <= 4096
+        assert "SECR" not in message and "entity_id" not in message
+
+
 def test_twenty_notifications_emit_twenty_private_candidate_pairs_each(
     private_fifo, caplog
 ):
@@ -90,7 +126,7 @@ def test_twenty_notifications_emit_twenty_private_candidate_pairs_each(
 
 
 @pytest.mark.parametrize("switch", [None, "0", "true", "DEBUG", ""])
-def test_general_and_dedicated_debug_cannot_enable_private_journal(
+def test_ha_debug_does_not_enable_the_independent_fifo(
     private_fifo, caplog, monkeypatch, switch
 ):
     caplog.set_level(logging.DEBUG)
@@ -104,8 +140,9 @@ def test_general_and_dedicated_debug_cannot_enable_private_journal(
     )
     assert private_fifo.read() == []
     assert "shadow_mapping_unproven" in caplog.text
-    assert "raw_value" not in caplog.text
-    assert "register_candidate" not in caplog.text
+    (record,) = [r for r in caplog.records if r.name == LOGGER]
+    assert len(record.hoben_shadow["candidate_registers"]) == 20
+    assert record.levelno == logging.DEBUG
 
 
 @pytest.mark.parametrize("ci", ["CI", "GITHUB_ACTIONS"])
@@ -132,19 +169,29 @@ def test_ci_refuses_even_an_explicit_private_sink(private_fifo, monkeypatch, ci)
         b"\x1bSECR\xff\xff\x00\x00\x00\x03\x01\x84\x02",
     ],
 )
-def test_other_shapes_never_receive_a_candidate_address(private_fifo, delivery):
+def test_other_shapes_never_receive_a_candidate_address(private_fifo, delivery, caplog):
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
     shadow.observe_data_updated(parse_data_updated(delivery), generation=1, index=1)
     assert private_fifo.read() == []
+    assert "raw_value" not in caplog.text
+    assert "register_candidate" not in caplog.text
+    assert all(
+        "candidate_registers" not in r.hoben_shadow
+        for r in caplog.records
+        if r.name == LOGGER
+    )
 
 
 @pytest.mark.parametrize("word", [-1, 65536, True, "PRIVATE"])
-def test_forged_invalid_words_are_not_formatted(private_fifo, word):
+def test_forged_invalid_words_are_not_formatted(private_fifo, word, caplog):
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
     parsed = parse_data_updated(notification())
     response = replace(parsed.response, registers=(word, *range(19)))
     shadow.observe_data_updated(
         replace(parsed, response=response), generation=1, index=1
     )
     assert private_fifo.read() == []
+    assert "raw_value" not in caplog.text and "PRIVATE" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -321,3 +368,60 @@ def test_real_rx_generations_and_cleanup_never_replay_private_candidates(private
         assert private_fifo.read() == []
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "level",
+    [logging.NOTSET, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL, 5],
+)
+def test_only_explicit_debug_enables_ha_numbers(caplog, monkeypatch, level):
+    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.delenv(FIFO, raising=False)
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(level, logger=LOGGER)
+    for index in range(20):
+        shadow.observe_data_updated(
+            parse_data_updated(notification()), generation=1, index=index + 1
+        )
+    assert not [r for r in caplog.records if r.name == LOGGER]
+    assert "raw_value" not in caplog.text and "register_candidate" not in caplog.text
+
+
+def test_info_disable_and_new_generation_keep_no_debug_backlog(caplog, monkeypatch):
+    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.delenv(FIFO, raising=False)
+    result = parse_data_updated(notification())
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    shadow.observe_data_updated(result, generation=1, index=1)
+    caplog.set_level(logging.INFO, logger=LOGGER)
+    for index in range(20):
+        shadow.observe_data_updated(result, generation=1, index=index + 2)
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    shadow.observe_data_updated(result, generation=2, index=1)
+    records = [r for r in caplog.records if r.name == LOGGER]
+    assert len(records) == 2
+    assert [r.hoben_shadow["generation"] for r in records] == [1, 2]
+    assert [r.hoben_shadow["index"] for r in records] == [1, 1]
+    assert all(len(r.hoben_shadow["candidate_registers"]) == 20 for r in records)
+    assert records[0].hoben_shadow is not records[1].hoben_shadow
+    monkeypatch.setattr(shadow._LOGGER, "disabled", True)
+    shadow.observe_data_updated(result, generation=2, index=2)
+    assert len([r for r in caplog.records if r.name == LOGGER]) == 2
+
+
+def test_debug_maximum_context_is_bounded_and_unknown_context_is_categorical(
+    caplog, monkeypatch
+):
+    monkeypatch.delenv(FLAG, raising=False)
+    monkeypatch.delenv(FIFO, raising=False)
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    result = parse_data_updated(notification((65535,) * 20))
+    shadow.observe_data_updated(result, generation=2147483647, index=65535)
+    (record,) = [r for r in caplog.records if r.name == LOGGER]
+    assert len(record.hoben_shadow["candidate_registers"]) == 20
+    assert len(record.getMessage().encode("ascii")) <= 4096
+    caplog.clear()
+    shadow.observe_data_updated(result, generation=True, index=1)
+    (record,) = [r for r in caplog.records if r.name == LOGGER]
+    assert "candidate_registers" not in record.hoben_shadow
+    assert "raw_value" not in record.getMessage()

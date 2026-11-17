@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #219-DU-HA-DEBUG-004, bloc DEBUG local DataUpdated
+
+- Un seul bloc structuré borné par notification admissible dans le logger HA
+  shadow explicitement DEBUG : vingt couples index/registre candidat/nom/UInt16,
+  génération/index et marqueurs `source=DataUpdated mapping=unverified simulated=true`.
+- Aucun env/FIFO requis pour cette sortie ; DEBUG parent seul insuffisant,
+  désactivation via INFO. FIFO indépendant préservé, données de support expurgées.
+- Tests synthétiques RED→GREEN, logger.set_level et invariants HA ; seule
+  empreinte shadow actualisée, aucune logique de gate changée. Aucun test réel.
+
 ## En cours — #219-DU-REGISTER-LOG-003, journal numérique privé candidat
 
 - Exception propriétaire du 17/11 : vingt couples registre V4 candidat/UInt16
