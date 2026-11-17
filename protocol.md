@@ -184,6 +184,26 @@ Tests synthétiques seulement ; réception naturelle et structure réelle
 **À VALIDER sur HA par le propriétaire, NOT RUN par CODEX DEV**. L'étape 2
 (snapshot/entités et fin du polling périodique) reste non autorisée.
 
+### Journal privé DataUpdated candidat — autorisation #219-DU-REGISTER-LOG-003
+
+La [décision propriétaire du 17/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6946450542)
+permet uniquement un diagnostic numérique local privé : pour une livraison
+admissible FFFF/04, unité 1 et vingt mots, indices 0..19 associés par hypothèse
+aux registres V4 candidats 1024..1043 et noms de référence du §8. Les valeurs
+restent des UInt16 bruts. **Aucune adresse n'est transmise dans cette réponse** ;
+la correspondance DataUpdated→V4 demeure **À VALIDER**, même si la forme ou
+des valeurs coïncident avec une lecture sollicitée. Ce choix autorisé n'ajoute
+aucune preuve statique ou observation réelle. Les champs V4 encore partiels
+(notamment 1033/1042) ne deviennent pas des mesures exploitées.
+
+Ce journal porte `mapping=unverified`, `simulated=true`, `source=DataUpdated`
+et passe seulement par une FIFO privée éphémère explicitement activée, jamais
+par les logs HA ou diagnostics exportables. Les autres formes n'obtiennent
+aucune adresse candidate. Aucun entity_id, snapshot, fraîcheur HA ou polling
+modifié ; aucun TX/RX supplémentaire. Voir le
+[contrat d'isolation et d'arrêt](docs/data-updated-recovery.md#219-du-register-log-003--debug-numérique-local-privé-hypothèse-candidate).
+Live / HA installé : **NOT RUN** ; #219-B reste non autorisée.
+
 ### Prototype privé Info — hypothèse #186-B, désactivée par défaut
 
 Le [prototype offline #186-B](docs/info-delivery-drop-experiment-186.md) peut
