@@ -1,12 +1,12 @@
-"""Categorical shadow decisions and the owner's private #219 register journal.
+"""Owner-authorized local DEBUG and the optional private #219 FIFO journal.
 
 V4 semantics are proven for solicited reads of 1024..1043, not for an arbitrary
-twenty-word notification. The #219-DU-REGISTER-LOG-003 exception permits only a
-labelled candidate range in a private ephemeral FIFO. No LogRecord ever carries
-those numbers; general HA loggers, handlers and support exports cannot receive
-them. The original public projection still refuses all entity proposals.
+twenty-word notification. #219-DU-HA-DEBUG-004 permits candidate words in the
+explicitly enabled dedicated HA DEBUG logger, without FIFO or environment opt-in.
+Numbers remain local: no support projection, HA state or entity mapping is added.
 """
 
+import json
 import logging
 import os
 import stat
@@ -44,11 +44,33 @@ _V4_REFERENCE_NAMES = (
 )
 
 
+def _candidate_words(result):
+    """The authorized hypothetical range is restricted to the exact V4 shape."""
+    if preview_data_updated(result) is None:
+        return None
+    response = result.response
+    if (
+        type(response.transaction_id) is not int
+        or response.transaction_id != 65535
+        or type(response.function_code) is not int
+        or response.function_code != 4
+        or type(response.unit_id) is not int
+        or response.unit_id != 1
+        or type(response.registers) is not tuple
+        or len(response.registers) != 20
+        or any(
+            type(word) is not int or not 0 <= word <= 65535
+            for word in response.registers
+        )
+    ):
+        return None
+    return response.registers
+
+
 def _private_register_journal(result, generation, index):
     """One nonblocking atomic batch, no retained writer, payload or replay.
 
-    This is a DEBUG-labelled private stream, deliberately NOT Python logging:
-    even a root handler or LogRecordFactory must never see household numbers.
+    This optional DEBUG-labelled FIFO stream is independent of Python logging.
     The owner must explicitly enable both environment settings in local HA and
     supply a reader on an owned 0600 FIFO. No file is created or truncated.
     O_PATH pins an inode without opening devices; /proc reopens that same FIFO,
@@ -67,22 +89,9 @@ def _private_register_journal(result, generation, index):
         path = os.environ.get("HOBEN_PRIVATE_DATAUPDATED_FIFO", "")
         if not path.startswith("/") or len(path) > 512:
             return
-        if preview_data_updated(result) is None:
-            return
-        response = result.response
+        words = _candidate_words(result)
         if (
-            type(response.transaction_id) is not int
-            or response.transaction_id != 65535
-            or type(response.function_code) is not int
-            or response.function_code != 4
-            or type(response.unit_id) is not int
-            or response.unit_id != 1
-            or type(response.registers) is not tuple
-            or len(response.registers) != 20
-            or any(
-                type(word) is not int or not 0 <= word <= 65535
-                for word in response.registers
-            )
+            words is None
             or _public_index(generation, 2147483647) == "unknown"
             or _public_index(index, 65535) == "unknown"
         ):
@@ -113,7 +122,7 @@ def _private_register_journal(result, generation, index):
             f"generation={generation} delivery={index} index={offset} "
             f"register_candidate={1024 + offset} raw_value={word} name={name}\n"
             for offset, (name, word) in enumerate(
-                zip(_V4_REFERENCE_NAMES, response.registers, strict=True)
+                zip(_V4_REFERENCE_NAMES, words, strict=True)
             )
         ).encode("ascii")
         if len(payload) > os.fpathconf(writer, "PC_PIPE_BUF"):
@@ -165,11 +174,12 @@ def _public_index(value, maximum):
 def observe_data_updated(result, *, generation, index):
     """Optional, synchronous, stateless observation owned by the original RX.
 
-    Only an explicit DEBUG level on THIS logger enables the categorical event.
+    Only an explicit DEBUG level on THIS logger enables the local HA event.
     An ancestor/root DEBUG setting cannot opt in. NOTSET or any other level
     stops it immediately, including after reload; there is no pending worker,
-    retained candidate or cross-generation state. The separate owner-opted-in
-    FIFO never sends numeric content through this or any other Python logger.
+    retained candidate or cross-generation state. Eligible raw UInt16 words are
+    candidate register labels, never physical measurements or entity proposals.
+    The independent FIFO retains its original opt-in and nonblocking behavior.
     """
     _private_register_journal(result, generation, index)
     try:
@@ -186,12 +196,37 @@ def observe_data_updated(result, *, generation, index):
             "generation": _public_index(generation, 2147483647),
             "index": _public_index(index, 65535),
         }
+        suffix = ""
+        words = _candidate_words(result)
+        if (
+            words is not None
+            and fields["generation"] != "unknown"
+            and fields["index"] != "unknown"
+        ):
+            candidates = [
+                {
+                    "index": offset,
+                    "register_candidate": 1024 + offset,
+                    "name": name,
+                    "raw_value": word,
+                }
+                for offset, (name, word) in enumerate(
+                    zip(_V4_REFERENCE_NAMES, words, strict=True)
+                )
+            ]
+            block = json.dumps(candidates, separators=(",", ":"))
+            # ASCII constants + bounded integers: one record stays below 4096
+            # bytes including its fixed prefix/context. Never split or retain it.
+            if len(block) <= 3500:
+                fields["candidate_registers"] = candidates
+                suffix = f" candidate_registers={block}"
         _LOGGER.debug(
             "Hoben SHADOW SIMULATION event=shadow_mapping_unproven "
             "simulated=true mapping=unverified source=DataUpdated "
-            "generation=%s index=%s proposals=0",
+            "generation=%s index=%s proposals=0%s",
             fields["generation"],
             fields["index"],
+            suffix,
             extra={"hoben_shadow": fields.copy()},
         )
     except Exception:

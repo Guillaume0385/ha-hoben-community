@@ -60,7 +60,7 @@
     "custom_components/hoben/session_monitor.py": "9100946164ff643492d6a9dfb4dff04bf1299e47bc880247ce6a54a41e2d830b",
     "custom_components/hoben/session_observation.py": "aae1d5c6bd829c7f82b8a18f4dc746f94f323ae8ca8f899b8d4aabf9a617f1ae",
     "custom_components/hoben/session_sensor.py": "eacf3307818df8feb4d7e7c953374d525f7f9114dd3bc589564e3912ae15e706",
-    "custom_components/hoben/shadow_data_updated.py": "6d14ca24db13776540a5f8505c83277698acb28f403ee87ddc9d8258d0c842c4",
+    "custom_components/hoben/shadow_data_updated.py": "303ed7278941791261dfb4d395cde557b602559d2710c7202050f3fc35ff11af",
     "custom_components/hoben/transport.py": "925d81e69d58c870bd338311cc356eac53f6a38b70fcf9979fe16653d7654b68",
     "custom_components/hoben/v4_eof_quarantine.py": "f2aadf8951a2f769cd8a8524d701f54fad729e9f9200e420c244f14316250ec9",
     "custom_components/hoben/v4_experiment.py": "640ebab9895093b26c149d5df7a51671227bd02805cb46562f01cd8a352a4063",

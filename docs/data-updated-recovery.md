@@ -119,7 +119,7 @@ volontaire du propriétaire sur HA, avec SHA chargé prouvé, pourra apporter
 les preuves réelles. **Étape 2 non attribuée ; aucune fin du polling ni mise
 à jour des entités par DataUpdated dans cette PR. Live / HA réel : NOT RUN.**
 
-## #219-S — shadow catégoriel livré, sans correspondance prouvée
+## #219-S — shadow catégoriel initial, sans correspondance prouvée
 
 Le mapping V4 existant décrit une lecture sollicitée de 1024..1043.
 Le PDU DataUpdated analysé n'établit ni cette adresse de départ, ni l'ordre
@@ -137,7 +137,7 @@ Le diagnostic catégoriel est désactivé par défaut. Seul le niveau explicitem
 `debug` du logger `custom_components.hoben.shadow_data_updated` l'active ;
 un DEBUG général ou hérité ne suffit pas. Repasser ce logger à `info` ou
 `NOTSET` arrête immédiatement l'observation, y compris après reload.
-Une panne de journalisation n'affecte pas le RX. Chaque événement ne contient
+Une panne de journalisation n'affecte pas le RX. Le repli catégoriel ne contient
 que la catégorie, les indicateurs fixes, zéro proposition et des compteurs
 locaux bornés. Aucun identifiant d'entité, valeur, registre, contenu RX,
 métadonnée opaque ou texte d'exception n'est journalisé ou retenu.
@@ -216,3 +216,59 @@ vérifient l'identité des états/snapshots, la fraîcheur, les listeners, le ti
 de polling, les émissions et l'absence des valeurs dans les exports de support.
 Le manifeste #186 réépingle seulement le module shadow ; gates inchangés.
 **Tests Hoben / HA installé : NOT RUN. #219-B reste non autorisée.**
+
+## #219-DU-HA-DEBUG-004 — bloc dans les logs HA locaux
+
+La [nouvelle tâche autorisée du 17/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959464626)
+ajoute une sortie directe dans `custom_components.hoben.shadow_data_updated`.
+Elle ne requiert **ni FIFO, ni variable d'environnement**. L'autorisation
+concerne exclusivement les logs/fichiers locaux HA du propriétaire : aucune
+valeur réelle dans GitHub, CI, diagnostics exportés ou rapports de support.
+Ne pas partager les logs de cette période ; aucun GUID, secret, métadonnée
+opaque, RX brut ou exception arbitraire n'est ajouté, même en DEBUG.
+
+Activation explicite dans les outils de développement HA, action :
+
+```yaml
+action: logger.set_level
+data:
+  custom_components.hoben.shadow_data_updated: debug
+```
+
+Désactivation des prochains blocs :
+
+```yaml
+action: logger.set_level
+data:
+  custom_components.hoben.shadow_data_updated: info
+```
+
+Un DEBUG du logger parent ou général ne suffit pas ; NOTSET/INFO/WARNING/ERROR
+sur le logger dédié n'émettent aucun nombre. INFO arrête les futurs blocs,
+sans effacer les éventuels fichiers locaux déjà écrits par la configuration HA.
+Ces actions sont une procédure propriétaire après installation volontaire du
+SHA revu ; CODEX DEV les teste uniquement sur le harnais HA simulé, pas sur HA installé.
+
+Une notification admissible produit **un seul LogRecord DEBUG**, identifié par
+`Hoben SHADOW SIMULATION`, `generation`, `index` et
+`source=DataUpdated mapping=unverified simulated=true`. La clé structurée
+`hoben_shadow.candidate_registers` contient vingt objets avec `index` 0..19,
+`register_candidate` 1024..1043, `name` de référence et `raw_value` UInt16.
+Le même tableau JSON compact figure dans le texte après `candidate_registers=`,
+donc il est lisible dans les logs HA sans dépendre du rendu des champs `extra`.
+Le message complet est borné à 4096 octets, sans découpage en vingt records.
+
+Les conditions restent FFFF/04, unité 1, vingt UInt16 et contexte de génération
+valide. Autres formes/contexte inconnu : repli catégoriel seulement. Les nombres
+ne sont ni convertis en mesures physiques ni associés à des entités :
+`proposals=0` conserve son sens de zéro proposition d'état HA.
+**Les adresses sont candidates et non transmises dans le PDU ; le mapping
+reste non prouvé.** Aucun snapshot, fraîcheur, listener, polling ou TX modifié.
+
+Le chemin FIFO #003 reste indépendant, avec ses propres opt-in, contrôles et
+refus en CI. Activer le logger n'active pas le FIFO, et inversement. Aucun cache
+ou replay des blocs n'est ajouté ; arrêt/reload/changement de génération ne
+rejouent pas d'anciennes valeurs. Les exports de diagnostic HA restent sur leur
+projection expurgée, sans ces LogRecords.
+L'empreinte shadow seule est réépinglée pour revue explicite MANAGER #186 ;
+aucune logique de gate ni workflow changé. **Live / HA installé : NOT RUN.**

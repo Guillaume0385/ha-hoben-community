@@ -196,7 +196,17 @@ aucune preuve statique ou observation réelle. Les champs V4 encore partiels
 (notamment 1033/1042) ne deviennent pas des mesures exploitées.
 
 Ce journal porte `mapping=unverified`, `simulated=true`, `source=DataUpdated`
-et, dans l'implémentation actuelle de la PR #223, passe par une FIFO privée éphémère explicitement activée. **Il ne s'agit plus d'une restriction de politique pour Home Assistant local** : le propriétaire autorise aussi les valeurs numériques en clair dans les logs et fichiers locaux HA (décision [#219](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959127890)). La PR #223 ne fournit pas encore cette sortie alternative. Les diagnostics exportés vers GitHub/CI/support restent expurgés. Les autres formes n'obtiennent
+et, dans la PR #223, passe par une FIFO privée éphémère explicitement activée.
+**Il ne s'agit plus d'une restriction de politique pour Home Assistant local** :
+le propriétaire autorise aussi les valeurs numériques en clair dans les logs
+et fichiers locaux HA ([décision #219](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959127890)).
+La [tâche #219-DU-HA-DEBUG-004](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959464626)
+ajoute un seul bloc structuré par notification dans le logger shadow
+**explicitement DEBUG**, sans env/FIFO requis. Il contient les vingt couples
+candidats index/registre/nom/UInt16 et génération/index, sans conversion physique.
+DEBUG parent seul insuffisant, désactivation via INFO, volume borné ; chemin
+FIFO indépendant préservé. Aucun nouveau fait ou mapping prouvé n'en découle.
+Les diagnostics exportés vers GitHub/CI/support restent expurgés. Les autres formes n'obtiennent
 aucune adresse candidate. Aucun entity_id, snapshot, fraîcheur HA ou polling
 modifié ; aucun TX/RX supplémentaire. Voir le
 [contrat d'isolation et d'arrêt](docs/data-updated-recovery.md#219-du-register-log-003--debug-numérique-local-privé-hypothèse-candidate).
