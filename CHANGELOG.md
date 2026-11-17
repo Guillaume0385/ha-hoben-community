@@ -1,5 +1,17 @@
 # Changelog
 
+## En cours — #219-DU-REGISTER-LOG-003, journal numérique privé candidat
+
+- Exception propriétaire du 17/11 : vingt couples registre V4 candidat/UInt16
+  pour DataUpdated FFFF/04, unité 1, vingt mots ; `mapping=unverified`,
+  `simulated=true`. Aucun état d'entité ni snapshot HA fabriqué.
+- Flux FIFO privé 0600 en mémoire, opt-in dédié indépendant du DEBUG général ;
+  aucune valeur dans les LogRecords, fichiers persistants, diagnostics ou CI.
+  Absence de lecteur, saturation, chemin non sûr ou CI : aucune écriture/repli.
+- Tests synthétiques, confidentialité, générations, arrêt et non-mutation HA.
+  Empreinte du seul module shadow réépinglée, gate #186 inchangé.
+  Live / HA installé : NOT RUN. [Contrat et activation](docs/data-updated-recovery.md).
+
 ## En cours — #219-S, garde shadow sans mapping inventé
 
 - Observation synchrone des seuls DataUpdated structurellement valides ;

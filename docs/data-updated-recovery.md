@@ -119,7 +119,7 @@ volontaire du propriétaire sur HA, avec SHA chargé prouvé, pourra apporter
 les preuves réelles. **Étape 2 non attribuée ; aucune fin du polling ni mise
 à jour des entités par DataUpdated dans cette PR. Live / HA réel : NOT RUN.**
 
-## #219-S — shadow limité faute de correspondance prouvée
+## #219-S — shadow catégoriel livré, sans correspondance prouvée
 
 Le mapping V4 existant décrit une lecture sollicitée de 1024..1043.
 Le PDU DataUpdated analysé n'établit ni cette adresse de départ, ni l'ordre
@@ -127,7 +127,7 @@ sémantique de ses mots ; ses métadonnées restent opaques. Un statut
 `parsed/ok`, vingt mots ou leur égalité dans une fixture ne prouvent pas
 l'identité avec le snapshot V4. Aucun état d'entité ne peut en être déduit.
 
-Le module `shadow_data_updated.py` produit uniquement une décision immuable
+Le chemin catégoriel de `shadow_data_updated.py` produit une décision immuable
 `shadow_mapping_unproven`, avec zéro proposition. Le RX existant l'observe
 sans tâche, cache, lecteur, émission ou timer supplémentaire. Aucun appel au
 décodeur sémantique, aux entités, au coordinator ou aux listeners ; aucun
@@ -142,12 +142,10 @@ que la catégorie, les indicateurs fixes, zéro proposition et des compteurs
 locaux bornés. Aucun identifiant d'entité, valeur, registre, contenu RX,
 métadonnée opaque ou texte d'exception n'est journalisé ou retenu.
 
-L'exception propriétaire du 17 novembre pour un DEBUG numérique local ne
-constitue pas une preuve de mapping : aucun chemin de journal numérique n'est
-implémenté ici. La simulation numérique demandée reste **bloquée** jusqu'à
-une preuve revue de la correspondance DataUpdated→V4 (plage et ordre).
-La suite exige un arbitrage MANAGER et les preuves autorisées ; CODEX DEV ne
-lance aucune observation réelle pour les obtenir.
+La PR #222 ne livrait aucun chemin numérique. L'autorisation distincte
+#219-DU-REGISTER-LOG-003 ci-dessous permet maintenant un journal privé
+**candidat**, sans lever l'absence de preuve DataUpdated→V4 (plage et ordre).
+CODEX DEV ne lance aucune observation réelle pour obtenir cette preuve.
 
 Les tests synthétiques couvrent au moins vingt messages, l'égalité trompeuse
 avec un V4, les invalides/fragments/coalescences, l'activation et l'arrêt,
@@ -161,3 +159,67 @@ FILES/manifeste et actualisation des empreintes session/module/routeur. Les
 autres champs, empreintes et toute logique d'admission restent identiques.
 Les tests refusent une modification synthétique ou l'omission du module ;
 cette conformité des sources ne prouve aucun mapping ni admission live.
+
+## #219-DU-REGISTER-LOG-003 — DEBUG numérique local privé, hypothèse candidate
+
+L'[autorisation explicite du 17/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6946450542)
+permet d'étiqueter les indices 0..19 comme registres V4 **candidats**
+1024..1043, uniquement pour un DataUpdated admissible `parsed/ok`, transaction
+FFFF, fonction 04, unité 1 et vingt UInt16. Les noms sont ceux de la table V4
+de `protocol.md` ; aucune conversion physique n'est effectuée. Les adresses
+ne sont pas transmises dans le PDU : `mapping=unverified`, `simulated=true`
+et `source=DataUpdated` figurent sur chacune des vingt lignes.
+Ni la forme de la notification, ni ce journal ne prouvent le mapping.
+Les autres formes restent diagnostiquées seulement en catégories expurgées.
+
+Pour isoler les nombres des exports HA, ce journal est un flux de texte
+étiqueté DEBUG, **pas un logger Python** : aucun LogRecord, LogRecordFactory,
+handler HA, stdout/stderr, fichier ordinaire ou diagnostic de support ne reçoit
+les couples. Le DEBUG général et le logger shadow catégoriel ne l'activent pas.
+Le module ne crée aucun fichier, n'installe aucun handler et ne garde aucun
+writer, candidat ou historique entre notifications/générations.
+
+Le propriétaire doit configurer explicitement, dans le processus HA local :
+
+```text
+HOBEN_PRIVATE_DATAUPDATED_DEBUG=1
+HOBEN_PRIVATE_DATAUPDATED_FIFO=/dev/shm/hoben-private/dataupdated.pipe
+```
+
+Après installation volontaire du SHA revu et démarrage HA avec ces variables,
+le propriétaire seul peut ouvrir un terminal **privé dans le même conteneur** :
+
+```sh
+umask 077
+mkdir -m 700 /dev/shm/hoben-private
+mkfifo -m 600 /dev/shm/hoben-private/dataupdated.pipe
+cat <> /dev/shm/hoben-private/dataupdated.pipe
+```
+
+Ces commandes sont une procédure propriétaire, jamais exécutée par CODEX DEV
+sur HA installé. Ne pas rediriger la sortie vers un fichier, un logger, une
+capture de terminal, un collecteur ou un ticket de support. Ce contenu contient
+des données domestiques privées : aucun partage GitHub/CI/diagnostics.
+Le `<>` Linux garde la FIFO ouverte entre les notifications sans conserver
+de writer dans le module HA ; Ctrl-C ferme ce lecteur privé et arrête la sortie.
+Si la plateforme ne permet pas ce canal local séparé, laisser l'option inactive ;
+aucun repli vers les logs HA n'est proposé. Fermer le lecteur arrête les sorties
+immédiatement ; retirer le commutateur et redémarrer HA désactive aussi le chemin.
+Le répertoire/FIFO peut ensuite être supprimé par le propriétaire.
+
+Le writer exige Linux `O_PATH`, un inode FIFO appartenant à l'UID HA, mode
+exact 0600, un seul lien, sans symlink. L'inode est épinglé avant ouverture
+non bloquante ; son identité et ses permissions sont revérifiées. Les vingt
+lignes tiennent dans une seule écriture atomique bornée à `PIPE_BUF`.
+Sans lecteur, avec un lecteur lent/fermé, une erreur ou un hôte incompatible,
+la notification est abandonnée sans attente, retry, rétention ou exception
+publique. Les variables `CI` ou `GITHUB_ACTIONS` interdisent le journal, même
+avec opt-in. Il n'existe aucun TX réseau ou lecteur RX supplémentaire.
+
+Les tests utilisent exclusivement des FIFO temporaires et des nombres inventés,
+avec vingt notifications, limites UInt16, mutations de chemin/permissions,
+pression, erreurs, activation/arrêt, générations et unload. Les tests HA
+vérifient l'identité des états/snapshots, la fraîcheur, les listeners, le timer
+de polling, les émissions et l'absence des valeurs dans les exports de support.
+Le manifeste #186 réépingle seulement le module shadow ; gates inchangés.
+**Tests Hoben / HA installé : NOT RUN. #219-B reste non autorisée.**
