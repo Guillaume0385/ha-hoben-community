@@ -1,5 +1,15 @@
 # Changelog
 
+## En cours — #219-S, garde shadow sans mapping inventé
+
+- Observation synchrone des seuls DataUpdated structurellement valides ;
+  diagnostic dédié opt-in `shadow_mapping_unproven`, zéro proposition.
+  Le DEBUG général ne l'active pas ; aucune valeur ou donnée reçue n'est loggée.
+- La correspondance avec les registres V4 reste non prouvée : simulation
+  numérique bloquée, aucune entité ni fraîcheur HA mise à jour, polling conservé.
+- Tests synthétiques de confidentialité, générations, cleanup et absence
+  d'effets HA ; aucun test réel. Voir [les limites](docs/data-updated-recovery.md).
+
 ## En cours — #219-A, réception et diagnostic DataUpdated par livraison
 
 - Le RX HA traite une livraison `0x1B` admissible entière comme candidat,

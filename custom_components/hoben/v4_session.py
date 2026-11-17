@@ -79,6 +79,7 @@ from .session import (
     _open_session,
 )
 from .session_monitor import SessionEvent, error_event, notify_status
+from .shadow_data_updated import observe_data_updated
 from .transport import (
     AsyncTlsTransport,
     TransportCertificateError,
@@ -748,6 +749,12 @@ class V4Session:
         result = parse_data_updated(data)
         self._diagnose_data_updated(result)
         report = result.safe_report()
+        if report["status"] == "parsed":
+            observe_data_updated(
+                result,
+                generation=self._framer.frame_log.generation,
+                index=self._data_updated_deliveries,
+            )
         if report["status"] not in {"parsed", "unsupported"}:
             self._begin_data_updated_recovery(
                 (report["declared_mbap_length"], report["reason"]),

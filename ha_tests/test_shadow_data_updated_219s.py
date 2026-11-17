@@ -23,6 +23,7 @@ async def test_twenty_parsed_deliveries_report_unproven_without_changing_ha(
     previous, stamp = coordinator.data, coordinator.last_successful_read_at
     life = peers.lifecycles[0]
     session, snapshot = life._session, life._session._snapshot
+    previous_states = {s.entity_id: s for s in hass.states.async_all()}
     listener = Mock()
     unsubscribe = coordinator.async_add_listener(listener)
     try:
@@ -32,7 +33,7 @@ async def test_twenty_parsed_deliveries_report_unproven_without_changing_ha(
         events = [
             r.hoben_shadow
             for r in caplog.records
-            if hasattr(r, "hoben_shadow")
+            if r.name == LOGGER and hasattr(r, "hoben_shadow")
         ]
         assert len(events) == 20, "one shadow decision per parsed delivery is missing"
         assert all(e["event"] == "shadow_mapping_unproven" for e in events)
@@ -42,6 +43,9 @@ async def test_twenty_parsed_deliveries_report_unproven_without_changing_ha(
         assert coordinator.last_successful_read_at == stamp
         assert session._snapshot is snapshot
         listener.assert_not_called()
+        states = {s.entity_id: s for s in hass.states.async_all()}
+        assert states.keys() == previous_states.keys()
+        assert all(states[key] is state for key, state in previous_states.items())
         assert life.witness.verified_read_sequence == 1
         assert peers.factory.call_count == 1 and not peers.backoff.delays
         assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
