@@ -125,7 +125,7 @@ Un échec GitHub transitoire peut être vérifié puis retenté une fois. Un ref
 
 Tous les tests DEV et CI ordinaires sont hors ligne. Les tests réels passent exclusivement par des mécanismes GitHub installés, des budgets et gates distincts, et les approbations d'environnement requises. `NOT RUN`, `PENDING APPROVAL` et `inconclusive` ne valent pas validation.
 
-Sécurité absolue : lecture seule, TLS vérifié vers `myhoben.fr:465`, aucune écriture Modbus 06/16/22, aucune commande du poêle, aucun secret, GUID, RX brut ou donnée domestique exposé, aucune frontière totale `OpenedClient` inventée. Préserver les codecs et tests existants. La validation Home Assistant réelle ne remplace pas la validation expérimentale préalable exigée.
+Sécurité absolue : lecture seule, TLS vérifié vers `myhoben.fr:465`, aucune écriture Modbus 06/16/22, aucune commande du poêle, aucun secret, GUID ou RX brut exposé, aucune donnée domestique réelle publiée sur GitHub, en CI ou dans des diagnostics de support ; **les valeurs numériques du poêle et identifiants de registres sont autorisés en clair dans les logs et fichiers locaux Home Assistant par décision explicite du propriétaire du 17/11/2026** ([#219](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6959127890)). Aucune frontière totale `OpenedClient` inventée. Préserver les codecs et tests existants. La validation Home Assistant réelle ne remplace pas la validation expérimentale préalable exigée.
 
 ## Compte rendu MANAGER
 
