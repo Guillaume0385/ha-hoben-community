@@ -118,3 +118,46 @@ Après revue MANAGER et fusion sur experimental, seule une observation passive
 volontaire du propriétaire sur HA, avec SHA chargé prouvé, pourra apporter
 les preuves réelles. **Étape 2 non attribuée ; aucune fin du polling ni mise
 à jour des entités par DataUpdated dans cette PR. Live / HA réel : NOT RUN.**
+
+## #219-S — shadow limité faute de correspondance prouvée
+
+Le mapping V4 existant décrit une lecture sollicitée de 1024..1043.
+Le PDU DataUpdated analysé n'établit ni cette adresse de départ, ni l'ordre
+sémantique de ses mots ; ses métadonnées restent opaques. Un statut
+`parsed/ok`, vingt mots ou leur égalité dans une fixture ne prouvent pas
+l'identité avec le snapshot V4. Aucun état d'entité ne peut en être déduit.
+
+Le module `shadow_data_updated.py` produit uniquement une décision immuable
+`shadow_mapping_unproven`, avec zéro proposition. Le RX existant l'observe
+sans tâche, cache, lecteur, émission ou timer supplémentaire. Aucun appel au
+décodeur sémantique, aux entités, au coordinator ou aux listeners ; aucun
+snapshot publié, compteur de fraîcheur ou polling n'est modifié.
+
+Le diagnostic catégoriel est désactivé par défaut. Seul le niveau explicitement
+`debug` du logger `custom_components.hoben.shadow_data_updated` l'active ;
+un DEBUG général ou hérité ne suffit pas. Repasser ce logger à `info` ou
+`NOTSET` arrête immédiatement l'observation, y compris après reload.
+Une panne de journalisation n'affecte pas le RX. Chaque événement ne contient
+que la catégorie, les indicateurs fixes, zéro proposition et des compteurs
+locaux bornés. Aucun identifiant d'entité, valeur, registre, contenu RX,
+métadonnée opaque ou texte d'exception n'est journalisé ou retenu.
+
+L'exception propriétaire du 17 novembre pour un DEBUG numérique local ne
+constitue pas une preuve de mapping : aucun chemin de journal numérique n'est
+implémenté ici. La simulation numérique demandée reste **bloquée** jusqu'à
+une preuve revue de la correspondance DataUpdated→V4 (plage et ordre).
+La suite exige un arbitrage MANAGER et les preuves autorisées ; CODEX DEV ne
+lance aucune observation réelle pour les obtenir.
+
+Les tests synthétiques couvrent au moins vingt messages, l'égalité trompeuse
+avec un V4, les invalides/fragments/coalescences, l'activation et l'arrêt,
+les générations, le cleanup et l'absence de publication HA ou de TX ajouté.
+L'étape #219-B et la suppression du polling restent non autorisées.
+Live / HA installé : **NOT RUN**.
+
+L'[arbitrage MANAGER du 17/11](https://github.com/Guillaume0385/ha-hoben-community/pull/222#issuecomment-6943374521)
+autorise le raccordement d'intégrité #186 : ajout du seul module shadow à
+FILES/manifeste et actualisation des empreintes session/module/routeur. Les
+autres champs, empreintes et toute logique d'admission restent identiques.
+Les tests refusent une modification synthétique ou l'omission du module ;
+cette conformité des sources ne prouve aucun mapping ni admission live.
