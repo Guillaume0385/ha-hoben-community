@@ -24,3 +24,25 @@ test('#219 parser mutation fails closed without a reviewed repin', () => {
     [parser]: sources[parser] + '\n# offline synthetic integrity mutation\n',
   }), {message: 'manual_info_route_not_connected'});
 });
+
+const shadow = 'custom_components/hoben/shadow_data_updated.py';
+
+test('#219-S shadow dependency is part of the closed integrity set', () => {
+  assert.ok(route.FILES.includes(shadow));
+  assert.ok(Object.hasOwn(manifest.files, shadow));
+  assert.equal(route.assess(manifest, sources).ready, true);
+});
+
+test('#219-S shadow mutation and omission fail closed', () => {
+  assert.ok(Object.hasOwn(sources, shadow));
+  assert.equal(route.assess(manifest, sources).ready, true);
+  const mutated = {...sources,
+    [shadow]: sources[shadow] + '\n# offline synthetic shadow mutation\n',
+  };
+  assert.throws(() => route.assess(manifest, mutated),
+    {message: 'manual_info_route_not_connected'});
+  const omitted = {...sources};
+  delete omitted[shadow];
+  assert.throws(() => route.assess(manifest, omitted),
+    {message: 'manual_info_route_not_connected'});
+});

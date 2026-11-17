@@ -154,3 +154,10 @@ avec un V4, les invalides/fragments/coalescences, l'activation et l'arrêt,
 les générations, le cleanup et l'absence de publication HA ou de TX ajouté.
 L'étape #219-B et la suppression du polling restent non autorisées.
 Live / HA installé : **NOT RUN**.
+
+L'[arbitrage MANAGER du 17/11](https://github.com/Guillaume0385/ha-hoben-community/pull/222#issuecomment-6943374521)
+autorise le raccordement d'intégrité #186 : ajout du seul module shadow à
+FILES/manifeste et actualisation des empreintes session/module/routeur. Les
+autres champs, empreintes et toute logique d'admission restent identiques.
+Les tests refusent une modification synthétique ou l'omission du module ;
+cette conformité des sources ne prouve aucun mapping ni admission live.

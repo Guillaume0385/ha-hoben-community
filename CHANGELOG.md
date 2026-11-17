@@ -9,6 +9,9 @@
   numérique bloquée, aucune entité ni fraîcheur HA mise à jour, polling conservé.
 - Tests synthétiques de confidentialité, générations, cleanup et absence
   d'effets HA ; aucun test réel. Voir [les limites](docs/data-updated-recovery.md).
+- Arbitrage MANAGER du 17/11 appliqué : dépendance shadow ajoutée à la liste
+  fermée d'intégrité #186, empreintes session/module/routeur actualisées ;
+  falsification ou omission du module refusée, logique des gates inchangée.
 
 ## En cours — #219-A, réception et diagnostic DataUpdated par livraison
 

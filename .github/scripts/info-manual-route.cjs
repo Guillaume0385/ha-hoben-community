@@ -53,6 +53,7 @@ const FILES = Object.freeze([
   'custom_components/hoben/session_monitor.py',
   'custom_components/hoben/session_observation.py',
   'custom_components/hoben/session_sensor.py',
+  'custom_components/hoben/shadow_data_updated.py',
   'custom_components/hoben/transport.py',
   'custom_components/hoben/v4_eof_quarantine.py',
   'custom_components/hoben/v4_experiment.py',
