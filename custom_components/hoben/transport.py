@@ -3,8 +3,10 @@
 import asyncio
 import math
 import ssl
+import sys
+from asyncio import selector_events, sslproto, trsock
 
-from .close_diagnostic import CloseTrace
+from .close_diagnostic import CloseTrace, emit_termination
 
 DEFAULT_HOST = "myhoben.fr"
 DEFAULT_PORT = 465
@@ -32,6 +34,109 @@ class TransportTlsError(TransportError):
 
 class TransportCertificateError(TransportTlsError):
     """Certificate or hostname verification failed, distinct from negotiation."""
+
+
+class _TlsCloseProof:
+    """Bind real CPython owners before close; unknown implementations stay refused.
+
+    A TLS close Future can finish with an error although the OS descriptor and
+    both SDK transports have been released. Neither that Future nor a callback
+    or abort flag proves release: check the captured descriptor, detached owners,
+    cancelled SDK timers and the separately reaped close task together.
+    """
+
+    @classmethod
+    def capture(cls, writer):
+        try:
+            if sys.implementation.name != "cpython" or sys.version_info[:2] not in {
+                (3, 12),
+                (3, 14),
+            }:
+                return None
+            if type(writer) is not asyncio.StreamWriter:
+                return None
+            app, protocol = writer.transport, writer._protocol
+            if (
+                type(app) is not sslproto._SSLProtocolTransport
+                or type(protocol) is not asyncio.StreamReaderProtocol
+            ):
+                return None
+            tls = app._ssl_protocol
+            if type(tls) is not sslproto.SSLProtocol:
+                return None
+            raw = tls._transport
+            if type(raw) is not selector_events._SelectorSocketTransport:
+                return None
+            sock = raw.get_extra_info("socket")
+            future = asyncio.StreamReaderProtocol._get_close_waiter(protocol, writer)
+            if (
+                type(sock) is not trsock.TransportSocket
+                or sock.fileno() < 0
+                or sock._sock is not raw._sock
+                or raw.get_protocol() is not tls
+                or app.get_protocol() is not protocol
+                or protocol._transport is not app
+                or future.done()
+            ):
+                return None
+            proof = cls()
+            proof.writer, proof.app, proof.protocol = writer, app, protocol
+            proof.tls, proof.raw, proof.socket, proof.future = tls, raw, sock, future
+            return proof
+        except Exception:
+            return None
+
+    def check(self, waiter, error, reaped):
+        checks = dict.fromkeys(
+            ("socket_closed", "tls_released", "stream_released", "waiter_reaped"), False
+        )
+        try:
+            checks["socket_closed"] = (
+                self.socket.fileno() == -1
+                and self.raw._sock is None
+                and self.raw._loop is None
+                and self.raw.get_protocol() is None
+                and self.raw._server is None
+                and self.raw.is_closing() is True
+                and self.raw.get_write_buffer_size() == 0
+            )
+            checks["tls_released"] = (
+                self.tls._transport is None
+                and self.tls._app_transport is None
+                and self.tls._app_protocol is None
+                and self.app.get_protocol() is None
+                and self.app.is_closing() is True
+                and self.tls._state is sslproto.SSLProtocolState.UNWRAPPED
+                and self.tls._handshake_timeout_handle is None
+                and self.tls._shutdown_timeout_handle is None
+                and not self.tls._write_backlog
+                and self.tls._outgoing.pending == 0
+            )
+            checks["stream_released"] = (
+                self.writer.transport is self.app
+                and self.writer._protocol is self.protocol
+                and asyncio.StreamReaderProtocol._get_close_waiter(
+                    self.protocol, self.writer
+                )
+                is self.future
+                and self.protocol._transport is None
+                and self.protocol._stream_reader_wr is None
+                and self.protocol._stream_writer is None
+                and self.protocol._task is None
+            )
+            checks["waiter_reaped"] = (
+                reaped is True
+                and isinstance(waiter, asyncio.Task)
+                and waiter.done()
+                and not waiter.cancelled()
+                and waiter.exception() is error
+                and self.future.done()
+                and not self.future.cancelled()
+                and self.future.exception() is error
+            )
+        except Exception:
+            return dict.fromkeys(checks, False)
+        return checks
 
 
 class AsyncTlsTransport:
@@ -168,8 +273,12 @@ class AsyncTlsTransport:
         if writer is None:
             return
         trace = CloseTrace(writer, self.close_timeout)
+        proof = _TlsCloseProof.capture(writer)
         waiter = None
         aborted = False
+        tls_error = None
+        abort_ok = reaped = False
+        deadline = None
 
         def abort() -> bool:
             nonlocal aborted
@@ -185,6 +294,7 @@ class AsyncTlsTransport:
         try:
             with trace.operation("writer_close"):
                 writer.close()
+            deadline = asyncio.get_running_loop().time() + self.close_timeout
             async with asyncio.timeout(self.close_timeout):
                 # Cancelling StreamWriter.wait_closed cancels its shared close
                 # future. Own one waiter and leave it intact at the graceful
@@ -205,6 +315,10 @@ class AsyncTlsTransport:
             trace.owner_failure(error)
             abort()
             raise TransportTimeout("close") from None
+        except ssl.SSLError as error:
+            trace.owner_failure(error)
+            abort_ok = abort()
+            tls_error = error  # Preserve the error; decide only AFTER real reap.
         except Exception as error:
             trace.owner_failure(error)
             abort()
@@ -220,5 +334,19 @@ class AsyncTlsTransport:
                         if not waiter.done():
                             waiter.cancel()
                         await asyncio.gather(waiter, return_exceptions=True)
+                        reaped = True
             finally:
                 trace.finish()
+        if tls_error is not None:
+            checks = proof.check(waiter, tls_error, reaped) if proof else {}
+            verified = (
+                proof is not None
+                and abort_ok
+                and len(checks) == 4
+                and all(value is True for value in checks.values())
+                and deadline is not None
+                and asyncio.get_running_loop().time() < deadline
+            )
+            emit_termination(trace.generation, checks, verified)
+            if not verified:
+                raise TransportError("TLS close failed") from None

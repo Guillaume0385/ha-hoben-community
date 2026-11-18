@@ -8,6 +8,7 @@ import ssl
 from contextlib import contextmanager
 
 _LOGGER = logging.getLogger(__name__)
+_TERMINATION_LOGGER = logging.getLogger(__name__ + ".termination")
 _GENERATION = contextvars.ContextVar("hoben_close_generation", default="unknown")
 _OPERATIONS = {"writer_close", "wait_closed", "abort", "reap"}
 _RESULTS = {
@@ -20,6 +21,34 @@ _RESULTS = {
     "not_confirmed",
 }
 _SOURCES = {"operation", "callback", "owner"}
+
+
+def emit_termination(generation, checks, verified):
+    """Audit a transport decision; this projection never authorizes it."""
+    try:
+        snapshot = {
+            "schema": 1,
+            "generation": generation
+            if type(generation) is int and 1 <= generation <= 2147483647
+            else "unknown",
+            "result": "verified" if verified is True else "not_confirmed",
+            **{
+                key: checks.get(key) is True
+                for key in (
+                    "socket_closed",
+                    "tls_released",
+                    "stream_released",
+                    "waiter_reaped",
+                )
+            },
+        }
+        _TERMINATION_LOGGER.debug(
+            "Hoben TLS termination proof=%s",
+            snapshot,
+            extra={"hoben_tls_termination": snapshot},
+        )
+    except (Exception, asyncio.CancelledError):
+        pass
 
 
 def result(error):
