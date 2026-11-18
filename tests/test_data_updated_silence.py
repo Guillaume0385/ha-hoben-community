@@ -17,9 +17,14 @@ from custom_components.hoben.transport import (
 )
 from custom_components.hoben.v4_session import SessionState
 from tests.test_session_300_runtime import response
+from tests.test_session_ignored_rx import ignored_frame
 from tests.test_v4_persistent import Factory
 
-BAD = b"\x1bPRIV\xff\xff\x00\x00\xff\xffPRIVATE_PAYLOAD"
+# #219-005 drops a fresh read-start 1B without the old silence guard. These
+# historical guard tests now exercise the STILL non-admissible boundary: a
+# fully delimited ignored 07 precedes 1B in the same read. No Pong/TX is added,
+# and no test-only runtime switch bypasses the production admission rule.
+BAD = ignored_frame(7) + b"\x1bPRIV\xff\xff\x00\x00\xff\xffPRIVATE_PAYLOAD"
 
 
 async def pump():

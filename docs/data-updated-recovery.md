@@ -4,6 +4,68 @@ Décision propriétaire du 30/10/2026, **option B**, dans
 [l’Issue #160](https://github.com/Guillaume0385/ha-hoben-community/issues/160).
 Cette politique est un choix de récupération, sans validation réelle revendiquée.
 
+## #219-005 — incrément sûr et preuve de mapping manquante
+
+La [décision du 18/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6980810892)
+autorise le raccordement DataUpdated→entités et l'initialisation V4 unique,
+avec suppression du polling, **sous condition de mappings justifiés**. Elle
+remplace les interdictions historiques d'étape 2 figurant plus bas. Cet incrément
+ne prétend pas achever ce raccordement : il livre seulement la partie sûre
+indépendante des valeurs, le drop des candidats invalides.
+
+Pour un vrai read commençant par `0x1B`, framer vide, transport/génération
+encore possédés par l'unique RX, le candidat entier est analysé une fois.
+`incomplete/malformed/unsupported/ambiguous` ou exception du parseur : abandon
+de toute la livraison, diagnostic structurel fermé, pas de garde silence #160,
+pas de sonde, TX supplémentaire, timeout crédité ni reconnexion causée par
+cette seule erreur. `parser_failure` n'expose ni exception ni contenu reçu.
+Un Ping, un candidat valide ou un vrai `0x0E` dans les **reads suivants** restent
+traités normalement. Aucun suffixe du candidat abandonné n'est réinjecté.
+
+Les frontières non admissibles restent soumises à la garde #160 historique :
+`0x1B` après un message délimité dans le même read ou dans le résidu d'ouverture.
+Un vrai `0x0E` partiel garde ses continuations, même commençant par `0x1B`.
+Les erreurs transport/TLS et d'ownership, les trois demandes #212 et la preuve
+de cleanup #192 restent distinctes. Aucun affaiblissement d'intégrité #186 :
+seules les empreintes du parseur et de la session modifiés sont actualisées.
+
+### Limite de preuve à soumettre au MANAGER
+
+L'[analyse statique existante, révision ad977f5](https://github.com/Guillaume0385/MyHOBEN_extract/blob/ad977f506d9eaa1fd000094bd1a8ea091c9105eb/analysis/data_updated_spec_apk34.md)
+établit la chaîne `0x1B → UInt16 → FFFF → UpdateApplicatif`, mais qualifie
+encore FFFF/04/20 de `v4_applicative_candidate` et demande la validation du
+contrat réel avant publication HA. Les réponses n'embarquent pas d'adresse de
+départ. Le protocole et le logger de cette base gardent `mapping=unverified`.
+Une égalité de nombres synthétiques ou une longueur de vingt mots ne prouve
+pas la correspondance des champs.
+
+La consigne récente évoque des observations privées de températures/consigne/
+ventilation, sans table des positions effectivement corroborées ni provenance
+de version chargée. La preuve attendue est une **table expurgée** : index
+DataUpdated, champ V4 accepté, conversion, qualification et référence de
+l'analyse ; aucun nombre domestique, RX, GUID ou octet opaque requis. Les
+champs composés 1030/1033/1042 ne sont pas promus. Aucun accès HA réel par DEV
+n'est utilisé pour combler cette lacune. Signalement [#6980951060](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6980951060).
+
+En attendant cette preuve, tous les DataUpdated restent sans effet sur les
+snapshots, entités, listeners et fraîcheur HA. **Le polling V4 existant est
+conservé** : le supprimer avant de disposer d'une source mappée démontrée ne
+remplirait pas l'objectif d'acquisition. La lecture initiale unique, l'absence
+de polling et la publication HA demandées restent donc **non implémentées**,
+à reprendre dans la même PR après décision MANAGER. Les règles de fraîcheur/
+disponibilité existantes ne sont ni réinitialisées ni annoncées comme validées
+pour un futur mode push.
+
+Tests RED→GREEN nouveaux : candidats tronqués/MBAP/PDU/suffixes/unsupported,
+exception ou retour invalide du parseur, vingt invalides puis valide sur la
+même TLS, Ping/Pong, attente V4 non créditée par 1B, pas de sonde même après
+301 s de silence, EOF réel/cleanup/générations et unload. Les tests historiques
+de la garde utilisent maintenant un `0x07` délimité avant `0x1B` : cas toujours
+non admissible, sans TX ajouté ni option runtime de contournement. Les cas de
+fragments/suffixes admissibles sont mis à jour pour la nouvelle décision ;
+aucun test n'est désactivé. Diagnostics et fixtures exclusivement synthétiques.
+Live Hoben / HA installé : **NOT RUN** ; réussite globale #219-005 non revendiquée.
+
 ## Réception HA par livraison — #219-A
 
 L'[étape 1 de #219](https://github.com/Guillaume0385/ha-hoben-community/issues/219)
@@ -21,8 +83,8 @@ aux entités ni au snapshot V4. Les fonctions inconnues restent `unsupported`.
 Le [contrat et les cinq statuts](../protocol.md#réception-ha-dataupdated-par-livraison--hypothèse-locale-219-a)
 distinguent structure interne et hypothèse de frontière.
 
-Les candidats `incomplete`, `malformed` ou `ambiguous` sont consommés sans scan
-puis entrent dans la garde ci-dessous. Aucun suffixe Ping/0x0E coalescé après
+Depuis #219-005, les candidats `incomplete`, `malformed` ou `ambiguous` sont
+consommés sans scan et abandonnés sans garde. Aucun suffixe Ping/0x0E coalescé après
 `0x1B` ne peut être crédité. Un Ping/0x0E déjà délimité avant la notification
 garde son ordre et son échange ; la notification qui suit n'est pas un nouveau
 read et déclenche la garde sans assemblage MBAP. Le framer d'un vrai 0x0E
@@ -46,11 +108,13 @@ Les tests de fragmentation/concaténation de cette voie restent inchangés.
 Une notification ne complète jamais une lecture 0x0E, ne produit aucun
 snapshot et ne déclenche aucun listener HA sur l'une ou l'autre voie.
 
-## Hypothèse de silence explicitement autorisée
+## Hypothèse de silence historique, conservée aux frontières non admissibles
 
 Seule la politique d’entrée HA (`ha_reconnect=True`) active cette extension du
 gestionnaire partagé. Les campagnes, clients bornés et codecs gardent leurs
-contrats antérieurs. Un candidat DataUpdated rejeté (ou une frontière non admissible) déclenche :
+contrats antérieurs. Depuis #219-005, seule la frontière non admissible déclenche
+encore cette garde ; le candidat admis au début d'un read puis rejeté par le
+parseur n'y entre plus :
 
 1. Un WARNING par épisode : type DataUpdated, raison fermée du parseur/de la frontière, Length
    annoncé lorsqu’il est disponible (UInt16), hypothèse `silence_30s`.

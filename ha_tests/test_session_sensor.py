@@ -127,7 +127,7 @@ async def test_eof_and_reopening_update_session_without_refreshing_measurements(
         assert_stopped(peers)
 
 
-async def test_data_updated_recovery_is_visible_before_any_measurement_poll(
+async def test_non_admissible_data_updated_recovery_is_visible_before_any_poll(
     hass, entry, peers, monkeypatch
 ):
     wire = peers.wire(DEVICE_GUID, [[RESPONSE], [RESPONSE[:10] + b"\x00\x13" * 20]])
@@ -144,7 +144,7 @@ async def test_data_updated_recovery_is_visible_before_any_measurement_poll(
     assert state.state == "recovering"
     assert state.attributes["recovery_count"] == 1
     assert state.attributes["last_error_category"] == "malformed_response"
-    assert state.attributes["last_error_phase"] == "mbap_header"
+    assert state.attributes["last_error_phase"] == "frame_boundary"
     assert wire.write.await_count == 2
     assert all(measures(hass, entry)[k] is v for k, v in before.items())
     await clock.advance(29)

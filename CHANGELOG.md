@@ -1,5 +1,18 @@
 # Changelog
 
+## En cours — #219-005, incrément sûr de drop DataUpdated
+
+- Une livraison DataUpdated admissible invalide est abandonnée entière sans
+  déclencher la garde silence #160, une sonde ou une reconnexion. RX, Ping/Pong
+  et requête V4 en cours continuent ; erreur du parseur expurgée et catégorielle.
+- Frontières non admissibles, vrais 0x0E partiels, timeouts #212 et cleanup #192
+  préservés ; tests RED→GREEN unitaires/HA et empreintes #186 seules actualisées.
+- **Livraison partielle** : preuve de mapping DataUpdated→champs V4 manquante
+  signalée au MANAGER. Aucune publication d'entité ou fausse fraîcheur ; lecture
+  initiale unique et suppression du polling non implémentées en attendant cette
+  preuve. [Limites et suite](docs/data-updated-recovery.md#219-005--incrément-sûr-et-preuve-de-mapping-manquante).
+  Aucun test Hoben/HA réel.
+
 ## En cours — #192, fermeture TLS avec preuve indépendante de libération
 
 - Après une erreur TLS de `wait_closed`, accepter uniquement une libération

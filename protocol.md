@@ -114,7 +114,32 @@ typée et numéro public ; CloseClient garde son chemin spécifique. Un type inc
 MBAP invalide ou suffixe ambigu ne permet jamais de saut ou resynchronisation.
 Cette règle ne prouve aucune longueur universelle d'OpenedClient.
 
-### Récupération HA après DataUpdated invalide — décision #160
+### Politique HA actuelle — décision #219-005 du 18/11/2026
+
+La [consigne propriétaire/MANAGER #219-DU-ENTITIES-INITIAL-V4-005](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6980810892)
+remplace la récupération par silence pour **le seul candidat admissible**
+commençant par `0x1B` au début d'un vrai read, avec framer vide et ownership
+encore vérifié. Une livraison invalide est abandonnée entière ; pas de scan,
+assemblage, réinjection de suffixe, sonde, remise à zéro d'un délai V4 ni
+reconnexion pour cette seule erreur. Le RX et Ping/Pong continuent. Une erreur
+du parseur pur donne seulement le diagnostic fermé `parser_failure`, sans
+texte d'exception ni contenu reçu. Ce choix de disponibilité ne prouve aucune
+frontière TLS/message et ne modifie aucun fait du mapping.
+
+Le contrat de frontière non admissible reste distinct : `0x1B` après un autre
+message dans le même read ou dans le résidu d'ouverture reste sous #160.
+Une continuation de vrai `0x0E` partiel appartient toujours à son framer.
+Pertes réelles transport/TLS, sécurité, ownership, #212 et cleanup #192 gardent
+leurs garde-fous. Les campagnes sans politique HA restent inchangées.
+
+La même décision autorise conditionnellement les notifications vers les entités,
+une lecture initiale par génération et la fin du polling, **uniquement avec
+mapping justifié**. Cet incrément ne livre que le drop sûr : snapshots, entités
+et polling restent ceux de la base en attendant la table de preuve expurgée.
+La correspondance candidate 1024..1043 et les champs composés ne deviennent pas
+prouvés par cette autorisation. Voir [le blocage précis](docs/data-updated-recovery.md#219-005--incrément-sûr-et-preuve-de-mapping-manquante).
+
+### Récupération HA historique après DataUpdated invalide — décision #160
 
 Le propriétaire autorise le 30/10/2026 une [hypothèse de récupération locale](docs/data-updated-recovery.md)
 sur le TLS existant : arrêt du décodage/lectures, RX abandonné sans scan ni
@@ -124,6 +149,8 @@ validé permet la reprise ; aucun registre DataUpdated n'est décodé ou publié
 Une sonde refusée retourne à la récupération bornée, sans reconnexion provoquée
 par cette seule anomalie. Les dernières valeurs HA restent conservées sans faux
 succès d'acquisition ; les vraies pertes transport/TLS restent distinctes.
+Pour les nouveaux candidats admissibles, cette ancienne règle est remplacée
+par #219-005 ci-dessus ; elle reste utilisée aux frontières non admissibles.
 Cette règle est une **hypothèse autorisée, pas une preuve de frontière ou de
 fraîcheur serveur**. Les contrats expérimentaux restent inchangés et aucun
 résultat réel nouveau n'est établi.
@@ -156,12 +183,12 @@ conversion physique, corrélation V4 ou règle de fusion inventée. Les statuts 
 - `malformed` : protocole/longueur MBAP ou structure PDU invalide ;
 - `ambiguous` : octets supplémentaires ou frontière de livraison non admissible.
 
-Un candidat incomplet, malformé ou ambigu rejoint la garde #160 sur **la même
-TLS** : pas d'assemblage, de scan, de fermeture pour cette seule anomalie ni de
-réponse créditée depuis le suffixe. Silence glissant, purge, sonde V4 unique,
-limites de corrélation et cleanup restent ceux de #160/#212. Une fonction non
-supportée mais internement bornée est seulement consommée/diagnostiquée sous
-l'hypothèse de livraison, sans interprétation supplémentaire.
+Depuis #219-005, un candidat incomplet, malformé, ambigu ou non supporté est
+consommé et diagnostiqué sans garde #160 : pas d'assemblage, de scan, de sonde,
+de fermeture pour cette seule anomalie ni de réponse créditée depuis le suffixe.
+Les limites de corrélation #212 et le cleanup restent inchangés. L'ancienne
+garde silence/purge/sonde est conservée pour la frontière non admissible décrite
+ci-dessous, pas pour la livraison admise puis refusée par le parseur.
 
 Un `0x1B` rencontré après un Ping/0x0E déjà délimité ou dans le résidu
 d'ouverture n'est pas une nouvelle livraison admissible : les événements
@@ -179,9 +206,9 @@ un read commençant par `0x1B` est diagnostiqué **sans examen** comme
 Le résidu d'ouverture n'est jamais étiqueté avec une fausse taille de read.
 Aucun identifiant de compte, GUID, secret, contenu opaque, code d'exception reçu ou RX/hex brut ne sort dans les diagnostics partageables ni dans les replis d'erreur. Les identifiants de registres et valeurs numériques DataUpdated peuvent être affichés en clair dans les journaux et fichiers **locaux** de Home Assistant, sur autorisation du propriétaire ; ils ne doivent jamais être exportés vers GitHub, CI ou les rapports de support.
 
-Tests synthétiques seulement ; réception naturelle et structure réelle
-**À VALIDER sur HA par le propriétaire, NOT RUN par CODEX DEV**. L'étape 2
-(snapshot/entités et fin du polling périodique) reste non autorisée.
+Tests synthétiques seulement ; aucun nouveau succès réel revendiqué par DEV.
+L'étape 2 est désormais autorisée par #219-005 sous condition de preuve du
+mapping, mais non livrée par l'incrément sûr décrit ci-dessus.
 
 ### Journal privé DataUpdated candidat — autorisation #219-DU-REGISTER-LOG-003
 
@@ -210,7 +237,9 @@ Les diagnostics exportés vers GitHub/CI/support restent expurgés. Les autres f
 aucune adresse candidate. Aucun entity_id, snapshot, fraîcheur HA ou polling
 modifié ; aucun TX/RX supplémentaire. Voir le
 [contrat d'isolation et d'arrêt](docs/data-updated-recovery.md#219-du-register-log-003--debug-numérique-local-privé-hypothèse-candidate).
-Live / HA installé : **NOT RUN** ; #219-B reste non autorisée.
+Live / HA installé : **NOT RUN par CODEX DEV**. La nouvelle décision #219-005
+supplante l'interdiction historique de #219-B, sans transformer les associations
+candidates du journal privé en mappings prouvés.
 
 ### Prototype privé Info — hypothèse #186-B, désactivée par défaut
 

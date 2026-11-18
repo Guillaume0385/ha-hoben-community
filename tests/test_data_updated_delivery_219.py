@@ -65,12 +65,16 @@ def test_fragment_is_not_reassembled_or_left_in_the_mbap_framer(split, caplog):
             assert not session._framer.partial, (
                 "a notification cannot span read deliveries"
             )
-            assert life.data_updated_recovering
+            assert not life.data_updated_recovering
             (event,) = reports(caplog)
             assert event["delivery_bytes"] == split and event["status"] == "incomplete"
             stream.queue.put_nowait(notification()[split:])
             await pump()
             assert not session._framer.partial and session.verified_read_sequence == 0
+            stream.queue.put_nowait(notification())
+            await pump()
+            assert reports(caplog)[-1]["status"] == "parsed"
+            assert not life.data_updated_recovering
             assert [w[0] for w in stream.writes] == [3]
         finally:
             await life.close()
@@ -99,7 +103,9 @@ def test_adjacent_suffix_is_never_scanned_or_credited_to_pending_v4(tail, caplog
                 event["status"] == "ambiguous" and event["reason"] == "delivery_suffix"
             )
             assert event["delivery_bytes"] == 54 + len(tail)
-            assert session.verified_read_sequence == 0 and life.data_updated_recovering
+            assert (
+                session.verified_read_sequence == 0 and not life.data_updated_recovering
+            )
             assert not session._framer.partial and stream.close_count == 0
             assert [w[0] for w in stream.writes] == [3, 13]
         finally:
