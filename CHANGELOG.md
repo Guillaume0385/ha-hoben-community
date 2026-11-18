@@ -1,5 +1,20 @@
 # Changelog
 
+## En cours — #192, fermeture TLS avec preuve indépendante de libération
+
+- Après une erreur TLS de `wait_closed`, accepter uniquement une libération
+  entièrement vérifiée : descripteur capturé fermé, propriétaires TLS/stream
+  détachés, timers/buffers libérés et tâche de fermeture réellement réapée.
+  Callback ou abort/reap retournés seuls restent insuffisants.
+- Adaptateur strict CPython selector 3.12/3.14 ; SDK inconnu, preuve partielle,
+  timeout, annulation et erreur non-TLS conservent le refus. Budgets, politique
+  de reconnexion, trois demandes #212 et DataUpdated inchangés.
+- Diagnostic original `raised_tls` conservé et projection catégorielle séparée.
+  RED→GREEN synthétique avec descripteurs locaux sans trafic ; deux empreintes
+  runtime #186 réépinglées sans modifier les gates. Aucun test réel ; cause et
+  résolution de l'incident résidentiel non attestées.
+  Voir [les preuves et limites](docs/tls-close-recovery-192.md).
+
 ## En cours — #219-DU-HA-DEBUG-004, bloc DEBUG local DataUpdated
 
 - Un seul bloc structuré borné par notification admissible dans le logger HA
