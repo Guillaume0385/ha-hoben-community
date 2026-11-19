@@ -41,7 +41,7 @@
     "custom_components/hoben/close_diagnostic.py": "e014e6c5cd6c1ef19b499620de8d100e735a75e82cbf664a2049ceb40dbd4928",
     "custom_components/hoben/config_flow.py": "c4080b79437eb6e3ca1e0c6f4cd522f9bed7f4ed09e5088b4dcca26d8569b088",
     "custom_components/hoben/const.py": "4b51f3f236ffb9216fdef31e7813e7dd3ecb6d277fdfe50f9ae87779dc12a584",
-    "custom_components/hoben/coordinator.py": "592f0d30a8f862ea4054d865b68198573399e57274f9825b83458bb5f3f454b9",
+    "custom_components/hoben/coordinator.py": "6c2370adc442c7e6dd5a1b3f90c821e5e4ee91b1eae4c4c1a0c0cca11ca27103",
     "custom_components/hoben/data_updated_parser.py": "02c79a924575c9ba3e3b610a5e5bbd533daf43fc516e3bbd1842c3c57eaccda9",
     "custom_components/hoben/data_updated_recovery.py": "30460aff7c7129e5a02b59af8b47bbf1771970bc39decc7727b464c76cd5b199",
     "custom_components/hoben/diagnostics.py": "7b08a5cb6382b78e331fc4da02a50f83fe02b483f2a31cf6d6966d02ba2e1637",

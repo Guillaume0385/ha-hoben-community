@@ -79,7 +79,7 @@ async def test_twenty_updates_publish_atomic_existing_decoded_entities(
 
 
 @pytest.mark.parametrize("value", [17, 222])
-async def test_no_periodic_or_explicit_duplicate_initial_read_and_staleness(
+async def test_no_periodic_or_explicit_duplicate_initial_read_during_connected_silence(
     hass, entry, push_peers, monkeypatch, value
 ):
     from custom_components.hoben import coordinator as module
@@ -96,8 +96,9 @@ async def test_no_periodic_or_explicit_duplicate_initial_read_and_staleness(
         await clock.advance(299)
         assert coordinator.snapshot_available
         await clock.advance(1)
-        assert not coordinator.snapshot_available
-        assert sensor(hass, entry).state == "unavailable"
+        assert coordinator.snapshot_available
+        assert sensor(hass, entry).state != "unavailable"
+        assert coordinator.last_successful_read_at == stamp
         assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
         wire.queue.put_nowait(updated((value,) * 20))
         await pump()
@@ -166,7 +167,7 @@ async def test_parent_debug_does_not_enable_private_values_and_unload_revokes_ca
     assert await hass.config_entries.async_unload(entry.entry_id)
     callback(item)
     assert coordinator.data is previous and not coordinator.snapshot_available
-    assert not client._data_listeners and coordinator._unsub_push_expiry is None
+    assert not client._data_listeners and coordinator._unsub_hold_expiry is None
     assert_stopped(push_peers)
 
 

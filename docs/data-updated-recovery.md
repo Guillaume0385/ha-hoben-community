@@ -57,22 +57,49 @@ explicite observe le cache de cette génération sans nouvelle émission et sans
 renouveler sa fraîcheur. Les clients manuels/config-flow/campagne conservent
 par défaut leur API explicite de lecture, sans activation implicite du push.
 
-Un timeout initial conserve la politique #212 : deux nouvelles émissions au
-maximum, chacune 60 s après le timeout précédent, TLS/RX/Ping-Pong maintenus,
-puis cleanup attesté avant reconnexion. Une notification ou une réponse FFFF
-retardée ne valide pas artificiellement cette initiale abandonnée. Le setup
-attend la prochaine acquisition vérifiée ; stop/unload annulent ses propriétaires.
-Après vraie perte, le superviseur existant reconnecte et le coordinateur fait
-une initialisation unique sur la nouvelle génération, sans replay.
+Le client conserve la politique #212 : deux nouvelles émissions au maximum,
+chacune 60 s après un timeout, TLS/RX/Ping-Pong maintenus, puis cleanup attesté
+avant reconnexion. Une notification ou une réponse FFFF retardée ne valide pas
+artificiellement une initiale abandonnée. Le bootstrap #220 dispose de sa borne
+distincte de 10 s puis du cleanup TLS existant de 5 s : il peut arrêter cette
+tentative avant le timeout protocolaire et rendre le retry à HA, uniquement
+après nettoyage attesté. Les budgets ne changent pas avec #219-006.
+Après vraie perte du client chargé, le superviseur existant reconnecte et le
+coordinateur fait une initialisation unique sur la nouvelle génération, sans replay.
 
-La disponibilité des mesures expire **300 s après réception/acquisition de la
-dernière donnée validée**, même si TLS reste silencieuse et saine. Un timer UI
-notifie HA ; il n'émet rien et ne déclenche aucune reconnexion. Un refresh du
-cache ne prolonge pas ce délai. Une notification valide rétablit les entités,
-y compris si ses valeurs sont identiques aux dernières. L'heure publique
-`last_successful_read_at` inclut désormais les acquisitions DataUpdated ; elle
-ne désigne plus seulement une lecture sollicitée. La fraîcheur est celle de la
-réception locale admissible, pas une preuve d'horodatage/anti-rejeu côté serveur.
+La [décision propriétaire #219-006 du 19/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-7016974888)
+remplace l'ancienne expiration de disponibilité fondée sur l'âge de la donnée.
+Après une première acquisition V4 valide, **les dernières mesures restent
+disponibles tant que la session/TLS courante est effectivement active**, même
+sans notification pendant 5, 10, 30 ou 60 minutes. Aucun timer d'âge push ni
+polling n'est armé. Le silence et une notification invalide ne prouvent aucune
+perte ; les valeurs, leur snapshot et leur heure de réception ne sont pas renouvelés.
+Disponibilité ne signifie donc pas mesure récente.
+
+À la perte effective de session, une unique fenêtre monotone de 300 s démarre
+à T0, **pas à la dernière notification ni à la fin du cleanup**. Le dernier
+snapshot validé reste retenu sous les garde-fous de récupération/nettoyage.
+À T0+300 s il reste dans la grâce ; **après** cette borne, les entités deviennent
+indisponibles sans nouvelle acquisition valide. Le timer UI vérifie cette limite
+stricte, sans TX ni permission de reconnexion. Une simple réouverture ou des
+pertes rapprochées sans acquisition ne rechargent pas cette fenêtre.
+
+La nouvelle génération doit fournir une vraie initiale V4 corrélée/décodée.
+Si elle réussit avant la borne, les entités n'ont pas à passer par unavailable ;
+après expiration, seule cette acquisition rétablit leur disponibilité. La
+notification éventuellement retenue pendant l'initiale conserve l'ordre #219-005.
+Une acquisition valide révoque l'ancien timer ; ses callbacks tardifs ne peuvent
+affecter une autre fenêtre, génération ou instance après unload/reload.
+
+Avant toute première acquisition, après stop/unload/shutdown, refus terminal
+d'identité/autorisation/certificat ou cleanup non attesté, aucun available n'est
+fabriqué. Ces exceptions de sécurité restent prioritaires sur la grâce. Les
+clients manuels/campagnes gardent leur contrat explicite antérieur.
+
+`last_successful_read_at` reste l'heure de la dernière acquisition admissible,
+y compris DataUpdated, jamais l'heure d'un simple maintien/reconnect/refresh du
+cache. La fraîcheur reste celle de la réception locale ; aucune preuve de
+timestamp serveur ou d'anti-rejeu n'est ajoutée.
 
 ### Invalides, frontières et garde-fous
 

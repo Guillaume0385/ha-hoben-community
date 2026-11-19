@@ -1,5 +1,19 @@
 # Changelog
 
+## En cours — #219-006, disponibilité liée à la connexion
+
+- Retrait du timer d'âge DataUpdated du mode HA push : les dernières mesures
+  validées restent disponibles sur une session active, même après une heure
+  sans notification. Aucun timestamp/snapshot/faux refresh renouvelé.
+- Grâce monotone unique démarrant à la perte effective de session : maintien
+  jusqu'à 300 s inclus, puis unavailable si aucune reprise valide. Acquisition
+  V4 requise sur la nouvelle génération ; ouverture seule et pertes rapprochées
+  sans acquisition ne rechargent pas la fenêtre. Ancien timer révoqué à la reprise.
+- Aucune disponibilité avant première acquisition ou après arrêt, refus
+  terminal ou cleanup non attesté. Setup #220, retry #212, protocoles et polling
+  inchangés. Tests HA RED→GREEN synthétiques, aucun test réel exécuté.
+  Voir [le contrat actuel](docs/data-updated-recovery.md).
+
 ## En cours — #220, démarrage HA hors ligne borné
 
 - Première acquisition limitée à 10 s pendant le setup, puis nettoyage du

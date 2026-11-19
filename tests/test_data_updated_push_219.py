@@ -167,9 +167,14 @@ def test_initial_timeout_keeps_three_request_212_and_never_credits_late_du(monke
     asyncio.run(run())
 
 
-def test_retained_notification_keeps_its_original_reception_time(monkeypatch):
+@pytest.mark.parametrize("clock_origin", [None, 54.456320868])
+def test_retained_notification_keeps_its_original_reception_time(
+    monkeypatch, clock_origin
+):
     async def run():
         clock, factory = Clock(monkeypatch), Factory()
+        if clock_origin is not None:
+            clock.start = clock_origin
         client = await connect_client(factory)
         pending = None
         try:
@@ -182,7 +187,11 @@ def test_retained_notification_keeps_its_original_reception_time(monkeypatch):
             stream.queue.put_nowait(response())
             assert (await pending).registers == (234,) * 20
             assert client.sample_received_monotonic == received
-            assert asyncio.get_running_loop().time() - received == 10
+            # Subtracting fractional monotonic origins can round by a few ulps.
+            # The retained receipt itself must still be exactly unchanged above.
+            assert asyncio.get_running_loop().time() - received == pytest.approx(
+                10, rel=0, abs=1e-9
+            )
         finally:
             if pending is not None:
                 await asyncio.gather(pending, return_exceptions=True)
