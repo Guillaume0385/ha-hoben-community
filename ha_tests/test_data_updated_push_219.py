@@ -170,7 +170,7 @@ async def test_parent_debug_does_not_enable_private_values_and_unload_revokes_ca
     assert_stopped(push_peers)
 
 
-async def test_initial_timeout_retries_three_times_then_initializes_fresh_generation(
+async def test_setup_deadline_cancels_initial_retry_owner_then_initializes_fresh_client(
     hass, entry, push_peers, monkeypatch
 ):
     clock = Clock(monkeypatch)
@@ -184,22 +184,25 @@ async def test_initial_timeout_retries_three_times_then_initializes_fresh_genera
                 break
         assert first.write.await_count == 2
         life = push_peers.lifecycles[0]
-        await clock.advance(30)
-        assert not setup.done() and life._session._failed_reads == 1
+        await clock.advance(10)
+        assert not await setup
+        entry.async_cancel_retry_setup()
+        assert_stopped(push_peers)
         first.queue.put_nowait(updated((345,) * 20))
+        first.queue.put_nowait(RESPONSE)
         await pump()
         assert life.witness.verified_read_generation is None
-        for _ in range(2):
-            await clock.advance(60)
-            await clock.advance(30)
-        await push_peers.backoff.entered.get()
+        # #220 explicitly stops the initial owner before #212's 30 s timeout.
+        # Its retries remain covered on the real loaded owner by #212's HA
+        # matrix; a stopped setup must never fire them in the background.
+        await clock.advance(210)
+        assert push_peers.factory.call_count == 1
         first.close.assert_awaited_once()
-        push_peers.backoff.release.put_nowait(None)
-        assert await setup
+        assert await hass.config_entries.async_reload(entry.entry_id)
         coordinator = entry.runtime_data.coordinator
         assert coordinator.data.raw.registers == (17,) * 20
         assert coordinator.update_interval is None
-        assert [c.args[0][0] for c in first.write.await_args_list] == [3, 13, 13, 13]
+        assert [c.args[0][0] for c in first.write.await_args_list] == [3, 13]
         assert [c.args[0][0] for c in second.write.await_args_list] == [3, 13]
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert_stopped(push_peers)

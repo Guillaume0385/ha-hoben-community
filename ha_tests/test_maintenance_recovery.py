@@ -68,7 +68,7 @@ async def test_rejected_endpoint_never_uses_tls_or_native_setup_retry(
 
 
 @pytest.mark.parametrize("fragmented", [False, True])
-async def test_setup_maintenance_waits_60s_on_same_owner(
+async def test_setup_maintenance_releases_long_backoff_before_native_retry(
     hass, entry, peers, freezer, caplog, fragmented
 ):
     hass.set_state(CoreState.running)
@@ -85,10 +85,12 @@ async def test_setup_maintenance_waits_60s_on_same_owner(
     async_fire_time_changed(hass, dt_util.utcnow())
     await asyncio.sleep(0)
     assert peers.factory.call_count == 1
-    peers.backoff.release.put_nowait(None)
-    assert await setup
+    assert not await setup
+    entry.async_cancel_retry_setup()
+    assert_stopped(peers)
+    assert await hass.config_entries.async_reload(entry.entry_id)
     assert entry.state is ConfigEntryState.LOADED
-    assert len(peers.lifecycles) == 1 and peers.factory.call_count == 2
+    assert len(peers.lifecycles) == 2 and peers.factory.call_count == 2
     assert entry.runtime_data.coordinator.last_update_success
     assert sensor(hass, entry).state != "unavailable"
     assert entry.data[CONF_DEVICE_GUID] == ROTATED_DEVICE_GUID
@@ -236,7 +238,7 @@ async def test_malformed_session_recovers_only_after_cleanup_and_new_read(
 
 
 @pytest.mark.parametrize("phase", ["opening", "read"])
-async def test_malformed_setup_recovers_on_same_owner_after_cleanup(
+async def test_malformed_setup_uses_native_retry_after_cleanup(
     hass, entry, peers, freezer, phase
 ):
     first = peers.wire(DEVICE_GUID, [[b"\x0e\xff\xff\x00\x00\xff\xff"]])
@@ -251,11 +253,13 @@ async def test_malformed_setup_recovers_on_same_owner_after_cleanup(
     async_fire_time_changed(hass, dt_util.utcnow())
     await asyncio.sleep(0)
     assert peers.factory.call_count == 1
-    peers.backoff.release.put_nowait(None)
-    assert await setup
+    assert not await setup
+    entry.async_cancel_retry_setup()
+    assert_stopped(peers)
+    assert await hass.config_entries.async_reload(entry.entry_id)
     assert entry.runtime_data.coordinator.last_update_success
     assert sensor(hass, entry).state != "unavailable"
-    assert peers.factory.call_count == 2 and len(peers.lifecycles) == 1
+    assert peers.factory.call_count == 2 and len(peers.lifecycles) == 2
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert_stopped(peers)
 

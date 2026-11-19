@@ -1,5 +1,23 @@
 # Changelog
 
+## En cours — #220, démarrage HA hors ligne borné
+
+- Première acquisition limitée à 10 s pendant le setup, puis nettoyage du
+  propriétaire avec le budget TLS existant de 5 s (cible totale 15 s).
+  HA reprend ses retries natifs après arrêt/nettoyage attestés, sans entité
+  ni valeur avant une vraie première réponse V4 décodée.
+- Poêle non connecté au serveur pendant l'ouverture : erreur récupérable ;
+  refus d'identité/autorisation et de certificat toujours terminaux. Identité
+  déjà acceptée persistée même si le setup expire.
+- Un cleanup non attesté interdit le retry et le reload de cette entrée :
+  propriétaires arrêtés conservés avec un verrou d'échec, aucun faux snapshot.
+  Annulation, arrêt et reload après cleanup réussi ne laissent aucun second
+  propriétaire. Diagnostics catégoriels uniquement.
+- La borne de bootstrap peut annuler la lecture initiale avant le timeout
+  protocolaire de 30 s ; elle ne modifie pas les trois demandes #212 du client
+  actif après chargement, ni #160/#192/#219, DataUpdated ou le polling.
+  Tests RED→GREEN HA synthétiques, aucune validation réelle exécutée.
+
 ## En cours — #219-005, DataUpdated vers les entités HA
 
 - Mapping 0..19 → V4 1024..1043 admis par décision empirique propriétaire du
