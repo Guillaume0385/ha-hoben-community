@@ -15,6 +15,10 @@
   et 0x0E partiels préservés. Tests RED→GREEN unitaires/HA et non-régressions ;
   empreintes runtime nécessaires actualisées sans changer les gates #186.
   Aucun test réel. [Contrat et limites](docs/data-updated-recovery.md).
+- Correction de revue : exceptions locales de décodage et de callback isolées
+  sans interrompre RX/Pong ni reconnecter ; notification échouée non retenue,
+  état/fraîcheur conservés et reprise sur la notification valide suivante.
+  Diagnostics catégoriels sans exception privée, tests RED→GREEN Python/HA.
 
 ## En cours — #192, fermeture TLS avec preuve indépendante de libération
 

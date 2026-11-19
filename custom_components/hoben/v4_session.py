@@ -792,31 +792,49 @@ class V4Session:
                 )
                 words, opened = _candidate_words(result), self._snapshot.opening
                 if words is not None and opened is not None:
-                    snapshot = RawStoveSnapshot(
-                        profile=StoveProfile.V4,
-                        registers=words,
-                        product_type=opened.product_type,
-                        product_revision=opened.product_revision,
-                        software_major=opened.software_major,
-                        software_minor=opened.software_minor,
-                        application_version=opened.application_version,
-                    )
-                    state = decode_v4_snapshot(snapshot)
-                    self._data_updated_sequence += 1
-                    self._latest_data_updated = (
-                        self._data_updated_sequence,
+                    try:
+                        snapshot = RawStoveSnapshot(
+                            profile=StoveProfile.V4,
+                            registers=words,
+                            product_type=opened.product_type,
+                            product_revision=opened.product_revision,
+                            software_major=opened.software_major,
+                            software_minor=opened.software_minor,
+                            application_version=opened.application_version,
+                        )
+                        state = decode_v4_snapshot(snapshot)
+                    except Exception:
+                        # Only this pure conversion is contained. No transport,
+                        # ownership check or cancellation is inside the boundary.
+                        _LOGGER.warning(
+                            "Hoben DataUpdated event=discarded reason=decode_failed"
+                        )
+                        return True
+                    item = (
+                        self._data_updated_sequence + 1,
                         snapshot,
                         state,
                         asyncio.get_running_loop().time(),
                         datetime.now(UTC),
                     )
+                    try:
+                        self._data_callback(item)
+                    except Exception:
+                        # A failed consumer must not terminate the sole RX or
+                        # leave a retained sample to overwrite the initial read.
+                        # Never log the exception or any received/private value.
+                        _LOGGER.warning(
+                            "Hoben DataUpdated event=discarded reason=callback_failed"
+                        )
+                        return True
+                    self._data_updated_sequence = item[0]
+                    self._latest_data_updated = item
                     observe_applied_data_updated(
                         snapshot,
                         state,
                         generation=self._framer.frame_log.generation,
                         index=self._data_updated_deliveries,
                     )
-                    self._data_callback(self._latest_data_updated)
         return True
 
     async def _read_framed_delivery(self, transport):

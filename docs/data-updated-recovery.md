@@ -30,6 +30,16 @@ champs combinés 1024/1030, bits 1035, valeurs inconnues et dérogations masqué
 restent ceux du décodeur existant. 1033/1042 restent bruts, sans nouvelle unité
 ni nouvelle entité.
 
+Les exceptions locales de construction/décodage du snapshot et d'appel du
+callback sont isolées séparément, après les gardes d'admissibilité. Le candidat
+est abandonné avec le seul motif fermé `decode_failed` ou `callback_failed`,
+sans exception, traceback ni valeur dans le diagnostic. Une notification dont
+le traitement échoue ne remplace pas l'échantillon retenu ni sa séquence et ne
+produit pas de journal d'état appliqué ; le RX/Pong et les délais d'acquisition
+continuent. Les notifications suivantes restent admissibles sur la même TLS.
+Les lectures/écritures transport, vérifications d'ownership, annulations et
+cleanup restent hors de ces deux frontières d'exception.
+
 La mémoire garde seulement la dernière notification de la session courante.
 Les callbacks sont liés à l'objet session et à la génération acceptée ; un
 ancien propriétaire ne peut publier après remplacement ou unload. Avant la

@@ -251,3 +251,66 @@ async def test_invalids_then_valid_same_rx_and_debug_explicit_opt_in(
     finally:
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert_stopped(push_peers)
+
+
+@pytest.mark.parametrize("fault", ["decode", "callback"])
+async def test_notification_exception_preserves_ha_then_valid_update_same_rx(
+    hass, entry, push_peers, monkeypatch, caplog, fault
+):
+    from custom_components.hoben import v4_session
+
+    wire = push_peers.wire(DEVICE_GUID, [[RESPONSE]])
+    coordinator = await load(hass, entry)
+    listener = Mock()
+    unsubscribe = coordinator.async_add_listener(listener)
+    caplog.set_level(
+        logging.DEBUG, logger="custom_components.hoben.shadow_data_updated"
+    )
+    try:
+        session = push_peers.lifecycles[0]._session
+        rx, callback = session._rx_task, session._data_callback
+        decode = v4_session.decode_v4_snapshot
+        previous = coordinator.data
+        stamp = coordinator.last_successful_read_at
+        failed = Mock(side_effect=RuntimeError("SYNTHETIC_PRIVATE_DU_FAILURE"))
+        if fault == "decode":
+            monkeypatch.setattr(v4_session, "decode_v4_snapshot", failed)
+        else:
+            session._data_callback = failed
+        wire.queue.put_nowait(updated((54321,) * 20))
+        wire.queue.put_nowait(b"\x0a")
+        await pump()
+        failed.assert_called_once()
+        assert session._rx_task is rx and not rx.done()
+        assert coordinator.data is previous
+        assert coordinator.last_successful_read_at == stamp
+        assert coordinator.client.last_snapshot is previous.raw
+        assert session._latest_data_updated is None
+        listener.assert_not_called()
+        assert not any(hasattr(r, "hoben_data_updated_state") for r in caplog.records)
+        assert "SYNTHETIC_PRIVATE_DU_FAILURE" not in caplog.text
+        assert not any(r.exc_info for r in caplog.records)
+        wire.close.assert_not_awaited()
+
+        monkeypatch.setattr(v4_session, "decode_v4_snapshot", decode)
+        session._data_callback = callback
+        wire.queue.put_nowait(updated((234,) * 20))
+        await pump()
+        listener.assert_called_once()
+        assert coordinator.data.raw.registers == (234,) * 20
+        assert coordinator.data.state == decode(coordinator.data.raw)
+        assert sensor(hass, entry).state == "23.4"
+        assert session._rx_task is rx and not rx.done()
+        assert (
+            len([r for r in caplog.records if hasattr(r, "hoben_data_updated_state")])
+            == 1
+        )
+        assert coordinator.update_interval is None
+        await coordinator.async_refresh()
+        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13, 11]
+        assert push_peers.factory.call_count == 1
+        assert_private_values_absent(caplog.text)
+    finally:
+        unsubscribe()
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert_stopped(push_peers)

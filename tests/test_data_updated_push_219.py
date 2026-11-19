@@ -9,6 +9,7 @@ from custom_components.hoben.client import HobenClient
 from custom_components.hoben.exceptions import HobenTimeoutError
 from custom_components.hoben.modbus import encode_mbap
 from custom_components.hoben.transport import TransportEOF
+from custom_components.hoben.v4_session import SessionState
 from custom_components.hoben.v4_state import decode_v4_snapshot
 from tests.test_data_updated_silence import Clock, pump
 from tests.test_session_300_runtime import response
@@ -201,6 +202,86 @@ def test_concurrent_refreshes_share_the_single_initial_request():
             )
             assert first is second
             assert [p[0] for p in factory.streams[0].writes] == [3, 13]
+        finally:
+            await client.async_close()
+            factory.assert_clean()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["decode", "callback"])
+@pytest.mark.parametrize("initialized", [False, True])
+def test_notification_failure_keeps_rx_and_never_retains_failed_sample(
+    monkeypatch, caplog, fault, initialized
+):
+    from custom_components.hoben import v4_session
+
+    async def run():
+        factory, backoff = Factory(), Backoff()
+        client = await connect_client(factory, sleep=backoff)
+        listener = Mock()
+        client.subscribe_data(listener)
+        try:
+            session, stream = factory.sessions[0], factory.streams[0]
+            if initialized:
+                await client.async_refresh()
+                stream.queue.put_nowait(notification((111,) * 20))
+                await pump()
+                listener.reset_mock()
+            original = client.last_snapshot
+            retained = session._latest_data_updated
+            sequence = session._data_updated_sequence
+            rx, callback = session._rx_task, session._data_callback
+            decode = v4_session.decode_v4_snapshot
+            failed = Mock(side_effect=RuntimeError("SYNTHETIC_PRIVATE_DU_FAILURE"))
+            if fault == "decode":
+                monkeypatch.setattr(v4_session, "decode_v4_snapshot", failed)
+            else:
+                session._data_callback = failed
+            stream.queue.put_nowait(notification((54321,) * 20))
+            stream.queue.put_nowait(b"\x0a")
+            await pump()
+            failed.assert_called_once()
+            assert session._rx_task is rx and not rx.done()
+            assert session.state is SessionState.CONNECTED
+            assert stream.close_count == 0 and len(factory.streams) == 1
+            assert client.last_snapshot is original
+            assert session._latest_data_updated is retained
+            assert session._data_updated_sequence == sequence
+            assert not session._data_updated.active
+            assert session._data_updated.task is None
+            assert session._failed_reads == 0 and not session.acquisition_uncertain
+            listener.assert_not_called()
+            assert "SYNTHETIC_PRIVATE_DU_FAILURE" not in caplog.text
+            assert not any(record.exc_info for record in caplog.records)
+            reason = "decode_failed" if fault == "decode" else "callback_failed"
+            assert f"event=discarded reason={reason}" in caplog.text
+
+            monkeypatch.setattr(v4_session, "decode_v4_snapshot", decode)
+            session._data_callback = callback
+            stream.queue.put_nowait(notification((234,) * 20))
+            await pump()
+            if not initialized:
+                listener.assert_not_called()
+                await client.async_refresh()
+            else:
+                listener.assert_called_once()
+            assert client.last_snapshot.registers == (234,) * 20
+            assert session._latest_data_updated[0] == sequence + 1
+            assert session._data_updated_sequence == sequence + 1
+            await client.async_refresh()
+            assert sorted(p[0] for p in stream.writes) == [3, 11, 13]
+            assert session._rx_task is rx and not rx.done()
+
+            # A true transport loss outside the two local calls still reaches
+            # the original supervisor and must be reaped before a fresh owner.
+            stream.queue.put_nowait(TransportEOF())
+            await backoff.entered.get()
+            assert session.cleanup_succeeded and stream.close_count == 1
+            assert len(factory.streams) == 1
+            backoff.release.put_nowait(None)
+            await client._lifecycle.wait_connected()
+            assert (await client.async_refresh()).registers == (17,) * 20
         finally:
             await client.async_close()
             factory.assert_clean()
