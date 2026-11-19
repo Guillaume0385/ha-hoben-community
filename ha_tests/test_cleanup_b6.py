@@ -24,7 +24,7 @@ from tests.tls_script import script_tls
 
 
 @pytest.fixture
-def tls_peers(monkeypatch):
+def tls_peers(monkeypatch, legacy_polling_client):
     """Keep AsyncTlsTransport's connect/read/write/close and verified TLS options."""
     wires, transports, owners, waits = [], [], [], []
 

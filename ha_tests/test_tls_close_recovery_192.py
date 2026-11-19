@@ -21,7 +21,7 @@ from tests.test_v4_lifecycle import Backoff
 
 
 @pytest.fixture
-def tls_stacks(monkeypatch):
+def tls_stacks(monkeypatch, legacy_polling_client):
     context = ssl.create_default_context()
     stacks, owners, backoff = [], [], Backoff()
     real_to_thread = asyncio.to_thread

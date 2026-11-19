@@ -1,17 +1,20 @@
 # Changelog
 
-## En cours — #219-005, incrément sûr de drop DataUpdated
+## En cours — #219-005, DataUpdated vers les entités HA
 
-- Une livraison DataUpdated admissible invalide est abandonnée entière sans
-  déclencher la garde silence #160, une sonde ou une reconnexion. RX, Ping/Pong
-  et requête V4 en cours continuent ; erreur du parseur expurgée et catégorielle.
-- Frontières non admissibles, vrais 0x0E partiels, timeouts #212 et cleanup #192
-  préservés ; tests RED→GREEN unitaires/HA et empreintes #186 seules actualisées.
-- **Livraison partielle** : preuve de mapping DataUpdated→champs V4 manquante
-  signalée au MANAGER. Aucune publication d'entité ou fausse fraîcheur ; lecture
-  initiale unique et suppression du polling non implémentées en attendant cette
-  preuve. [Limites et suite](docs/data-updated-recovery.md#219-005--incrément-sûr-et-preuve-de-mapping-manquante).
-  Aucun test Hoben/HA réel.
+- Mapping 0..19 → V4 1024..1043 admis par décision empirique propriétaire du
+  19/11 pour cet équipement, sans prétendre à des adresses transmises dans le
+  PDU. RawStoveSnapshot et décodeur V4 existant réutilisés, publication atomique.
+- Une lecture initiale par génération TLS, puis notifications sans polling ;
+  retries #212/cleanup #192 conservés, aucune notification créditée comme réponse
+  0x0E. Notification retenue pendant l'initiale prioritaire, ancien owner révoqué.
+- Fraîcheur depuis réception, indisponibilité après 300 s de silence sans TX ni
+  reconnexion ; DEBUG dédié local explicite avec vingt mots et modèle décodé,
+  aucune valeur dans les diagnostics exportables. FIFO historique indépendant.
+- Invalides admis abandonnés entiers sans garde #160 ; frontières non admissibles
+  et 0x0E partiels préservés. Tests RED→GREEN unitaires/HA et non-régressions ;
+  empreintes runtime nécessaires actualisées sans changer les gates #186.
+  Aucun test réel. [Contrat et limites](docs/data-updated-recovery.md).
 
 ## En cours — #192, fermeture TLS avec preuve indépendante de libération
 

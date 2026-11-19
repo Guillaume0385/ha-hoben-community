@@ -715,7 +715,14 @@ async def test_typed_error_recovers_on_normal_timers_without_history_or_extra_io
     ],
 )
 async def test_scripted_wire_failure_reaches_actual_polling_diagnostics(
-    hass, private_entry, monkeypatch, caplog, failure, expected, request_types
+    hass,
+    private_entry,
+    monkeypatch,
+    caplog,
+    failure,
+    expected,
+    request_types,
+    legacy_polling_client,
 ):
     """Only replace TLS: real client/parsers, HA setup and refresh stay intact."""
     opened = bytearray(48)

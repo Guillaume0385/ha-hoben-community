@@ -1,16 +1,17 @@
-"""Owner-authorized local DEBUG and the optional private #219 FIFO journal.
+"""Local opt-in #219 DEBUG: current applied states and historical candidate FIFO.
 
-V4 semantics are proven for solicited reads of 1024..1043, not for an arbitrary
-twenty-word notification. #219-DU-HA-DEBUG-004 permits candidate words in the
-explicitly enabled dedicated HA DEBUG logger, without FIFO or environment opt-in.
-Numbers remain local: no support projection, HA state or entity mapping is added.
+The owner empirically accepted FFFF/04/20 index order on 2026-11-19 for the
+reference equipment. observe_applied_data_updated audits that current HA path;
+the legacy shadow/FIFO API retains its original candidate labels and opt-ins.
+Nothing here defines a shared diagnostic export or sends data elsewhere.
 """
 
+import asyncio
 import json
 import logging
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from .data_updated_parser import DataUpdatedResult
 from .modbus import ModbusReadResponse
@@ -18,8 +19,9 @@ from .modbus import ModbusReadResponse
 _LOGGER = logging.getLogger(__name__)
 
 # Names of the solicited V4 reference map in protocol.md §8. Their association
-# with a notification index is ONLY the owner's explicitly authorized hypothesis.
-# Do not use these candidates as a RawStoveSnapshot or as an entity mapping.
+# with a notification index was accepted empirically by the owner on 2026-11-19,
+# without claiming an address in the response. Legacy candidate labels remain
+# for compatibility; current HA snapshot publication uses the existing decoder.
 _V4_REFERENCE_NAMES = (
     "erarMode_ConsigneMarchArret",
     "erarTemperatureDerogation",
@@ -45,7 +47,7 @@ _V4_REFERENCE_NAMES = (
 
 
 def _candidate_words(result):
-    """The authorized hypothetical range is restricted to the exact V4 shape."""
+    """Exact shape admitted by the owner; legacy callers keep candidate labels."""
     if preview_data_updated(result) is None:
         return None
     response = result.response
@@ -231,3 +233,39 @@ def observe_data_updated(result, *, generation, index):
         )
     except Exception:
         pass  # A diagnostic failure cannot change RX, freshness, TX or cleanup.
+
+
+def observe_applied_data_updated(snapshot, state, *, generation, index):
+    """Private local opt-in only; mapping accepted by the owner on 2026-11-19.
+
+    One bounded event, no identifier/metadata/frame or export projection. Values
+    come from the same immutable snapshot and existing V4 decoder used by HA.
+    """
+    try:
+        if _LOGGER.level != logging.DEBUG or not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        fields = {
+            "source": "DataUpdated",
+            "mapping": "owner_validated",
+            "generation": _public_index(generation, 2147483647),
+            "index": _public_index(index, 65535),
+            "registers": [
+                {
+                    "index": i,
+                    "register": 1024 + i,
+                    "name": _V4_REFERENCE_NAMES[i],
+                    "raw_value": word,
+                }
+                for i, word in enumerate(snapshot.registers)
+            ],
+            "decoded": asdict(state),
+        }
+        block = json.dumps(fields, separators=(",", ":"), ensure_ascii=True)
+        if len(block) <= 8192:
+            _LOGGER.debug(
+                "Hoben DataUpdated local state=%s",
+                block,
+                extra={"hoben_data_updated_state": fields},
+            )
+    except (Exception, asyncio.CancelledError):
+        pass

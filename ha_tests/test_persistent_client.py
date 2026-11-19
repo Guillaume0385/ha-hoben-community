@@ -38,7 +38,7 @@ RESPONSE = bytes.fromhex("0effff0000002b010428") + b"\x00\x11" * 20
 
 
 @pytest.fixture
-def peers(monkeypatch):
+def peers(monkeypatch, legacy_polling_client):
     """Only inject byte transports and backoff; instantiate the actual owners."""
     wires, lifecycles, backoff = [], [], Backoff()
 

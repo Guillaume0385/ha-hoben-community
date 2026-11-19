@@ -14,12 +14,14 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Protocol
 
 from .client import (
     DEFAULT_BUILD,
     DEFAULT_DEVICE_INFO,
+    RawStoveSnapshot,
     _validate_delay,
     _validate_device_guid,
 )
@@ -83,7 +85,12 @@ from .session import (
     _open_session,
 )
 from .session_monitor import SessionEvent, error_event, notify_status
-from .shadow_data_updated import observe_data_updated
+from .shadow_data_updated import (
+    _candidate_words,
+    _private_register_journal,
+    observe_applied_data_updated,
+    observe_data_updated,
+)
 from .transport import (
     AsyncTlsTransport,
     TransportCertificateError,
@@ -112,6 +119,7 @@ from .v4_experiment import (
     _RejectedCloseClient,
 )
 from .v4_no_pong import NoPongAfter120
+from .v4_state import decode_v4_snapshot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -413,6 +421,9 @@ class V4Session:
         "_cleanup_failed",
         "_data_updated",
         "_data_updated_deliveries",
+        "_data_callback",
+        "_latest_data_updated",
+        "_data_updated_sequence",
         "_read_idle",
         "_info_delivery_drop",
         "_discard_unsupported_deliveries",
@@ -570,6 +581,9 @@ class V4Session:
         self._tx_operations: set[asyncio.Task] = set()
         self._data_updated = DataUpdatedRecovery()
         self._data_updated_deliveries = 0
+        self._data_callback = None
+        self._latest_data_updated = None
+        self._data_updated_sequence = 0
         self._status_callback = None
         self._read_idle = asyncio.Event()
         self._read_idle.set()
@@ -764,11 +778,45 @@ class V4Session:
             report = result.safe_report()
         self._diagnose_data_updated(result)
         if report["status"] == "parsed":
-            observe_data_updated(
-                result,
-                generation=self._framer.frame_log.generation,
-                index=self._data_updated_deliveries,
-            )
+            if self._data_callback is None:
+                observe_data_updated(
+                    result,
+                    generation=self._framer.frame_log.generation,
+                    index=self._data_updated_deliveries,
+                )
+            else:
+                _private_register_journal(
+                    result,
+                    self._framer.frame_log.generation,
+                    self._data_updated_deliveries,
+                )
+                words, opened = _candidate_words(result), self._snapshot.opening
+                if words is not None and opened is not None:
+                    snapshot = RawStoveSnapshot(
+                        profile=StoveProfile.V4,
+                        registers=words,
+                        product_type=opened.product_type,
+                        product_revision=opened.product_revision,
+                        software_major=opened.software_major,
+                        software_minor=opened.software_minor,
+                        application_version=opened.application_version,
+                    )
+                    state = decode_v4_snapshot(snapshot)
+                    self._data_updated_sequence += 1
+                    self._latest_data_updated = (
+                        self._data_updated_sequence,
+                        snapshot,
+                        state,
+                        asyncio.get_running_loop().time(),
+                        datetime.now(UTC),
+                    )
+                    observe_applied_data_updated(
+                        snapshot,
+                        state,
+                        generation=self._framer.frame_log.generation,
+                        index=self._data_updated_deliveries,
+                    )
+                    self._data_callback(self._latest_data_updated)
         return True
 
     async def _read_framed_delivery(self, transport):

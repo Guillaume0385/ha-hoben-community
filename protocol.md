@@ -132,12 +132,21 @@ Une continuation de vrai `0x0E` partiel appartient toujours à son framer.
 Pertes réelles transport/TLS, sécurité, ownership, #212 et cleanup #192 gardent
 leurs garde-fous. Les campagnes sans politique HA restent inchangées.
 
-La même décision autorise conditionnellement les notifications vers les entités,
-une lecture initiale par génération et la fin du polling, **uniquement avec
-mapping justifié**. Cet incrément ne livre que le drop sûr : snapshots, entités
-et polling restent ceux de la base en attendant la table de preuve expurgée.
-La correspondance candidate 1024..1043 et les champs composés ne deviennent pas
-prouvés par cette autorisation. Voir [le blocage précis](docs/data-updated-recovery.md#219-005--incrément-sûr-et-preuve-de-mapping-manquante).
+L'[arbitrage propriétaire du 19/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6980810892)
+valide empiriquement, pour cet équipement, **indices 0..19 → 1024..1043 dans
+l'ordre croissant**. Cette décision résout l'ancien blocage `unverified`, sans
+prétendre que les adresses sont dans le PDU ni interpréter les métadonnées.
+Le mode HA accepte FFFF/04, unité 1 et vingt UInt16, construit le snapshot V4
+et réutilise le décodeur §8 pour les entités existantes ; aucun nouveau sens ni
+exposition de 1033/1042. Une initiale V4 par génération (retries #212 conservés),
+puis notifications sans polling périodique. La publication reste atomique,
+liée au propriétaire et à son ordre de réception ; disponibilité 300 s après
+la dernière réception validée, sans reconnexion due au seul silence.
+Le DEBUG dédié local privé peut montrer les vingt mots et le modèle décodé
+(`mapping=owner_validated`), jamais dans les exports de support/GitHub/CI.
+Voir [le contrat actuel](docs/data-updated-recovery.md#219-005--mapping-empirique-propriétaire-et-mises-à-jour-ha).
+La nouvelle implémentation reste à valider sur HA réel après revue/fusion ;
+aucun test réel exécuté par CODEX DEV.
 
 ### Récupération HA historique après DataUpdated invalide — décision #160
 
@@ -207,8 +216,8 @@ Le résidu d'ouverture n'est jamais étiqueté avec une fausse taille de read.
 Aucun identifiant de compte, GUID, secret, contenu opaque, code d'exception reçu ou RX/hex brut ne sort dans les diagnostics partageables ni dans les replis d'erreur. Les identifiants de registres et valeurs numériques DataUpdated peuvent être affichés en clair dans les journaux et fichiers **locaux** de Home Assistant, sur autorisation du propriétaire ; ils ne doivent jamais être exportés vers GitHub, CI ou les rapports de support.
 
 Tests synthétiques seulement ; aucun nouveau succès réel revendiqué par DEV.
-L'étape 2 est désormais autorisée par #219-005 sous condition de preuve du
-mapping, mais non livrée par l'incrément sûr décrit ci-dessus.
+L'étape 2 est désormais autorisée par #219-005 avec mapping empirique propriétaire décrit ci-dessus ; publication HA
+et arrêt du polling sont implémentés sous ce contrat local.
 
 ### Journal privé DataUpdated candidat — autorisation #219-DU-REGISTER-LOG-003
 

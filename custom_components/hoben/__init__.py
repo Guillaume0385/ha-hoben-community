@@ -53,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
             device_guid=entry.data[CONF_DEVICE_GUID],
             ha_reconnect=True,
             ha_fast_reconnect=True,
+            push_updates=True,
         )
     except (KeyError, HobenInvalidInputError):
         raise ConfigEntryError("Stored Hoben connection data is invalid") from None
