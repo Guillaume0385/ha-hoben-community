@@ -171,6 +171,7 @@ class V4Lifecycle:
         "_ha_fast_reconnect",
         "_diagnostics",
         "_read_retry_task",
+        "_data_callback",
     )
 
     def __init__(
@@ -188,6 +189,7 @@ class V4Lifecycle:
         ha_reconnect: bool = False,
         ha_fast_reconnect: bool = False,
         _status_callback=None,
+        _data_callback=None,
         _quarantine: _LifecycleQuarantineCapability | None = None,
     ) -> None:
         # Validate all configuration before any factory can acquire a transport.
@@ -213,6 +215,10 @@ class V4Lifecycle:
             ):
                 raise HobenInvalidInputError()
             if _status_callback is not None and not callable(_status_callback):
+                raise HobenInvalidInputError()
+            if _data_callback is not None and (
+                not callable(_data_callback) or not ha_reconnect
+            ):
                 raise HobenInvalidInputError()
             if (
                 not isinstance(retry_delays, tuple)
@@ -243,6 +249,7 @@ class V4Lifecycle:
         self._ha_reconnect = ha_reconnect
         self._ha_fast_reconnect = ha_fast_reconnect
         self._status_callback = _status_callback
+        self._data_callback = _data_callback
         self._ha_acquisition_generation = None
         self._diagnostics = None
         self._read_retry_task = None
@@ -666,6 +673,19 @@ class V4Lifecycle:
             self._diagnostics.safe_report() if self._diagnostics is not None else None
         )
 
+    @property
+    def latest_data_updated(self):
+        """One private immutable sample from the current accepted owner only."""
+        if (
+            not self._stopping
+            and self._connected.is_set()
+            and self._session is not None
+            and self.state is SessionState.CONNECTED
+            and self._session._latest_data_updated is not None
+        ):
+            return self._active_generation, self._session._latest_data_updated
+        return None
+
     async def _cleanup(self, *, _quarantine_permit=None) -> None:
         task = self._read_retry_task
         if task is not None:
@@ -748,6 +768,19 @@ class V4Lifecycle:
             self._diagnostics = SessionDiagnostics(attempt)
             session._diagnostics = self._diagnostics
         session._status_callback = self._status_callback
+        if self._data_callback is not None:
+
+            def received(item):
+                if (
+                    not self._stopping
+                    and self._session is session
+                    and self._active_generation is not None
+                    and self._connected.is_set()
+                    and self.state is SessionState.CONNECTED
+                ):
+                    self._data_callback(self._active_generation, item)
+
+            session._data_callback = received
         if session._framer is not None:
             session._framer.frame_log.generation = attempt
         if cap is not None:
@@ -935,6 +968,8 @@ class V4Lifecycle:
                         self._ha_fast_reconnect
                         and attempt > 1
                         and ha_timing != "conservative"
+                        or self._data_callback is not None
+                        and attempt > 1
                     ):
                         self._ha_acquisition_generation = self._generation
                         notify_status(self._status_callback)

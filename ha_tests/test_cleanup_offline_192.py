@@ -135,7 +135,7 @@ class Wire(asyncio.Transport):
 
 
 @pytest.fixture
-def tls(monkeypatch, freezer):
+def tls(monkeypatch, freezer, legacy_polling_client):
     wires, transports, owners, delays = [], [], [], []
     now = [0.0]
     context = ssl.create_default_context()

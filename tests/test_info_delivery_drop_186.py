@@ -433,7 +433,7 @@ def test_opening_ping_suffix_does_not_prevent_later_genuine_delivery_drop():
 
 
 @pytest.mark.parametrize("production", [False, True])
-def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(
+def test_non_admissible_dataupdated_keeps_rolling_silence_and_one_probe(
     monkeypatch, production
 ):
     async def scenario():
@@ -446,7 +446,9 @@ def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(
         )
         await session.connect()
         try:
-            wire.queue.put_nowait(INVALID_UPDATED)
+            # A 1B after a delimited 07 in the SAME read is still outside the
+            # #219-005 whole-delivery admission rule and retains #160's guard.
+            wire.queue.put_nowait(ignored_frame(7) + INVALID_UPDATED)
             await pump()
             assert session.data_updated_recovering
             await clock.advance(29)
@@ -470,7 +472,9 @@ def test_dataupdated_recovery_keeps_rolling_silence_and_one_probe(
 
 
 @pytest.mark.parametrize("production", [False, True])
-def test_dataupdated_probe_info_uses_recovery_guard_not_drop(monkeypatch, production):
+def test_non_admissible_dataupdated_probe_info_keeps_recovery_guard(
+    monkeypatch, production
+):
     async def scenario():
         clock = Clock(monkeypatch)
         session, wire, factory = owner(
@@ -481,7 +485,7 @@ def test_dataupdated_probe_info_uses_recovery_guard_not_drop(monkeypatch, produc
         )
         await session.connect()
         try:
-            wire.queue.put_nowait(INVALID_UPDATED)
+            wire.queue.put_nowait(ignored_frame(7) + INVALID_UPDATED)
             await pump()
             await clock.advance(30.001)
             assert session.data_updated_recovering and not session._data_updated.probing

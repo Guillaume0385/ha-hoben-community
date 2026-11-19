@@ -63,7 +63,10 @@ class HobenCoordinatorData:
 
 
 class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
-    """Poll/decode every 60 seconds; the shared client alone owns reconnection."""
+    """Initialise once, then receive typed snapshots; the client owns recovery.
+
+    Explicit manual/campaign clients retain their existing polling adapter.
+    """
 
     def __init__(
         self, hass: HomeAssistant, entry: "HobenConfigEntry", client: HobenClient
@@ -74,10 +77,19 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             _LOGGER,
             name=DOMAIN,
             config_entry=entry,
-            update_interval=UPDATE_INTERVAL,
+            update_interval=None
+            if client.push_updates_enabled is True
+            else UPDATE_INTERVAL,
             always_update=False,
         )
         self.client = client
+        self._push_mode = client.push_updates_enabled is True
+        self._push_fresh_until = None
+        self._unsub_push_expiry = None
+        self._push_expiry_token = None
+        self._unsub_data = (
+            client.subscribe_data(self._data_updated) if self._push_mode else None
+        )
         self.data_updated_hold = False
         self.data_updated_deferred = False
         self.last_successful_read_at: datetime | None = None
@@ -115,6 +127,13 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     async def async_shutdown(self) -> None:
         """Cancel scheduling and the entry's shutdown hook; unload closes the client."""
         await super().async_shutdown()
+        if self._unsub_data is not None:
+            self._unsub_data()
+            self._unsub_data = None
+        if self._unsub_push_expiry is not None:
+            self._unsub_push_expiry()
+            self._unsub_push_expiry = None
+        self._push_expiry_token = None
         if self._recovery_read_handle is not None:
             self._recovery_read_handle.cancel()
             self._recovery_read_handle = None
@@ -137,6 +156,44 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         """Diagnostic channel, independent from measure listeners and their hold."""
         if type(self.client) is HobenClient:
             self.client.session_monitor.emit(event)
+
+    @callback
+    def _fresh_push_sample(self):
+        """UI freshness deadline only, never a poll or reconnection trigger."""
+        if self._unsub_push_expiry is not None:
+            self._unsub_push_expiry()
+        token = self._push_expiry_token = object()
+        self._push_fresh_until = self.client.sample_received_monotonic + 300
+
+        @callback
+        def expire(_now):
+            if self._push_expiry_token is not token or self._shutdown_requested:
+                return
+            self._unsub_push_expiry = None
+            remaining = self._push_fresh_until - self.hass.loop.time()
+            if remaining > 0:
+                self._unsub_push_expiry = async_call_later(self.hass, remaining, expire)
+                return
+            super(HobenDataUpdateCoordinator, self).async_update_listeners()
+
+        self._unsub_push_expiry = async_call_later(
+            self.hass, max(0, self._push_fresh_until - self.hass.loop.time()), expire
+        )
+
+    @callback
+    def _data_updated(self, raw, state):
+        if self._shutdown_requested:
+            return
+        self.last_successful_read_at = self.client.sample_received_at
+        self._snapshot_hold = self.data_updated_hold = self.data_updated_deferred = (
+            False
+        )
+        self._connection_hold_until = self._connection_loss_generation = None
+        self._connection_hold_revoked = False
+        self._cancel_hold_expiry()
+        self._fresh_push_sample()
+        self._session_event(SessionEvent("read_succeeded"))
+        self.async_set_updated_data(HobenCoordinatorData(raw=raw, state=state))
 
     def _cancel_hold_expiry(self) -> None:
         self._hold_timer_token = None
@@ -336,6 +393,11 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         """A shutdown or terminal failure cannot be covered by retained data."""
         return (
             not self._shutdown_requested
+            and (
+                not self._push_mode
+                or self._push_fresh_until is not None
+                and self.hass.loop.time() < self._push_fresh_until
+            )
             and self.client.session_observation.stopped is not True
             and self.data is not None
             and (
@@ -457,6 +519,8 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                     except Exception as storage_error:
                         log_unexpected_error(_LOGGER, storage_error)
                 raise
+            if self._push_mode and self.data is not None and snapshot is self.data.raw:
+                return self.data  # Cached observation is not a fresh acquisition.
             if snapshot.profile is not StoveProfile.V4:
                 raise HobenUnsupportedProfileError(snapshot.profile)
             with error_boundary("model_decode"):
@@ -464,6 +528,9 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             with error_boundary("identity_storage"):
                 self._persist_identity()
             self.last_successful_read_at = dt_util.utcnow()
+            if self._push_mode:
+                self.last_successful_read_at = self.client.sample_received_at
+                self._fresh_push_sample()
             self._connection_hold_until = None
             self._connection_loss_generation = None
             self._connection_hold_revoked = False

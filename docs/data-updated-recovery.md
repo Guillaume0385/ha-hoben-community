@@ -4,7 +4,130 @@ Décision propriétaire du 30/10/2026, **option B**, dans
 [l’Issue #160](https://github.com/Guillaume0385/ha-hoben-community/issues/160).
 Cette politique est un choix de récupération, sans validation réelle revendiquée.
 
-## Réception HA par livraison — #219-A
+## #219-005 — mapping empirique propriétaire et mises à jour HA
+
+La [décision propriétaire du 19/11/2026](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-6980810892)
+valide pour cet équipement les vingt positions DataUpdated **0..19 → registres
+V4 1024..1043, dans l'ordre croissant**. Elle résout le blocage signalé le 18/11.
+C'est une validation empirique du propriétaire, pas une adresse transmise dans
+la trame, une interprétation des quatre métadonnées ni une garantie universelle
+pour tous les modèles/firmwares. Les paragraphes historiques ci-dessous ne
+constituent plus une interdiction de publication HA pour ce mode.
+
+### Réception, décodage et publication atomique
+
+Le seul RX accepte une livraison read() entière commençant par 0x1B, avec
+framer vide, transport/génération encore possédés. La publication exige le
+parseur valide, transaction FFFF, unité 1, fonction 04 normale et exactement
+vingt UInt16. Les autres formes sont ignorées pour les entités. Aucune
+notification ne complète une demande 0x0E en cours.
+
+La session construit un `RawStoveSnapshot` avec les métadonnées publiques de
+son ouverture et appelle `decode_v4_snapshot()` de `v4_state.py`. Le même
+`V4StoveState` est transmis au coordinateur : une seule publication atomique,
+sans conversion recopiée ni création d'entité. Les sentinelles, Int16/10,
+champs combinés 1024/1030, bits 1035, valeurs inconnues et dérogations masquées
+restent ceux du décodeur existant. 1033/1042 restent bruts, sans nouvelle unité
+ni nouvelle entité.
+
+Les exceptions locales de construction/décodage du snapshot et d'appel du
+callback sont isolées séparément, après les gardes d'admissibilité. Le candidat
+est abandonné avec le seul motif fermé `decode_failed` ou `callback_failed`,
+sans exception, traceback ni valeur dans le diagnostic. Une notification dont
+le traitement échoue ne remplace pas l'échantillon retenu ni sa séquence et ne
+produit pas de journal d'état appliqué ; le RX/Pong et les délais d'acquisition
+continuent. Les notifications suivantes restent admissibles sur la même TLS.
+Les lectures/écritures transport, vérifications d'ownership, annulations et
+cleanup restent hors de ces deux frontières d'exception.
+
+La mémoire garde seulement la dernière notification de la session courante.
+Les callbacks sont liés à l'objet session et à la génération acceptée ; un
+ancien propriétaire ne peut publier après remplacement ou unload. Avant la
+première réponse V4 validée, les notifications restent retenues sans rendre les
+entités disponibles. Après cette réponse, la dernière notification reçue prend
+priorité sur l'initiale ; son instant de réception est conservé, pas remplacé
+par l'heure de fin d'attente. Les publications suivantes gardent l'ordre local
+RX ; les métadonnées opaques ne servent ni de séquence ni de timestamp serveur.
+
+### Initialisation, disponibilité et silence
+
+L'entrée HA active explicitement `push_updates=True` : une seule demande V4
+initiale par génération TLS acceptée, puis aucun polling périodique. Un refresh
+explicite observe le cache de cette génération sans nouvelle émission et sans
+renouveler sa fraîcheur. Les clients manuels/config-flow/campagne conservent
+par défaut leur API explicite de lecture, sans activation implicite du push.
+
+Un timeout initial conserve la politique #212 : deux nouvelles émissions au
+maximum, chacune 60 s après le timeout précédent, TLS/RX/Ping-Pong maintenus,
+puis cleanup attesté avant reconnexion. Une notification ou une réponse FFFF
+retardée ne valide pas artificiellement cette initiale abandonnée. Le setup
+attend la prochaine acquisition vérifiée ; stop/unload annulent ses propriétaires.
+Après vraie perte, le superviseur existant reconnecte et le coordinateur fait
+une initialisation unique sur la nouvelle génération, sans replay.
+
+La disponibilité des mesures expire **300 s après réception/acquisition de la
+dernière donnée validée**, même si TLS reste silencieuse et saine. Un timer UI
+notifie HA ; il n'émet rien et ne déclenche aucune reconnexion. Un refresh du
+cache ne prolonge pas ce délai. Une notification valide rétablit les entités,
+y compris si ses valeurs sont identiques aux dernières. L'heure publique
+`last_successful_read_at` inclut désormais les acquisitions DataUpdated ; elle
+ne désigne plus seulement une lecture sollicitée. La fraîcheur est celle de la
+réception locale admissible, pas une preuve d'horodatage/anti-rejeu côté serveur.
+
+### Invalides, frontières et garde-fous
+
+Un candidat admissible incomplete/malformed/unsupported/ambiguous ou une
+exception du parseur est abandonné entier : diagnostic fermé, aucune mutation,
+sonde, garde silence #160, remise à zéro de délai ou reconnexion pour cette
+seule erreur. Pas de scan, assemblage ou suffixe réinjecté. RX/Ping/Pong et
+les prochaines livraisons continuent. `parser_failure` n'exporte pas l'exception.
+
+Les frontières non admissibles restent sous #160 : 0x1B après un autre message
+dans le même read ou dans un résidu d'ouverture. Un vrai 0x0E partiel garde ses
+continuations. Pertes réelles, ownership/sécurité, 0x0C/#186 et cleanup #192
+conservent leurs règles ; une notification ne constitue aucune preuve de cleanup.
+Les empreintes des seuls modules runtime modifiés sont actualisées, sans
+changement de liste fermée, gate, workflow, approbation ou permission.
+
+### DEBUG local privé du mode HA
+
+Le logger dédié `custom_components.hoben.shadow_data_updated` doit avoir son
+niveau **explicitement DEBUG**. DEBUG parent seul ne suffit pas ; INFO/NOTSET
+arrêtent les futurs événements. Activation/désactivation propriétaire via
+`logger.set_level`, après installation volontaire du code revu, comme documenté
+plus bas. CODEX ne l'active jamais sur HA installé.
+
+Chaque notification admise dans le mode push produit au plus un LogRecord
+`Hoben DataUpdated local state=...`, JSON <=8192 octets : génération/index,
+`mapping=owner_validated`, vingt objets index/registre/raw_value et `decoded`
+issu du même décodeur. Aucune trame RX, métadonnée opaque, GUID, identifiant,
+secret ou exception libre. Ces nombres sont autorisés **uniquement localement** ;
+ne pas exporter les logs vers GitHub, CI, support ou diagnostics partageables.
+Les diagnostics de support gardent leurs projections expurgées. Le FIFO privé
+reste indépendant avec ses protections ; ses anciennes étiquettes candidates
+sont conservées comme compatibilité du journal historique, sans bloquer le push.
+
+### Validation hors ligne
+
+Les nouveaux tests utilisent de vrais client/session/lifecycle/coordinator et
+entités HA, uniquement sous transports/horloges synthétiques : vingt mises à
+jour atomiques, mapping et décodage existants, initiale unique, notification
+avant/pendant initialisation, ordre, génération révoquée, invalides/0x0C/Ping,
+retries #212, silence et reprise sur valeur identique, DEBUG explicite/off,
+unload et confidentialité. Les suites historiques de campagne/polling restent
+sur l'API explicitement manuelle ; la suite push exerce le constructeur HA de
+production sans cet opt-out. Aucun test supprimé ou désactivé.
+
+Le mapping est admis par la décision empirique propriétaire ; la nouvelle
+implémentation n'est pas encore validée sur HA installé. **Live Hoben / HA
+installé / workflow manuel : NOT RUN par CODEX DEV.** Revue et installation
+volontaire du propriétaire restent nécessaires avant constat réel de réussite.
+
+## Historique : réception HA par livraison — #219-A
+
+Les sections historiques suivantes décrivent les étapes livrées avant le
+19/11. Le contrat #219-005 ci-dessus prévaut pour le mode HA push actuel ; les
+anciens labels candidats/interdictions ne le rebloquent pas.
 
 L'[étape 1 de #219](https://github.com/Guillaume0385/ha-hoben-community/issues/219)
 remplace le framing MBAP de la notification pour la seule politique HA qui
@@ -21,8 +144,8 @@ aux entités ni au snapshot V4. Les fonctions inconnues restent `unsupported`.
 Le [contrat et les cinq statuts](../protocol.md#réception-ha-dataupdated-par-livraison--hypothèse-locale-219-a)
 distinguent structure interne et hypothèse de frontière.
 
-Les candidats `incomplete`, `malformed` ou `ambiguous` sont consommés sans scan
-puis entrent dans la garde ci-dessous. Aucun suffixe Ping/0x0E coalescé après
+Depuis #219-005, les candidats `incomplete`, `malformed` ou `ambiguous` sont
+consommés sans scan et abandonnés sans garde. Aucun suffixe Ping/0x0E coalescé après
 `0x1B` ne peut être crédité. Un Ping/0x0E déjà délimité avant la notification
 garde son ordre et son échange ; la notification qui suit n'est pas un nouveau
 read et déclenche la garde sans assemblage MBAP. Le framer d'un vrai 0x0E
@@ -46,11 +169,13 @@ Les tests de fragmentation/concaténation de cette voie restent inchangés.
 Une notification ne complète jamais une lecture 0x0E, ne produit aucun
 snapshot et ne déclenche aucun listener HA sur l'une ou l'autre voie.
 
-## Hypothèse de silence explicitement autorisée
+## Hypothèse de silence historique, conservée aux frontières non admissibles
 
 Seule la politique d’entrée HA (`ha_reconnect=True`) active cette extension du
 gestionnaire partagé. Les campagnes, clients bornés et codecs gardent leurs
-contrats antérieurs. Un candidat DataUpdated rejeté (ou une frontière non admissible) déclenche :
+contrats antérieurs. Depuis #219-005, seule la frontière non admissible déclenche
+encore cette garde ; le candidat admis au début d'un read puis rejeté par le
+parseur n'y entre plus :
 
 1. Un WARNING par épisode : type DataUpdated, raison fermée du parseur/de la frontière, Length
    annoncé lorsqu’il est disponible (UInt16), hypothèse `silence_30s`.

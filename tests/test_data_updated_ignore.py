@@ -120,7 +120,7 @@ def test_notifications_on_closed_generation_cannot_satisfy_a_fresh_read():
 
 
 @pytest.mark.parametrize("protocol, length", [(0, 0), (0, 1), (0, 255), (0, 65535)])
-def test_invalid_dataupdated_length_warns_without_immediate_close_or_reconnect(
+def test_invalid_dataupdated_length_is_diagnosed_without_recovery_or_reconnect(
     protocol, length, caplog
 ):
     caplog.set_level(logging.DEBUG, logger="custom_components.hoben.frame_diagnostic")
@@ -146,16 +146,10 @@ def test_invalid_dataupdated_length_warns_without_immediate_close_or_reconnect(
             assert factory.sessions[0].state is SessionState.CONNECTED
             assert stream.close_count == 0 and len(factory.streams) == 1
             warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-            assert (
-                len(
-                    [
-                        r
-                        for r in warnings
-                        if r.name == "custom_components.hoben.v4_session"
-                    ]
-                )
-                == 1
+            assert not any(
+                r.name == "custom_components.hoben.v4_session" for r in warnings
             )
+            assert not life.data_updated_recovering
             (delivery,) = [
                 r.hoben_data_updated
                 for r in caplog.records

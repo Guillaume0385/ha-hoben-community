@@ -10,6 +10,7 @@ import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from .exceptions import (
     HobenAuthorizationRequiredError,
     HobenClientClosedError,
     HobenClosedError,
+    HobenDataUpdatedRecoveryError,
     HobenInternalError,
     HobenInvalidCredentialsError,
     HobenInvalidInputError,
@@ -174,6 +176,7 @@ class HobenClient:
         device_info: str = DEFAULT_DEVICE_INFO,
         ha_reconnect: bool = False,
         ha_fast_reconnect: bool = False,
+        push_updates: bool = False,
     ) -> None:
         # Validate every field before constructing a transport. Codec validation
         # remains shared with the legacy helpers; its temporary packet is unused.
@@ -203,6 +206,13 @@ class HobenClient:
         ):
             raise HobenInvalidInputError()
         self._ha_reconnect = ha_reconnect
+        if type(push_updates) is not bool or (push_updates and not ha_reconnect):
+            raise HobenInvalidInputError()
+        self._push_updates = push_updates
+        self._push_initial_generation = self._push_attempt_generation = None
+        self._push_sequence = 0
+        self.sample_received_at = self.sample_received_monotonic = None
+        self._data_listeners = set()
         self._ha_fast_reconnect = ha_fast_reconnect
         self._max_attempts = max_attempts
         self._retry_delay = retry_delay
@@ -226,6 +236,35 @@ class HobenClient:
     def ha_reconnect_enabled(self) -> bool:
         """Explicit entry policy; campaign/config-flow clients retain their limits."""
         return self._ha_reconnect
+
+    @property
+    def push_updates_enabled(self):
+        """Entry-only policy; explicit campaign/manual clients retain their API."""
+        return self._push_updates
+
+    def subscribe_data(self, listener):
+        """Subscribe synchronously to immutable samples; unsubscribe at unload."""
+        self._data_listeners.add(listener)
+        return lambda: self._data_listeners.discard(listener)
+
+    def _receive_data_updated(self, generation, item):
+        sequence, snapshot, state, tick, instant = item
+        if (
+            self._closed
+            or self._push_initial_generation is None
+            or type(generation) is not int
+            or generation != self._push_initial_generation
+            or sequence <= self._push_sequence
+        ):
+            return
+        self._push_sequence = sequence
+        self.sample_received_monotonic, self.sample_received_at = tick, instant
+        self._last_snapshot = snapshot
+        for listener in tuple(self._data_listeners):
+            try:
+                listener(snapshot, state)
+            except Exception:
+                pass  # Subscriber failure cannot change the RX/cleanup owner.
 
     @property
     def ha_recovery_pending(self) -> bool:
@@ -319,7 +358,7 @@ class HobenClient:
 
     @property
     def last_snapshot(self) -> RawStoveSnapshot | None:
-        """Last complete successful refresh; failures never replace this snapshot."""
+        """Last complete accepted sample; failed acquisitions never replace it."""
         return self._last_snapshot
 
     @property
@@ -452,6 +491,7 @@ class HobenClient:
         all shared background ownership; unload awaits both cleanup paths.
         """
         self._closed = True
+        self._data_listeners.clear()
         self.session_monitor.emit(SessionEvent("stop"))
         self._adopt_persistent_identity()
         if self._active_operation is not None:
@@ -499,12 +539,32 @@ class HobenClient:
                     _status_callback=(
                         self.session_monitor.emit if self._ha_reconnect else None
                     ),
+                    **(
+                        {"_data_callback": self._receive_data_updated}
+                        if self._push_updates
+                        else {}
+                    ),
                 )
                 await self._lifecycle.connect()
             else:
                 await self._lifecycle.wait_connected()
             self._adopt_persistent_identity()
             before = self._lifecycle.witness
+            generation = before.established_generation
+            if self._push_updates and generation == self._push_attempt_generation:
+                if self.data_updated_recovering:
+                    raise HobenDataUpdatedRecoveryError()
+                if not self.data_updated_transport_alive:
+                    raise HobenTransportError()
+                if self.acquisition_uncertain:
+                    raise HobenTimeoutError()
+                if generation == self._push_initial_generation:
+                    return self._last_snapshot
+                # #212 alone owns the two retries after an abandoned FFFF read.
+                # Ordinary coordinator requests must not add another request.
+                raise HobenTimeoutError()
+            if self._push_updates:
+                self._push_attempt_generation = generation
             response = await self._lifecycle.request_v4_data(timeout=self._read_timeout)
             after = self._lifecycle.witness
             opened = self._lifecycle.opening_metadata
@@ -518,7 +578,7 @@ class HobenClient:
                 self._adopt_persistent_identity()
                 await self._lifecycle.close()
                 raise HobenInternalError()
-            return RawStoveSnapshot(
+            snapshot = RawStoveSnapshot(
                 profile=StoveProfile.V4,
                 registers=response.registers,
                 product_type=opened.product_type,
@@ -527,6 +587,23 @@ class HobenClient:
                 software_minor=opened.software_minor,
                 application_version=opened.application_version,
             )
+            if self._push_updates:
+                self._push_initial_generation = generation
+                self._push_sequence = 0
+                self.sample_received_at = datetime.now(UTC)
+                self.sample_received_monotonic = asyncio.get_running_loop().time()
+                latest = self._lifecycle.latest_data_updated
+                if latest is not None and latest[0] == generation:
+                    (
+                        self._push_sequence,
+                        snapshot,
+                        _,
+                        self.sample_received_monotonic,
+                        self.sample_received_at,
+                    ) = latest[1]
+                # A queued notification always wins over an older initial read.
+                # Neither arrival metadata nor FFFF is a server timestamp.
+            return snapshot
         except LifecycleExhaustedError as error:
             raise HobenRefreshExhaustedError(
                 self._lifecycle.snapshot.attempts,

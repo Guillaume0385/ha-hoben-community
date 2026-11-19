@@ -30,6 +30,7 @@ _REASONS = {
     "oversized_delivery",
     "not_read_start",
     "recovery_discarded",
+    "parser_failure",
 }
 _NUMBERS = {
     "delivery_bytes": 4096,

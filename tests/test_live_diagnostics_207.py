@@ -322,7 +322,7 @@ def test_unsolicited_response_is_never_counted_as_correlated():
 
 
 @pytest.mark.parametrize("split", [1, 2, 5, 7, 12])
-def test_fragmented_dataupdated_guard_is_not_an_unsupported_delivery_drop(split):
+def test_non_admissible_dataupdated_guard_is_not_an_unsupported_drop(split):
     from tests.test_session_ignored_rx import ignored_frame
 
     async def run():
@@ -332,13 +332,19 @@ def test_fragmented_dataupdated_guard_is_not_an_unsupported_delivery_drop(split)
         try:
             await life.connect()
             frame = ignored_frame(27)
-            factory.streams[0].chunks = [frame[:split], frame[split:], response()]
+            # Preserve this #160/#207 guard regression at a non-read-start
+            # boundary. A fresh read-start fragment is now a #219-005 drop.
+            factory.streams[0].chunks = [
+                ignored_frame(7) + frame[:split],
+                frame[split:],
+                response(),
+            ]
             pending = asyncio.create_task(life.request_v4_data())
             await pump()
             r = life.session_diagnostics
             assert r["unsupported_deliveries"] == r["info_candidate_deliveries"] == 0
-            # #219 never assembles separate deliveries or credits a response
-            # discarded during #160's guard as a fresh acquisition.
+            # A non-admissible boundary never assembles separate deliveries or
+            # credits a response discarded in #160 as a fresh acquisition.
             assert r["v4_responses_correlated"] == 0
             assert life.data_updated_recovering and not pending.done()
             assert not factory.sessions[0]._framer.partial

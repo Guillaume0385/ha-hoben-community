@@ -114,6 +114,7 @@ async def test_auth_failure_starts_reauth_then_reloads_and_resumes_polling(
             device_guid=DEVICE_GUID,
             ha_reconnect=True,
             ha_fast_reconnect=True,
+            push_updates=True,
         ),
         call(user_guid=NORMALIZED_USER_GUID, device_guid=DEVICE_GUID),
         call(
@@ -121,6 +122,7 @@ async def test_auth_failure_starts_reauth_then_reloads_and_resumes_polling(
             device_guid=assigned_guid,
             ha_reconnect=True,
             ha_fast_reconnect=True,
+            push_updates=True,
         ),
     ]
     client.async_close.assert_awaited_once_with()
@@ -221,6 +223,7 @@ async def test_setup_authorization_request_can_pair_and_resume_polling(
             device_guid=DEVICE_GUID,
             ha_reconnect=True,
             ha_fast_reconnect=True,
+            push_updates=True,
         ),
         call(user_guid=NORMALIZED_USER_GUID, device_guid=DEVICE_GUID),
         call(user_guid=NORMALIZED_USER_GUID, device_guid=DEVICE_GUID),
@@ -229,6 +232,7 @@ async def test_setup_authorization_request_can_pair_and_resume_polling(
             device_guid=ROTATED_DEVICE_GUID,
             ha_reconnect=True,
             ha_fast_reconnect=True,
+            push_updates=True,
         ),
     ]
     assert_private_values_absent(repr(failed) + repr(result) + caplog.text)

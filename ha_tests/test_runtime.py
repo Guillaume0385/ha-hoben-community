@@ -73,6 +73,7 @@ async def test_setup_runtime_and_safe_device(
         device_guid=DEVICE_GUID,
         ha_reconnect=True,
         ha_fast_reconnect=True,
+        push_updates=True,
     )
     client.async_refresh.assert_awaited_once_with()
     assert isinstance(entry.runtime_data, HobenRuntimeData)
@@ -401,6 +402,7 @@ async def test_reload_rebuilds_with_persisted_identity(
         device_guid=ROTATED_DEVICE_GUID,
         ha_reconnect=True,
         ha_fast_reconnect=True,
+        push_updates=True,
     )
     client.async_close.assert_awaited_once_with()
     second.async_refresh.assert_awaited_once_with()

@@ -123,3 +123,17 @@ def assert_private_values_absent(text):
         repr(tuple(range(20))),
     ):
         assert value not in text
+
+
+@pytest.fixture
+def legacy_polling_client(monkeypatch):
+    """Explicit manual/polling API for historical retry/campaign regressions.
+
+    Production entry always opts into push. New push tests use its unmodified
+    constructor; retaining the opt-out here does not disable any production gate.
+    """
+
+    def manual_client(**options):
+        return HobenClient(**(options | {"push_updates": False}))
+
+    monkeypatch.setattr("custom_components.hoben.HobenClient", manual_client)
