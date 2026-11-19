@@ -567,8 +567,11 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 CloseClientReason.AUTHORIZATION_TIMEOUT,
             ):
                 error_type = ConfigEntryAuthFailed
-            elif error.reason is CloseClientReason.SERVER_MAINTENANCE or (
-                type(error) is ExperimentalCloseClientError
+            elif (
+                error.reason is CloseClientReason.SERVER_MAINTENANCE
+                or self.data is None
+                and error.reason is CloseClientReason.STOVE_CONNECTION_REQUIRED
+                or type(error) is ExperimentalCloseClientError
             ):
                 error_type = UpdateFailed
             else:

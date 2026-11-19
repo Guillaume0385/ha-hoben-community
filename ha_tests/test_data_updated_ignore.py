@@ -167,10 +167,11 @@ async def test_setup_recovery_can_be_cancelled_without_reconnection_or_orphan_pr
     setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
     await received.wait()
     await pump()
-    await clock.advance(30)
+    await clock.advance(9)
     assert not setup.done()
     assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
-    assert peers.lifecycles[0].acquisition_uncertain
+    assert peers.lifecycles[0].data_updated_recovering
+    assert not peers.lifecycles[0].acquisition_uncertain
     setup.cancel()
     with pytest.raises(asyncio.CancelledError):
         await setup
@@ -182,7 +183,7 @@ async def test_setup_recovery_can_be_cancelled_without_reconnection_or_orphan_pr
     )
 
 
-async def test_setup_needs_a_new_generation_after_an_ambiguous_original_read(
+async def test_setup_deadline_discards_ambiguous_original_read_before_native_retry(
     hass, entry, peers, monkeypatch
 ):
     wire = peers.wire(DEVICE_GUID, [[BAD], [RESPONSE]])
@@ -201,15 +202,15 @@ async def test_setup_needs_a_new_generation_after_an_ambiguous_original_read(
     setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
     await received.wait()
     await pump()
-    await clock.advance(30)
-    assert not setup.done() and peers.lifecycles[0].acquisition_uncertain
+    await clock.advance(10)
+    assert not await setup
+    entry.async_cancel_retry_setup()
+    assert_stopped(peers)
     wire.queue.put_nowait(RESPONSE)
     await pump()
-    assert not setup.done() and peers.factory.call_count == 1
-    wire.queue.put_nowait(TransportEOF())
-    assert await peers.backoff.entered.get() == 60
-    peers.backoff.release.put_nowait(None)
-    assert await setup
+    assert peers.factory.call_count == 1
+    assert peers.lifecycles[0].witness.verified_read_generation is None
+    assert await hass.config_entries.async_reload(entry.entry_id)
     try:
         assert entry.runtime_data.coordinator.last_update_success
         assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]

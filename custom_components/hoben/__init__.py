@@ -6,6 +6,7 @@ protocol package must still work in the lightweight, HA-free test environment.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -23,6 +24,10 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
+# Leave the existing transport's five-second close budget inside the 15 s
+# bootstrap target. This deadline stops setup, not the protocol's #212 retries
+# once an entry is loaded. HA owns retries between fully cleaned setup attempts.
+SETUP_REFRESH_TIMEOUT = 10.0
 
 
 @dataclass(slots=True, repr=False)
@@ -31,6 +36,7 @@ class HobenRuntimeData:
 
     client: HobenClient
     coordinator: HobenDataUpdateCoordinator
+    setup_cleanup_failed: bool = False
 
 
 type HobenConfigEntry = ConfigEntry[HobenRuntimeData]
@@ -46,6 +52,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
     from homeassistant.helpers import device_registry as dr
 
     from .coordinator import HobenDataUpdateCoordinator
+
+    previous = getattr(entry, "runtime_data", None)
+    if isinstance(previous, HobenRuntimeData) and previous.setup_cleanup_failed:
+        # HA also permits reload from SETUP_ERROR. Retain the failed owner as
+        # a barrier: explicit reload is not evidence its old socket was closed.
+        raise ConfigEntryError("Hoben setup cleanup not verified")
 
     try:
         client = HobenClient(
@@ -64,19 +76,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
     coordinator = HobenDataUpdateCoordinator(hass, entry, client)
     platforms_started = False
     try:
-        while True:
-            try:
-                await coordinator.async_config_entry_first_refresh()
-                break
-            except ConfigEntryNotReady:
-                # Keep one entry-owned lifecycle during setup. The next fresh
-                # acquisition waits for its proven recovery gate, rather than HA's
-                # shorter native retry creating another client/transport.
-                if (
-                    client.ha_recovery_pending is not True
-                    and coordinator.data_updated_deferred is not True
-                ):
-                    raise
+        try:
+            async with asyncio.timeout(SETUP_REFRESH_TIMEOUT) as deadline:
+                while True:
+                    try:
+                        await coordinator.async_config_entry_first_refresh()
+                        break
+                    except ConfigEntryNotReady:
+                        # A brief recovery may finish within this setup budget.
+                        # Never park HA bootstrap through the long-lived owner's
+                        # reconnect/backoff or uncertain-acquisition waiters.
+                        if (
+                            client.ha_recovery_pending is not True
+                            and coordinator.data_updated_deferred is not True
+                        ):
+                            raise
+        except TimeoutError:
+            if not deadline.expired():
+                raise  # An inner error is not proof that our deadline elapsed.
+            raise ConfigEntryNotReady(
+                "Hoben service unavailable during setup"
+            ) from None
         snapshot = coordinator.data.raw
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -103,12 +123,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: HobenConfigEntry) -> boo
         # failed setup. Do not leave a closed client/partial platform runtime.
         if hasattr(entry, "runtime_data"):
             del entry.runtime_data
+        if client.ha_reconnect_enabled is True:
+            observation = client.session_observation
+            if not (
+                observation.stopped is True
+                and observation.active is False
+                and observation.cleanup_failed is False
+            ):
+                # No platforms/snapshot are registered. Keep only the stopped
+                # owners and failure latch so native retry OR reload cannot
+                # replace an unverified socket. Cancellation still propagates.
+                entry.runtime_data = HobenRuntimeData(client, coordinator, True)
+                if isinstance(error, asyncio.CancelledError):
+                    raise
+                raise ConfigEntryError("Hoben setup cleanup not verified") from None
+        if isinstance(error, ConfigEntryNotReady):
+            _LOGGER.info("Hoben setup event=unavailable retry=native_ha")
         if isinstance(error, Exception) and not isinstance(
             error, (ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady)
         ):
             log_unexpected_error(_LOGGER, error)
             raise ConfigEntryError("Unexpected Hoben setup failure") from None
         raise
+    _LOGGER.info("Hoben setup event=initial_snapshot_ready")
     return True
 
 

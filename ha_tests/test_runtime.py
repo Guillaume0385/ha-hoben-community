@@ -256,7 +256,11 @@ async def test_authentication_failure_stops_polling(
             (
                 HobenClosedError(reason),
                 ConfigEntryState.SETUP_RETRY
-                if reason is CloseClientReason.SERVER_MAINTENANCE
+                if reason
+                in (
+                    CloseClientReason.SERVER_MAINTENANCE,
+                    CloseClientReason.STOVE_CONNECTION_REQUIRED,
+                )
                 else ConfigEntryState.SETUP_ERROR,
             )
             for reason in CloseClientReason

@@ -115,24 +115,22 @@ async def test_first_acquisition_silence_keeps_one_setup_owner_without_spin(
         # the request clock, independently of host load or test order.
         await emitted.wait()
         await pump()
-        await clock.advance(30.001)
+        await clock.advance(10)
         await pump()
-        assert not setup.done() and peers.lifecycles[0].acquisition_uncertain
+        assert not await setup
+        entry.async_cancel_retry_setup()
+        assert_stopped(peers)
         wire.queue.put_nowait(RESPONSE + b"\x0a")
         await pump()
-        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13, 11]
+        assert [c.args[0][0] for c in wire.write.await_args_list] == [3, 13]
         assert peers.factory.call_count == 1 and not peers.backoff.delays
-        wire.close.assert_not_awaited()
+        wire.close.assert_awaited_once_with()
+        assert peers.lifecycles[0].witness.verified_read_generation is None
         if stop:
-            setup.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await setup
+            await clock.advance(300)
             assert peers.factory.call_count == 1
         else:
-            wire.queue.put_nowait(TransportEOF())
-            assert await peers.backoff.entered.get() == 60
-            peers.backoff.release.put_nowait(None)
-            assert await setup
+            assert await hass.config_entries.async_reload(entry.entry_id)
             assert entry.runtime_data.coordinator.last_update_success
             assert peers.factory.call_count == 2
             assert await hass.config_entries.async_unload(entry.entry_id)

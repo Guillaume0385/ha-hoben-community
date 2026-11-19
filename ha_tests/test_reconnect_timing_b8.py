@@ -446,14 +446,20 @@ async def test_first_read_failure_has_no_held_values_and_setup_uses_one_fresh_re
 ):
     peers.wire(DEVICE_GUID, [[TransportEOF()]])
     fresh = peers.wire(DEVICE_GUID, [[RESPONSE], [RESPONSE]])
-    setup = asyncio.create_task(load(hass, entry))
+    setup = asyncio.create_task(hass.config_entries.async_setup(entry.entry_id))
     assert await timeline.waiting.get() == 10
     assert not setup.done()
-    await timeline.advance(10)
-    assert await timeline.waiting.get() == 10
-    assert fresh.write.await_count == 1
-    await timeline.advance(10)
-    coordinator = await setup
+    # Startup's #220 budget stops this owner; B8's long-lived reconnect gates
+    # remain exercised after successful setup by the other tests in this file.
+    await timeline.advance(10.001)
+    assert not await setup
+    entry.async_cancel_retry_setup()
+    assert_stopped(peers)
+    assert all(c.args[0][0] != 13 for c in fresh.write.await_args_list)
+    if peers.factory.call_count == 2:
+        fresh = peers.wire(DEVICE_GUID, [[RESPONSE], [RESPONSE]])
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    coordinator = entry.runtime_data.coordinator
     await pump()
     assert coordinator.last_update_success
     assert fresh.write.await_count == 2
