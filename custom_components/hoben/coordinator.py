@@ -84,9 +84,6 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         )
         self.client = client
         self._push_mode = client.push_updates_enabled is True
-        self._push_fresh_until = None
-        self._unsub_push_expiry = None
-        self._push_expiry_token = None
         self._unsub_data = (
             client.subscribe_data(self._data_updated) if self._push_mode else None
         )
@@ -130,10 +127,6 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         if self._unsub_data is not None:
             self._unsub_data()
             self._unsub_data = None
-        if self._unsub_push_expiry is not None:
-            self._unsub_push_expiry()
-            self._unsub_push_expiry = None
-        self._push_expiry_token = None
         if self._recovery_read_handle is not None:
             self._recovery_read_handle.cancel()
             self._recovery_read_handle = None
@@ -158,29 +151,6 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             self.client.session_monitor.emit(event)
 
     @callback
-    def _fresh_push_sample(self):
-        """UI freshness deadline only, never a poll or reconnection trigger."""
-        if self._unsub_push_expiry is not None:
-            self._unsub_push_expiry()
-        token = self._push_expiry_token = object()
-        self._push_fresh_until = self.client.sample_received_monotonic + 300
-
-        @callback
-        def expire(_now):
-            if self._push_expiry_token is not token or self._shutdown_requested:
-                return
-            self._unsub_push_expiry = None
-            remaining = self._push_fresh_until - self.hass.loop.time()
-            if remaining > 0:
-                self._unsub_push_expiry = async_call_later(self.hass, remaining, expire)
-                return
-            super(HobenDataUpdateCoordinator, self).async_update_listeners()
-
-        self._unsub_push_expiry = async_call_later(
-            self.hass, max(0, self._push_fresh_until - self.hass.loop.time()), expire
-        )
-
-    @callback
     def _data_updated(self, raw, state):
         if self._shutdown_requested:
             return
@@ -191,7 +161,6 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         self._connection_hold_until = self._connection_loss_generation = None
         self._connection_hold_revoked = False
         self._cancel_hold_expiry()
-        self._fresh_push_sample()
         self._session_event(SessionEvent("read_succeeded"))
         self.async_set_updated_data(HobenCoordinatorData(raw=raw, state=state))
 
@@ -252,7 +221,8 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             return
         if (
             self.client.data_updated_transport_alive is not True
-            or self.client.acquisition_uncertain is True
+            or not self._push_mode
+            and self.client.acquisition_uncertain is True
         ):
             if self._connection_hold_until is None:
                 # Loss is degradation, never a successful HA update. Retained
@@ -322,8 +292,12 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
         if self._shutdown_requested or self._connection_hold_until is None:
             return
         remaining = self._connection_hold_until - monotonic()
-        if remaining > 0:
-            self._schedule_hold_expiry(remaining)
+        if remaining > 0 or self._push_mode and remaining == 0:
+            # Push becomes unavailable only AFTER 300 s of actual loss. Avoid
+            # rescheduling at zero if a callback fires at the exact boundary.
+            self._schedule_hold_expiry(
+                max(remaining, 0.001) if self._push_mode else remaining
+            )
             return
         self.async_update_listeners()
 
@@ -343,7 +317,11 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
                 self.data is not None
                 and self.last_successful_read_at is not None
                 and not self._connection_hold_revoked
-                and monotonic() < self._connection_hold_until
+                and (
+                    monotonic() <= self._connection_hold_until
+                    if self._push_mode
+                    else monotonic() < self._connection_hold_until
+                )
                 and self._connection_hold_safe
                 and (
                     self.client.acquisition_uncertain is True
@@ -391,13 +369,34 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
     @property
     def snapshot_available(self) -> bool:
         """A shutdown or terminal failure cannot be covered by retained data."""
+        if self._push_mode:
+            observation = self.client.session_observation
+            category = self.client.session_monitor.last_error_category
+            return (
+                not self._shutdown_requested
+                and observation.stopped is not True
+                and observation.cleanup_failed is False
+                and self.data is not None
+                and self.last_successful_read_at is not None
+                and (
+                    self.last_snapshot_held
+                    if self._connection_hold_until is not None
+                    else (
+                        self.client.data_updated_transport_alive is True
+                        and observation.active is True
+                        and type(observation.generation) is int
+                        and observation.read_generation == observation.generation
+                        and (
+                            category is None
+                            or category in _HOLD_CATEGORIES
+                            # A refused #160 probe is not a TLS/session loss.
+                            or category == "modbus_exception"
+                        )
+                    )
+                )
+            )
         return (
             not self._shutdown_requested
-            and (
-                not self._push_mode
-                or self._push_fresh_until is not None
-                and self.hass.loop.time() < self._push_fresh_until
-            )
             and self.client.session_observation.stopped is not True
             and self.data is not None
             and (
@@ -530,7 +529,6 @@ class HobenDataUpdateCoordinator(DataUpdateCoordinator[HobenCoordinatorData]):
             self.last_successful_read_at = dt_util.utcnow()
             if self._push_mode:
                 self.last_successful_read_at = self.client.sample_received_at
-                self._fresh_push_sample()
             self._connection_hold_until = None
             self._connection_loss_generation = None
             self._connection_hold_revoked = False

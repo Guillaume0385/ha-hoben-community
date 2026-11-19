@@ -140,8 +140,16 @@ Le mode HA accepte FFFF/04, unité 1 et vingt UInt16, construit le snapshot V4
 et réutilise le décodeur §8 pour les entités existantes ; aucun nouveau sens ni
 exposition de 1033/1042. Une initiale V4 par génération (retries #212 conservés),
 puis notifications sans polling périodique. La publication reste atomique,
-liée au propriétaire et à son ordre de réception ; disponibilité 300 s après
-la dernière réception validée, sans reconnexion due au seul silence.
+liée au propriétaire et à son ordre de réception. La disponibilité initialement
+limitée à 300 s depuis réception est remplacée par la
+[décision locale #219-006 du 19/11](https://github.com/Guillaume0385/ha-hoben-community/issues/219#issuecomment-7016974888) :
+après vraie acquisition V4, dernières mesures disponibles tant que TLS/session
+est active ; silence DataUpdated sans polling ni faux renouvellement d'heure.
+Seule une perte effective démarre la grâce monotone unique de 300 s ; au-delà,
+indisponibilité jusqu'à nouvelle acquisition valide. Une ouverture seule ou une
+perte rapprochée ne réarme pas cette fenêtre. Stop, refus terminal et cleanup
+non attesté restent prioritaires. Cette règle de disponibilité ne prouve ni
+cadence serveur, ni fraîcheur physique des mesures, ni frontière supplémentaire.
 Le DEBUG dédié local privé peut montrer les vingt mots et le modèle décodé
 (`mapping=owner_validated`), jamais dans les exports de support/GitHub/CI.
 Voir [le contrat actuel](docs/data-updated-recovery.md#219-005--mapping-empirique-propriétaire-et-mises-à-jour-ha).
