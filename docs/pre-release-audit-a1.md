@@ -552,3 +552,48 @@ requis. Pas de CHANGELOG : ancien outillage inaccessible, hors livrable HACS,
 sans changement d'API ni de comportement du plugin. Tests réels Hoben/HA
 **NOT RUN** ; aucun dispatch/rerun live, secret, donnée domestique, commande,
 écriture Modbus, main, tag/release ou fusion DEV. Aucun lot suivant engagé.
+
+## Annexe B4 — audit du lanceur experimental-boundary (20/11/2026)
+
+Tâche `HOBEN-189-B4-LEGACY-EXPERIMENTAL-BOUNDARY-AUDIT-006`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `ac15cf88dad2a5e5ef58d1d36d9e8bed645926d9` ;
+`main` lu seulement à `1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+**Conserver `scripts/launch_experimental_boundary.py` et tous ses tests dans B4.**
+Aucun appel opérationnel courant n'est constaté, mais l'équivalence complète
+des régressions intégrées ci-dessous n'est pas établie. Aucun autre candidat
+examiné ; annexe documentaire seule, sans suppression ou réorganisation de tests.
+
+| Symbole / consommateur | Preuve examinée aux deux SHA | Tests / décision |
+| --- | --- | --- |
+| `collector_environment` / imports | Parcours AST scripts/plugin/tests : seuls imports directs dans [test_experimental_lab_workflow.py](../tests/test_experimental_lab_workflow.py#L12) et [test_experimental_phase_diagnostics.py](../tests/test_experimental_phase_diagnostics.py#L16). Aucun export de packaging ou appel CLI courant documenté. | Conserver : environnement réellement transmis à un subprocess et helper zero_environment des simulations du vrai collecteur, pas seulement une assertion de présence de fichier. |
+| `main`, contexte/refus, sortie privée | [Tests de phase](../tests/test_experimental_phase_diagnostics.py#L144) : vrais checkouts locaux, vrai collecteur isolé en `-I`, refus contexte/identité avant réseau ; simulations H1/H2 avec validation Node indépendante et absence de sortie privée. | Conserver les tests du collecteur et leurs fixtures ; retirer leur dépendance au lanceur demanderait une équivalence démontrée, non réalisée dans B4. |
+| `CHILD_PHASES` / diagnostic parent | [Lanceur](../scripts/launch_experimental_boundary.py#L35) : codes 10..16 seuls admis, autre code/signal/timeout sans phase prouvée. [Test adversarial](../tests/test_experimental_phase_diagnostics.py#L399) : sorties privées jetées, child_exit distinct de unavailable. | Conserver ce contrat de diagnostic fermé ; les parents actuels exposent d'autres schémas, pas une preuve de remplacement de ces assertions. |
+| `main` / nettoyage | Timeout enfant 1800 s, nettoyage du staging privé même après interruption ; échec de nettoyage refusé même après succès enfant, diagnostic fixe de provenance parent. [Régression](../tests/test_experimental_phase_diagnostics.py#L422) avec exception synthétique non publiée. | Conserver, ne pas effacer le refus autonome pour faire disparaître un import de test. |
+| Fixture / garde de séparation H1/H2 et session-300 | Le YAML hoben-experimental a été déplacé R100 en [fixture](../tests/fixtures/retired_workflows/hoben-experimental.yml#L125) par #121 (`3969c02375603d94f331ca5f721dd476ce3408ae`). [test_session_300_workflow.py](../tests/test_session_300_workflow.py#L144) lit aussi l'AST du lanceur et suit le vrai collecteur/sonde pour interdire une fausse équivalence H1/H2-V4. | Conserver fixture et garde croisé ; sa valeur indépendante ne disparaît pas avec le seul statut historique du YAML. |
+| Dynamique / subprocess / SourceBundle / HACS / publication | Aucun import opérationnel du lanceur ; seul import_module observé = `scripts.probe_opened_client_boundary`. Entrées courantes : run_campaign/campaign_worker, launch_manual_hoben et route Info ; chemins fixes, bundle HA sans ce lanceur. Plugin et publisher ne l'appellent pas. | Absence d'appel courant étayée ; ne pas la confondre avec une preuve que ses tests de sécurité sont devenus inutiles. Main et tous les chemins actuels restent inchangés. |
+
+Les parents actuels ont leurs propres protections d'isolation, de budget et de
+nettoyage : [run_campaign.execute](../scripts/run_campaign.py#L187) produit des
+raisons fermées et utilise un canal de rapport, tandis que
+[launch_manual_hoben](../scripts/launch_manual_hoben.py#L115) supervise le groupe
+et son staging. Leurs tests passent sans démontrer le remplacement des sorties
+phase_source=child_exit/unavailable/parent, du helper de simulation et du garde
+AST historique. Une absence d'appel dans les YAML ne suffit donc pas à autoriser
+la suppression de ces dépendances de test ou à déclarer la couverture équivalente.
+
+Vérification reproductible : `git grep -n launch_experimental_boundary <SHA> --
+.github scripts tests docs README.md pyproject.toml`, complétée par AST de tous
+les modules, inspection des appels/copies et `git log --name-status --
+.github/workflows/hoben-experimental.yml tests/fixtures/retired_workflows/hoben-experimental.yml`.
+Les tests ciblés exécutent les vrais parents/collecteurs sur transports et
+horloges simulés ; aucune preuve live ni connaissance d'usages privés externes
+n'en est déduite. Résultats, liens, Ruff, diff-check et quatre CI au HEAD exact
+consignés dans la PR/#189. Pas de RED/GREEN de retrait : aucun retrait effectué.
+
+Tous les fichiers hors cette annexe sont byte-identiques à la base, y compris
+tests, scripts, moteurs, runtime, fixtures et gates. Pas de CHANGELOG : audit
+interne sans impact HACS/plugin. Checkout temporaire sous /tmp, limite d'inodes
+du volume initial conservée et documentée. Tests Hoben/HA réels **NOT RUN** ;
+aucun dispatch/rerun live, commande/écriture Modbus, donnée privée, main,
+tag/release/version ou fusion DEV. Livrer pour revue MANAGER puis arrêter B4.
