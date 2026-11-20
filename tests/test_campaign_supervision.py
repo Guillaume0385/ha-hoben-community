@@ -40,10 +40,16 @@ def test_actual_parent_ack_bounds_projection_and_reaping(
     processes = []
     private_directories = []
     real = subprocess.Popen
+    forbidden = {"GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "GITHUB_OUTPUT", "PYTHONPATH"}
+    for key in forbidden:
+        monkeypatch.setenv(key, "SYNTHETIC_PRIVATE_CAPABILITY")
 
     def spawn(argv, **kwargs):
         private_directories.append(Path(kwargs["env"]["CAMPAIGN_PRIVATE_DIR"]))
+        assert argv[1] == "-I"
         assert argv[2].endswith("scripts/campaign_worker.py")
+        assert not forbidden.intersection(kwargs["env"])
+        assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
         process = real(
             [

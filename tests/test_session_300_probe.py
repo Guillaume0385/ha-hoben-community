@@ -10,8 +10,7 @@ import pytest
 from custom_components.hoben.exceptions import HobenProtocolError, HobenTransportError
 from custom_components.hoben.v4_experiment import Session300
 from custom_components.hoben.v4_session import SessionState
-from scripts import launch_session_300 as launcher
-from scripts.run_session_300 import context_proof, observe, validate_report
+from scripts.run_session_300 import ROOT, context_proof, observe, validate_report
 
 PROOF = {
     "merge_sha": "a" * 40,
@@ -20,6 +19,22 @@ PROOF = {
     "run_attempt": 1,
     "pr_number": 89,
 }
+
+
+def test_removed_session_300_launcher_has_no_operational_entry_point():
+    """Retire the unused launcher while keeping the shared engine reachable."""
+    assert not (ROOT / "scripts/launch_session_300.py").exists()
+    assert (ROOT / "scripts/run_session_300.py").is_file()
+    for folder in (
+        ".github/workflows",
+        ".github/scripts",
+        "scripts",
+        "custom_components",
+    ):
+        for path in (ROOT / folder).rglob("*"):
+            if path.suffix in {".py", ".cjs", ".yml", ".yaml"}:
+                assert "launch_session_300" not in path.read_text(), path
+    assert "launch_session_300" not in (ROOT / "pyproject.toml").read_text()
 
 
 class Clock:
@@ -159,7 +174,7 @@ def test_report_rejects_private_or_inconsistent_data(key, value):
         validate_report(report, PROOF)
 
 
-def test_live_context_is_exact_and_launcher_strips_runner_capabilities(monkeypatch):
+def test_live_context_is_exact():
     env = {
         "GITHUB_ACTIONS": "true",
         "GITHUB_REPOSITORY": "Guillaume0385/ha-hoben-community",
@@ -186,29 +201,6 @@ def test_live_context_is_exact_and_launcher_strips_runner_capabilities(monkeypat
         bad[key] = "untrusted"
         with pytest.raises((ValueError, TypeError)):
             context_proof(bad)
-    source = env | {
-        "GITHUB_TOKEN": "private",
-        "ACTIONS_RUNTIME_TOKEN": "private",
-        "GITHUB_OUTPUT": "private",
-        "PYTHONPATH": "untrusted",
-        "HOBEN_USER_GUID": "synthetic-private-identity",
-    }
-    child = launcher.collector_environment(source)
-    assert (
-        not {"GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "GITHUB_OUTPUT", "PYTHONPATH"}
-        & child.keys()
-    )
-    assert child["HOBEN_USER_GUID"] == "synthetic-private-identity"
-
-    def run(command, **kwargs):
-        assert command[1] == "-I"
-        assert kwargs["timeout"] == 360
-        assert kwargs["stdout"] is launcher.subprocess.DEVNULL
-        assert kwargs["stderr"] is launcher.subprocess.DEVNULL
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(launcher.subprocess, "run", run)
-    assert launcher.main() == 0
 
 
 def test_probe_uses_real_lifecycle_and_session_with_only_an_offline_transport():
