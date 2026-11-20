@@ -296,8 +296,9 @@ def test_close_during_each_phase_has_no_late_reconnect_or_orphan(phase):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("quiet_seconds", [601, 901])
 def test_quiet_session_and_consumed_modbus_exception_never_reconnect(
-    deadlines, monkeypatch
+    deadlines, monkeypatch, quiet_seconds
 ):
     async def scenario():
         factory, sleep = Factory(), AsyncMock()
@@ -309,7 +310,7 @@ def test_quiet_session_and_consumed_modbus_exception_never_reconnect(
         await transport.rx_started.wait()
         # Advance the monotonic clock beyond the one-shot and polling intervals.
         loop = asyncio.get_running_loop()
-        advanced = loop.time() + 601
+        advanced = loop.time() + quiet_seconds
         monkeypatch.setattr(loop, "time", lambda: advanced)
         # No live inactivity timer exists to expire, even beyond polling cadence.
         assert all(context.expired() is False for _, context in deadlines.contexts)

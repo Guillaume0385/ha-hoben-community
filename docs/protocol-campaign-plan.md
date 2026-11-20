@@ -51,7 +51,7 @@ augmenterait son périmètre sans preuve et demande un autre arbitrage.
 Le module conserve dans excluded_references les chemins historiques
 [session_suite.py](../scripts/session_suite.py),
 [v4_no_pong.py](../custom_components/hoben/v4_no_pong.py) et
-[session_natural_900.py](../scripts/session_natural_900.py).
+[session_natural_900.py](https://github.com/Guillaume0385/ha-hoben-community/blob/e6e1943996f32939ad2dce3d8d4594bf9f170a1c/scripts/session_natural_900.py).
 Le premier parcours utilise **NoPongAfter120**, une inhibition artificielle :
 il n'est pas présenté comme perte naturelle et n'est pas une implémentation
 réutilisable telle quelle dans cette cible. La fondation 900 s ne constitue

@@ -50,6 +50,26 @@ def never_starts(result):
     assert "PRIVATE_INPUT" not in repr(result)
 
 
+def test_removed_natural_900_foundation_has_no_operational_entry_point():
+    """An excluded historical reference must never become a runtime import."""
+    assert not (ROOT / "scripts/session_natural_900.py").exists()
+    for folder in ("scripts", "custom_components"):
+        for path in (ROOT / folder).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = (
+                    [node.module or "", *(item.name for item in node.names)]
+                    if isinstance(node, ast.ImportFrom)
+                    else [item.name for item in node.names]
+                    if isinstance(node, ast.Import)
+                    else []
+                )
+                assert not any("session_natural_900" in name for name in names), path
+    for path in (ROOT / ".github/workflows").glob("*.yml"):
+        assert "session_natural_900" not in path.read_text(), path
+        assert "session-natural-900" not in path.read_text(), path
+    assert "session_natural_900" not in (ROOT / "pyproject.toml").read_text()
+
+
 def test_choices_match_the_inert_protocol_shell_and_all_has_historical_order():
     shell = yaml.load(
         (ROOT / ".github/workflows/hoben-protocol-manual.yml").read_text(),
@@ -88,7 +108,13 @@ def test_plans_are_deeply_immutable_and_never_execution_permits(selection):
         never_starts(stage)
         for refs in (stage.references, stage.excluded_references):
             assert type(refs) is tuple
-            assert all((ROOT / p).is_file() for p in refs)
+        assert all((ROOT / p).is_file() for p in stage.references)
+        for reference in stage.excluded_references:
+            if reference == "scripts/session_natural_900.py":
+                # Keep the explicit exclusion as historical negative evidence.
+                assert not (ROOT / reference).exists()
+            else:
+                assert (ROOT / reference).is_file()
         assert type(stage.historical_limits) is tuple
         assert all(type(pair) is tuple for pair in stage.historical_limits)
         with pytest.raises(FrozenInstanceError):

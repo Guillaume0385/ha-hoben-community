@@ -84,8 +84,8 @@ réutilisation TLS, continuous_300s, cleanup et supervision. Ni le silence, ni
 un arrêt local, ni CloseClient ne prouvent un EOF TLS. Les tests de pertes
 synthétiques ne sont pas une preuve de reconnexion réelle.
 
-Autres éléments à ne pas réactiver : [session_natural_900.py](../scripts/session_natural_900.py)
-et son [test](../tests/test_session_natural_900.py) sont une fondation historique
+Autres éléments à ne pas réactiver : [session_natural_900.py](https://github.com/Guillaume0385/ha-hoben-community/blob/da80bff53dc4bf6ece5ec2d3229b794239d0d579/scripts/session_natural_900.py)
+et son [test](https://github.com/Guillaume0385/ha-hoben-community/blob/da80bff53dc4bf6ece5ec2d3229b794239d0d579/tests/test_session_natural_900.py) sont une fondation historique
 sans choix Actions actuel ; 900 s n'est pas un budget autorisé pour #126.
 Le mode --live-v4-validation-values du [probe][probe] est un outil de recherche
 privée, refusé dans Actions ; il n'appartient à aucun all ni rapport public.
