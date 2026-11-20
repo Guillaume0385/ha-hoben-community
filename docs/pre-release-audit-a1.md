@@ -230,7 +230,7 @@ leur présence ne prouve pas à elle seule une couverture exhaustive.
 | [launch_experimental_boundary.py](../scripts/launch_experimental_boundary.py) | C | fixture hoben-experimental, tests et docs ; ancien lancement | T5 | présent |
 | [launch_live_ha_parity.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/launch_live_ha_parity.py) | C | fixture hoben-live-experimental, tests et ancien contrat | T5 | présent |
 | [run_live_ha_parity.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/run_live_ha_parity.py) | C | subprocess du lanceur parity ; pas le coordinator actuel | T5 | présent |
-| [launch_session_300.py](../scripts/launch_session_300.py) | C | ancienne fixture, tests ; lance run_session_300, moteur partagé | T2/T5 | présent |
+| [launch_session_300.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/launch_session_300.py) | C | ancienne fixture, tests ; lance run_session_300, moteur partagé | T2/T5 | présent |
 | [launch_session_suite.py](../scripts/launch_session_suite.py) | C | ancienne fixture/tests ; subprocess run_session_suite | T2/T5 | présent |
 | [run_session_suite.py](../scripts/run_session_suite.py) | C | launch_session_suite ; conservé en compatibilité/test | T2/T5 | présent |
 | [probe_hoben_connection.py](../scripts/probe_hoben_connection.py) | C | CLI documentée et tests ; références des plans non exécutables | T2/T5 | présent |
@@ -467,7 +467,7 @@ par une incertitude de recherche. Aucun autre candidat n'est examiné dans B2.
 | `valid_ignored_messages` | [campaign_runtime_contract.validate_stage](../scripts/campaign_runtime_contract.py#L425) importe ce validateur si un détail protocole contient `ignored_messages`. | **Conserver**, contrat de rapport actuel ; tests de schémas fermés et métadonnées bornées. L'import local conditionnel est un consommateur, même absent des imports de tête de fichier. |
 | `observe`, `write_report` | [run_manual_hoben.sessions/save](../scripts/run_manual_hoben.py#L27) les importe et les appelle ; [launch_manual_hoben](../scripts/launch_manual_hoben.py#L17) importe aussi `write_report`. Le YAML manuel installé appelle ce lanceur, sans utiliser `launch_session_300.py`. Même dépendance du chemin manuel dans l'arbre main examiné. | **Conserver**, observation et publication privée partagées ; `test_manual_hoben_runtime.py` et `test_session_300_report_writer.py` couvrent contexte, export, permissions, refus de liens/fichiers existants et nettoyage d'écriture échouée. |
 | `context_proof`, `require`, `write_report` | [run_session_suite.py](../scripts/run_session_suite.py#L24) importe les helpers du module. La [fixture retirée hoben-session-300](../tests/fixtures/retired_workflows/hoben-session-300.yml#L135) appelle `launch_session_suite.py`, qui lance ce runner. | **Conserver** les helpers et fixtures ; tests de suite/processus et de contexte. La fixture n'est pas un workflow installé ni un appel direct de `launch_session_300.py`. |
-| `launch_session_300.collector_environment/main` | Aucun appel trouvé dans les cinq YAML installés des deux branches, ni import entrant dans les modules opérationnels examinés. Appel interne fixe de `run_session_300.py` ; [test_session_300_probe.py](../tests/test_session_300_probe.py#L162) vérifie son isolation, son plafond 360 s et ses sorties privées. | **Conserver dans B2** : lanceur historique candidat, distinct du moteur actif et du lanceur de suite. Aucun dossier autonome de remplacement de ses régressions n'est établi ici ; ne pas conclure que le couple est supprimable à partir de son seul statut. |
+| `launch_session_300.collector_environment/main` | Aucun appel trouvé dans les cinq YAML installés des deux branches, ni import entrant dans les modules opérationnels examinés. Appel interne fixe de `run_session_300.py` ; [test_session_300_probe.py](https://github.com/Guillaume0385/ha-hoben-community/blob/3ed9ce9a51ac1eae82d9147691e5e3149457bd45/tests/test_session_300_probe.py#L162) vérifie son isolation, son plafond 360 s et ses sorties privées. | **Conserver dans B2** : lanceur historique candidat, distinct du moteur actif et du lanceur de suite. Aucun dossier autonome de remplacement de ses régressions n'est établi ici ; ne pas conclure que le couple est supprimable à partir de son seul statut. |
 | Chargements dynamiques / SourceBundle | Parcours AST des modules scripts/plugin sur les deux SHA : les imports ci-dessus sont réels ; seul `import_module` observé = `scripts.probe_opened_client_boundary`. [SourceBundle](../scripts/ha_session_supervisor.py#L91) copie le plugin et une liste de helpers HA sans ces deux scripts. | Aucune suppression déduite de cette absence dans le bundle HA : la collecte protocole est exécutée sur le host et possède ses propres dépendances. |
 | CI, HACS, publication, documentation | `validate.yml` collecte les tests cités ; le plugin HACS n'importe pas les deux scripts et le publisher ne les exécute pas. Les [instructions courantes](manual-test-campaign-runtime.md#correspondance-des-collecteurs-et-preuve) désignent positivement `run_session_300.observe`. Les définitions modernes sur main sont des shells inertes ; le manuel y refuse une collecte sur main. | Conserver tous les contrats et liens ; absence d'import depuis le plugin ou de commande du publisher ne prouve pas l'absence d'usage par les campagnes protocolaires. Aucune activation main déduite de l'inspection. |
 
@@ -501,3 +501,54 @@ sous `/tmp` sans modifier le dépôt initial. Tests Hoben/HA réels **NOT RUN** 
 aucun dispatch/rerun live, secret, donnée privée, commande ou écriture Modbus,
 modification de protection, main, tag/release ou fusion DEV. Livrer les preuves
 pour revue MANAGER, sans changer de candidat ni lancer le lot suivant.
+
+## Annexe B3 — retrait du seul lanceur session-300 (20/11/2026)
+
+Tâche `HOBEN-189-B3-LEGACY-SESSION300-LAUNCHER-ISOLATION-005`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `913236636e1db8ce0d66d0d97f51117b3fe115db` ;
+`main` examiné seulement en lecture : `1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+**Retirer uniquement `scripts/launch_session_300.py` ; conserver le moteur
+partagé `scripts/run_session_300.py` à l'octet.** B2 reste le constat antérieur ;
+les liens de l'ancien lanceur A1 et de ses assertions B2 sont épinglés à leurs
+SHA respectifs, sans effacer ces décisions historiques.
+
+### Preuve par fonction et consommateur
+
+| Fonction / entrée | Consommateurs examinés et preuve indépendante | Décision |
+| --- | --- | --- |
+| `collector_environment` | Parcours AST de tous les modules scripts/plugin aux deux SHA : aucun import entrant. Seul consommateur dans l'arbre maintenu : portion du test `test_session_300_probe.py` appelant directement cette fonction. Aucun export de package ni point d'entrée déclaré dans pyproject. | Retirer avec le lanceur ; protections équivalentes sur les parents maintenus ci-dessous. |
+| `main` / CLI du fichier | Commande historique introduite dans [3b1336d](https://github.com/Guillaume0385/ha-hoben-community/blob/3b1336d7951743e02ff3783abb9d3c221f078dcf/.github/workflows/hoben-session-300.yml), remplacée par `launch_session_suite.py` dans [dc3872e](https://github.com/Guillaume0385/ha-hoben-community/blob/dc3872e495f9a26e1e31affd217e4d0bf48d0005/.github/workflows/hoben-session-300.yml). Les cinq YAML installés, fixtures retirées et commandes documentées des deux arbres ne l'appellent plus. Son `__main__` est une entrée directe au fichier, sans consommateur CLI maintenu. | Retirer ce point d'entrée historique, pas le lanceur de suite ni ses contrats. |
+| Import dynamique / subprocess / SourceBundle | Seul import_module des modules examinés : `scripts.probe_opened_client_boundary`. Subprocess à chemins fixes et liste SourceBundle sans le lanceur ; aucun parcours chargeant arbitrairement les scripts. | Aucun chemin opérationnel reconstruit vers ce lanceur ; pas de substitution ou d'élargissement d'admission. |
+| Campagnes, HACS, publication | Protocole → run_campaign/campaign_worker ; manuel → launch_manual_hoben ; fixture session-300 → launch_session_suite. Le plugin n'importe pas ce lanceur ; le publisher n'exécute pas ce fichier. Les imports positifs de run_session_300 établis en B2 restent présents. | Conserver tous les moteurs, YAML, gates, rapports et fixtures. Main reste inchangé, y compris son exemplaire historique et ses tests. |
+
+### Équivalence des protections et adaptation minimale des tests
+
+| Protection testée sur l'ancien lanceur | Preuve maintenue sur les voies actuelles | Adaptation B3 |
+| --- | --- | --- |
+| Environnement allowlisté, tokens/fichiers Actions/PYTHONPATH exclus | [test_manual_hoben_runtime.py](../tests/test_manual_hoben_runtime.py), `test_child_environment_has_no_runner_tokens_or_arbitrary_mode` : clé inconnue refusée, ensemble exact de l'allowlist. Dans [test_campaign_supervision.py](../tests/test_campaign_supervision.py), les quatre capacités de l'ancien test sont injectées dans l'environnement parent et leur absence est vérifiée sur le vrai Popen ; worker synthétique sans tokens/identité en environnement. | Déplacer les garanties sur le parent actif, retirer les seuls appels à collector_environment de l'ancien lanceur. |
+| Budget dur 360 s / exécution isolée | `test_child_environment_has_no_runner_tokens_or_arbitrary_mode` vérifie `session-300: 360` ; [test_campaign_runtime.py](../tests/test_campaign_runtime.py), `test_design_budgets_are_exact_and_legacy_ha_limit_is_not_extended`, fige le même plafond moderne. Tests des parents : délais armés avant ACK, transition tardive refusée, SIGKILL/réapage d'un groupe résistant ; `-I` désormais vérifié explicitement avant le vrai Popen moderne. | Retirer le stub qui vérifiait le champ timeout=360 de l'ancien subprocess, sans changer les budgets actuels ni leurs tests. |
+| stdout/stderr privés, aucune identité publiée | `test_actual_parent_ack_bounds_projection_and_reaping` vérifie DEVNULL sur les deux sorties d'un vrai subprocess synthétique, rapports privés refusés et dossier privé supprimé. Les régressions de publication et de confidentialité session-300 restent conservées. | Retirer uniquement les assertions DEVNULL sur le stub de l'ancien lanceur. |
+| Contexte exact du moteur partagé | [test_session_300_probe.py](../tests/test_session_300_probe.py), désormais `test_live_context_is_exact` : contexte positif et mutation de chaque champ toujours refusée ; observe, validate_report et tests d'écriture sécurisée inchangés. | Conserver le test autonome ; supprimer son import du lanceur et la portion devenue sans objet. Aucun cas de contexte supprimé. |
+
+Ces équivalences portent sur les garanties de sécurité maintenues, pas sur
+l'identité des APIs des lanceurs ni une autorisation de collecter. Le nouveau
+garde vérifie l'absence du fichier, des références opérationnelles et d'entrée
+pyproject, tout en exigeant la présence du moteur partagé : RED avant retrait,
+GREEN après. Aucun autre test ni fixture retiré ; un cas de garde ajouté.
+
+Reproduction : `git grep -n launch_session_300 <SHA> -- .github scripts tests docs
+README.md pyproject.toml`, complété par AST, inspection des subprocess/copies,
+historique `git log -G launch_session_300 -- .github/workflows` et tests offline.
+Les conclusions portent sur les consommateurs maintenus des deux arbres ; des
+usages privés externes non observables ne sont pas déclarés connus.
+
+Diff B3 limité au lanceur, à son fichier de tests, au renforcement des assertions
+du parent actif dans test_campaign_supervision.py et à ce document. Le moteur,
+runtime HA, gates/YAML, fixtures, manifest et version restent byte-identiques.
+Résultats ciblés, suites complètes locales et quatre CI au HEAD exact consignés
+dans la PR/#189, avec les limites d'inodes locales. Ruff, liens et diff-check
+requis. Pas de CHANGELOG : ancien outillage inaccessible, hors livrable HACS,
+sans changement d'API ni de comportement du plugin. Tests réels Hoben/HA
+**NOT RUN** ; aucun dispatch/rerun live, secret, donnée domestique, commande,
+écriture Modbus, main, tag/release ou fusion DEV. Aucun lot suivant engagé.
