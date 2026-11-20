@@ -228,8 +228,8 @@ leur présence ne prouve pas à elle seule une couverture exhaustive.
 | Fichier | État | Consommateur / raison vérifiable | Tests | main |
 | --- | --- | --- | --- | --- |
 | [launch_experimental_boundary.py](../scripts/launch_experimental_boundary.py) | C | fixture hoben-experimental, tests et docs ; ancien lancement | T5 | présent |
-| [launch_live_ha_parity.py](../scripts/launch_live_ha_parity.py) | C | fixture hoben-live-experimental, tests et ancien contrat | T5 | présent |
-| [run_live_ha_parity.py](../scripts/run_live_ha_parity.py) | C | subprocess du lanceur parity ; pas le coordinator actuel | T5 | présent |
+| [launch_live_ha_parity.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/launch_live_ha_parity.py) | C | fixture hoben-live-experimental, tests et ancien contrat | T5 | présent |
+| [run_live_ha_parity.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/run_live_ha_parity.py) | C | subprocess du lanceur parity ; pas le coordinator actuel | T5 | présent |
 | [launch_session_300.py](../scripts/launch_session_300.py) | C | ancienne fixture, tests ; lance run_session_300, moteur partagé | T2/T5 | présent |
 | [launch_session_suite.py](../scripts/launch_session_suite.py) | C | ancienne fixture/tests ; subprocess run_session_suite | T2/T5 | présent |
 | [run_session_suite.py](../scripts/run_session_suite.py) | C | launch_session_suite ; conservé en compatibilité/test | T2/T5 | présent |
@@ -382,3 +382,65 @@ PR A1 ; leurs résultats seront consignés dans la PR et #189, sans confondre le
 SHA source de cet audit avec le SHA de livraison. Aucun nouveau test ajouté pour
 miroiter un changement de code inexistant. Validation Hoben/HA réelle A1 :
 **NOT RUN**. Arrêt DEV à state:review, sans fusion ni modification d'automatisation.
+
+## Annexe B1 — retrait du couple HA-parity historique (20/11/2026)
+
+Tâche `HOBEN-189-B1-LEGACY-HA-PARITY-REMOVAL-003`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base examinée : `experimental` à `17a09888d5e77f7f4f720d6d3e2207517cf3a881` ;
+`main` lu seulement à `1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+Les constats A1 ci-dessus restent ceux du 05/11, pas un inventaire après retrait.
+Les liens des deux scripts y sont épinglés à la base A1 ; ceux de l'inventaire
+du 27/10 sont épinglés à sa propre base pour conserver les preuves accessibles.
+
+### Graphe de consommateurs et décision
+
+| Fichier/symbole | Consommateur et preuve à la base B1 | Décision / régression conservée |
+| --- | --- | --- |
+| `launch_live_ha_parity.py:main/child_environment` | Seule commande entrante : ligne `run` de `tests/fixtures/retired_workflows/hoben-live-experimental.yml`. Aucun des cinq YAML installés sur les deux branches ne l'appelle. | Retirer le lanceur ; conserver la fixture et ses assertions de permissions, secrets après recheck, publication séparée, rétention et refus d'admission. |
+| `run_live_ha_parity.py:observe/main/context_valid/write_report` | Seul appel opérationnel potentiel : subprocess fixe du lanceur retiré. Son contexte exige `push` et l'ancien chemin Actions absent. Le vrai client est importé par ce script ; aucun import inverse depuis le plugin. | Retirer ce collecteur one-shot historique et son schéma 1 ; aucune preuve HA persistante actuelle n'en dépend. Ne pas modifier les clients, décodeurs ni rapports maintenus. |
+| Imports Python des deux scripts | Parcours AST de tous les modules `scripts/` et `custom_components/` sur les deux SHA : aucun import entrant. Les seuls imports entrants du dépôt sont dans `tests/test_experimental_live_workflow.py`. | Retirer ces deux imports et les tests strictement dépendants ; garde de non-réactivation ajouté. |
+| Chargement dynamique / copie de sources | Seul `import_module` des modules examinés : `scripts.probe_opened_client_boundary`. `SourceBundle` copie les modules du plugin et une liste fermée de workers/helpers HA, jamais le couple parity. Les subprocess sélectionnent des chemins fixes. | Conserver tous les moteurs partagés et leurs tests ; aucune extension d'allowlist ni substitution de worker. |
+| Campagnes HA/protocole actuelles | YAML → `run_campaign.py` → `campaign_worker.py` → `ha_session_supervisor.py`/`ha_session_guard.py` → `ha_campaign_worker.py` et vrais client/coordinator ; protocole → `protocol_campaign_collect.py`. | Chemins inchangés ; tests de supervision, publication et HA réels sur transports simulés conservés. |
+| Voie manuelle #119 | YAML installé → `launch_manual_hoben.py` ; route Info → `launch_info_manual.py`. Sur le main examiné, les deux formulaires modernes sont des shells inertes ; aucune entrée parity installée. | Conserver YAML, gates, scripts partagés et tests négatifs, y compris Node `experimental-live-gate` / `experimental-live-report`. Aucune modification main. |
+| Publication / HACS | `publish-release.yml` lit manifest/CHANGELOG via API, sans exécuter ces scripts. HACS charge `custom_components/hoben/`, qui n'importe pas le couple. Une archive Git peut contenir du code sans le consommer à l'exécution. | Publication, manifeste, version et plugin inchangés ; tests de publication conservés. |
+| Documentation / fixtures | Les liens exacts des deux scripts figurent dans les inventaires datés A1 et 27/10 ; l'ancienne procédure et les noms de rapports sont historiques, pas des commandes courantes. La fixture retirée n'est pas un workflow installé. | Conserver les preuves, épingler les liens de code aux SHA audités ; aucune suppression de fixture ni modification des contrats historiques. |
+
+Cette conclusion combine appels des YAML, imports, subprocess, copies et
+chargements dynamiques ; elle ne repose pas sur une absence de texte seule.
+Elle porte sur les deux arbres examinés, pas sur d'éventuels usages privés
+externes non observables. Le retrait n'active aucune autre voie et n'allège
+aucune admission ou publication maintenue.
+
+### Tests retirés et garanties maintenues
+
+Dans `tests/test_experimental_live_workflow.py`, **neuf cas** sont devenus sans
+objet : inspection du collecteur supprimé (1), deux appels sur son FakeClient
+(3), refus de contexte et écriture exclusive de son rapport (1), allowlist de
+son lanceur (1), provenance de son `main` aux tentatives 1/2/3 (3).
+Le FakeClient, ses imports et fixtures locales sans autre usage sont retirés.
+Ces tests ne couvraient pas le coordinator actuel : ils ne sont pas présentés
+comme équivalents à une preuve de session persistante.
+
+Les garanties autonomes restent couvertes sans changement par :
+
+- les assertions du YAML en fixture et les deux suites Node de gate/rapport,
+  conservées dans le même fichier ;
+- `test_manual_hoben_runtime.py` : refus de chaque champ avant identité,
+  environnement enfant sans token/fichiers Actions et rapport révalidé ;
+- `test_campaign_runtime.py`, `test_campaign_consolidation.py` et
+  `test_campaign_publication.py` : contexte natif, identité, provenance,
+  projections privées refusées et fichier de rapport dangereux refusé ;
+- `test_ha_session_supervisor.py`, `test_ha_manual_live.py` et
+  `ha_tests/test_manual_campaign_observer.py` : sources fermées, identité privée,
+  cleanup, vrais client/coordinator, lecture/erreur/décodage sur pairs simulés.
+
+Le garde B1 vérifie que la fixture existe, que son YAML n'est pas réinstallé,
+que les deux scripts sont absents et qu'aucun module ou YAML opérationnel ne
+les référence : RED avant retrait, GREEN après. Les suites complètes et les
+quatre CI sont consignées au HEAD exact dans la PR et #189.
+
+Pas de modification CHANGELOG : retrait d'outillage historique inaccessible,
+hors livrable HACS, sans changement d'API, version ou comportement du plugin.
+Tests Hoben/HA réels **NOT RUN** ; aucune connexion, commande, écriture Modbus,
+modification de gate ou promotion main. Aucun lot suivant lancé par CODEX DEV.
