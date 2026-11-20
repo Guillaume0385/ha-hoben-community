@@ -251,7 +251,7 @@ leur présence ne prouve pas à elle seule une couverture exhaustive.
 | [github_campaign_branch_evidence.py](../scripts/github_campaign_branch_evidence.py) | C | tests et doc ; HEAD de branche sans autorité d’exécution | T6 | absent |
 | [github_campaign_workflow_tree.py](../scripts/github_campaign_workflow_tree.py) | C | tests et doc ; identité d’arbre des shells | T6 | absent |
 | [github_campaign_workflow_blob.py](../scripts/github_campaign_workflow_blob.py) | C | tests et doc ; identité des octets Git, pas sémantique YAML | T6 | absent |
-| [github_campaign_actions_registry.py](../scripts/github_campaign_actions_registry.py) | C | tests et doc ; métadonnées partielles du registre Actions | T6 | absent |
+| [github_campaign_actions_registry.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/github_campaign_actions_registry.py) | C | tests et doc ; métadonnées partielles du registre Actions | T6 | absent |
 
 ### Supports hors des 88 scripts
 
@@ -647,3 +647,58 @@ locale et résultats non verts éventuels rapportés honnêtement ; checkout sou
 /tmp. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, commande,
 écriture Modbus, donnée privée, main, release/tag ni fusion DEV. Aucun autre
 candidat examiné ou lot suivant engagé.
+
+## Annexe B6 — retrait du lecteur de registre Actions
+
+Tâche `HOBEN-189-B6-LEGACY-SCRIPT-SINGLE-CANDIDATE-008`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Candidat unique A1 : `scripts/github_campaign_actions_registry.py`, hors B2/B4
+et natural900. Base `experimental` : `64383c9524adab10a0be3a4c8d8002fe200913d0` ;
+main lu seulement à `1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+**Retirer uniquement ce lecteur sans consommateur opérationnel ; conserver
+toutes les protections du transport GET et des admissions maintenues.**
+
+| Symbole / consommateur | Preuve examinée | Décision / couverture |
+| --- | --- | --- |
+| `validate_registry`, `read_registry`, modèles Fact/Observation | AST de tous les modules scripts/plugin/tests : seul import dans test_github_campaign_actions_registry.py. Aucun import des helpers de ce test ailleurs. Source absente de main. Aucune CLI utile, backend HTTP ou recherche de token ; exécution directe refusée. | Retirer le modèle introduit en `5df31d7d51239adace6466922257a96898cb7591`, pas le transport. Aucun producteur/consommateur maintenu de ses observations ne dépend de son API. |
+| Workflows, dynamique, subprocess, SourceBundle, packaging | Aucun appel installé/historique en YAML/fixture/CLI documentée, aucun import opérationnel. Seul import_module des scripts/plugin = probe_opened_client_boundary ; entrées à chemins fixes et bundle HA sans le lecteur. HACS/publisher sans dépendance. | Pas de raccordement ou activation retirés ; main, gates et scripts B2/B4 inchangés. Absence établie par graphe et inspection, pas par recherche textuelle seule. |
+| 30 cas de tests du transport partagé | Deux routes fixes, 18 routes interdites, 6 refus de pagination/query, 3 JSON/token refusés, 1 redirection refusée. Ces cas ne deviennent pas inutiles avec le lecteur. | **Conserver les 30 cas** dans [test_github_campaign_actions_registry.py](../tests/test_github_campaign_actions_registry.py), sans importer le lecteur supprimé. Appeler directement GitHubGETTransport et vérifier erreurs typées/fermeture/absence de fuite. |
+| 112 autres cas du même fichier | Projection enum/ID/path/state, bornes et binding des seules observations retirées, recheck et ancien garde de source/CLI. Aucun helper exporté ou consommateur tiers. | Retirer ces seuls cas dépendants ; ajouter un garde d'absence du module/imports opérationnels/entrée YAML/packaging. Fichier de tests conservé : 142 cas avant, 31 après. |
+| Preuves documentaires / limite d'accès historique | A1 et [section registre](github-campaign-evidence.md) décrivent le lecteur non raccordé et le refus du connecteur observé le 27/10. Liens source/test épinglés aux SHA antérieurs, contrat historique conservé. | Ne pas inférer qu'un workflow est actif ou approuvé ; aucun nouvel appel GitHub réel ni contournement du refus historique. |
+
+### Garanties indépendantes maintenues
+
+- [test_github_campaign_transport.py](../tests/test_github_campaign_transport.py) :
+  GET allowlisté, TLS vérifié, token injecté sans découverte d'environnement,
+  refus HTTP/403, timeout/tailles, redirections, pagination hostile, JSON ambigu
+  et écho de secret ; fermeture des streams et erreurs sans contexte privé.
+  Les 30 cas propres aux routes de workflow restent en plus testés directement.
+- [test_github_campaign_evidence.py](../tests/test_github_campaign_evidence.py) :
+  faits partiels sans autorité, can_start=false, immutabilité, incohérences,
+  recheck, erreurs/pagination et champs privés refusés.
+- [test_campaign_minimal_admission.py](../tests/test_campaign_minimal_admission.py)
+  et les régressions des campagnes maintenues : contexte fermé et propriétaire,
+  choix, refus et environnements ; aucune entrée registry active n'est assimilée
+  à une autorisation. Les workflows/gates eux-mêmes restent byte-identiques.
+
+Il n'y a pas de remplacement permissif du parseur d'observations : cette API
+inutilisée disparaît. Sa borne de métadonnées 16 Kio n'est transférée à aucun
+rapport ; transport existant (2 Mio/10 s), budgets Hoben et routes restent
+inchangés. Le booléen false du modèle retiré n'est pas remplacé par un succès
+ou une approbation inventée. Les schémas d'observations maintenus et les contrôles
+d'admission continuent d'être testés indépendamment.
+
+Reproduction : `git grep -n -E 'github_campaign_actions_registry|read_registry|validate_registry'
+<SHA> -- .github scripts tests ha_tests docs README.md pyproject.toml`, AST,
+inspection des entrées/copies et historique du candidat. Garde RED avant retrait,
+GREEN après ; suites ciblées avant/après, Python/HA complètes, Ruff, liens,
+diff-check et quatre CI au HEAD exact consignés dans la PR/#189. Les usages
+privés externes non observables ne sont pas déclarés connus.
+
+Diff B6 : ce seul script, son fichier de tests conservé/adapté et deux documents
+de preuves. Aucun runtime, transport, moteur partagé, gate/workflow, fixture,
+manifest/version ou script B2/B4 changé. Pas de CHANGELOG : modèle interne
+non raccordé hors livrable HACS, sans changement du comportement du plugin.
+Limites d'inodes/Docker locales rapportées, checkout sous /tmp. Tests réels
+Hoben/HA **NOT RUN**, aucun dispatch/rerun live, secret/donnée privée, commande,
+écriture Modbus, main/release/tag ni fusion DEV. Aucun autre candidat ou lot.
