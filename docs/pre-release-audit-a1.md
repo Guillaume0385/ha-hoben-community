@@ -236,7 +236,7 @@ leur présence ne prouve pas à elle seule une couverture exhaustive.
 | [probe_hoben_connection.py](../scripts/probe_hoben_connection.py) | C | CLI documentée et tests ; références des plans non exécutables | T2/T5 | présent |
 | [v4_validation_values.py](../scripts/v4_validation_values.py) | C | import par probe_hoben_connection ; export privé manuel historique | T5 | présent |
 | [replay_opened_client_boundary.py](../scripts/replay_opened_client_boundary.py) | C | outil de replay offline documenté et testé ; pas un collecteur live | T5 | présent |
-| [session_natural_900.py](../scripts/session_natural_900.py) | C | tests et référence de plan ; aucune nouvelle admission autorisée | T2 | présent |
+| [session_natural_900.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/session_natural_900.py) | C | tests et référence de plan ; aucune nouvelle admission autorisée | T2 | présent |
 | [ha_session_proof.py](../scripts/ha_session_proof.py) | C | contrat C1 importé par ses tests ; distinct du contrat live C2 | T5 | présent |
 | [campaign_shell_semantics.py](../scripts/campaign_shell_semantics.py) | C | tests/fixtures des shells inertes ; pas admission des collecteurs | T6 | absent |
 | [manual_campaign_contract.py](../scripts/manual_campaign_contract.py) | C | modèle offline et tests ; pas de caller live des cinq workflows | T6 | absent |
@@ -597,3 +597,53 @@ interne sans impact HACS/plugin. Checkout temporaire sous /tmp, limite d'inodes
 du volume initial conservée et documentée. Tests Hoben/HA réels **NOT RUN** ;
 aucun dispatch/rerun live, commande/écriture Modbus, donnée privée, main,
 tag/release/version ou fusion DEV. Livrer pour revue MANAGER puis arrêter B4.
+
+## Annexe B5 — retrait de la fondation natural-900 (20/11/2026)
+
+Tâche `HOBEN-189-B5-LEGACY-SCRIPT-CANDIDATE-INVENTORY-007`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Candidat unique choisi dans A1 : `scripts/session_natural_900.py`, distinct des
+scripts conservés B2/B4. Base `experimental` :
+`d7fe6b3ec38deba1da2a9b48d8b1ab15295fdeec` ; main examiné seulement en lecture :
+`1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+**Retirer ce seul module et son test entièrement dédié ; conserver les moteurs,
+les gardes de refus de fausse reconnexion et les exclusions de scénario.**
+
+| Symbole / consommateur | Preuve aux deux SHA | Décision / couverture |
+| --- | --- | --- |
+| `observe_natural`, `validate_natural` | Parcours AST de tous les modules scripts/plugin/tests : seul import entrant dans test_session_natural_900.py. Module sans CLI, point d'entrée de packaging, constructeur live ou admission. Aucun YAML installé ni fixture ne l'appelle. | Retirer la fondation introduite par #110 (`9452af15318f43ee037560a977424963d1623a24`) et ses 24 cas strictement liés. Aucun helper partagé dans ce test n'est importé ailleurs. |
+| Imports dynamiques, subprocess, SourceBundle | Seul import_module des scripts/plugin = probe_opened_client_boundary. Entrées modernes et historiques à chemins fixes ; bundle HA avec liste de scripts fermée, sans natural900. Plugin HACS et publisher sans dépendance. | Absence d'usage établie par graphe/imports/appels, pas seulement par recherche textuelle ; main reste inchangé. |
+| `protocol_campaign_plan.excluded_references` | Chaîne historique dans une liste explicitement exclue ; dataclass de citations, jamais importée ni lancée. Le scénario session-natural-900 est rejeté par le catalogue fermé ; aucun appel à observe_natural dans le runtime. | Conserver la chaîne et son test négatif. Les références actives et les autres exclusions doivent toujours exister ; seul ce chemin retiré doit désormais être absent. Aucune règle d'admission modifiée. |
+| Documents A1 / inventaire / plan | Références à la fondation historique non autorisée, pas une commande courante. Les liens de code/test sont épinglés aux bases respectives des documents. | Conserver l'historique accessible. Le plafond 900 s retiré n'est transféré à aucune campagne ; le budget HA dual de 900000 ms est indépendant et inchangé. |
+
+### Garanties équivalentes conservées sur les chemins actuels
+
+| Garantie de l'ancien test dédié | Régression indépendante maintenue / renforcée |
+| --- | --- |
+| Silence sans reconnexion fabriquée ; réouverture seule insuffisante | [test_v4_lifecycle.py](../tests/test_v4_lifecycle.py) : quiet_session_and_consumed_modbus_exception_never_reconnect conservé à 601 s et étendu à 901 s simulées. natural_witness_causality_generation_and_correlated_read exige perte horodatée, génération et lecture réellement corrélée ; une réouverture réinitialise le témoin, une ancienne réponse ne le rétablit pas. |
+| Pas de perte/reprise inventée sur arrêt local ou ouverture refusée | Même suite : natural_witness_has_no_loss_on_local_shutdown_or_unproven_opening, natural_loss_timestamp_survives_delayed_lifecycle_wakeup. [test_protocol_campaign_collect.py](../tests/test_protocol_campaign_collect.py) vérifie le refus d'une perte antérieure au seuil et les générations corrélées, sans présenter l'inhibition expérimentale Pong comme perte naturelle. |
+| Schéma fermé, aucun champ privé ni fausse promotion SUCCESS | [test_campaign_runtime.py](../tests/test_campaign_runtime.py) : reconnection_without_natural_loss_never_succeeds, private_unknown_keys_refuse_in_every_public_layer et absolute_stage_limits_fail_closed, avec validateurs Python/Node. L'ancien schéma natural900 n'a plus de producteur ou consommateur maintenu ; il n'est pas remplacé par un faux rapport. |
+| Nettoyage, annulation, ouverture en erreur et budget borné | Tests lifecycle : close_during_each_phase_has_no_late_reconnect_or_orphan, cancel_initial_connect_closes_opening_and_does_not_retry, ordered_backoff_and_strict_lifetime_budget et invalid_configuration_rejected_before_factory. Tests de [session_suite](../tests/test_session_suite.py) : annulation/délai réel ferme le propriétaire partagé. Aucun changement de factory/runtime. |
+| Aucune admission de la fondation 900 s | [test_protocol_campaign_plan.py](../tests/test_protocol_campaign_plan.py) : refus du choix session-natural-900, exclusion explicite conservée ; nouveau garde d'absence du fichier, des imports opérationnels et des entrées YAML/packaging. |
+
+Les 24 cas supprimés testaient exclusivement les deux fonctions retirées :
+4 rapports admis, 13 rapports refusés, 1 champ privé refusé, 6 observations sur
+lifecycle simulé. Les tests indépendants et leurs fixtures restent conservés.
+L'équivalence porte sur les garanties maintenues, pas sur la création d'une
+nouvelle campagne de 900 s ou la compatibilité d'un schéma historique inutilisé.
+
+Vérifications : `git grep -n -E 'session_natural_900|observe_natural|validate_natural'
+<SHA> -- .github scripts tests ha_tests docs README.md pyproject.toml`, AST,
+inspection de SourceBundle/subprocess/packaging et historique du candidat.
+Garde RED avant retrait puis GREEN ; deux anciennes assertions de présence de
+référence exclue adaptées à cette seule suppression, contrôles des références
+actives/immutabilité inchangés. Tests ciblés, suites complètes, Ruff, liens,
+diff-check et quatre CI au HEAD exact sont consignés dans la PR/#189.
+
+Tous les scripts B2/B4, moteurs, runtime HA, workflows/gates, manifest/version
+restent byte-identiques. Pas de CHANGELOG : fondation non raccordée hors
+livrable HACS, sans changement du comportement/API du plugin. Limite d'inodes
+locale et résultats non verts éventuels rapportés honnêtement ; checkout sous
+/tmp. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, commande,
+écriture Modbus, donnée privée, main, release/tag ni fusion DEV. Aucun autre
+candidat examiné ou lot suivant engagé.
