@@ -475,16 +475,32 @@ L'icône communautaire originale représente trois points reliés ; elle ne repr
 aucun logo Hoben ou Inovalp. Les assets locaux `brand/` sont pris en charge à
 partir de Home Assistant 2026.3.
 
-### Tests Hoben manuels — Issue #119
+### Tests Hoben manuels — deux campagnes sur `experimental`
 
-Après revue et fusion, ouvrir **Actions → Tests Hoben manuels → Run workflow**,
-choisir **experimental** dans **Use workflow from**, puis h1h2, session-300,
-session-reconnect ou all. Attendre les approbations d'environnement si requises.
-Main reste inactive ; aucun test automatique sur push/PR/merge, aucun rerun.
-Les scénarios réutilisent les collecteurs et budgets existants, avec résultats
-SUCCESS / FAILURE / INCONCLUSIVE / NOT RUN et rapports strictement anonymisés.
-Voir [la procédure, les gates et les limites](docs/hoben-manual-workflow.md).
-DEV ne lance aucun test réel. Les quatre checks CI hors ligne sont conservés.
+Les campagnes actuelles utilisent **deux workflows distincts** sur `experimental` :
+
+| Campagne | Workflow | Environnement déclaré |
+| --- | --- | --- |
+| Scénarios Home Assistant — **Vérification réelle Home Assistant** | [hoben-ha-manual.yml](.github/workflows/hoben-ha-manual.yml) | `hoben-live` |
+| Scénarios protocolaires — **Tests expérimentaux MyHOBEN** | [hoben-protocol-manual.yml](.github/workflows/hoben-protocol-manual.yml) | `hoben-experimental` |
+
+Consulter le [guide des campagnes manuelles](docs/manual-test-campaign-guide.md)
+pour les scénarios, les budgets, les résultats et les conditions de lancement,
+ainsi que les [règles de branche et de revue](docs/experimental-protocol-workflow.md#règles-de-branche-et-de-revue).
+Toute collecte réelle exige une autorisation distincte du propriétaire et le
+respect des protections et approbations effectives. Un formulaire visible ou un
+environnement déclaré dans le YAML ne prouve ni son approbation effective ni la
+disponibilité opérationnelle de la campagne sur `main`. Ce README n'autorise
+aucun lancement ni promotion.
+
+La voie **Tests Hoben manuels — #119**,
+[hoben-manual.yml](.github/workflows/hoben-manual.yml), est **historique et non
+recommandée pour les nouvelles campagnes**. Elle reste présente, avec ses propres
+protections et ses consommateurs ; sa [documentation historique](docs/hoben-manual-workflow.md)
+est conservée pour la traçabilité.
+Les campagnes réelles restent exclusivement manuelles, sans lancement sur
+push/PR/merge. DEV ne lance aucun test réel ni rerun ; les quatre checks CI hors
+ligne restent obligatoires pour les PR de développement.
 
 ### Procédures live historiques de `main` — retirées, ne pas exécuter
 
