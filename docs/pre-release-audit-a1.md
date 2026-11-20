@@ -444,3 +444,60 @@ Pas de modification CHANGELOG : retrait d'outillage historique inaccessible,
 hors livrable HACS, sans changement d'API, version ou comportement du plugin.
 Tests Hoben/HA réels **NOT RUN** ; aucune connexion, commande, écriture Modbus,
 modification de gate ou promotion main. Aucun lot suivant lancé par CODEX DEV.
+
+## Annexe B2 — consommateurs des candidats session-300 (20/11/2026)
+
+Tâche `HOBEN-189-B2-LEGACY-SESSION300-REACHABILITY-004`, selon la
+[consigne canonique MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `3ed9ce9a51ac1eae82d9147691e5e3149457bd45` ;
+`main` examiné en lecture seule : `1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+L'audit A1 et l'annexe B1 restent des constats datés à leurs bases respectives.
+
+**Décision B2 : conserver les deux scripts, aucune suppression ni adaptation de
+tests.** `run_session_300.py` est un moteur partagé effectivement appelé.
+Le retrait du couple est bloqué par ces consommateurs positifs, pas seulement
+par une incertitude de recherche. Aucun autre candidat n'est examiné dans B2.
+
+### Matrice symbole → consommateur → preuve → décision → régression
+
+| Symbole / candidat | Consommateur et preuve à la base B2 | Décision / tests conservés |
+| --- | --- | --- |
+| `run_session_300.observe` | [Workflow protocole](../.github/workflows/hoben-protocol-manual.yml) → `run_campaign.py protocol` → `campaign_worker.py` → [protocol_campaign_collect.collect](../scripts/protocol_campaign_collect.py#L149) : import local puis `await observe(...)` dans le choix `session-300`. Le scénario existe aussi dans `all`. | **Conserver**, chemin actuel ; `test_protocol_campaign_collect.py` exécute le vrai collecteur/lifecycle/framer sur flux et horloge simulés, dont trois fragmentations pour session-300. |
+| `observe`, `validate_report`, `valid_close_client`, `valid_ignored_messages` | [session_suite.py](../scripts/session_suite.py#L26) importe ces symboles ; `observe_suite` appelle `observe_300` avant la seconde observation et revalide le rapport. Imports également présents au SHA main examiné. | **Conserver**, moteur et validateurs partagés ; `test_session_suite.py`, `test_session_close_client.py`, `test_session_ignored_rx.py`. Aucun retrait de session_suite. |
+| `valid_ignored_messages` | [campaign_runtime_contract.validate_stage](../scripts/campaign_runtime_contract.py#L425) importe ce validateur si un détail protocole contient `ignored_messages`. | **Conserver**, contrat de rapport actuel ; tests de schémas fermés et métadonnées bornées. L'import local conditionnel est un consommateur, même absent des imports de tête de fichier. |
+| `observe`, `write_report` | [run_manual_hoben.sessions/save](../scripts/run_manual_hoben.py#L27) les importe et les appelle ; [launch_manual_hoben](../scripts/launch_manual_hoben.py#L17) importe aussi `write_report`. Le YAML manuel installé appelle ce lanceur, sans utiliser `launch_session_300.py`. Même dépendance du chemin manuel dans l'arbre main examiné. | **Conserver**, observation et publication privée partagées ; `test_manual_hoben_runtime.py` et `test_session_300_report_writer.py` couvrent contexte, export, permissions, refus de liens/fichiers existants et nettoyage d'écriture échouée. |
+| `context_proof`, `require`, `write_report` | [run_session_suite.py](../scripts/run_session_suite.py#L24) importe les helpers du module. La [fixture retirée hoben-session-300](../tests/fixtures/retired_workflows/hoben-session-300.yml#L135) appelle `launch_session_suite.py`, qui lance ce runner. | **Conserver** les helpers et fixtures ; tests de suite/processus et de contexte. La fixture n'est pas un workflow installé ni un appel direct de `launch_session_300.py`. |
+| `launch_session_300.collector_environment/main` | Aucun appel trouvé dans les cinq YAML installés des deux branches, ni import entrant dans les modules opérationnels examinés. Appel interne fixe de `run_session_300.py` ; [test_session_300_probe.py](../tests/test_session_300_probe.py#L162) vérifie son isolation, son plafond 360 s et ses sorties privées. | **Conserver dans B2** : lanceur historique candidat, distinct du moteur actif et du lanceur de suite. Aucun dossier autonome de remplacement de ses régressions n'est établi ici ; ne pas conclure que le couple est supprimable à partir de son seul statut. |
+| Chargements dynamiques / SourceBundle | Parcours AST des modules scripts/plugin sur les deux SHA : les imports ci-dessus sont réels ; seul `import_module` observé = `scripts.probe_opened_client_boundary`. [SourceBundle](../scripts/ha_session_supervisor.py#L91) copie le plugin et une liste de helpers HA sans ces deux scripts. | Aucune suppression déduite de cette absence dans le bundle HA : la collecte protocole est exécutée sur le host et possède ses propres dépendances. |
+| CI, HACS, publication, documentation | `validate.yml` collecte les tests cités ; le plugin HACS n'importe pas les deux scripts et le publisher ne les exécute pas. Les [instructions courantes](manual-test-campaign-runtime.md#correspondance-des-collecteurs-et-preuve) désignent positivement `run_session_300.observe`. Les définitions modernes sur main sont des shells inertes ; le manuel y refuse une collecte sur main. | Conserver tous les contrats et liens ; absence d'import depuis le plugin ou de commande du publisher ne prouve pas l'absence d'usage par les campagnes protocolaires. Aucune activation main déduite de l'inspection. |
+
+### Vérifications reproductibles et limites
+
+Depuis la base B2, examiner les occurrences puis les imports AST, branches de
+sélection, appels et copies de fichiers ; une occurrence seule ne prouve pas
+l'exécution et une absence seule ne prouve pas le code mort :
+
+```sh
+git grep -n -E 'launch_session_300|run_session_300' 3ed9ce9a51ac1eae82d9147691e5e3149457bd45 -- .github scripts tests ha_tests docs README.md custom_components
+git grep -n -E 'launch_session_300|run_session_300' 1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3 -- .github scripts tests docs README.md custom_components
+rg -n 'run_campaign|launch_manual_hoben|launch_session_suite' .github/workflows tests/fixtures/retired_workflows
+```
+
+Les imports de bibliothèque n'exécutent pas le `main` protégé de l'ancien
+runner : son contexte `push`/ancien workflow ne rend pas inaccessibles les
+fonctions partagées importées par les voies manuelles actuelles. Les tests
+existants prouvent des appels sur doubles hors ligne, pas une validation live.
+Aucune équivalence de couverture autorisant une suppression n'est revendiquée.
+
+Validation B2 : annexe seule, liens/symboles vérifiés, tests ciblés existants,
+Ruff et `git diff --check` ; quatre CI requises au HEAD exact, résultats dans la
+PR et #189. Aucun RED/GREEN de suppression : aucune suppression effectuée.
+Tous les scripts, tests, fixtures, workflows et fichiers du plugin sont
+byte-identiques à la base. Pas de CHANGELOG : audit interne sans impact sur le
+livrable HACS ou son comportement.
+
+Le volume initial reste saturé en inodes ; l'audit utilise un checkout isolé
+sous `/tmp` sans modifier le dépôt initial. Tests Hoben/HA réels **NOT RUN** ;
+aucun dispatch/rerun live, secret, donnée privée, commande ou écriture Modbus,
+modification de protection, main, tag/release ou fusion DEV. Livrer les preuves
+pour revue MANAGER, sans changer de candidat ni lancer le lot suivant.
