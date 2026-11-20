@@ -1,5 +1,12 @@
 # Tests Hoben manuels — #119, phase 2 experimental
 
+**Voie historique, non recommandée pour les nouvelles campagnes.** Le workflow
+`hoben-manual.yml` reste présent avec ses protections propres et ses consommateurs.
+Ce document conserve ses contrats et ses preuves historiques. Pour les deux
+campagnes actuelles distinctes HA et protocole sur `experimental`, consulter le
+[guide des campagnes manuelles](manual-test-campaign-guide.md). Cette documentation
+ne donne aucune autorisation de lancement réel ni de promotion vers `main`.
+
 **#186-D8 — continuation opaque actuelle, NOT RUN.** Après un candidat 0x0C,
 le même propriétaire TLS continue de comptabiliser les livraisons plaintext et
 leurs tailles sans les remettre au framer V4. Les seules sondes actives sont

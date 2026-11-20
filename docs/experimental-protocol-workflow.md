@@ -23,15 +23,16 @@ de C. Les descriptions ha-parity one-shot historiques plus bas, ainsi que leurs
 anciens rapports, ne valident ni une seconde ouverture actuelle ni ce client
 persistant. Aucun accès réel HA n'est activé par la seule livraison de B.
 
-La [procédure #119](hoben-manual-workflow.md) prévaut pour toute nouvelle campagne :
-workflow_dispatch du propriétaire, sélecteur natif Use workflow from, experimental
-seule active, SHA/provenance/revue/CI exacts, claim anti-rejeu et recheck après
-approbations d'environnement. Aucun commentaire MANAGER pré-fusion ni lancement
-sur push/PR/merge ; reruns refusés, nouveau dispatch explicite requis.
-H1/H2, session-300, reconnexion seule et all réutilisent les vrais collecteurs et
-leurs plafonds. Le reste de ce document conserve les contrats et observations
-historiques des anciennes voies : leurs décisions/claims ne sont jamais un repli.
-Les règles de revue/branche restent applicables, aucun test réel par DEV.
+Pour les nouvelles campagnes sur `experimental`, consulter le
+[guide des deux workflows actuels HA et protocole](manual-test-campaign-guide.md),
+qui décrit leurs scénarios, budgets, protections et conditions de lancement.
+La [procédure #119](hoben-manual-workflow.md) est historique, toujours présente et
+non recommandée pour les nouvelles campagnes. Ses exigences propres de
+SHA/provenance/revue/CI, claim anti-rejeu, recheck et refus des reruns restent
+attachées à cette seule voie ; elles ne décrivent pas l'admission des deux
+campagnes actuelles. Les contrats et observations historiques ci-dessous restent
+conservés ; leurs décisions/claims ne sont jamais un repli. Les règles de
+revue/branche restent applicables, aucun test réel par DEV.
 
 Le [contrat expérimental CloseClient](session-suite-plan.md#closeclient-expérimental--closeclient-session-close-006)
 autorisé par #112 emploie deux octets, une fermeture typée distincte d'EOF et
