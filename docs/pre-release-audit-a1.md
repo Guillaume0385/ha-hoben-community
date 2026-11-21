@@ -1356,3 +1356,97 @@ installation réelle. Diff limité à cette annexe ; aucun exécutable/test,
 workflow/gate, runtime, manifest/version ou CHANGELOG modifié : audit interne
 sans impact HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucune
 fusion DEV. Revue MANAGER puis arrêt, sans autre tâche auto-attribuée.
+
+## Synthèse E1 — bilan consolidé, décision de pré-release encore distincte
+
+Tâche `HOBEN-189-E1-PRE-RELEASE-AUDIT-CONSOLIDATION-018`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+État vérifié le 21/11/2026 sur `experimental`
+`c2e63b52f995dff18c08c530b4f6b0db86cbeaec`.
+**Bilan documentaire des lots fusionnés, pas une validation de pré-release.**
+L'inventaire A1 et chaque annexe gardent leur base historique ; cette synthèse
+résume leurs décisions sans réécrire les preuves ni réauditer tout le plugin.
+
+### Lots livrés et preuves CI
+
+Les 17 PR ci-dessous sont fusionnées, base exactement experimental ; leurs
+commits intégrés sont ancêtres de la base E1. Les liens HEAD abrégés désignent
+les SHA complets des candidats ; les runs Validate liés, pull_request/tentative 1,
+portent chacun **tests, ha-tests, hacs et hassfest SUCCESS sur ce HEAD exact**.
+Ils ne constituent ni une CI au SHA de squash, ni une validation réelle.
+
+| Lot | PR / HEAD source | Validate 4/4 SUCCESS | Résultat intégré |
+| --- | --- | --- | --- |
+| A1 | [#190](https://github.com/Guillaume0385/ha-hoben-community/pull/190) · [dc80b23f62fa](https://github.com/Guillaume0385/ha-hoben-community/commit/dc80b23f62fad0b9673a56da2127424ae15ce645) | [42118746911](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/42118746911) | Inventaire initial et limites ; aucun retrait. |
+| D1 manuel · 002 | [#230](https://github.com/Guillaume0385/ha-hoben-community/pull/230) · [16e215bc680b](https://github.com/Guillaume0385/ha-hoben-community/commit/16e215bc680ba41de54f96cbf6cacc6dddcd2c07) | [44804775363](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44804775363) | Deux voies modernes clarifiées ; voie historique conservée. |
+| B1 | [#231](https://github.com/Guillaume0385/ha-hoben-community/pull/231) · [da5651bcddcb](https://github.com/Guillaume0385/ha-hoben-community/commit/da5651bcddcbbab0194a0301271b7c34790e2815) | [44814136597](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44814136597) | Couple HA-parity retiré ; fixtures et gardes maintenus. |
+| B2 | [#232](https://github.com/Guillaume0385/ha-hoben-community/pull/232) · [0e639621f1d9](https://github.com/Guillaume0385/ha-hoben-community/commit/0e639621f1d9a8d43c60a74d5f7e6278c0eca757) | [44819621348](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44819621348) | Moteur session-300 et lanceur conservés à cette étape. |
+| B3 | [#233](https://github.com/Guillaume0385/ha-hoben-community/pull/233) · [c76a2d6eb177](https://github.com/Guillaume0385/ha-hoben-community/commit/c76a2d6eb177da4e5ba159a28b9e88da38ac427d) | [44824399721](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44824399721) | Seul lanceur session-300 retiré ; moteur partagé conservé. |
+| B4 | [#234](https://github.com/Guillaume0385/ha-hoben-community/pull/234) · [3a3a94951803](https://github.com/Guillaume0385/ha-hoben-community/commit/3a3a949518030000b76451e69c76b4e06e8b31a4) | [44829182492](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44829182492) | Lanceur experimental-boundary conservé : dépendances établies. |
+| B5 | [#235](https://github.com/Guillaume0385/ha-hoben-community/pull/235) · [6e31a9c3e337](https://github.com/Guillaume0385/ha-hoben-community/commit/6e31a9c3e337d291939079a127f9d5ffefe65299) | [44834329329](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44834329329) | Fondation natural-900 et test dédié retirés ; exclusions maintenues. |
+| B6 | [#236](https://github.com/Guillaume0385/ha-hoben-community/pull/236) · [9f2e2ce1cf16](https://github.com/Guillaume0385/ha-hoben-community/commit/9f2e2ce1cf1667edb0314e97e4f017e6e17020f6) | [44840475548](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44840475548) | Lecteur Actions registry retiré ; 30 cas du transport conservés. |
+| B7 | [#237](https://github.com/Guillaume0385/ha-hoben-community/pull/237) · [7cb73d1369b3](https://github.com/Guillaume0385/ha-hoben-community/commit/7cb73d1369b31ceed94d0d1080b9316ed529503e) | [44850677310](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44850677310) | Lecteur Git Blob retiré ; 25 cas transport/arbre conservés. |
+| C1 | [#238](https://github.com/Guillaume0385/ha-hoben-community/pull/238) · [d1536e63a15d](https://github.com/Guillaume0385/ha-hoben-community/commit/d1536e63a15db80caf3bae7c84ffe525a1d4fa2b) | [44854425100](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44854425100) | 55 cas du contrat HA offline conservés. |
+| C2 | [#239](https://github.com/Guillaume0385/ha-hoben-community/pull/239) · [4cfd3cb9de69](https://github.com/Guillaume0385/ha-hoben-community/commit/4cfd3cb9de6907b11fc5869c618a57e08a0901fc) | [44858023072](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44858023072) | 54 cas du validateur de preuve HA conservés. |
+| C3 | [#240](https://github.com/Guillaume0385/ha-hoben-community/pull/240) · [9c0309464089](https://github.com/Guillaume0385/ha-hoben-community/commit/9c03094640890a2191adb5401ee131775920e7f2) | [44860403780](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44860403780) | Réexamen de C1, pas une autre famille : 55 cas conservés. |
+| C4 | [#241](https://github.com/Guillaume0385/ha-hoben-community/pull/241) · [3a86973ac419](https://github.com/Guillaume0385/ha-hoben-community/commit/3a86973ac4193e1128d49e32dea04b3628010fa3) | [44864460143](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44864460143) | 12 cas du vrai chemin HA synthétique conservés. |
+| C5 | [#242](https://github.com/Guillaume0385/ha-hoben-community/pull/242) · [4bb82c6ee18e](https://github.com/Guillaume0385/ha-hoben-community/commit/4bb82c6ee18ecbdefb3457ad8cc3781fa01ff8ae) | [44867116406](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44867116406) | Coûts observés documentés ; quatre jobs et caches inchangés. |
+| D1 HACS · 015 | [#243](https://github.com/Guillaume0385/ha-hoben-community/pull/243) · [e9c568c613f6](https://github.com/Guillaume0385/ha-hoben-community/commit/e9c568c613f6f4af951677e44e04ddcf600ae229) | [44870822905](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44870822905) | Installation HACS/ref et diagnostics README clarifiés. |
+| D2 | [#244](https://github.com/Guillaume0385/ha-hoben-community/pull/244) · [83651f4ac10d](https://github.com/Guillaume0385/ha-hoben-community/commit/83651f4ac10d608be8b884330c7728f562466fc9) | [44872577063](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44872577063) | Guide DataUpdated conservé ; preuves ajoutées à l'audit. |
+| D3 | [#245](https://github.com/Guillaume0385/ha-hoben-community/pull/245) · [769521f2055b](https://github.com/Guillaume0385/ha-hoben-community/commit/769521f2055bc698e246edfc31507fcfec68b80b) | [44880754594](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44880754594) | Guide diagnostics conservé ; séparation support/DEBUG confirmée. |
+
+Les deux D1 correspondent aux tâches distinctes 002 (campagnes manuelles) et
+015 (installation HACS). Les C1–C5 effectivement livrés auditent les tests/coûts ;
+ils n'exécutent pas la proposition A1 de retrait du workflow historique.
+
+### Suppressions bornées et conservations
+
+Six scripts retirés seulement : `launch_live_ha_parity.py`,
+`run_live_ha_parity.py`, `launch_session_300.py`, `session_natural_900.py`,
+`github_campaign_actions_registry.py` et `github_campaign_workflow_blob.py`
+(sous scripts/). Les annexes B1/B3/B5/B6/B7 portent les graphes statiques et
+dynamiques, consommateurs, limites externes et équivalences des garanties.
+Les tests strictement attachés ont été retirés/adaptés ; le seul fichier de
+tests supprimé est test_session_natural_900.py. Les 30 cas transport B6 et
+25 cas transport/arbre B7 restent testés directement, sans API retirée.
+
+run_session_300.py, launch_experimental_boundary.py, moteurs/validateurs
+partagés, fixtures historiques et contrats indépendants Python/Node sont
+conservés. C1–C4 n'ont supprimé aucun test ; C3 réexamine C1. C5 n'a modifié
+ni workflow/cache/dépendance ni revendiqué un gain causal. Les diffs propres
+aux 17 lots ne modifient aucun fichier du plugin distribué ni YAML ; cela ne
+prétend pas que le runtime soit resté identique entre A1 et E1, d'autres issues
+ayant évolué séparément. Aucune économie globale de CI n'est démontrée ici.
+
+### Risques ouverts et suite à décider
+
+- Retrait du workflow hoben-manual.yml et de ses dépendances non autorisé par
+  ces lots ; différences d'admission et consommateurs à préserver. Autres
+  candidats A1 non traités conservés, pas implicitement déclarés morts.
+- Audit A1 limité aux workflows/scripts et supports listés : pas d'exhaustivité
+  de chaque fonction/runtime, ni preuve d'absence d'usages privés externes.
+  Politiques natives, approbations effectives, reproductibilité des actions
+  flottantes et éventuelles optimisations de cache restent à vérifier séparément.
+- [#186](https://github.com/Guillaume0385/ha-hoben-community/issues/186),
+  [#219](https://github.com/Guillaume0385/ha-hoben-community/issues/219) et
+  [#220](https://github.com/Guillaume0385/ha-hoben-community/issues/220)
+  restent ouvertes, state:waiting au contrôle E1 ; leur suite relève de MANAGER,
+  sans réactivation ici. Les anciens corps/commentaires ne remplacent pas les
+  décisions plus récentes ; #163/#192/#212 sont closes, pas des tâches à reprendre.
+- Le FAIL HA historique cité en A1 reste un constat à son SHA, pas le verdict
+  du runtime actuel. Les CI synthétiques et fusions documentaires ne soldent
+  aucune validation réelle : propriétaire/MANAGER doivent rapprocher observations,
+  version réellement chargée et SHA avant toute décision de pré-release.
+- Export de support expurgé distinct du DEBUG privé local ; aucune valeur
+  domestique, secret, GUID ou RX brut dans ce bilan. V4 lecture seule et TLS
+  certificat/hostname vérifiés myhoben.fr:465 inchangés.
+
+Vérifications E1 : références PR/commits/runs/jobs, ascendance des fusions,
+fichiers réellement retirés/conservés, liens et diff documentaire contrôlés ;
+Ruff/diff-check et quatre CI du nouveau HEAD E1 consignés dans la PR/#189.
+Pas de nouveau test miroir ni de suite complète locale pour cette synthèse ;
+les suites existantes sont exécutées par la CI. Diff limité à cette synthèse,
+pas de CHANGELOG : audit interne sans changement de livrable/API/comportement.
+Tests réels **NOT RUN** ; aucun dispatch/rerun live, commande ou écriture Modbus.
+**Aucune promotion main, version, tag, release ou déclaration « prête » autorisée
+par E1.** Revue MANAGER, state:review puis arrêt DEV, sans fusion ni autre tâche.
