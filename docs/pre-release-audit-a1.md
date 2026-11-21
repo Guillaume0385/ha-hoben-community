@@ -1577,3 +1577,37 @@ Pas de nouveau test ni suite complète locale ; suites existantes en CI.
 Tests réels **NOT RUN**, V4 lecture seule et TLS vérifié myhoben.fr:465 préservés.
 Revue MANAGER puis arrêt state:review, sans fusion, main/release/tag/version,
 commande/écriture Modbus, donnée privée ou autre tâche auto-attribuée.
+
+## Annexe E5 — matrice des points ouverts avant décision de pré-release
+
+Tâche `HOBEN-189-E5-PRE-RELEASE-OPEN-BLOCKERS-EVIDENCE-MATRIX-022`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `f2d7f3b90703c927ad1859bfa6eb9e1e0e5a3416`.
+Synthèse des preuves E1–E4, sans nouvelle validation : le propriétaire doit
+encore qualifier chaque point comme bloquant, accepté ou reporté, avec son
+motif et sa preuve, sans déroger aux gates et validations obligatoires.
+Ces lacunes ne sont pas cinq défauts runtime démontrés.
+
+| Point / état établi et source publique | Preuve manquante / risque | Décision réservée au propriétaire, avec revue MANAGER |
+| --- | --- | --- |
+| Réel : NOT RUN consigné dans les lots [E1/#246](https://github.com/Guillaume0385/ha-hoben-community/pull/246) à [E4/#249](https://github.com/Guillaume0385/ha-hoben-community/pull/249) ; leurs CI valident leurs HEAD sources hors ligne. | Validation réelle de la version effectivement installée non établie par ces lots ; risque de confondre tests synthétiques et stabilité domestique. | Examiner les observations existantes, expurgées et corrélées au SHA chargé, puis décider des preuves encore nécessaires et d'une éventuelle validation séparément autorisée. Aucun lancement accordé par E5. |
+| Politiques natives : environnements/admission déclarés, effectivité non prouvée ([E2/#247](https://github.com/Guillaume0385/ha-hoben-community/pull/247), E4). | Politique et approbation applicables au contexte réel non attestées ; risque d'inférer une autorisation depuis le YAML ou une CI verte. | Exiger la preuve authentifiée pertinente avant une éventuelle campagne autorisée ; aucune protection présumée absente, aucun changement ou contournement ici. |
+| Usages externes : limites du graphe du dépôt établies en E1/E2 ; aucun consommateur externe avéré par cet audit. | Absence d'usage hors dépôt non prouvée ; risque pour un futur retrait, sans remise en cause automatique des lots clos. | Qualifier les usages connus par catégories expurgées et les besoins de compatibilité avant tout autre retrait ; conserver les candidats dont l'inutilité n'est pas établie. |
+| Actions : quatre références flottantes/sept occurrences constatées ; faisabilité syntaxique seule, aucun pin choisi ([E3/#248](https://github.com/Guillaume0385/ha-hoben-community/pull/248)). | Politique de provenance, entretien et compatibilité d'une révision future non décidés ; contenu direct/transitif susceptible d'évoluer. Aucun compromis démontré. | Arbitrer la politique et son entretien ; toute mise en œuvre reste une tâche distincte avec revue et quatre CI. Le pinning n'est pas imposé comme critère de release par E5. |
+| Inventaire : périmètre historique A1 et lots livrés établis en E1/E2. | Exhaustivité de chaque fonction/runtime non démontrée ; risque de présenter un inventaire partiel comme certification globale. | Délimiter les zones à examiner ou à reporter et justifier leur acceptation ; aucune tâche supplémentaire ni suppression attribuée par DEV. |
+
+Les runs propriétaires historiques restent bornés à leurs SHA ; NOT RUN ici
+ne signifie pas qu'aucun test propriétaire n'a jamais eu lieu. Les quatre CI
+E5 n'apportent aucune des preuves externes ci-dessus. Aucune ligne n'est soldée
+par cette matrice ; aucune version prête, promotion, release ou autorisation
+live ne se déduit de la fusion des audits. Décisions et validations restent
+distinctes, avec preuve au SHA concerné.
+
+Contrôles E5 : sources E1–E4, cohérence, liens, confidentialité, ajout seul,
+Ruff/diff-check et quatre CI au HEAD exact consignés dans PR/#189. Aucun nouveau
+test ni suite complète locale ; suites existantes en CI. Diff limité à cette
+annexe, sans CHANGELOG (audit interne, aucun impact HACS/API/comportement).
+Code/tests/workflows/droits/gates/dépendances/environnements/runtime/version
+inchangés. Tests réels **NOT RUN** ; aucun accès privé, dispatch/rerun live,
+commande/écriture Modbus, donnée privée, main/release/tag ou fusion DEV.
+V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; state:review puis arrêt.
