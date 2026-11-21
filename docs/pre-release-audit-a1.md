@@ -1323,3 +1323,36 @@ byte-identiques à la base. Pas de CHANGELOG : vérification interne sans impact
 HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun,
 commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag/version
 ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
+
+## Annexe D3 — champs des diagnostics HA et collecte de support
+
+Tâche `HOBEN-189-D3-HA-DIAGNOSTICS-DOC-CONSISTENCY-017`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `1a8af5cebd5caa241b7a709b928af1328be9f928`.
+Guide unique audité : [home-assistant-integrator.md](home-assistant-integrator.md).
+**Conserver le guide à l'octet : aucune divergence factuelle démontrée dans
+les champs expurgés et la collecte de support ciblés.**
+
+| Affirmation du guide | Source actuelle en lecture seule / conclusion |
+| --- | --- |
+| Téléchargement existant en mémoire, sans sonde, refresh ni mutation HA | [diagnostics.py](../custom_components/hoben/diagnostics.py) projette uniquement des métadonnées ; sans runtime typé, seuls domain, entry et runtime_available sont retournés. |
+| Champs publiables explicitement limités, erreurs typées et sans chaîne d'exception | diagnostics.py et [safe_reports.py](../custom_components/hoben/safe_reports.py) valident les types, catégories et bornes. La liste du prompt est un sous-ensemble volontairement restrictif : les champs supplémentaires du JSON actuel n'autorisent pas leur collecte/publication automatique. |
+| Snapshot conservé ou client ready insuffisants pour prouver une connexion actuelle ; version installée à relever séparément | snapshot_available vérifie la présence en mémoire d'un RawStoveSnapshot ; client.state provient du safe_report. Ces champs ne prouvent ni connexion active, ni ref HACS installée. Le guide distingue explicitement cette ref de sa gouvernance main. |
+| Journaux structurés WARNING/ERROR, fallback brut borné, rapport exclusivement catégoriel | Le guide n'autorise pas la collecte DEBUG. [shadow_data_updated.py](../custom_components/hoben/shadow_data_updated.py), observe_applied_data_updated, exige DEBUG explicite sur son logger pour les valeurs locales privées ; ce flux reste distinct de la projection support sans valeurs du foyer. Aucun logger activé pendant l'audit. |
+
+L'absence de session, snapshot_held, horodatage/âge et de certains champs
+d'erreur dans la liste publiable du prompt n'est pas une déclaration d'absence
+dans le JSON : le guide impose d'omettre les extensions inconnues et de vérifier
+clés **et valeurs** avant publication. Ne pas élargir cette autorisation pour
+aligner artificiellement le prompt sur tous les champs runtime, ni recopier
+les DEBUG privés dans un rapport de support. README D1 et guide DataUpdated D2
+restent hors modification ; aucun fait protocolaire nouveau.
+
+Validation : tests existants de schéma privé en mémoire, téléchargement via
+l'endpoint HA simulé, absence de runtime et opt-in DEBUG dédié ; références,
+diff-check/lint et quatre CI au HEAD exact consignés dans la PR/#189. Ces tests
+utilisent uniquement des données synthétiques et ne prouvent pas l'état d'une
+installation réelle. Diff limité à cette annexe ; aucun exécutable/test,
+workflow/gate, runtime, manifest/version ou CHANGELOG modifié : audit interne
+sans impact HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucune
+fusion DEV. Revue MANAGER puis arrêt, sans autre tâche auto-attribuée.
