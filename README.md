@@ -117,21 +117,36 @@ construite avec une liste explicite de métadonnées autorisées, pour pouvoir
 l’attacher à une issue GitHub publique. Home Assistant ajoute ses métadonnées
 standard de système et d’intégration autour de cette partie.
 
+Les champs ci-dessous décrivent le code courant de `experimental` ; leur
+présence peut varier avec la release ou la ref réellement installée.
+
 Le rapport contient le domaine, l’état de chargement et les versions du schéma
 de l’entrée, ainsi que la présence du runtime. Lorsque celui-ci existe, il ajoute
 l’état/profil publics du client, un **booléen** indiquant l’attribution d’un
-DeviceGuid, le résultat du dernier rafraîchissement, l’intervalle fixe de
-60 secondes et la présence d’un instantané. Seuls le profil, les métadonnées
-publiques de produit/révision/logiciel/application et le **nombre** de registres
-de cet instantané sont exportés. Ces métadonnées décrivent la dernière lecture
-conservée en mémoire ; elles ne garantissent pas une connexion actuelle et ne
-déduisent pas un modèle commercial.
+DeviceGuid, le résultat de la dernière mise à jour et la présence d’un instantané
+en mémoire. `snapshot_held` indique son maintien éventuel ;
+`last_successful_read_at` et `last_successful_read_age` décrivent la date et
+l’âge de la dernière acquisition admise. La section `session`, lorsqu’elle est
+disponible, expose une projection bornée de la tentative TLS : génération
+locale, compteurs et indicateurs.
+
+`update_interval_seconds` conserve la constante de compatibilité **60** : ce
+champ n’atteste pas une lecture toutes les 60 secondes. L’entrée HA actuelle de
+`experimental` utilise une session persistante et les notifications DataUpdated,
+sans polling V4 périodique ; voir le [mode HA courant](docs/data-updated-recovery.md).
+La présence d’un instantané et son âge ne suffisent pas à attester une connexion
+active ou une perte de connexion.
+
+Seuls le profil, les métadonnées publiques de produit/révision/logiciel/application
+et le **nombre** de registres de cet instantané sont exportés. Ces métadonnées
+décrivent le dernier instantané conservé en mémoire ; elles ne garantissent pas
+une connexion actuelle et ne déduisent pas un modèle commercial.
 
 Les GUID, le code d’autorisation, les secrets de configuration, l’empreinte
 privée de l’identifiant HOBEN, les paquets et trames bruts, les valeurs des
 registres, toutes les mesures du foyer, les dérogations et les états des entités
-sont exclus. Lors d’un échec réel du polling, le coordinator valide et copie les
-codes et métadonnées expurgés de l’erreur Hoben dans l’exception Home Assistant.
+sont exclus. Lors d’un échec de rafraîchissement, le coordinator valide et copie
+les codes et métadonnées expurgés de l’erreur Hoben dans l’exception Home Assistant.
 Le message d’échec HA existant et `coordinator.last_error` conservent ainsi les
 catégories telles que `malformed_response`, `unclassified_opened_client_bytes`,
 `modbus_exception` et `server_closed`, avec leurs seuls champs déjà autorisés.
@@ -143,8 +158,12 @@ diagnostics ; les champs inconnus ou non conformes au contrat sûr sont omis.
 Une exception HA sans métadonnées fiables garde sa catégorie fixe ; une erreur
 arbitraire ou un contrat d’erreur Hoben inutilisable donne `unexpected_error`.
 Aucun texte, argument, traceback ou chaîne d’exceptions n’est parcouru pour
-reconstruire une cause. Après un rafraîchissement réussi, `last_error` redevient
+reconstruire une cause. Après une mise à jour réussie, `last_error` redevient
 `null` : cet export décrit l’erreur courante, sans historique ni compteur de panne.
+
+Les journaux DEBUG DataUpdated locaux sont distincts de ce diagnostic expurgé :
+ils peuvent contenir des valeurs du foyer et ne doivent pas être joints au
+support ni publiés sur GitHub.
 
 La correction d’observabilité de [#43](https://github.com/Guillaume0385/ha-hoben-community/issues/43)
 est vérifiée avec des erreurs entièrement synthétiques. La cause des incidents
@@ -378,12 +397,17 @@ existante reste une régression de lecture et ne soumet aucun code.
 
 ## Installation via HACS
 
-La préversion `v0.1.0-beta1` est destinée aux premiers tests communautaires via
+La [préversion publiée `v0.1.0-beta1`](https://github.com/Guillaume0385/ha-hoben-community/releases/tag/v0.1.0-beta1)
+est destinée aux premiers tests communautaires via
 HACS. Dans HACS, ajouter le dépôt
 `https://github.com/Guillaume0385/ha-hoben-community` comme **dépôt personnalisé**
 de catégorie **Integration**, puis installer **Hoben** et redémarrer Home
-Assistant. Une fois la GitHub pre-release `v0.1.0-beta1` publiée, sélectionner
-cette version lorsqu'elle est proposée par HACS.
+Assistant. Sélectionner `v0.1.0-beta1` lorsqu’elle est proposée par HACS.
+
+HACS installe la release ou la ref sélectionnée ; les évolutions de la branche
+de développement `experimental` ne sont pas livrées automatiquement par cette
+préversion. Pour le support, relever la version et la ref effectivement
+installées : la version du manifest ne suffit pas à identifier un commit.
 
 Après redémarrage, ouvrir **Paramètres → Appareils et services → Ajouter une
 intégration → Hoben** puis saisir l'Identifiant HOBEN. Si le service MyHOBEN
