@@ -1164,3 +1164,121 @@ aucun retrait ; aucun test miroir. Pas de CHANGELOG : audit interne sans impact
 HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun
 live, commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag
 ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
+
+## Annexe C5 — coût observé du workflow Validate, préparation et caches
+
+Tâche `HOBEN-189-C5-CI-OFFLINE-WORKFLOW-DURATION-AUDIT-014`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `73a96f2f072a3b09aea1d2414c73ddd24c84832d`.
+Périmètre unique : [Validate](../.github/workflows/validate.yml), sa préparation,
+ses actions et [groupes de dépendances](../pyproject.toml), sans réaudit C1–C4.
+**Conserver le workflow et les quatre jobs : aucun gain sûr mesuré justifiant
+un changement de préparation/cache ou la suppression d'un contrôle.**
+
+### Exécutions existantes et méthode
+
+Quatre runs pull_request, tentative 1, quatre jobs SUCCESS chacun, consultés
+sans dispatch/rerun. Les contenus Validate et pyproject sont identiques aux
+quatre HEAD sources et à la base ; blobs Git respectifs
+`5f038c01c6be41dd8eb4a72c6cc78e77e6f7f473` et
+`9f09dc7dee61904656e1bbc69aa01febe93d9b95`.
+Les PR sont documentaires ; runner, versions résolues et réseau ne sont pas
+contrôlés comme dans une expérience comparative de cache.
+
+Durées en secondes, timestamps REST started_at/completed_at des jobs/étapes :
+
+| Run / HEAD source abrégé | tests | ha-tests | hacs | hassfest | Fenêtre des quatre jobs | Somme des durées jobs |
+| --- | --- | --- | --- | --- | --- | --- |
+| [44854425100](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44854425100) / d1536e6 | 222 | 202 | 33 | 17 | 223 | 474 |
+| [44858023072](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44858023072) / 4cfd3cb | 257 | 182 | 33 | 16 | 257 | 488 |
+| [44860403780](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44860403780) / 9c03094 | 281 | 342 | 32 | 18 | 343 | 673 |
+| [44864460143](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/44864460143) / 3a86973 | 184 | 320 | 37 | 15 | 320 | 556 |
+
+Fenêtre = dernier completed_at moins premier started_at des quatre jobs,
+hors attente initiale de runner ; médiane **288,5 s**, somme médiane **522 s**.
+Les jobs sont indépendants/parallèles, pas quatre étapes séquentielles.
+La somme n'est ni une latence, ni du CPU, ni une facture GitHub. Les timestamps
+à la seconde et les intervalles entre étapes expliquent des écarts avec leurs
+sommes ou le temps interne affiché par pytest ; un 0 s n'est pas un travail nul.
+
+| Étape / job | Min / médiane / max, secondes |
+| --- | --- |
+| pip install --upgrade pip / tests | 1 / 3 / 6 |
+| pip install --group dev / tests | 2 / 4 / 5 |
+| python -m pytest / tests | 177 / 221,5 / 268 |
+| pip install --upgrade pip / ha-tests | 1 / 3,5 / 5 |
+| pip install --group ha-test / ha-tests | 39 / 49 / 78 |
+| pytest HA / ha-tests | 136 / 199,5 / 256 |
+
+setup-python prend 0–1 s, checkout 1–6 s et chaque Ruff 0–1 s dans cet
+échantillon. Pull HACS : 16–24 s ; action Hassfest : 11–14 s. Ni HACS ni
+Hassfest n'est le dernier job terminé ici. Les tests dominent les jobs Python ;
+l'installation HA est le plus gros poste de préparation observé. Ces chiffres
+ne prouvent ni une étape inutile ni un gain causal d'une modification future.
+
+### Dépendances, isolation et caches
+
+Les jobs Python ont des runners/environnements distincts : CPython 3.12/dev
+et 3.14/ha-test. Les deux installations ne sont pas un doublon dans un même
+environnement. Le groupe dev utilise des plages de versions, le harness HA
+est épinglé mais ses dépendances ne constituent pas un lock CI complet.
+Le pip upgrade est distinct de ces installations ; son retrait demanderait
+une preuve de compatibilité de pip avec --group sur tous les runners admis.
+
+Validate n'active ni cache setup-python ni action de cache explicite. Cela
+ne prouve pas l'absence de caches natifs pip/outils préinstallés du runner.
+Le run C4 résout notamment CPython 3.12.16 et 3.14.10 ; les sélecteurs YAML
+3.12/3.14, @v7, @main et @master ne sont pas des pins de tous les exécutables.
+Les actions réellement téléchargées sont relevées dans les logs, sans les
+modifier : setup-python `6d4fd22b20465ccc0f7354476588e8df7c9ca0e0`, checkout
+`3d3c42e5aac5ba805825da76410c181273ba90b1`, HACS
+`1ebf01c408f29afcb6406bd431bc98fd8cbb15aa`, Hassfest
+`07f46fd2e19967768b5fd3000f91f857452b767c` pour C4 seulement.
+
+Sources setup-python à ce SHA : [inputs](https://github.com/actions/setup-python/blob/6d4fd22b20465ccc0f7354476588e8df7c9ca0e0/action.yml),
+[activation conditionnelle](https://github.com/actions/setup-python/blob/6d4fd22b20465ccc0f7354476588e8df7c9ca0e0/src/setup-python.ts),
+[cache pip](https://github.com/actions/setup-python/blob/6d4fd22b20465ccc0f7354476588e8df7c9ca0e0/src/cache-distributions/pip-cache.ts).
+L'action ne restaure un cache que si cache est demandé. Le cache pip porte sur
+pip cache dir, pas sur un venv installé. Sa clé inclut OS/architecture/Linux,
+version Python, gestionnaire et hash des dépendances ; une clé de repli peut
+restaurer des archives sans le même hash. Une restitution ne doit donc jamais
+remplacer installation/résolution ni validations.
+
+Le glob par défaut est `**/requirements.txt` avant repli : le seul fichier ainsi
+nommé ici est scripts/ha_session_runtime/requirements.txt, pour l'image Docker,
+alors que les commandes CI installent les groupes du pyproject. Un futur essai
+devrait expliciter `cache-dependency-path: pyproject.toml` et vérifier invalidation,
+portée PR/branche, isolation 3.12/3.14 et restauration partielle. Aucun essai
+froid/chaud, coût de transfert/sauvegarde ou taux de hits n'est observé ici :
+**aucun gain de cache revendiqué, aucune activation proposée dans C5**.
+
+Les dépendances exécutées ne se limitent pas aux commandes pip :
+[HACS](https://github.com/hacs/action/blob/1ebf01c408f29afcb6406bd431bc98fd8cbb15aa/action.yml)
+utilise Docker ghcr.io/hacs/action:main ;
+[Hassfest](https://github.com/home-assistant/actions/blob/07f46fd2e19967768b5fd3000f91f857452b767c/hassfest/action.yml)
+est une action composite qui lance l'image Hassfest via Docker. Un SHA d'action
+ne rend pas ces tags d'image immuables. Préparation Actions/pip/validations peut
+utiliser Internet ; « offline » signifie aucun Hoben/HA domestique, pas airgap.
+Aucun workflow live, environnement, approbation ou protection n'est inspecté
+pour être modifié ou utilisé par ce lot.
+
+### Reproduction, validation et décision
+
+Lecture REST de actions/runs/{id}, actions/runs/{id}/jobs?per_page=100 et des
+logs de chaque job ; vérifier HEAD/événement/tentative/quatre conclusions puis
+soustraire les timestamps UTC. Pour la fenêtre, prendre max des fins moins min
+des débuts, indépendamment de l'ordre de la liste des jobs. Pour les médianes
+de quatre valeurs, moyenne des deux centrales triées. Recontrôler les fichiers
+aux SHA sources ; ne pas déduire un coût manquant d'une valeur absente.
+
+Conserver quatre jobs/noms/commandes, déclencheurs, contents:read par job,
+persist-credentials:false, absence de secrets/environnements réels et tests
+intégraux. Diff limité à cette annexe ; aucun test, dépendance, YAML, cache,
+runtime/protocole, permission, gate, manifest/version modifié. Cohérence des
+mesures, liens, invariant statique Validate, Ruff/diff-check et quatre CI au
+HEAD exact consignés dans la PR/#189. Suites complètes locales non relancées
+pour cet audit documentaire ; la CI les exécute. Pas de CHANGELOG : audit
+interne sans impact HACS/API/comportement, pas d'accélération revendiquée.
+Tests réels **NOT RUN** ; aucun dispatch/rerun, commande/écriture Modbus,
+secret/GUID/RX/donnée privée, main/release/tag ou fusion DEV. Revue MANAGER
+puis arrêt ; aucune optimisation ou tâche suivante auto-attribuée.
