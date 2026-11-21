@@ -1611,3 +1611,37 @@ Code/tests/workflows/droits/gates/dépendances/environnements/runtime/version
 inchangés. Tests réels **NOT RUN** ; aucun accès privé, dispatch/rerun live,
 commande/écriture Modbus, donnée privée, main/release/tag ou fusion DEV.
 V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; state:review puis arrêt.
+
+## Annexe E6 — registre des arbitrages restant au propriétaire
+
+Tâche `HOBEN-189-E6-PRE-RELEASE-AUDIT-CLOSURE-DECISION-REGISTER-023`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `224f90d698d91a83864249d62a3bc86ec58f31cb`.
+Source unique de cette synthèse : matrice [E5/#250](https://github.com/Guillaume0385/ha-hoben-community/pull/250).
+**Cinq arbitrages en attente ; aucune décision propriétaire présumée.** Les
+conditions ci-dessous concernent chaque point, pas la clôture de #189 ni une
+promotion. Un report ne satisfait aucune obligation de sécurité ou validation.
+
+| Point E5 / décision encore requise | Preuve attendue | Responsable de l'arbitrage | Condition de clôture du point ou de report |
+| --- | --- | --- | --- |
+| Réel : déterminer les observations/validations encore nécessaires pour le SHA effectivement chargé. | Bilan expurgé corrélant SHA installé, contexte, résultats et limites ; autorisation distincte avant tout éventuel nouvel essai. | Propriétaire ; MANAGER examine la preuve. | Clôture seulement sur décision explicite citant les preuves recevables ; à défaut, report motivé et validation réelle non acquise. Ni fusion d'audit ni CI ne la remplace. |
+| Politiques natives : établir l'admissibilité d'une éventuelle campagne autorisée. | Preuve authentifiée des protections et approbations applicables au contexte/ref/run, pas leur seule déclaration YAML. | Propriétaire pour les autorisations ; MANAGER vérifie la conformité. | Clôture sur conformité attestée ; sinon campagne non admise. Reporter son examen n'autorise ni lancement, ni assouplissement ou contournement des gates. |
+| Usages externes : décider des contraintes de compatibilité avant tout autre retrait. | Dépendances connues par catégories expurgées, périmètre et incertitudes explicités ; aucune collecte de scripts privés exigée ici. | Propriétaire ; MANAGER borne l'analyse. | Décision documentée sur ce périmètre, sans prétendre prouver l'absence universelle d'usages ; sinon conserver les candidats et reporter tout retrait non démontré. |
+| Actions : choisir la politique de références et son entretien, sans pin imposé par l'audit. | Décision sur portée, responsable/cadence et critères de provenance/compatibilité ; preuves de révision seulement dans une future tâche autorisée. | Propriétaire ; MANAGER organise revue et contrôles. | Clôture de l'arbitrage sur politique et limites explicites ; mise en œuvre séparée si autorisée. Sans décision, report enregistré, YAML inchangé et risque E5 conservé. |
+| Inventaire : décider des zones à examiner, accepter de manière bornée ou reporter. | Périmètre retenu, exclusions, justification et critères de preuve ; pas une certification globale déduite des lots A1–E5. | Propriétaire ; MANAGER vérifie la traçabilité. | Clôture de cet arbitrage avec couverture/limites approuvées ; sinon zones non auditées maintenues comme telles. Toute suite exige attribution distincte. |
+
+Pour enregistrer ultérieurement un arbitrage : décision propriétaire datée et
+liée, SHA/périmètre concernés, lien de preuve, conclusion MANAGER et motif de
+clôture/report. Sans ces éléments, garder « en attente » ; ne pas remplir les
+cases à partir d'une ancienne CI ou d'une absence de réponse. Aucun choix,
+délai, essai ou travail suivant n'est attribué par E6. La décision de pré-release
+reste distincte et aucune version n'est déclarée prête.
+
+Contrôles E6 : correspondance des cinq lignes E5, liens, cohérence des rôles et
+limites, confidentialité, ajout seul, Ruff/diff-check et quatre CI au HEAD exact
+consignés dans PR/#189. Pas de nouveau test ni suite complète locale ; suites
+existantes conservées en CI. Diff limité au registre, sans CHANGELOG (audit
+interne sans impact HACS/API). Aucun code/test/workflow/droit/gate/environnement/
+dépendance/protocole/manifest/version modifié. Tests réels **NOT RUN** ; aucune
+action live, commande/écriture Modbus, donnée privée, main/release/tag ou fusion
+DEV. V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; revue puis arrêt.
