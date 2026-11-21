@@ -1282,3 +1282,44 @@ interne sans impact HACS/API/comportement, pas d'accélération revendiquée.
 Tests réels **NOT RUN** ; aucun dispatch/rerun, commande/écriture Modbus,
 secret/GUID/RX/donnée privée, main/release/tag ou fusion DEV. Revue MANAGER
 puis arrêt ; aucune optimisation ou tâche suivante auto-attribuée.
+
+## Annexe D2 — cohérence du guide DataUpdated avec le code actuel
+
+Tâche `HOBEN-189-D2-DATAUPDATED-DIAGNOSTIC-DOC-CONSISTENCY-016`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `28e20e428961018c7a79dcb80713ee85ec86fc08`.
+Document unique audité : [data-updated-recovery.md](data-updated-recovery.md).
+**Conserver le guide à l'octet : aucune divergence factuelle établie sur les
+flux ciblés.** Cette annexe est la sortie documentaire de conservation prévue
+par la consigne, sans correction cosmétique ni nouveau fait protocolaire.
+
+| Affirmation vérifiée | Source actuelle en lecture seule / conclusion |
+| --- | --- |
+| Livraison entière 0x1B sur framer libre et propriétaire RX valide ; forme publiable FFFF/unité 1/04/20 UInt16 | [v4_session.py](../custom_components/hoben/v4_session.py) : _delivery_drop_allowed et _consume_data_updated_delivery ; _candidate_words du [module shadow](../custom_components/hoben/shadow_data_updated.py). Les autres formes ne deviennent pas une acquisition. |
+| Invalides admis abandonnés sans scan, garde #160 ni reset de délai ; erreurs decode/callback bornées | Même session : retour après diagnostic parser_failure/decode_failed/callback_failed ; les contrôles transport/ownership et la récupération des frontières non admissibles restent distincts. |
+| Publication par snapshot/décodeur existants, génération et ordre local ; notification retenue avant initiale | Session → callback → [client.py](../custom_components/hoben/client.py) : _receive_data_updated et _async_refresh_once, garde de génération initialisée, latest_data_updated et conservation du timestamp reçu. Une notification ne valide pas le waiter 0x0E. |
+| Initiale par génération, cache sans nouvelle fraîcheur, aucun polling périodique de l'entrée push | [__init__.py](../custom_components/hoben/__init__.py) active push_updates ; client distingue tentative/initiale ; [coordinator.py](../custom_components/hoben/coordinator.py) utilise update_interval=None en push et conserve l'heure reçue. Les réessais #212 et le setup borné ne sont pas une nouvelle cadence. |
+| Connexion active sans notification ; fenêtre de perte unique de 300 s, stricte après la borne | Coordinator : _session_changed, last_snapshot_held, snapshot_available et _expire_connection_hold ; pas d'extension par simple ouverture/cache, arrêt/refus terminal/cleanup non attesté prioritaires. |
+| DEBUG privé explicite et borné, distinct de l'export support ; FIFO historique indépendant | observe_applied_data_updated exige DEBUG sur son logger, conserve le marqueur owner_validated et le JSON borné à 8192 octets ; [diagnostics.py](../custom_components/hoben/diagnostics.py) reste une projection sans valeurs du foyer. Aucune activation réelle effectuée. |
+
+Le guide annonce la priorité de #219-005 et de la disponibilité #219-006,
+puis ouvre explicitement « Historique » pour les étapes antérieures au 19/11.
+Les mentions de polling, mapping candidat et absence de mutation HA dans ces
+archives ne sont pas des interdictions actuelles du push. La branche sans
+callback de publication garde son observation historique ; le mode push publie
+sur le chemin distinct vérifié ci-dessus. Aucune réécriture de l'historique,
+des autorisations ni des limites de preuve ne s'impose sur cette comparaison.
+
+Validation ciblée existante : [tests push](../tests/test_data_updated_push_219.py),
+frontières/livraisons et silence/récupération ; [tests HA push](../ha_tests/test_data_updated_push_219.py)
+sur vrais client/session/coordinator et horloges/transports simulés. Résultats,
+liens, cohérence des références, Ruff/diff-check et quatre CI au HEAD exact
+consignés dans la PR/#189. Les sources seules ne prouvent ni mapping universel,
+frontière TLS/message, timestamp serveur, anti-rejeu ou validation HA installée.
+
+Diff limité à cette annexe. Guide audité, README D1, tous exécutables/tests,
+dépendances/workflows/gates/permissions, runtime/protocole/TLS, manifest/version
+byte-identiques à la base. Pas de CHANGELOG : vérification interne sans impact
+HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun,
+commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag/version
+ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
