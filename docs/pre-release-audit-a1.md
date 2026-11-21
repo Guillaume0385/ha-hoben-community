@@ -1540,3 +1540,40 @@ Workflow/code/tests/dépendances/permissions/environnements/version inchangés.
 Tests réels **NOT RUN**, V4 lecture seule et TLS vérifié myhoben.fr:465 préservés.
 Revue MANAGER puis arrêt state:review, sans fusion/main/release/tag ni version
 déclarée prête ; aucune action live, commande/écriture Modbus ou donnée privée.
+
+## Annexe E4 — déclencheurs CI et frontière avec les campagnes manuelles
+
+Tâche `HOBEN-189-E4-VALIDATE-TRIGGERS-LIVE-BOUNDARY-DOC-AUDIT-021`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `b6bb03700f79553c7a0e7c51069fed801b5ef39b`.
+**Cohérence constatée sur le périmètre ciblé ; aucun texte existant ou YAML
+à corriger.** Cette preuve complète les décisions A1 sans changer de déclencheur.
+
+| Fait dans les YAML publics | Portée / séparation vérifiée |
+| --- | --- |
+| [Validate](../.github/workflows/validate.yml) : push, branches main et chore/** | Pas de déclenchement push direct déclaré pour experimental ; une fusion sur experimental n'est pas en elle-même une campagne réelle. |
+| Validate : pull_request, sans filtre branches/paths explicite | CI des PR, distincte du filtre push ; quatre checks à constater au HEAD exact, pas à déduire de l'existence du YAML. |
+| Validate : workflow_dispatch | Dispatch de la CI ordinaire ; ce nom d'événement ne signifie pas à lui seul accès Hoben réel. Aucun lancement effectué dans E4. |
+| Validate : schedule, cron 0 0 * * 1 | Planification hebdomadaire déclarée de CI, pas une campagne live ni une preuve d'exécution effective ou d'heure observée. |
+| Validate : permissions globales vides, contents:read dans chacun des quatre jobs | tests = pytest/Ruff ; ha-tests = pytest HA synthétique ; hacs et hassfest = validations dédiées. Aucun environment ou secret Hoben référencé, ni étape de dispatch/collecteur réel déclarée dans ce YAML. |
+| [HA](../.github/workflows/hoben-ha-manual.yml) et [protocole](../.github/workflows/hoben-protocol-manual.yml) : seul événement workflow_dispatch | Admission sur dépôt, acteur ET triggering_actor propriétaires, ref autorisée et catalogue fermé ; collect dépend de l'admission réussie. Environnements déclarés hoben-live / hoben-experimental, mutex commun hoben-read-only-observation sans annulation du run actif. Aucun push/PR/schedule/workflow_run déclaré pour ces campagnes. |
+
+Le [workflow expérimental](experimental-protocol-workflow.md) annonce les deux
+campagnes actuelles et réserve les exigences historiques PR/CI/claim/recheck
+à la voie #119. Ses anciennes descriptions d'un lancement sur push restent
+historiques : elles ne déclenchent pas les YAML actuels. Ne pas les transférer
+dans Validate ni réintroduire leurs gates dans les deux campagnes modernes.
+Leur admission autorise des refs nommées ; elle ne prouve ni installation sur
+chaque branche ni approbations natives effectives, qui restent hors preuve E4.
+
+Lecture YAML complète et comparaison documentaire seulement : aucun dispatch,
+rerun, accès privé ou contrôle de Settings. CI « offline » signifie sans Hoben/HA
+domestique, pas sans Internet pour outils/dépendances. Un vert de CI ne valide
+pas le poêle, une campagne réelle ou une pré-release ; une déclaration de gate
+ne prouve pas sa politique native. Liens, événements/droits, confidentialité,
+identité des trois YAML, Ruff/diff-check et quatre CI au HEAD E4 consignés dans
+PR/#189. Diff limité à l'annexe, sans CHANGELOG (audit interne sans impact API).
+Pas de nouveau test ni suite complète locale ; suites existantes en CI.
+Tests réels **NOT RUN**, V4 lecture seule et TLS vérifié myhoben.fr:465 préservés.
+Revue MANAGER puis arrêt state:review, sans fusion, main/release/tag/version,
+commande/écriture Modbus, donnée privée ou autre tâche auto-attribuée.
