@@ -502,8 +502,13 @@ activation, promotion main ou fusion DEV. Livraison puis STOP.
 
 ## Métadonnées du registre Actions — HOBEN-126-ACTIONS-REGISTRY-012
 
+**Archive B6 : le lecteur décrit ci-dessous est retiré, sans changer le transport
+GET partagé ni ses routes.** Les liens de code et de tests historiques sont
+épinglés à leur version avant retrait. Les [gardes HTTP maintenus](../tests/test_github_campaign_actions_registry.py)
+testent désormais directement le transport ; voir la matrice de l'[audit B6](pre-release-audit-a1.md).
+
 Base experimental `2a19df8f05fbea245b011ccef182df65f2f1c566`, après #144.
-[github_campaign_actions_registry.py](../scripts/github_campaign_actions_registry.py)
+[github_campaign_actions_registry.py](https://github.com/Guillaume0385/ha-hoben-community/blob/64383c9524adab10a0be3a4c8d8002fe200913d0/scripts/github_campaign_actions_registry.py)
 est indépendant des lecteurs Git/arbre/blob et du contrat d'admission. Il ne
 contient aucun backend HTTP, token, lecture d'environnement, interpréteur YAML
 ou CLI. Aucun workflow, gate, collecteur ou client HA ne le consomme.
@@ -575,7 +580,7 @@ utilisé pour contourner ce refus. Livraison limitée au contrat de lecture et
 aux validations vérifiables hors ligne, comme prévu par la consigne MANAGER ;
 la preuve opérationnelle reste bloquée par cette limitation d'accès.
 
-Les [tests](../tests/test_github_campaign_actions_registry.py) utilisent
+Les [tests](https://github.com/Guillaume0385/ha-hoben-community/blob/64383c9524adab10a0be3a4c8d8002fe200913d0/tests/test_github_campaign_actions_registry.py) utilisent
 seulement faux Reader/HTTP, DNS/sockets interdits : deux campagnes, états connus,
 IDs/chemins/états faux, absence de métadonnées, incohérences et changements,
 erreurs/privé, pagination, doublons/troncature, recheck, bornes, immuabilité,
