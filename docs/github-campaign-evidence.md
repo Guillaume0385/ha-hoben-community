@@ -411,8 +411,14 @@ GitHub/Hoben réel, raccordement live, dispatch/rerun/claim, secret, commande,
 
 ## Identité des octets du blob — HOBEN-126-WORKFLOW-BLOB-011
 
+**Archive B7 : le lecteur Blob décrit ci-dessous est retiré, sans changer le
+transport GET, le lecteur d'arbre ou les contrôles d'intégrité actifs.** Les
+liens de code et de tests historiques sont épinglés avant retrait. Les
+[gardes transport/arbre conservés](../tests/test_github_campaign_workflow_blob.py)
+exercent leurs composants maintenus ; voir le bilan de l'[audit B7](pre-release-audit-a1.md).
+
 Base experimental `e06b469a5c8e28763fb42fd7f80698cfde7cee1e`, après #143.
-[github_campaign_workflow_blob.py](../scripts/github_campaign_workflow_blob.py)
+[github_campaign_workflow_blob.py](https://github.com/Guillaume0385/ha-hoben-community/blob/e72aabcc4771ddaff52265cac793053d88206958/scripts/github_campaign_workflow_blob.py)
 consomme une preuve d'arbre distincte de la tranche 010 ; aucun lecteur HTTP
 par défaut, token, environnement, interpréteur YAML ou CLI n'est ajouté.
 Il n'est raccordé à aucun workflow, gate, collecteur, client HA ou contrat
@@ -491,7 +497,7 @@ anti-rejeu, fraîcheur/atomicité, UI/main, recheck après approbation et autori
 restent UNKNOWN. La preuve d'arbre est un instantané distinct ; la double
 lecture du blob ne la rafraîchit pas et ne crée aucune preuve atomique globale.
 
-Les [tests](../tests/test_github_campaign_workflow_blob.py) sont uniquement
+Les [tests](https://github.com/Guillaume0385/ha-hoben-community/blob/e72aabcc4771ddaff52265cac793053d88206958/tests/test_github_campaign_workflow_blob.py) sont uniquement
 synthétiques : faux Reader/HTTP, DNS/sockets interdits, vraie validation d'arbre,
 deux campagnes, altérations/pins erronés, tailles/limites, base64/troncature,
 erreurs HTTP et données privées, recheck, immuabilité et routes interdites.
