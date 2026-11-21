@@ -250,7 +250,7 @@ leur présence ne prouve pas à elle seule une couverture exhaustive.
 | [github_campaign_dispatch_evidence.py](../scripts/github_campaign_dispatch_evidence.py) | C | tests et doc provenance ; faits partiels de dispatch | T6 | absent |
 | [github_campaign_branch_evidence.py](../scripts/github_campaign_branch_evidence.py) | C | tests et doc ; HEAD de branche sans autorité d’exécution | T6 | absent |
 | [github_campaign_workflow_tree.py](../scripts/github_campaign_workflow_tree.py) | C | tests et doc ; identité d’arbre des shells | T6 | absent |
-| [github_campaign_workflow_blob.py](../scripts/github_campaign_workflow_blob.py) | C | tests et doc ; identité des octets Git, pas sémantique YAML | T6 | absent |
+| [github_campaign_workflow_blob.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/github_campaign_workflow_blob.py) | C | tests et doc ; identité des octets Git, pas sémantique YAML | T6 | absent |
 | [github_campaign_actions_registry.py](https://github.com/Guillaume0385/ha-hoben-community/blob/c81b79643485e8b148695c6e4fc0e2a9a50f2a87/scripts/github_campaign_actions_registry.py) | C | tests et doc ; métadonnées partielles du registre Actions | T6 | absent |
 
 ### Supports hors des 88 scripts
@@ -702,3 +702,62 @@ non raccordé hors livrable HACS, sans changement du comportement du plugin.
 Limites d'inodes/Docker locales rapportées, checkout sous /tmp. Tests réels
 Hoben/HA **NOT RUN**, aucun dispatch/rerun live, secret/donnée privée, commande,
 écriture Modbus, main/release/tag ni fusion DEV. Aucun autre candidat ou lot.
+
+## Annexe B7 — retrait du lecteur de contenu Git Blob
+
+Tâche `HOBEN-189-B7-REMAINING-LEGACY-CANDIDATE-AUDIT-009`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Candidat unique A1 : `scripts/github_campaign_workflow_blob.py`, hors B2/B4
+et suppressions précédentes. Base `experimental` :
+`e72aabcc4771ddaff52265cac793053d88206958` ; main lu seulement à
+`1ec61b40615b481fe5da1b6e2b2c7590b4ff86e3`.
+**Retirer ce seul modèle non raccordé ; conserver le transport, le lecteur
+d'arbre et les contrôles d'intégrité/admission maintenus.**
+
+| Symbole / consommateur | Preuve examinée | Décision / couverture |
+| --- | --- | --- |
+| `validate_workflow_blob`, `read_workflow_blob`, Expected/Observation | AST scripts/plugin/tests aux deux SHA : seul import dans test_github_campaign_workflow_blob.py, aucun helper de test importé ailleurs. Source absente de main ; pas de backend, token d'environnement ou CLI utile. | Retirer l'API de preuve de bytes introduite par #144 (`2a19df8f05fbea245b011ccef182df65f2f1c566`), sans producteur/consommateur opérationnel. |
+| Dépendance envers workflow_tree | Le lecteur Blob importe le lecteur d'arbre et consomme sa projection, pas l'inverse. Les imports/appels d'arbre dans les tests restent conservés. | Source du lecteur d'arbre inchangée ; son test de non-raccordement perd seulement l'ancienne exception pour le consommateur Blob supprimé, ce qui resserre le garde. |
+| Dynamique, subprocess, SourceBundle, YAML/fixtures, CLI/packaging, HACS/publication | Aucun appel opérationnel ou historique dans les points d'entrée ; seul import_module scripts/plugin = probe_opened_client_boundary. Processus à chemins fixes et bundle HA sans le lecteur. | Aucun autre script candidat examiné ou modifié. Absence fondée sur graphe et inspection, pas sur recherche textuelle seule. |
+| 25 cas indépendants du transport/arbre | Deux campagnes avec vraie traversée d'arbre sur FakeHTTP puis GET du seul SHA sélectionné ; 17 routes refusées, 3 queries refusées, 3 JSON/token refusés. | **Conserver les 25 cas** dans [test_github_campaign_workflow_blob.py](../tests/test_github_campaign_workflow_blob.py), sans importer l'API retirée. Erreurs JSON/SECRET typées vérifiées directement, streams fermés ; preuve d'arbre toujours sans autorité. |
+| 111 cas propres au modèle Blob | Enveloppe/base64, hash Git, pins, binding, double lecture/recheck et ancien garde source/CLI exclusivement de l'API retirée. Aucun helper partagé. | Retirer ces seuls cas ; nouveau garde d'absence du fichier/imports opérationnels/entrée YAML/packaging. Fichier conservé : 136 cas avant, 26 après (25 + garde). |
+| Documents / preuves historiques | A1 et [section Blob](github-campaign-evidence.md) décrivent une preuve partielle d'identité des octets, sans sémantique YAML ou autorisation. Liens source/test épinglés avant retrait. | Contrat historique conservé comme archive, sans déclaration de workflow chargé, approuvé ou disponible sur main. |
+
+### Garanties indépendantes maintenues
+
+- [test_github_campaign_workflow_tree.py](../tests/test_github_campaign_workflow_tree.py) :
+  chaîne commit/arbres/SHA, mauvais pins/ref/chemins refusés, recheck, projection
+  figée, absence d'autorité/YAML chargé ; backend et source inchangés.
+- [test_github_campaign_transport.py](../tests/test_github_campaign_transport.py) :
+  GET allowlisté et TLS vérifié, token injecté, HTTP/403/redirect, pagination,
+  tailles/délais, JSON tronqué/dupliqué, secret et contexte privé refusés.
+  Les 25 cas spécifiques ci-dessus continuent de tester la route Git Blob.
+- [test_github_campaign_evidence.py](../tests/test_github_campaign_evidence.py) et
+  [test_campaign_minimal_admission.py](../tests/test_campaign_minimal_admission.py) :
+  faits partiels sans can_start, observations cohérentes, contexte fermé et
+  propriétaire ; aucune identité de bytes ne devient une autorisation.
+- [test_info_manual_route_186.py](../tests/test_info_manual_route_186.py) :
+  intégrité/provenance et refus de falsification des chemins actifs ; sources,
+  manifestes d'intégrité et gates inchangés. Les protections HA #220/#212,
+  0x0C, Ping/Pong, #160/#192 ne sont pas modifiées.
+
+L'API inutilisée de preuve Git SHA-1/base64 n'est pas remplacée par une
+attestation permissive. Le GET direct des tests reste une réponse opaque du
+transport, pas une preuve de bytes/YAML chargés ou d'approbation. Sa borne
+16 Kio/24 Kio base64 n'est transférée à aucun chemin ; transport existant
+2 Mio/10 s et tous les budgets Hoben restent inchangés.
+
+Reproduction : `git grep -n -E 'github_campaign_workflow_blob|read_workflow_blob|validate_workflow_blob'
+<SHA> -- .github scripts tests ha_tests docs README.md pyproject.toml`, AST,
+inspection des entrées/copies et historique du candidat. Garde RED avant
+retrait puis GREEN, ciblés avant/après, suites Python/HA, Ruff, liens, diff-check
+et quatre CI au HEAD exact consignés dans la PR/#189. Les usages privés
+externes non observables ne sont pas déclarés connus.
+
+Diff B7 limité à ce script, deux fichiers de tests et deux documents de preuves.
+Sources du transport/arbre, moteurs, scripts B2/B4, runtime HA, gates/YAML,
+fixtures, manifest/version inchangés. Pas de CHANGELOG : modèle interne non
+raccordé hors livrable HACS, sans changement du comportement du plugin.
+Limites d'inodes/Docker locales rapportées, checkout sous /tmp. Tests réels
+Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, donnée privée, commande,
+écriture Modbus, main/release/tag/version ou fusion DEV. Aucun autre lot.

@@ -541,9 +541,7 @@ def test_module_stdlib_only_no_runtime_caller_backend_io_env_or_cli():
         assert not any(
             "github_campaign_workflow_tree" in p.read_text()
             for p in (ROOT / folder).rglob("*")
-            if p not in {path, ROOT / "scripts/github_campaign_workflow_blob.py"}
-            and p.is_file()
-            and p.suffix in {".py", ".cjs", ".yml"}
+            if p != path and p.is_file() and p.suffix in {".py", ".cjs", ".yml"}
         )
     result = subprocess.run(
         [sys.executable, "-I", str(path)], env={}, capture_output=True, timeout=5
