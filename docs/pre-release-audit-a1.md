@@ -1003,3 +1003,60 @@ retrait, aucun test miroir ajouté. Pas de CHANGELOG : audit interne sans impact
 livrable HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun
 dispatch/rerun live, donnée privée, commande/écriture Modbus, main/release/tag
 ou fusion DEV. Revue MANAGER puis arrêt, aucune autre tâche auto-attribuée.
+
+## Annexe C3 — réexamen de la famille déjà auditée C1
+
+Tâche `HOBEN-189-C3-CI-HA-SESSION-PROOF-REDUNDANCY-AUDIT-012`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `1d759d6b4d36bf2b6d50e02fda236dbf00edd115`.
+Famille unique : [tests/test_ha_session_proof.py](../tests/test_ha_session_proof.py).
+**Même famille que C1 ; conserver ses 55 cas et tous ses helpers.**
+
+Depuis la base C1 `ea8ceb52db75703379e208546f6724a381c3a000`, le seul fichier
+modifié est ce document d'audit. Le test a toujours le blob Git
+`6522a619a6cb3352442d339d13dffe5142917964` ; validateurs Python/Node,
+bibliothèques de preuves, collecteur et test HA consommateurs inchangés.
+La matrice des neuf fonctions / 55 cas / 59 appels de l'annexe C1 reste
+applicable ; elle n'est pas recopiée comme un nouveau résultat de couverture.
+
+Réexamen AST actuel : neuf corps de fonctions distincts et 38 tuples INVALID
+distincts. proof/ROOT restent importés par test_ha_live_proof ; node_accepts
+par le test HA ; ha_session_collector consomme encore le contrat Python.
+Le require embarqué charge ha-session-proof.cjs puis ha-session-evidence.cjs,
+sans entrée live ni appel Actions. Le garde réseau Python et les assertions
+de sorties/erreur fixes restent en place ; mesures limitées aux fixtures
+synthétiques, sans publication des stdin, données ou exceptions rejetées.
+
+Python et Node valident séparément schéma/provenance/budgets, causalité de
+reprise, cleanup, critères et JSON canonique. L'acceptation d'une preuve
+INCONCLUSIVE honnête ne remplace pas le refus d'une preuve falsifiée. Des
+tuples/entrées distincts ne prouvent pas des branches indépendantes ; aucune
+équivalence complète de couverture autorisant un retrait n'est établie ici.
+Les limites de preuve et la décision de conservation C1 sont maintenues.
+
+Nouvelles mesures C3, Python **3.12.14** / Node **v24.19.0**, checkout recréé
+sous /tmp après disparition du précédent : reproducteur de l'annexe C1,
+bytecode/cache pytest désactivés, trois processus frais par série sans suite
+concurrente, caches OS non purgés. Chaque passage : **55 PASS, 59 appels Node
+et 59 entrées byte-distinctes**. Temps monotone et SHA256 en mémoire ; vrais
+appels/verdicts inchangés, aucun rapport affiché.
+
+| Série C3 | Temps mural Python, secondes (3 runs) | Somme des appels Node, secondes | Médiane murale |
+| --- | --- | --- | --- |
+| Avant annexe | 1.959 / 2.143 / 1.949 | 1.783 / 1.960 / 1.765 | 1.959 s |
+| Après annexe | 2.150 / 1.957 / 2.134 | 1.921 / 1.793 / 1.975 | 2.134 s |
+
+Reproduction : même commande et extrait Python que C1, sélection exacte
+tests/test_ha_session_proof.py. Les temps Node incluent lancement, chargement,
+parsing, validation et échanges, sans coût de démarrage isolé ni extrapolation
+CI. Aucun gain revendiqué, aucun batching/cache ou changement d'isolation.
+
+Diff C3 limité à cette annexe ; aucune autre famille ni suppression. Tous
+tests/helpers/fixtures, contrats de preuve, runtime/V4/TLS, workflows/gates,
+permissions, manifest/version inchangés. Ciblés, suites Python/HA, Ruff,
+liens/diff-check et quatre CI au HEAD exact consignés dans la PR/#189, avec
+les limites Docker/inodes locales. Aucun RED/GREEN de retrait : aucun retrait ;
+aucun test miroir. Pas de CHANGELOG : audit interne sans impact HACS/API ou
+comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live,
+commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag/version
+ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
