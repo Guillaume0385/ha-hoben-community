@@ -1060,3 +1060,107 @@ aucun test miroir. Pas de CHANGELOG : audit interne sans impact HACS/API ou
 comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live,
 commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag/version
 ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
+
+## Annexe C4 — preuves produites par le vrai chemin HA synthétique
+
+Tâche `HOBEN-189-C4-CI-HA-SESSION-OFFLINE-REDUNDANCY-AUDIT-013`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `f742530926193782a3be76a99d67b2f2c6a5c072`.
+Famille unique : [ha_tests/test_ha_session_proof.py](../ha_tests/test_ha_session_proof.py),
+**sept fonctions async / 12 cas HA**, distincte du test de parseur audité C1/C3.
+**Conserver les 12 cas et tous les helpers** : aucune équivalence complète
+autorisant un retrait établie. Aucun autre groupe audité ou supprimé.
+
+### Matrice scénarios / assertions / couverture conservée
+
+| Fonction test_* (suffixe) | Cas HA / appels Node | Garanties exercées sur les vrais objets HA/client/coordinator |
+| --- | --- | --- |
+| healthy_real_ha_path_one_tls_no_reconnection_claim | 1 / 1 | Observation initiale sans I/O, immuabilité, six lectures corrélées sur une seule session, vrai décodage HA, génération/séquence, pas de faux succès de reconnexion. |
+| observed_loss_cleanup_new_generation_and_correlated_ha_read | 3 / 3 | CloseClient fragmenté, TransportEOF, TransportTlsError ; cleanup de la génération perdue, deuxième ouverture puis vraie lecture décodée ; type de perte/sous-code et émissions allowlistées. |
+| cancel_propagates_after_cleanup_with_partial_failure_proof | 4 / 4 | Annulation pendant opening/TX/RX/backoff, propagation de CancelledError après cleanup, rapport partiel FAILURE/INCONCLUSIVE, aucune réouverture ou tâche orpheline. |
+| read_timeout_recovery_is_not_natural_loss_evidence | 1 / 1 | Expiration déterministe du vrai timeout à un await ; fermeture et backoff contrôlés, cinq nouvelles lectures décodées sans fabriquer de perte naturelle ni succès de reconnexion. |
+| cleanup_error_cannot_be_reported_success | 1 / 1 | Erreur réelle de fermeture sur double transport : cleanup_failed et critère FAILURE, pas de faux cleanup réussi. |
+| correlated_wire_read_without_ha_decode_is_not_success | 1 / 1 | Décodeur HA qui refuse : séquence de lecture avance mais aucune data publiée/décodée ; réutilisation et issue restent FAILURE. |
+| absolute_window_cuts_off_before_next_slot_without_more_io | 1 / 1 | Horloge synthétique à 300 s : un seul slot, aucun refresh supplémentaire, collection FAILURE et cleanup attesté. |
+
+Chaque cas conserve aussi le round-trip Python et le validateur Node indépendant,
+la borne 8192 octets, l'absence d'identifiants/contenus synthétiques privés dans
+rapport et caplog, execution=offline/system_enforcement=NOT RUN/boundary_proven=false.
+assert_stopped vérifie fermeture unique, identité acceptée effacée et absence
+de tâches lifecycle/RX encore actives. Les sept corps AST sont distincts.
+
+### Rapports répétés ne signifiant pas tests interchangeables
+
+Chaque mesure relève **12 appels Node / 10 stdin distincts** (SHA256 en mémoire).
+Les seuls groupes répétés, dans chacun des six passages :
+
+- loss1/loss2 : EOF et erreur TLS produisent la même projection publique
+  catégorielle transport ; les exceptions injectées restent différentes ;
+- tx/rx : le même rapport partiel suit une annulation pendant deux attentes
+  différentes, write bloqué et lecteur RX bloqué.
+
+Ces répétitions portent sur les octets du rapport transmis au parseur, pas sur
+le chemin async, les effets HA ou le cleanup vérifiés avant/après. Supprimer un
+cas entier retirerait l'une des injections/attentes. Les autres suites de
+parseur ne construisent pas ce chemin HA ni ce collecteur. Un cache de verdict
+ou un processus Node partagé changerait l'isolation actuelle ; aucune telle
+modification ni accélération n'est proposée sans équivalence démontrée.
+
+### Fixtures et dépendances vérifiées
+
+[ha_session_collector.py](../ha_tests/ha_session_collector.py) reçoit de vrais
+HobenClient/HobenDataUpdateCoordinator frais, appelle async_refresh et projette
+SessionObservation ; clock/sleep injectés accélèrent six slots, pas 300 s réelles.
+Le collecteur possède son cutoff/cleanup et son rapport partiel, que les seuls
+tests de schéma C1/C2 ne remplacent pas.
+AST et recherche d'appels : ce fichier de test est son seul importeur dans le
+dépôt ; aucun import entrant des helpers de la famille C4. Cela ne prouve pas
+que ces tests ou ce collecteur sont inutiles : pytest les découvre directement.
+
+Fixtures importées depuis [test_persistent_client.py](../ha_tests/test_persistent_client.py) :
+peers construit les vrais propriétaires avec transport en mémoire et backoff
+contrôlé ; assert_stopped est partagé et reste intact. Ce chemin de régression
+historique garde ha_fast_reconnect=false dans la fixture, sans changer la
+politique de production. [Conftest HA](../ha_tests/conftest.py) interdit un
+transport Hoben réel et utilise le blocage sockets/DNS du harness, identités
+inventées et nettoyage HA. [pytest.ini](../ha_tests/pytest.ini) définit la
+découverte/asyncio HA séparée. Le require Node est celui du helper C1 importé,
+pas une campagne live. Aucun changement de fixture, collecteur ou runtime.
+
+### Coût local reproductible et limites
+
+Python HA **3.14.7**, Node **v24.19.0**, même environnement et checkout sous /tmp,
+trois processus Python frais par série sans suite concurrente ; bytecode/cache
+pytest désactivés, caches OS non purgés. Chaque passage : **12 PASS**. Profil
+temporaire autour des vrais subprocess.run Node, chronomètre monotone, hash en
+mémoire ; appels/arguments/rapports/verdicts inchangés, aucun contenu publié.
+
+| Série | Temps autour de pytest.main, secondes (3 runs) | Somme des appels Node, secondes | Médiane murale |
+| --- | --- | --- | --- |
+| Avant annexe | 5.878 / 4.896 / 5.186 | 0.458 / 0.399 / 0.432 | 5.186 s |
+| Après annexe | 5.360 / 4.991 / 4.884 | 0.428 / 0.412 / 0.368 | 4.991 s |
+
+Reproduction depuis la racine dans l'environnement HA :
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -c ha_tests/pytest.ini -q -p no:cacheprovider --durations=10 ha_tests/test_ha_session_proof.py
+```
+
+Le reproducteur Python C1 s'adapte uniquement en sélectionnant ce fichier avec
+-c ha_tests/pytest.ini et l'interpréteur HA ; un hook pytest_runtest_setup relève
+le nodeid courant pour grouper les hashes égaux sans afficher les stdin.
+Temps autour de pytest.main incluant chargement des plugins, collecte,
+fixtures/setup/tests/teardown HA, hors démarrage de l'interpréteur et import
+initial de pytest ; somme Node incluant lancement/chargement/parsing/validation/
+échanges. Ce ne sont pas des mesures isolées de démarrage, de chaque fixture
+ou du coût CI. Aucun gain
+revendiqué : code inchangé, répétitions de rapports conservées et expliquées.
+
+Diff limité à cette annexe ; audit antérieur, tous tests/helpers/fixtures,
+contrats, runtime/V4/TLS, workflows/gates/permissions, manifest/version inchangés.
+Ciblés, suites Python/HA, Ruff, liens/diff-check et quatre CI au HEAD exact
+consignés dans la PR/#189, avec limites locales. Aucun RED/GREEN de retrait :
+aucun retrait ; aucun test miroir. Pas de CHANGELOG : audit interne sans impact
+HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun
+live, commande/écriture Modbus, secret/GUID/RX/donnée privée, main/release/tag
+ou fusion DEV. Revue MANAGER puis arrêt ; aucune autre tâche auto-attribuée.
