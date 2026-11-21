@@ -1483,3 +1483,60 @@ Tests réels **NOT RUN** ; aucun accès aux secrets/environnements, dispatch/rer
 live, commande/écriture Modbus, main/release/tag/version ou fusion DEV.
 V4 lecture seule, TLS certificat/hostname vérifiés myhoben.fr:465 inchangés.
 Revue MANAGER puis arrêt en state:review ; aucune déclaration de version prête.
+
+## Annexe E3 — faisabilité d'un pinning des actions de Validate
+
+Tâche `HOBEN-189-E3-VALIDATE-ACTIONS-PINNING-FEASIBILITY-AUDIT-020`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `3310df6b89aaafda8e5831b32b494d1c21ccdd81`.
+**Conclusion : syntaxe de pinning disponible, adoption non décidée et
+compatibilité d'une révision future non démontrée. Aucun SHA candidat résolu,
+sélectionné ou appliqué.**
+
+[Validate](../.github/workflows/validate.yml) contient quatre références
+distinctes dans sept étapes uses ; les quatre jobs doivent rester présents.
+
+| Référence actuelle | Jobs / occurrences | Contrat à préserver dans une éventuelle tâche autorisée |
+| --- | --- | --- |
+| actions/checkout@v7 | tests, ha-tests, hassfest / 3 | Checkout du candidat et persist-credentials:false ; vérifier les exigences du runner de la révision retenue, sans changer de génération d'action implicitement. |
+| actions/setup-python@v7 | tests, ha-tests / 2 | Séparation Python 3.12/dev et 3.14/ha-test, installations et commandes existantes ; disponibilité des interpréteurs et compatibilité action/runner à vérifier. |
+| hacs/action@main | hacs / 1 | category:integration, comment:false et verdict HACS ; figer le code de l'action ne garantit pas de figer ses images/dépendances. |
+| home-assistant/actions/hassfest@master | hassfest / 1 | Sous-chemin hassfest et verdict HA conservés ; vérifier code composite, images et dépendances de la révision future. |
+
+La [syntaxe officielle GitHub](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/find-and-customize-actions#using-shas)
+permet un SHA complet et précise que les mises à jour ne sont alors plus reçues
+automatiquement. C5 décrit des images HACS/Hassfest mobiles à ses SHA historiques,
+sans nouvelle résolution ici. ubuntu-latest, Python, pip et les dépendances de
+[pyproject.toml](../pyproject.toml) ne seraient pas figés par ce seul pin.
+La [référence de sécurité GitHub](https://docs.github.com/en/actions/reference/security/secure-use#using-third-party-actions)
+demande origine dans le dépôt de l'action, pas un fork, et revue du code :
+immuabilité ne signifie pas innocuité. Ses lockfiles ne sont pas évalués en E3.
+
+Avant une éventuelle mise en œuvre, propriétaire/MANAGER doivent arbitrer :
+
+- **Provenance** : autorisation distincte pour les sept occurrences, origine,
+  version intentionnelle et revue ; les anciens SHA C5 ne sont pas des candidats
+  approuvés ni une preuve de compatibilité actuelle.
+- **Entretien** : responsable et cadence de revue des correctifs/avis. Aucun
+  dependabot.yml/.yaml suivi dans .github à cette base, sans preuve sur le suivi
+  externe. Le mécanisme
+  [Dependabot pour les actions](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/auto-update-actions)
+  est documenté, pas activé ou autorisé par E3.
+- **Compatibilité** : exigences runner/action, entrées, images et dépendances ;
+  PR distincte revue avec quatre CI SUCCESS au HEAD exact, correction même PR
+  si échec, sans supprimer un job ni élargir permissions/runtime/cache.
+
+**Décision E3 : conserver le YAML actuel pendant cet audit ; aucun pin proposé
+comme prêt à appliquer.** Bénéfice possible : référence directe stable ; risques :
+correctifs non intégrés sans maintenance et reproductibilité transitive
+surestimée. Aucune vulnérabilité ou économie CI établie ; politique finale
+réservée au propriétaire, aucun réglage natif présumé disponible.
+
+Sources publiques consultées le 21/11/2026 ; liens, occurrences, limites,
+confidentialité, Ruff/diff-check et quatre CI au HEAD E3 consignés dans PR/#189.
+Diff limité à l'annexe, sans CHANGELOG (audit interne, aucun impact HACS/API).
+Pas de nouveau test ni suite complète locale ; suites existantes en CI.
+Workflow/code/tests/dépendances/permissions/environnements/version inchangés.
+Tests réels **NOT RUN**, V4 lecture seule et TLS vérifié myhoben.fr:465 préservés.
+Revue MANAGER puis arrêt state:review, sans fusion/main/release/tag ni version
+déclarée prête ; aucune action live, commande/écriture Modbus ou donnée privée.
