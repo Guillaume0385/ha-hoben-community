@@ -761,3 +761,148 @@ raccordé hors livrable HACS, sans changement du comportement du plugin.
 Limites d'inodes/Docker locales rapportées, checkout sous /tmp. Tests réels
 Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, donnée privée, commande,
 écriture Modbus, main/release/tag/version ou fusion DEV. Aucun autre lot.
+
+## Annexe C1 — coût et redondance du contrat de preuve HA offline
+
+Tâche `HOBEN-189-C1-CI-TEST-REDUNDANCY-AUDIT-010`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `ea8ceb52db75703379e208546f6724a381c3a000`.
+Famille unique : [tests/test_ha_session_proof.py](../tests/test_ha_session_proof.py),
+neuf fonctions / **55 cas pytest**. Le nom historique `ha-persistent-c1`
+désigne le schéma offline, distinct de cette tâche C1 de nettoyage #189.
+**Conserver les 55 cas et leurs helpers : aucune équivalence permettant un
+retrait n'est établie.** Audit documentaire uniquement, sans autre candidat.
+
+### Matrice scénarios / assertions / décision
+
+| Fonction test_* (suffixe) | Cas pytest / appels Node | Assertions distinctes conservées |
+| --- | --- | --- |
+| independent_validator_accepts_bounded_synthetic_evidence | 3 / 3 | Absence de perte, perte transport, CloseClient ; round-trip Python, acceptation Node indépendante, reconnexion SUCCESS/INCONCLUSIVE et absence de champs privés. |
+| python_and_node_reject_malformed_or_forged_proof | 38 / 38 | Chaque tuple path/key/value est différent : clés privées, schéma/types, provenance/tentative, budgets, génération/séquence/perte/cleanup et critères falsifiés. Refus Python et Node, erreur fixe. |
+| opening_alone_stale_read_and_unconfirmed_cleanup_never_prove_recovery | 1 / 2 | Deux preuves recevables mais INCONCLUSIVE : ouverture sans lecture décodée et cleanup non attesté ; recalcul des critères, acceptation du rapport honnête par Node. |
+| not_run_and_partial_failure_are_separate_from_recovery_success | 1 / 2 | Aucune collection = NOT RUN ; collection interrompue = FAILURE même avec reprise prouvée. Deux rapports distincts, pas deux succès de reconnexion. |
+| input_limits_and_errors_do_not_echo_rejected_content | 6 / 6 | Objet incomplet, liste, null, JSON tronqué, texte privé synthétique, entrée de 8193 octets ; erreurs fixes des deux parseurs. |
+| canonical_encoding_rejects_duplicate_keys_and_noncanonical_numbers | 1 / 3 | Espace initial, clé dupliquée, nombre 1.0 : trois formes wire distinctes rejetées en Python et Node. |
+| unknown_numeric_close_subcodes_remain_payload_free | 2 / 2 | Bornes UInt8 0 et 255 recevables sans inventer une signification au sous-code. |
+| terminal_evidence_cannot_be_erased_in_later_samples | 2 / 2 | Deux témoins terminaux différents, cleanup_failed et stopped, ne peuvent disparaître dans un échantillon ultérieur. |
+| six_report_slots_and_budget_reserve_are_bounded | 1 / 1 | Septième slot refusé ; six échéances uniques/ordonnées et réserves connexion/lecture/cleanup sous les plafonds Python. |
+
+Les **59 entrées Node sont byte-distinctes** dans chaque mesure ; aucun doublon
+exact de corps AST entre les neuf fonctions n'est relevé. Cela ne prouve pas
+que chaque cas est indispensable : des entrées différentes peuvent exercer
+une même branche. L'inspection n'établit cependant pas de remplacement
+conservant toutes les assertions, bornes, erreurs et indépendances ci-dessus.
+Les assertions Python/Node ne sont pas interchangeables :
+[ha_session_proof.py](../scripts/ha_session_proof.py) et
+[ha-session-proof.cjs](../scripts/ha-session-proof.cjs) sont deux validateurs
+distincts, chacun utilisant sa bibliothèque de preuves dans son langage.
+Un verdict identique n'est pas une preuve de duplication d'implémentation.
+
+### Consommateurs et chemins de découverte
+
+AST des modules scripts/plugin/tests/ha_tests et inspection des appels :
+[test_ha_live_proof.py](../tests/test_ha_live_proof.py) importe ROOT/proof ;
+[ha_tests/test_ha_session_proof.py](../ha_tests/test_ha_session_proof.py) importe
+node_accepts ; [ha_session_collector.py](../ha_tests/ha_session_collector.py)
+consomme LIMITS/REFRESH_AT_MS/build_report/project_observation. Le test HA
+soumet les rapports du vrai client/coordinator sur transports simulés ; il
+ne remplace pas les mutations de schéma synthétiques de cette famille.
+Le contrat C2a testé dans test_ha_live_proof possède un autre schéma et refuse
+les rapports C1, et réciproquement : aucun remplacement global prouvé.
+
+Le `require('./scripts/ha-session-proof.cjs')` embarqué dans `node -e` est un
+consommateur dynamique réel, invisible à un graphe d'imports Python seul.
+Subprocess reçoit uniquement le rapport synthétique par stdin, capture les
+sorties et exige un vocabulaire d'erreur fixe. Le validateur Node et ses
+imports font de la validation JSON, sans réseau, CLI live ou accès Actions.
+`tests/conftest.py` interdit les connexions/DNS Python. La découverte reste
+`pyproject.toml` → tests ; le job HA collecte séparément ha_tests avec ses
+fixtures d'isolation. Les quatre jobs de validate.yml restent inchangés.
+
+### Mesures reproductibles et limites
+
+Hôte local, checkout sous /tmp, Python **3.12.14**, Node **v24.19.0** ; cache
+pytest désactivé, bytecode désactivé. Trois processus Python frais par série,
+sans suite concurrente ; caches OS non purgés. Le profil temporaire entoure
+subprocess.run sans modifier ses arguments, entrées, sorties ou verdicts :
+temps monotone autour du vrai appel et SHA256 en mémoire de chaque stdin,
+aucun rapport/valeur publié. Chaque run : 55 PASS, 59 appels, 59 entrées uniques.
+
+| Série | Temps mural Python, secondes (3 runs) | Somme des appels Node, secondes | Médiane murale |
+| --- | --- | --- | --- |
+| Avant annexe | 2.151 / 2.135 / 2.160 | 1.956 / 1.962 / 1.994 | 2.151 s |
+| Après annexe | 2.075 / 2.203 / 2.167 | 1.899 / 2.038 / 2.007 | 2.167 s |
+
+Les appels Node mesurent ensemble lancement, chargement, parsing, validation
+et échange stdin/stdout ; ce n'est pas une mesure du démarrage Node isolé.
+Le résultat ne permet aucune extrapolation au runner CI ni au coût total des
+quatre jobs. Aucune accélération n'est revendiquée : tests inchangés ; les
+écarts avant/après relèvent d'une mesure locale sans changement exécutable.
+Batcher les rapports ou partager un processus Node changerait l'isolation
+actuelle ; aucune équivalence ni modification de helper proposée dans C1.
+
+Reproduction du ciblé standard, à répéter trois fois avant/après :
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider --durations=10 tests/test_ha_session_proof.py
+```
+
+Pour compter et chronométrer les vrais appels sans afficher leur contenu,
+exécuter dans le même environnement depuis la racine (un processus par run) :
+
+```python
+import hashlib
+import subprocess
+import time
+from unittest.mock import patch
+import pytest
+
+calls = []
+original = subprocess.run
+
+
+def measure(*args, **kwargs):
+    command = args[0] if args else kwargs.get("args", [])
+    if not command or command[0] != "node":
+        return original(*args, **kwargs)
+    start = time.perf_counter()
+    result = original(*args, **kwargs)
+    calls.append(
+        (time.perf_counter() - start, hashlib.sha256(kwargs["input"].encode()).digest())
+    )
+    return result
+
+
+start = time.perf_counter()
+with patch.object(subprocess, "run", measure):
+    status = pytest.main(
+        [
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--durations=10",
+            "tests/test_ha_session_proof.py",
+        ]
+    )
+print(
+    status,
+    time.perf_counter() - start,
+    len(calls),
+    sum(t for t, _ in calls),
+    len({h for _, h in calls}),
+)
+raise SystemExit(status)
+```
+
+Vérifications complémentaires : imports AST, rg ha_session_proof/ha-session-proof
+sur scripts/plugin/tests/ha_tests/YAML/fixtures, inspection du contrat C1 et de
+ses consommateurs cités. Aucun autre groupe audité ni supprimé. Ciblés de
+compatibilité, suites Python/HA, Ruff, liens, diff-check et quatre CI au HEAD
+exact consignés dans la PR/#189 ; limites Docker/inodes locales rapportées.
+Pas de RED/GREEN de retrait : aucun retrait. Pas de nouveau test miroir.
+Tous les fichiers exécutables/tests/fixtures/gates/workflows restent
+byte-identiques à la base, notamment #220/#212/0x0C/Ping-Pong/#160/#192/#186.
+Pas de CHANGELOG : audit interne sans impact livrable HACS/API/comportement.
+Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, donnée privée,
+commande/écriture Modbus, main/release/tag/version ou fusion DEV. Revue MANAGER,
+puis arrêt ; aucune deuxième famille ou tâche auto-attribuée.
