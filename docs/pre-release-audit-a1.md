@@ -906,3 +906,100 @@ Pas de CHANGELOG : audit interne sans impact livrable HACS/API/comportement.
 Tests réels Hoben/HA **NOT RUN** ; aucun dispatch/rerun live, donnée privée,
 commande/écriture Modbus, main/release/tag/version ou fusion DEV. Revue MANAGER,
 puis arrêt ; aucune deuxième famille ou tâche auto-attribuée.
+
+## Annexe C2 — coût et redondance du validateur de preuve HA inactive
+
+Tâche `HOBEN-189-C2-CI-LIVE-PROOF-OFFLINE-REDUNDANCY-AUDIT-011`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `300be14aa67652d6d7f08bf5f11896550e9a5c6b`.
+Famille unique : [tests/test_ha_live_proof.py](../tests/test_ha_live_proof.py),
+neuf fonctions / **54 cas pytest**, entièrement synthétiques malgré « live »
+dans le nom. **Conserver les 54 cas et tous les helpers** : aucune équivalence
+complète permettant un retrait démontrée. Aucun autre groupe audité.
+
+### Matrice scénarios / assertions / décision
+
+| Fonction test_* (suffixe) | Cas pytest / appels Node | Assertions distinctes conservées |
+| --- | --- | --- |
+| actual_evidence_contract_is_distinct_from_c1_and_never_admitted | 2 / 2 | Avec/sans reprise : round-trip Python et acceptation Node du schéma C2a, issue FAILURE/INCONCLUSIVE ; rejet Python croisé des schémas C1/C2a. |
+| local_stop_cannot_claim_natural_reconnection | 5 / 5 | cancelled/timeout/memory/processes/worker_failure : le reçu externe d'arrêt local empêche un succès de reconnexion, même avec preuve de reprise antérieure. |
+| missing_confinement_is_not_run_without_invented_cleanup | 1 / 1 | Aucun démarrage/réapage : tous les critères et l'issue restent NOT RUN, sans inventer de cleanup. |
+| forged_private_or_inconsistent_reports_are_rejected | 27 / 27 | Tuples path/key/value distincts : enveloppe/admission/provenance, mémoire/PID/délais/réseau/réapage, générations/séquences/cleanup, sous-code et critères falsifiés. Refus Python/Node à erreur fixe. |
+| invalid_input_is_bounded_and_never_echoed | 5 / 5 | Objet incomplet, null, liste, texte privé synthétique et 8193 octets : refus borné des deux parseurs sans écho du contenu. |
+| canonical_encoding_and_evidence_cannot_override_parent_receipt | 1 / 2 | Espace initial et clé dupliquée refusés par Python/Node ; build_report refuse en plus une preuve enfant qui tente d'injecter supervisor. |
+| final_timestamp_cannot_forge_completion | 4 / 4 | 250000/299999 ms sous la fenêtre utile, 330000/360000 ms à/au-delà de sa limite de collecte : refus de completed en Python/Node. |
+| final_witness_and_clock_are_independently_validated | 8 / 8 | Horloge live/monotonic sans reçu cohérent, durée booléenne, témoin absent/inactif/régressif, sixième slot trop tôt et premier slot décalé. |
+| monotonic_window_needs_corresponding_parent_duration | 1 / 1 | Contrôle positif distinct : fenêtre monotone recevable avec durée externe 309000 ms, contrairement au reçu de 1000 ms du cas négatif. |
+
+Les 55 entrées Node sont byte-distinctes dans chaque passage ; neuf corps de
+fonctions AST distincts, sans doublon strict relevé. Ce comptage ne démontre
+pas que chaque branche est indépendante ou chaque cas indispensable. Les
+refus identiques ne prouvent pas l'équivalence des contraintes qui les causent.
+Aucun remplacement conservant toutes les assertions de la matrice n'est établi.
+
+### Helpers, consommateurs et distinction du contrat C1
+
+AST scripts/plugin/tests/ha_tests : receipt/report/PROVENANCE/node_accepts sont
+importés par six modules Python de tests (campagnes, dual, récupération,
+manuel, sandbox, supervision) et quatre modules HA (dual, observer, campagne
+manuelle, [rapport #212](../ha_tests/test_three_request_report_212.py)).
+Le [test HA observer](../ha_tests/test_ha_live_observer.py) soumet aussi les
+rapports issus du vrai client/coordinator sur transports simulés. Ces scénarios
+ne remplacent pas la matrice de mutations du schéma synthétique ; aucun helper
+déplacé, aucun consommateur supprimé.
+
+Les fixtures de cette famille réutilisent proof/ROOT du test C1 conservé, mais
+le schéma 2 ajoute reçu externe, at_ms/window, continuous_300s et supervision.
+Le schéma C1 n'atteste pas ces garanties. Les deux cas de rejet croisé testent
+explicitement leur incompatibilité en Python, sans revendiquer une admission
+GitHub ni un résultat réel.
+
+[ha_live_proof.py](../scripts/ha_live_proof.py) et
+[ha-live-proof.cjs](../scripts/ha-live-proof.cjs) recalculent séparément les
+critères dans chaque langage. Le require embarqué dans node -e est un vrai
+consommateur dynamique, avec stdin synthétique et sorties/erreur fixes.
+Le module Python est utilisé par supervisor/guard/observer/worker,
+ha_manual_live_report et ha_campaign_evidence, et copié par SourceBundle.
+Les rapports [moderne](../.github/scripts/campaign-report.cjs) et
+[historique](../.github/scripts/ha-manual-live-report.cjs) importent le validateur
+Node : validateObservation et validateReport
+ont des responsabilités différentes ; « inactive » ne signifie pas inutilisé.
+Inspection seulement de ces dépendances, sans autre famille candidate ni
+exécution de campagne. Découverte pytest, conftest et quatre jobs inchangés.
+
+### Mesures locales reproductibles, aucune accélération revendiquée
+
+Même méthode temporaire que l'annexe C1 : vrais appels subprocess.run entourés
+d'un chronomètre monotone et de SHA256 des stdin en mémoire, sans publication
+du contenu ni modification des verdicts. Python **3.12.14**, Node **v24.19.0**,
+checkout sous /tmp ; bytecode/cache pytest désactivés ; trois processus frais
+par série, sans suite concurrente, caches OS non purgés. Chaque passage :
+54 PASS, 55 appels Node et 55 entrées uniques.
+
+| Série | Temps mural Python, secondes (3 runs) | Somme des appels Node, secondes | Médiane murale |
+| --- | --- | --- | --- |
+| Avant annexe | 2.057 / 1.975 / 2.069 | 1.868 / 1.795 / 1.882 | 2.057 s |
+| Après annexe | 2.018 / 2.155 / 2.020 | 1.834 / 1.944 / 1.852 | 2.020 s |
+
+Reproduction du ciblé :
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider --durations=10 tests/test_ha_live_proof.py
+```
+
+Pour les mesures instrumentées, reprendre l'extrait Python de l'annexe C1 avec
+le seul argument de sélection remplacé par tests/test_ha_live_proof.py, trois
+fois avant/après. La somme Node inclut lancement, chargement, parsing,
+validation et échanges ; ce n'est pas une mesure du démarrage seul ni un coût
+CI isolé. Tests inchangés : les écarts ne démontrent aucun gain. Aucun batching,
+cache de verdict ou partage de processus Node proposé sans équivalence.
+
+Diff C2 : cette annexe seulement ; audit antérieur intact, tous tests/helpers,
+fixtures, scripts de preuve/runtime, protocole/TLS, gates/workflows/permissions,
+manifest/version byte-identiques à la base. Suites ciblées et Python/HA,
+Ruff/diff-check, liens et quatre CI au HEAD exact consignés dans la PR/#189,
+avec les limites Docker/inodes locales. Aucun RED/GREEN de retrait : aucun
+retrait, aucun test miroir ajouté. Pas de CHANGELOG : audit interne sans impact
+livrable HACS/API/comportement. Tests réels Hoben/HA **NOT RUN** ; aucun
+dispatch/rerun live, donnée privée, commande/écriture Modbus, main/release/tag
+ou fusion DEV. Revue MANAGER puis arrêt, aucune autre tâche auto-attribuée.
