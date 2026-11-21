@@ -1450,3 +1450,36 @@ pas de CHANGELOG : audit interne sans changement de livrable/API/comportement.
 Tests réels **NOT RUN** ; aucun dispatch/rerun live, commande ou écriture Modbus.
 **Aucune promotion main, version, tag, release ou déclaration « prête » autorisée
 par E1.** Revue MANAGER, state:review puis arrêt DEV, sans fusion ni autre tâche.
+
+## Complément E2 — lacunes restantes et décisions réservées
+
+Tâche `HOBEN-189-E2-REMAINING-AUDIT-GAPS-INVENTORY-019`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` vérifiée le 21/11/2026 :
+`95ea584858a856b9c290fc8e68c6536c0241ec46`, après [E1/#246](https://github.com/Guillaume0385/ha-hoben-community/pull/246).
+Ce tableau précise seulement les quatre lacunes d'E1 ; les lots clos et leurs
+décisions ne sont pas réaudités. Aucun candidat supplémentaire à suppression.
+
+| Lacune / preuve publique vérifiée | Limite de preuve | Risque restant | Prochaine décision réservée au propriétaire / MANAGER |
+| --- | --- | --- | --- |
+| Usages externes : la méthode A1 et les annexes B examinent les arbres, imports/appels, CLI, copies et documents du dépôt aux SHA indiqués. | Ce périmètre n'observe ni scripts privés, ni tâches locales, ni consommateurs tiers ; aucune absence d'usage externe n'est prouvée. | Un futur retrait pourrait casser un usage hors dépôt ; ce risque n'est pas un consommateur avéré ni un motif pour rouvrir les retraits déjà revus. | Avant tout autre retrait, qualifier les dépendances externes connues avec le propriétaire, par catégories expurgées, et définir les preuves/compatibilités nécessaires. Aucun inventaire privé collecté par E2. |
+| Approbations natives : [campagne HA](../.github/workflows/hoben-ha-manual.yml#L90) déclare hoben-live ; [campagne protocole](../.github/workflows/hoben-protocol-manual.yml#L88) déclare hoben-experimental. | Une déclaration environment ne prouve ni reviewers effectifs, ni interdiction d'auto-approbation, ni politique appliquée à un run/ref donné. Aucun réglage ou environnement lu dans E2. | Une protection inconnue ne peut être présumée présente **ou absente** ; YAML et CI seuls ne suffisent pas à déclarer une campagne approuvée. | Vérifier ultérieurement les protections effectives par un accès légitime et une preuve authentifiée, sous décision distincte ; aucun assouplissement, dispatch ou autorisation de live ici. |
+| Actions flottantes : [Validate](../.github/workflows/validate.yml) utilise actions/checkout@v7, actions/setup-python@v7, hacs/action@main et home-assistant/actions/hassfest@master. | Ces tags/branches ne sont pas des SHA immuables. E2 ne résout ni ne choisit leurs révisions ; un succès historique ne fixe pas le contenu d'une prochaine exécution. Les références SHA des campagnes manuelles ne rendent pas tout le dépôt reproductible. | Variation possible du contenu exécuté à ref du dépôt constante ; aucun incident ou compromis n'est démontré par ce constat. | Arbitrer séparément une politique de reproductibilité et de maintenance des actions, avec compatibilité et quatre checks préservés ; aucun pin, workflow ou dépendance modifié en E2. |
+| Portée : A1 inventorie cinq workflows et 88 fichiers d'outillage à sa base c81b79643485e8b148695c6e4fc0e2a9a50f2a87 ; E1 consolide les lots effectivement livrés. | Ces nombres sont historiques, pas un inventaire courant de chaque fonction du plugin ni une couverture exhaustive des comportements. Les changements d'autres issues ne sont pas réaudités ici. | Présenter le bilan comme exhaustif masquerait des zones non examinées ; aucune nouvelle anomalie runtime n'est établie. | Définir, si nécessaire, un prochain petit périmètre et ses critères de preuve avant de l'attribuer ; conserver les éléments dont l'inutilité n'est pas établie. Aucune tâche suivante créée par DEV. |
+
+Les preuves historiques restent bornées à leurs SHA. Le vert des quatre CI
+d'E1 et celui requis pour E2 portent sur leurs HEAD sources respectifs, pas sur
+les politiques natives, les usages externes ou une validation HA installée.
+Les observations propriétaires, suivis fonctionnels et décision de pré-release
+restent distincts, selon E1 ; aucune lacune ci-dessus n'est déclarée résolue
+par cette seule documentation.
+
+Validation E2 : liens/références, conformité du tableau aux déclarations
+publiques, confidentialité, ajout documentaire seul, Ruff/diff-check et quatre
+CI sur le HEAD exact consignés dans la PR/#189. Pas de nouveau test ni suite
+complète locale pour ce tableau ; les suites existantes restent exécutées en CI.
+Diff limité à ce complément ; pas de CHANGELOG, sans impact HACS/API/runtime.
+Tests réels **NOT RUN** ; aucun accès aux secrets/environnements, dispatch/rerun
+live, commande/écriture Modbus, main/release/tag/version ou fusion DEV.
+V4 lecture seule, TLS certificat/hostname vérifiés myhoben.fr:465 inchangés.
+Revue MANAGER puis arrêt en state:review ; aucune déclaration de version prête.
