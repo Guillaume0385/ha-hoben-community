@@ -1645,3 +1645,56 @@ interne sans impact HACS/API). Aucun code/test/workflow/droit/gate/environnement
 dépendance/protocole/manifest/version modifié. Tests réels **NOT RUN** ; aucune
 action live, commande/écriture Modbus, donnée privée, main/release/tag ou fusion
 DEV. V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; revue puis arrêt.
+
+## Annexe B8 — chemins DataUpdated actuels, compatibilité shadow et tests Python
+
+Tâche `HOBEN-189-B8-SHADOW-LEGACY-PYTHON-TEST-AUDIT-024`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `3a2d0e751311f7278588b7a017036167ac10af79` (25/11/2026).
+**Audit seul : aucun chemin ni test prouvé supprimable. Conserver le module
+et les quatre familles ; aucun B9 de suppression proposé sur cette preuve.**
+« Legacy » décrit une API de compatibilité, pas une absence de consommateur.
+
+| Fonction/branche et consommateur établi à cette base | Tests / invariant distinct | Décision et risque de retrait |
+| --- | --- | --- |
+| [_candidate_words / preview_data_updated / ShadowPreview](../custom_components/hoben/shadow_data_updated.py#L49) : admission utilisée par le push dans [V4Session](../custom_components/hoben/v4_session.py#L754), le FIFO et le logger candidat. | [Python shadow](../tests/test_shadow_data_updated_219s.py#L36) : structure sans proposition, immutabilité, faux mapping par égalité ; [Python privé](../tests/test_private_data_updated_219.py#L157) et [push](../tests/test_data_updated_push_219.py#L67) : faux TID/unité/fonction/taille, mots forgés dont bool refusés. | **Conserver** : retirer le « preview » affecterait aussi le filtre push. parsed/ok seul n'admet pas la forme FFFF/unité 1/04/20 UInt16 ; les métadonnées ne prouvent ni adresse ni frontière TLS. |
+| [_private_register_journal](../custom_components/hoben/shadow_data_updated.py#L72) : appelé par observe_data_updated **et directement par le push** (session lignes 788–792), avant décodage/callback. | [Python privé](../tests/test_private_data_updated_219.py#L95) : opt-in indépendant, refus CI, FIFO 0600/UID/lien unique, O_PATH/inode revérifié, substitution de chemin, pression/sans lecteur, PIPE_BUF, fermeture des descripteurs, erreur sans fuite et générations. [HA privé](../ha_tests/test_private_data_updated_219.py#L22) : état/fraîcheur/listeners/TX/exports inchangés en compatibilité. | **Conserver** : le FIFO n'est pas orphelin du mode installé. Aucune création de fichier, fallback public, rétention/replay ni attente du lecteur ; ne pas remplacer ces négatifs par un seul test de logger. |
+| [observe_data_updated / _public_index](../custom_components/hoben/shadow_data_updated.py#L169) : branche sans callback ; HobenClient garde push_updates=False par défaut, et le client dual de [ha_session_live_worker](../scripts/ha_session_live_worker.py#L60) demande ha_reconnect sans push. | [Python shadow](../tests/test_shadow_data_updated_219s.py#L74) : DEBUG parent insuffisant, arrêt/reload/disabled, contexte opaque et handler en échec, EOF/nouvelle génération sans RX/TX ajouté. Python privé ajoute nombres candidats bornés, opt-in HA sans FIFO et absence de backlog. | **Conserver** : appel opérationnel possible, pas seulement une fixture. Le scénario dual est cité comme consommateur, sans réactivation ni critère de release. Valeurs locales autorisées seulement en DEBUG explicite ; jamais export de support. |
+| [observe_applied_data_updated](../custom_components/hoben/shadow_data_updated.py#L238) : callback push de l'entrée [__init__.py](../custom_components/hoben/__init__.py#L68), snapshot existant/décodeur V4 puis [client](../custom_components/hoben/client.py#L250) → [coordinator](../custom_components/hoben/coordinator.py#L154). | [HA push](../ha_tests/test_data_updated_push_219.py#L33) : vingt publications atomiques, initiale unique/ordre, ancien callback révoqué, root DEBUG inopérant, opt-in/off, JSON local et panne decode/callback sans état partiel ni exception privée. | **Conserver** : chemin courant distinct du candidat. mapping owner_validated relève de la décision empirique propriétaire, pas d'une adresse transmise ; borne JSON 8192 et garde DEBUG dédiées, pas de nouvelle lecture réseau. |
+| Fixtures : [legacy_polling_client](../ha_tests/conftest.py#L128) impose push_updates=False via peers ; [push_peers](../ha_tests/test_data_updated_push_219.py#L20) rétablit le constructeur de production. HA privé importe FLAG/fields/notification/private_fifo du fichier Python privé. | [HA shadow](../ha_tests/test_shadow_data_updated_219s.py#L16) : aucune publication/listener/fraîcheur/TX sur vingt livraisons ; HA privé : quatre combinaisons FIFO/DEBUG plus vrai service logger HA simulé. Les tests push exigent au contraire des publications. | **Conserver** : ces attentes opposées concernent des modes explicites, pas un test obsolète interdisant le push. Ne pas supprimer un fichier porteur de fixtures partagées. Les vingt paramètres du preview restent **à vérifier** pour équivalence. L'écriture FIFO en entrée push reste aussi à vérifier : les tests privés HA imposent le mode de compatibilité ; aucune réduction prouvée. |
+| Dépendances indirectes : [SourceBundle](../scripts/ha_session_supervisor.py#L91) copie tous les modules *.py ; [intégrité #219/#186](../tests/js/data-updated-integrity-219.test.cjs#L28) exige le module shadow et refuse mutation/omission. | [Drop](../tests/test_data_updated_drop_219.py), push Python/HA et [disponibilité](../ha_tests/test_connection_availability_219.py) gardent faux messages sans #160/reconnect, vrai EOF/cleanup, retries #212, refus d'ancienne génération et perte réelle >300 s sans fraîcheur fabriquée. | **Conserver** ces garanties indépendantes. Toute éventuelle modification runtime devrait faire arbitrer séparément la dépendance d'intégrité ; B8 ne change ni empreinte ni gate. Les quatre familles ciblées ne remplacent pas ces régressions. |
+
+Méthode : lecture à SHA fixe, recherche textuelle sur 105 fichiers runtime/scripts
+et 296 fichiers tests/docs/supports, puis inspection des appels/fixtures repérés.
+Le seul import_module de ces scripts charge la sonde boundary nommée ; le glob
+SourceBundle constitue un consommateur sans import textuel direct du module.
+Pas d'AST ou de trace d'exécution obtenus : cette recherche ne démontre pas
+l'absence d'usages privés/dynamiques inconnus. [La documentation](data-updated-recovery.md#L119)
+maintient explicitement le FIFO indépendant ; les sections historiques ne
+remplacent pas le contrat push actuel. _private_register_journal et _candidate_words
+sont importés par valeur dans v4_session : un futur test de substitution doit
+viser le symbole réellement consommé, sans neutraliser le chemin de production.
+
+Coût : **pytest ciblé --durations=20 NOT RUN**, aucune durée ni accélération CI
+inventée. Le Cloud sélectionné a échoué avant le shell : environment_startup_failed,
+container_creation/container_service_failed/transport_failed. Source/base et
+état failed/offline vérifiés ; aucun checkout/exécuteur utilisable. Les quatre
+fichiers contiennent statiquement 8 / 18 / 1 / 2 fonctions de test, avec
+paramétrisations ; ce ne sont pas des comptes de collecte ou des mesures.
+Commandes de reproduction sur cette base, non exécutées ici :
+
+```sh
+python3.12 -m pytest -q tests/test_shadow_data_updated_219s.py tests/test_private_data_updated_219.py --durations=20
+python3.14 -m pytest -c ha_tests/pytest.ini -q ha_tests/test_shadow_data_updated_219s.py ha_tests/test_private_data_updated_219.py --durations=20
+```
+
+Les quatre CI du HEAD B8 et leurs résultats sont consignés dans PR/#189 ;
+leurs durées globales ne sont pas celles de cette sélection. git diff --check
+et Ruff locaux **NOT RUN** pour la même panne ; ajout seul, liens/lignes et
+espaces vérifiés via le connecteur, lint/tests ordinaires vérifiés en CI.
+Diff limité à cette annexe ; exécutables/tests byte-identiques à la base,
+pas de CHANGELOG (audit interne sans effet HACS/API). Aucun retrait engagé,
+aucun lot suivant attribué ; arbitrages E5/E6 ouverts. Tests réels **NOT RUN** :
+aucun dispatch/rerun live, commande/écriture Modbus, secret/GUID/RX/valeur privée,
+main/release/tag/version ou fusion DEV. TLS certificat/hostname vérifiés vers
+myhoben.fr:465 et V4 lecture seule préservés ; state:review puis arrêt.
