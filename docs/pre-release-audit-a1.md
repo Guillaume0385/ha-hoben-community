@@ -1698,3 +1698,63 @@ aucun lot suivant attribué ; arbitrages E5/E6 ouverts. Tests réels **NOT RUN**
 aucun dispatch/rerun live, commande/écriture Modbus, secret/GUID/RX/valeur privée,
 main/release/tag/version ou fusion DEV. TLS certificat/hostname vérifiés vers
 myhoben.fr:465 et V4 lecture seule préservés ; state:review puis arrêt.
+
+## Annexe B9 — pilote WARNING examiné, instrumentation non retenue
+
+Tâche `HOBEN-189-B9-PLUGIN-WARNING-USAGE-PILOT-025`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `86c646bc173ad54def4bb393d248b076aae5ad98` (25/11/2026).
+**Sortie d'audit seule autorisée : aucun candidat admissible démontré dans ce
+balayage limité ; proposition de trace non retenue.** Aucun WARNING, changement
+runtime, test ajouté, désactivation ou suppression. Shadow/FIFO B8 hors périmètre.
+
+| Auxiliaires examinés / preuve d'appel | Conséquence pour le pilote |
+| --- | --- |
+| [entity](../custom_components/hoben/entity.py), [sensor](../custom_components/hoben/sensor.py), [binary_sensor](../custom_components/hoben/binary_sensor.py), [session_sensor](../custom_components/hoben/session_sensor.py) : plateformes transmises par __init__, création explicite des entités ; callback moniteur et timer local 60 s du capteur de session. [Tests entités](../ha_tests/test_entities.py), [session](../ha_tests/test_session_sensor.py). | Chemins ordinaires déjà reliés à l'installation et aux publications HA ; les tracer ne tranche pas un usage incertain. Le garde de type précis est examiné ci-dessous. |
+| [helpers](../custom_components/hoben/helpers.py), [safe_reports](../custom_components/hoben/safe_reports.py), error_phases : identité et erreurs expurgées appelées par config_flow, __init__, coordinator. [Test helper](../ha_tests/test_helpers.py). | Hors candidat : fonctions actives ou sensibles à la confidentialité/authentification, pas une sonde d'usage neutre. Ne pas provoquer d'erreur pour obtenir une trace. |
+| [session_monitor](../custom_components/hoben/session_monitor.py), session_observation, session_diagnostics : imports client/coordinator/lifecycle/session et consommateurs dans scripts d'observation. [Tests moniteur](../tests/test_session_monitor.py). | Flux courant de statut et preuves bornées ; chemins d'erreur/cleanup non garantis dans 24 h normales. Conserver, sans log dans RX/TX, timings ou sécurité. |
+| [diagnostics](../custom_components/hoben/diagnostics.py) : hook HA de téléchargement, projection session via project_report ; [test endpoint HA](../ha_tests/test_diagnostics.py#L279). | Appel conditionné par une demande de diagnostic, pas une activité passive attendue chaque jour. Son absence ne prouve pas une inutilité ; projection privée à préserver. |
+
+**Un seul candidat de branche examiné** : dans
+[HobenSessionSensor.native_value, ligne 36](../custom_components/hoben/session_sensor.py#L34),
+le terme `type(self.client) is not HobenClient` renvoie disconnected. L'entrée
+normale construit explicitement HobenClient ; [les fixtures HA](../ha_tests/conftest.py#L71)
+peuvent fournir un Mock. Aucune substitution normale du client n'est établie
+dans le graphe examiné. Le terme voisin `_shutdown_requested` relève, lui,
+de l'arrêt normal : tracer le garde commun confondrait ces deux causes.
+Un WARNING limité au type différent n'aurait pas de sollicitation normale
+identifiée pendant 24 h. Candidat donc **non retenu**, sans le déclarer mort
+ni retirer sa protection de compatibilité. Les tests entités sur client simulé
+et session sur véritables propriétaires couvrent des contextes distincts.
+
+Méthode : inventaire des 35 modules Python, lecture ciblée des auxiliaires,
+recherche rg et AST des imports de 98 fichiers runtime/scripts ; inspection de
+la délégation HA, de l'import_module nommé et du glob SourceBundle qui copie
+les modules. Pas de preuve universelle sur des extensions externes ; la
+déclaration propriétaire sur les consommateurs ne remplace pas les liens internes.
+Prochain périmètre proposé au MANAGER : recensement hors ligne des tests
+helpers/diagnostics et de leurs fixtures partagées, sans instrumentation runtime.
+C'est une proposition, pas une nouvelle tâche attribuée.
+
+**Observation future, seulement après un autre pilote admissible et fusionné** :
+propriétaire confirme le SHA instrumenté effectivement chargé, le début de la
+collecte WARNING et le processus concerné, puis 24 h normales sans nouveau
+changement sur ce chemin. B9 n'émet pas HOBEN189_B9_USAGE : aucun SHA à installer
+pour ce pilote. Une future trace devrait garder marqueur/branche constants,
+une fois par processus, sans contenu privé, et supporter un logger défaillant.
+Trace observée : chemin utilisé, conserver. Trace absente mais sollicitation
+normalement attendue : vérifier sollicitation réelle, SHA, filtres/rétention,
+redémarrages et éventuelle émission avant la fenêtre ; aucune preuve de code mort.
+Résultat ambigu : soumettre une phase distincte de désactivation réversible,
+sans suppression, revue/quatre CI puis nouvel essai propriétaire séparément
+autorisé. Aucun essai ni désactivation réalisé ou déclenché par B9.
+
+Tests hors ligne existants du moniteur, des entités, du capteur de session,
+helpers/diagnostics : 13 tests Python et 167 tests HA PASS, détails dans PR/#189 ; pas de nouveau
+test miroir ni de test de marqueur inexistant. Liens, AST, diff documentaire,
+Ruff/diff-check et quatre CI au HEAD exact contrôlés. Diff limité à cette annexe,
+sans CHANGELOG (audit interne, aucun impact HACS/API). Tous code/tests/YAML,
+droits/gates/refs Actions/manifest/version inchangés ; aucun Settings inspecté.
+Tests réels **NOT RUN**, aucune installation, commande/écriture Modbus, secret,
+GUID/RX/valeur privée, main/release/tag ou fusion DEV. V4 lecture seule et TLS
+certificat/hostname myhoben.fr:465 préservés ; state:review, arrêt DEV et revue MANAGER.
