@@ -1758,3 +1758,83 @@ droits/gates/refs Actions/manifest/version inchangés ; aucun Settings inspecté
 Tests réels **NOT RUN**, aucune installation, commande/écriture Modbus, secret,
 GUID/RX/valeur privée, main/release/tag ou fusion DEV. V4 lecture seule et TLS
 certificat/hostname myhoben.fr:465 préservés ; state:review, arrêt DEV et revue MANAGER.
+
+## Annexe B10 — coût du sandbox hors ligne, protections conservées
+
+Tâche `HOBEN-189-B10-OFFLINE-SANDBOX-CI-COST-026`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `c556980ace668244a8190db8379e9a8f1eec5a16` (25/11/2026).
+**Audit seul : aucun changement sûr de test démontré, aucun retrait ni gain CI
+revendiqué.** Les deux familles restent complémentaires, pas interchangeables.
+
+| Famille / consommateur | Preuves spécifiques à conserver |
+| --- | --- |
+| [sandbox](../tests/test_ha_session_sandbox.py), 14 cas → vrai Engine local, supervisor/guardian et worker HA synthétique | DNS/IP interdits, seul socket Unix Docker fixe autorisé ; namespace sans réseau, cgroups mémoire/swap/PIDs effectifs ; healthy/CloseClient/EOF/TLS/read_timeout, mémoire/processus/forged, descendants setsid résistants avec deadline/annulation/perte du contrôle hôte, réapage vérifié par observateur indépendant. Canal stdin synthétique privé ; configuration live inspectée à l'arrêt, start refusé et feed interdit. |
+| [supervisor](../tests/test_ha_session_supervisor.py), 33 cas → moteur double, vrai superviseur/SourceBundle/guardian | Refus de capacités absentes et de 12 configurations effectives falsifiées avant start ; backend absent sans fallback hôte, annulation, horloge/délais originaux, plafonds non extensibles, métriques obligatoires, bundle public non modifiable et refus des symlinks. Ne prouve pas les limites ni le réapage du noyau réel. |
+
+### Mesures locales et limites
+
+Python 3.12.14, Docker 28.4.0 ; moteur local annonçant cgroup v2 et contrôles
+MemoryLimit/SwapLimit/PidsLimit. Même code que la base, `--durations=20`,
+cache pytest désactivé, aucun changement des gardes ou des budgets.
+
+| Passage | Résultat mesuré |
+| --- | --- |
+| Superviseur seul, deux processus pytest | 33 PASS en 0,17 puis 0,33 s ; appels les plus lents 0,02 puis 0,04 s. Pas de temps Docker simulé présenté comme réel. |
+| Sandbox, premier build effectif | 14 PASS en 530,99 s ; setup partagé 133,19 s, dont couche pip non réutilisée 127,3 s et export de couches 5,6 s selon BuildKit. |
+| Appels sandbox les plus lents | Descendants deadline/annulation 39,49/39,00 s ; perte contrôle 34,34 s ; read_timeout 33,57 s ; TLS 32,89 s ; mémoire 32,49 s. Healthy 9,25 s, CloseClient 24,92 s, EOF 29,26 s ; ce sont des durées d'appel complètes, pas les durées internes du reçu. |
+| Rebuild identique immédiatement après | 0,214 s, succès ; COPY et pip CACHED. Même commande que la fixture, socket Unix et CA vérifiée conservés. |
+| Cas configuration arrêtée, image chaude | 1 PASS en 34,83 s : setup 0,35 s, call 34,44 s ; requête create 32,780 s, DELETE 1,614 s, autres requêtes ≤0,019 s. Aucun start/feed effectif. |
+| Contrats adjacents | 166 PASS en 6,91 s : ha_live_proof, ha_manual_live, ha_manual_live_diagnostics, ha_session_proof ; synthétiques uniquement. |
+
+Ce n'est **pas un cold complet** : base/COPY déjà disponibles après les essais
+préparatoires ; caches ni images purgés, aucun cache CI introduit. Premier essai
+restreint : 1 FAIL (création de socket refusée par l'exécuteur), 13 SKIP ; puis
+1 PASS/13 ERROR (configuration Docker en lecture seule), et 1 PASS/13 ERROR en
+36,46 s (build sans accès direct à PyPI). Relance avec support sockets du
+harnais et configuration Docker temporaire sous /tmp utilisant le proxy fourni,
+sans publier ses valeurs ni désactiver TLS. Gardes DNS/IP, Engine Unix fixe et
+`Env=[]`/`network=none` des workers inchangés. Les échecs ne sont pas des mesures
+de scénarios exécutés. Aucune modification des dépendances épinglées.
+
+La fixture image est **déjà session-scoped** : un build partagé par processus
+pytest, pas un build par cas. Le rebuild chaud ne démontre donc pas un gain à
+obtenir par changement de scope. Les durées d'appels incluent préparation,
+échanges Engine, exécution et nettoyage : ne pas les confondre avec le plafond
+du reçu ni réduire les deadlines pour masquer un coût non attribué.
+Le cas arrêté a été chronométré par wrapper temporaire de Engine.request,
+appel original inchangé, sans enregistrer corps/réponses/noms de conteneurs.
+Il situe son coût avant start, dans create ; pas une preuve universelle pour les
+autres cas. Pas de deuxième suite sandbox complète chaude ni cold entièrement
+vide. Contrats adjacents et second superviseur ont chevauché respectivement
+le build initial et le cas arrêté : mesures de conditions locales, pas benchmark
+CPU isolé ni comparaison avant/après optimisation. Aucun changement proposé.
+
+Reproduction : `python -m pytest -q -p no:cacheprovider --durations=20 -rs`
+suivi de `tests/test_ha_session_sandbox.py`, puis de
+`tests/test_ha_session_supervisor.py` dans un processus distinct. Si moteur ou
+capacités absents, fixture SKIP et runtime NOT RUN sans fallback ; si build
+disponible mais échoué, erreur conservée, jamais convertie en succès.
+
+### CI comparable et décision
+
+[B8/45656942877](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/45656942877)
+et [B9/45664490965](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/45664490965) :
+mêmes fichiers ciblés/runtime/Validate, Python 3.12 sur ubuntu-latest,
+10 229 PASS en 237,83/204,15 s. Écarts entre dernière ligne du module précédent
+et ligne sandbox : 113,04/101,70 s ; ligne supervisor suivante : 0,16/0,13 s.
+**Intervalles de sortie pytest**, pas `--durations` historiques : buffering,
+build, couches et état du runner non séparables ; aucune attribution certaine
+de 117 s au module actuel ni extrapolation du Cloud vers un gain GitHub.
+
+Conserver tests, assertions, fixtures et délais. Une équivalence de couverture
+ou une attente évitable n'est pas établie ; substituer les doubles au noyau,
+réduire des marges ou contourner une préparation échouée affaiblirait la preuve.
+Recommandation : obtenir des durées détaillées comparables avant un éventuel
+petit lot distinct, sans modifier Validate ni attribuer cette suite ici.
+Diff B10 : cette annexe seule ; pas de CHANGELOG (audit interne sans effet
+HACS/API). Ruff/diff-check, ciblés et quatre CI du HEAD exact consignés dans
+PR/#189. Aucun plugin/script/test/fixture/YAML/gate/droit/cache/dépendance,
+manifest/version modifié. Tests Hoben/HA réels **NOT RUN** ; pas de dispatch,
+commande/écriture Modbus, donnée privée, main/release/tag ou fusion DEV.
+V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; revue MANAGER puis arrêt.
