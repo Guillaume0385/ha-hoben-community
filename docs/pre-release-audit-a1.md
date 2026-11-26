@@ -1838,3 +1838,138 @@ PR/#189. Aucun plugin/script/test/fixture/YAML/gate/droit/cache/dépendance,
 manifest/version modifié. Tests Hoben/HA réels **NOT RUN** ; pas de dispatch,
 commande/écriture Modbus, donnée privée, main/release/tag ou fusion DEV.
 V4 lecture seule et TLS vérifié myhoben.fr:465 préservés ; revue MANAGER puis arrêt.
+
+## Annexe B11 — audit croisé DataUpdated delivery/drop Python–HA
+
+Tâche `HOBEN-189-B11-DATAUPDATED-CROSS-SUITE-TEST-AUDIT-027`, selon la
+[consigne MANAGER](https://github.com/Guillaume0385/ha-hoben-community/issues/189#issuecomment-7048670130).
+Base `experimental` : `104cec1b73ff47364f831db4b80c5e1b5df764c5` (26/11/2026).
+**Conserver les quatre fichiers et leurs 44 cas : aucune équivalence complète
+autorisant fusion/suppression démontrée.** Audit documentaire seulement.
+
+### Préconditions et chemin réellement exercé
+
+Codes de la matrice : [PD : Python delivery](../tests/test_data_updated_delivery_219.py),
+[HD : HA delivery](../ha_tests/test_data_updated_delivery_219.py),
+[PX : Python drop](../tests/test_data_updated_drop_219.py),
+[HX : HA drop](../ha_tests/test_data_updated_drop_219.py).
+Les noms de fonctions ci-dessous omettent seulement le préfixe test_.
+
+PD/PX utilisent les vrais V4Lifecycle/V4Session et leur RX/framer, via
+[Factory](../tests/test_v4_persistent.py#L43) et Stream en mémoire : ouverture et
+réponses V4 synthétiques déclenchées par TX ; assert_clean contrôle fermeture
+unique, absence d'I/O actives, opérations/waiters/timer et RX terminés.
+[make_owner/Clock/pump](../tests/test_data_updated_silence.py#L30) activent
+ha_reconnect/recover_acquisition, sans callback de données ; Clock remplace
+l'horloge du loop et l'avance sans attente, pump cède 40 tours, Backoff est libéré explicitement.
+Aucun coordinator, registre d'entités ni état HA n'est créé par PD/PX.
+
+HD/HX chargent réellement l'intégration, client/coordinator et capteurs, via
+[peers/load/sensor/assert_stopped](../ha_tests/test_persistent_client.py#L40).
+Le transport seul est simulé ; le harness HA bloque les sockets externes et
+[no_hoben_network](../ha_tests/conftest.py#L32) refuse un transport non remplacé.
+**peers dépend de [legacy_polling_client](../ha_tests/conftest.py#L129)** :
+push_updates=False ; il conserve aussi le backoff historique, pas le timing
+rapide de production. Le décodeur V4 alimente le snapshot initial réel.
+HD désabonne le refresh existant, puis vérifie une lecture explicite dans deux
+cas ; HX vérifie au contraire l'identité d'un timer de polling encore présent.
+Unload vérifie fermeture, effacement d'identité et absence de tâches lifecycle/RX.
+
+Cela ne contredit pas [l'entrée de production](../custom_components/hoben/__init__.py#L61),
+qui active push_updates=True. Le [routage commun](../custom_components/hoben/v4_session.py#L754)
+consomme une livraison entière admissible avant le framer, appelle le parser
+structurel et son diagnostic expurgé ; sans callback, aucune publication HA.
+Avec callback, la forme applicative admise produit RawStoveSnapshot et passe par
+decode_v4_snapshot, lifecycle/client puis coordinator._data_updated. Les
+[tests push voisins](../ha_tests/test_data_updated_push_219.py#L20) rétablissent
+le constructeur de production et attendent des mises à jour atomiques ; leurs
+préconditions ne sont donc pas équivalentes à HD/HX. Les commentaires historiques
+« mapping unproven » de HX décrivent une fixture de compatibilité, pas la décision
+propriétaire actuelle. Aucun fait protocolaire ni fichier de test corrigé ici.
+
+### Matrice des cas, recouvrements et différences
+
+Chaque ligne : **conserver** ; nombre = cas pytest, pas nombre de notifications.
+
+| Source / fonction | Cas | Assertions et différence de couverture |
+| --- | --- | --- |
+| [PD each_whole_delivery_is_diagnosed_without_an_acquisition](../tests/test_data_updated_delivery_219.py#L20) | 1 | Trois événements, index 1–3, taille/scope read_delivery, boundary_proven=false ; aucune acquisition, TX d'ouverture seul. HD commence après une vraie lecture et vérifie des objets HA absents ici. |
+| [PD fragment_is_not_reassembled_or_left_in_the_mbap_framer](../tests/test_data_updated_delivery_219.py#L54) | 5 | Coupures 1/5/10/14/53 : diagnostic incomplete, aucun tampon MBAP/recollage/récupération ; livraison complète suivante parsed sans TX. HX réutilise ces préfixes, sans vérifier chacun des restes ni le framer. |
+| [PD adjacent_suffix_is_never_scanned_or_credited_to_pending_v4](../tests/test_data_updated_delivery_219.py#L87) | 3 | Suffixe Ping, début réponse ou seconde notification : ambiguous/delivery_suffix, taille exacte, waiter toujours pendant, aucune séquence ni scan. HD teste une autre concaténation sans requête en vol ; PX inflight va jusqu'à une réponse corrélée. |
+| [PD payload_byte_1b_continuing_a_real_partial_0e_is_not_a_notification](../tests/test_data_updated_delivery_219.py#L121) | 1 | Une continuation 0E contenant des octets 1B termine la vraie réponse, sans événement DataUpdated ; non couvert par des candidats lus au repos. |
+| [PD delimited_message_before_1b_survives_but_the_suffix_is_not_a_new_read](../tests/test_data_updated_delivery_219.py#L144) | 2 | Ping/Pong ou réponse corrélée préservé ; suffixe not_read_start sans valeurs et garde #160 active. Distinct d'un candidat frais invalide que PX/HX doivent jeter sans garde. |
+| [PD opening_residue_is_not_relabelled_as_a_complete_read_delivery](../tests/test_data_updated_delivery_219.py#L176) | 1 | Résidu de handshake : taille de livraison inconnue, not_read_start et garde active, pas une nouvelle lecture. Aucun paramètre HA équivalent. |
+| [PD counter_saturates_but_every_delivery_still_emits_an_event](../tests/test_data_updated_delivery_219.py#L201) | 1 | Trois événements encore émis à 65535, counter_capped vrai ; pas d'acquisition/récupération. HX vingt événements ne sollicite pas la saturation. |
+| [PD reconnect_keeps_generations_separate_and_never_replays_old_candidates](../tests/test_data_updated_delivery_219.py#L226) | 1 | EOF, génération/index réinitialisés, ancien RX non rejoué ; seule vraie lecture nouvelle crédite génération 2. PX EOF part de vingt invalides et contrôle explicitement cleanup avant réouverture. |
+| [PD failed_logging_handler_cannot_change_rx_or_read_correlation](../tests/test_data_updated_delivery_219.py#L264) | 1 | Logger qui lève : RX reste connecté, vraie lecture corrélée possible. Ce n'est pas l'exception du parser testée par PX/HX. |
+| [PD ineligible_notification_closes_the_read_gate_before_awaiting_prior_pong](../tests/test_data_updated_delivery_219.py#L292) | 1 | Pong suspendu : garde déjà fermée avant await, aucune lecture pendante/TX ajoutée ; puis Pong seul. Aucun test HA de cette compétition. |
+| [PX invalid_candidate_never_enters_silence_guard_or_creates_a_probe](../tests/test_data_updated_drop_219.py#L34) | 13 | Cinq préfixes, protocole/longueur MBAP invalides, PDU vide/impair/tronqué, fonction non admise, deux concaténations ; chaque cas après initiale. Avance 301 s, aucun probe/garde/échec/lecture, même RX/TLS ; Ping puis parsed ne créditent pas V4. HX couvre le lot, pas cette échéance monotone. |
+| [PX parser_failure_is_closed_diagnostic_without_private_exception_or_recovery](../tests/test_data_updated_drop_219.py#L77) | 2 | Parser qui lève OU retourne un mauvais type : parser_failure sans valeur/exception privée ; parseur restauré, RX/Pong utilisables. HX ne simule que la levée, mais avec vingt livraisons et état HA. |
+| [PX drop_does_not_complete_or_abandon_an_inflight_v4_request](../tests/test_data_updated_drop_219.py#L114) | 3 | Préfixe, longueur invalide ou suffixe ; notification/Ping puis vrai 0E : une seule requête réussit, compteur d'échec nul. PD suffixe constate seulement le waiter non terminé avant annulation. |
+| [PX real_eof_after_drops_still_requires_cleanup_before_next_generation](../tests/test_data_updated_drop_219.py#L135) | 1 | Vingt invalides n'entraînent aucune fermeture ; vrai EOF impose cleanup avant génération 2 et vraie lecture, ancien candidat laissé dans l'ancienne queue. HX unload ne remplace pas une reconnexion après EOF. |
+| [PX dropping_candidate_neither_resets_v4_deadline_nor_disables_212](../tests/test_data_updated_drop_219.py#L167) | 1 | Drop à 29 s, timeout original à 30 s, retry seulement 60 s après, RX maintenu sans garde. HX n'avance ni cette échéance ni le compteur #212. |
+| [HD notification_preserves_ha_snapshot_freshness_and_polling](../ha_tests/test_data_updated_delivery_219.py#L26) | 5 | parsed/unsupported/incomplete/ambiguous/malformed : statut et taille exacts, mêmes data/capteur/timestamp, listener silencieux, même RX, aucun backoff/close/TX ajouté, logs expurgés. parsed est un candidat structurel de deux mots, pas une forme push admise. parsed/unsupported autorisent ensuite une vraie lecture ; PD ne possède aucun objet HA. |
+| [HX twenty_drops_then_valid_keep_tls_ha_snapshot_and_existing_poll](../ha_tests/test_data_updated_drop_219.py#L19) | 2 | Sans/avec erreur parser : vingt livraisons cyclent sur 13 formes (pas 20 uniques), vingt diagnostics, timer/snapshot/timestamp/capteur/listener préservés ; parser restauré puis parsed/Pong, vraie lecture avance fraîcheur/séquence, unload propre. Recouvre les formes PX et certains statuts HD, sans leurs assertions individuelles, mauvais type, échéances ou frontières. |
+
+Recouvrements réels : diagnostic commun, même RX, absence de TX/acquisition
+fabriquée pour candidat frais, puis réponse V4 encore utilisable. Même entrée
+« double notification » dans PD/PX, mais waiter en vol contre état après initiale
+et horloge avancée ; mêmes INVALID dans PX/HX, mais isolation par cas contre lot
+avec état/timer HA. Le [parser pur voisin](../tests/test_data_updated_parser_219.py)
+valide les structures et la confidentialité, pas le routage RX ni les entités.
+AST : 17 corps de fonctions test distincts parmi ces quatre fichiers ; absence
+de doublon syntaxique ne démontre ni indépendance des branches ni équivalence
+sémantique. Pas de mesure de couverture de branches/mutations revendiquée.
+
+### Dépendances actives, coût et registre cumulatif
+
+Imports AST/rg : reports (PD) est consommé par PX, HD et HX ; INVALID (PX) par
+HX, [HA push](../ha_tests/test_data_updated_push_219.py#L16) et
+[HA disponibilité](../ha_tests/test_connection_availability_219.py#L22).
+notification/response/candidate et Clock/Backoff sont partagés ; un helper
+identique n'est pas un doublon d'assertions. Fixtures pytest importées peers,
+délégation du loader HA et script_transport exécutent les propriétaires réels,
+pas un mock de coordinator. Découverte par les deux jobs distincts de
+[Validate](../.github/workflows/validate.yml) ; aucun consommateur runtime des
+fonctions test ni besoin de les copier dans SourceBundle identifié.
+
+Mesures par fichier dans quatre processus successifs, hors ligne, caches pytest
+désactivés et bytecode désactivé pour cette série ; dépendances existantes sous
+/tmp, Python 3.12.14 ou 3.14.7/harness HA 0.13.367. Support sockets de l'exécuteur
+requis par asyncio, gardes réseau du test/harness inchangés. Aucun SKIP/NOT RUN
+dans les ciblés. Une mesure par fichier, caches OS non purgés ; pas un gain CI.
+
+| Fichier | Cas PASS | Temps pytest / processus mural | --durations=20 observé |
+| --- | --- | --- | --- |
+| PD | 17 | 0,10 / 0,373 s | Phases du top 20 sous 0,005 s à la résolution affichée. |
+| PX | 20 | 0,11 / 0,420 s | Phases du top 20 sous 0,005 s. |
+| HD | 5 | 0,44 / 2,430 s | Setup maximal 0,16 s, call 0,05 s, autres calls 0,03 s. |
+| HX | 2 | 0,29 / 1,924 s | Setup maximal 0,15 s, calls 0,05/0,03 s. |
+
+Commandes : `python -m pytest -q -p no:cacheprovider --durations=20 <fichier>` ;
+HA ajoute `-c ha_tests/pytest.ini`. Temps processus = chronomètre monotone autour
+de subprocess.run, inclut lancement/plugins/collecte/arrêt, contrairement aux
+seuls temps call. Première vérification groupée : 37 Python PASS/0,56 s et
+7 HA PASS/1,10 s dans deux processus concurrents ; non utilisée comme mesure
+isolée. Voisins de contexte : 147 Python et 36 HA PASS, sans prétendre les avoir
+audités exhaustivement. Ruff check/format (361 fichiers), liens et diff-check
+PASS ; CI du HEAD exact dans PR/#189. [CI B10](https://github.com/Guillaume0385/ha-hoben-community/actions/runs/45715814145)
+confirme les quatre fichiers (17/20/5/2 cas) dans 10 229 Python et 917 HA PASS,
+sans --durations par fichier : aucune durée ciblée CI déduite des timestamps.
+
+Registre cumulatif : C1–C5 conservent preuves/validateurs et limites de coût ;
+B8 conserve shadow/FIFO et B10 le sandbox. Cette tranche ajoute **quatre fichiers,
+44 cas analysés, tous conserver** ; ni inventaire global terminé ni suppression
+candidate démontrée. Tranches proposées au MANAGER, non attribuées : push et
+ordering/générations ; ignore/silence/framing ; private/shadow en réutilisant B8 ;
+puis autres tests Python/HA, JS et contrats/fixtures de workflows manuels en
+lecture seule. Chaque tranche devra ajouter fichiers/cas/fixtures, consommateur,
+équivalence et coût mesuré au registre ; une suppression éventuelle exigerait
+une PR distincte avec preuve avant/après et quatre CI, jamais un retrait ici.
+
+Diff B11 : cette annexe seulement, audit antérieur intact ; aucun code/test,
+fixture/CI/cache/dépendance/gate/droit/manifest/version modifié. Pas de CHANGELOG
+(audit interne sans effet HACS/API). Tests réels Hoben/HA **NOT RUN** ; aucun RX
+brut/identifiant privé publié, dispatch/rerun live, commande/écriture Modbus,
+inspection de protection native, main/release/tag ni fusion DEV. TLS vérifié
+myhoben.fr:465 et V4 lecture seule préservés ; state:review, revue MANAGER et arrêt.
